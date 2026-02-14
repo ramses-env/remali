@@ -1,5 +1,5 @@
 [phases.setup]
-nixPkgs = ["python312", "gcc", "pkg-config", "mysql80", "postgresql"]
+nixPkgs = ["python312", "gcc", "pkg-config", "mysql80", "postgresql", "portaudio"]
 
 [phases.build]
 cmds = ["pip install -r requirements.txt", "python manage.py collectstatic --noinput"]
