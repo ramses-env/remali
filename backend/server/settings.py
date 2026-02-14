@@ -180,7 +180,7 @@ USE_TZ = True
 WHITENOISE_ROOT = STATIC_ROOT 
 WHITENOISE_INDEX_FILE = True
 
-STATIC_URL = 'static/'
+STATIC_URL = '/static/'
 
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 # Esto verifica si la carpeta existe antes de agregarla, evitando que Django explote
