@@ -104,19 +104,25 @@ load_dotenv(os.path.join(BASE_DIR, '.env'))
 
 _DB_NAME = os.environ.get('DB_NAME')
 
-DATABASES = {
-    'default': dj_database_url.config(
-        default=os.environ.get('MYSQL_URL', f'mysql://{os.environ.get("DB_USER", "")}:{os.environ.get("DB_PASSWORD", "")}@{os.environ.get("DB_HOST", "127.0.0.1")}:{os.environ.get("DB_PORT", "3306")}/{_DB_NAME}'),
-        conn_max_age=600,
-        conn_health_checks=True,
-    )
-}
-
-if not DATABASES['default']['NAME']:
-    # Fallback to manual configuration if dj_database_url didn't find a URL and the default construction failed or wasn't used intendedly
-    # Check for Railway specific variables without underscores if URL wasn't present
-    if os.environ.get('MYSQLDATABASE'):
-         DATABASES['default'] = {
+if os.environ.get('MYSQL_URL'):
+    DATABASES = {
+        'default': dj_database_url.config(
+            default=os.environ.get('MYSQL_URL'),
+            conn_max_age=600,
+            conn_health_checks=True,
+        )
+    }
+elif _DB_NAME:
+    DATABASES = {
+        'default': dj_database_url.config(
+            default=f'mysql://{os.environ.get("DB_USER", "")}:{os.environ.get("DB_PASSWORD", "")}@{os.environ.get("DB_HOST", "127.0.0.1")}:{os.environ.get("DB_PORT", "3306")}/{_DB_NAME}',
+            conn_max_age=600,
+            conn_health_checks=True,
+        )
+    }
+elif os.environ.get('MYSQLDATABASE'):
+     DATABASES = {
+        'default': {
             'ENGINE': 'django.db.backends.mysql',
             'NAME': os.environ.get('MYSQLDATABASE'),
             'USER': os.environ.get('MYSQLUSER'),
@@ -124,6 +130,14 @@ if not DATABASES['default']['NAME']:
             'HOST': os.environ.get('MYSQLHOST'),
             'PORT': os.environ.get('MYSQLPORT'),
         }
+    }
+else:
+     DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': BASE_DIR / 'db.sqlite3',
+        }
+    }
 
 # Password validation
 # https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators
