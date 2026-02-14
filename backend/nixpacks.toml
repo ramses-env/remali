@@ -1,0 +1,8 @@
+[phases.setup]
+nixPkgs = ["python312", "gcc", "pkg-config", "mysql80", "postgresql"]
+
+[phases.build]
+cmds = ["pip install -r requirements.txt", "python manage.py collectstatic --noinput"]
+
+[start]
+cmd = "gunicorn server.wsgi --log-file -"

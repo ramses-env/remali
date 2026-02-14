@@ -13,6 +13,7 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 from pathlib import Path
 import os
 import importlib
+import dj_database_url
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -22,12 +23,19 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-)c$-2&1@^51q88$+47^%6egtz$e@5m__u7na^ashnvhl&o^bdp'
+SECRET_KEY = os.environ.get('SECRET_KEY', 'django-insecure-)c$-2&1@^51q88$+47^%6egtz$e@5m__u7na^ashnvhl&o^bdp')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.environ.get('DEBUG', 'False') == 'True'
 
-ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", "*").split(",")
+ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", "").split(",") + [
+    "remali-production.up.railway.app",
+    "localhost",
+    "127.0.0.1"
+]
+ALLOWED_HOSTS = [host for host in ALLOWED_HOSTS if host]
+
+CSRF_TRUSTED_ORIGINS = os.environ.get("CSRF_TRUSTED_ORIGINS", "https://*.railway.app,https://*.up.railway.app,https://remali-production.up.railway.app").split(",")
 
 
 # Application definition
@@ -95,27 +103,27 @@ load_dotenv(os.path.join(BASE_DIR.parent, '.env'))
 load_dotenv(os.path.join(BASE_DIR, '.env'))
 
 _DB_NAME = os.environ.get('DB_NAME')
-if not _DB_NAME:
-    raise ImproperlyConfigured("DB_NAME no está configurado. Configura MySQL en .env y evita SQLite.")
 
 DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.mysql',
-        'NAME': _DB_NAME,
-        'USER': os.environ.get('DB_USER', ''),
-        'PASSWORD': os.environ.get('DB_PASSWORD', ''),
-        'HOST': os.environ.get('DB_HOST', '127.0.0.1'),
-        'PORT': os.environ.get('DB_PORT', '3306'),
-        'OPTIONS': {
-            'charset': 'utf8mb4',
-            **(
-                {'unix_socket': os.environ['DB_SOCKET']}
-                if os.environ.get('DB_SOCKET')
-                else {}
-            )
-        }
-    }
+    'default': dj_database_url.config(
+        default=os.environ.get('MYSQL_URL', f'mysql://{os.environ.get("DB_USER", "")}:{os.environ.get("DB_PASSWORD", "")}@{os.environ.get("DB_HOST", "127.0.0.1")}:{os.environ.get("DB_PORT", "3306")}/{_DB_NAME}'),
+        conn_max_age=600,
+        conn_health_checks=True,
+    )
 }
+
+if not DATABASES['default']['NAME']:
+    # Fallback to manual configuration if dj_database_url didn't find a URL and the default construction failed or wasn't used intendedly
+    # Check for Railway specific variables without underscores if URL wasn't present
+    if os.environ.get('MYSQLDATABASE'):
+         DATABASES['default'] = {
+            'ENGINE': 'django.db.backends.mysql',
+            'NAME': os.environ.get('MYSQLDATABASE'),
+            'USER': os.environ.get('MYSQLUSER'),
+            'PASSWORD': os.environ.get('MYSQLPASSWORD'),
+            'HOST': os.environ.get('MYSQLHOST'),
+            'PORT': os.environ.get('MYSQLPORT'),
+        }
 
 # Password validation
 # https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators
