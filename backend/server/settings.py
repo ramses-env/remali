@@ -29,12 +29,15 @@ SECRET_KEY = os.environ.get('SECRET_KEY', 'django-insecure-)c$-2&1@^51q88$+47^%6
 DEBUG = os.environ.get('DEBUG', 'False') == 'True'
 
 ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", "").split(",") + [
-    "remali-production.up.railway.app",
+    "remali.up.railway.app",
     "localhost",
     "127.0.0.1"
 ]
 
-CSRF_TRUSTED_ORIGINS = os.environ.get("CSRF_TRUSTED_ORIGINS", "https://*.railway.app,https://*.up.railway.app,https://remali-production.up.railway.app").split(",")
+CSRF_TRUSTED_ORIGINS = os.environ.get("CSRF_TRUSTED_ORIGINS", "https://remali.up.railway.app").split(",") + [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+]
 
 
 # Application definition
@@ -242,8 +245,15 @@ DEFAULT_FROM_EMAIL = os.environ.get('DEFAULT_FROM_EMAIL', 'no-reply@shoping-fal.
 
 
 
-FRONTEND_URL = os.environ.get('FRONTEND_URL', 'http://localhost:5173')
-BACKEND_URL = os.environ.get('BACKEND_URL', 'http://localhost:8000')
+if not DEBUG:
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    FRONTEND_URL = os.environ.get('FRONTEND_URL', 'https://remali.up.railway.app')
+    BACKEND_URL = os.environ.get('BACKEND_URL', 'https://remali.up.railway.app')
+else:
+    FRONTEND_URL = os.environ.get('FRONTEND_URL', 'http://localhost:5173')
+    BACKEND_URL = os.environ.get('BACKEND_URL', 'http://localhost:8000')
 PASSWORD_RESET_TIMEOUT = int(os.environ.get('PASSWORD_RESET_TIMEOUT', '14400'))
 EMAIL_VERIFICATION_TIMEOUT = int(os.environ.get('EMAIL_VERIFICATION_TIMEOUT', '14400'))
 
