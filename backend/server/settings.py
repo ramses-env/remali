@@ -33,7 +33,6 @@ ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", "").split(",") + [
     "localhost",
     "127.0.0.1"
 ]
-ALLOWED_HOSTS = [host for host in ALLOWED_HOSTS if host]
 
 CSRF_TRUSTED_ORIGINS = os.environ.get("CSRF_TRUSTED_ORIGINS", "https://*.railway.app,https://*.up.railway.app,https://remali-production.up.railway.app").split(",")
 
@@ -178,8 +177,9 @@ STATIC_URL = 'static/'
 
 
 STATICFILES_DIRS = [
-    BASE_DIR / 'frontend' / 'build' / 'static'
+    BASE_DIR.parent / 'frontend' / 'dist',
 ]
+
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 
 STORAGES = {
