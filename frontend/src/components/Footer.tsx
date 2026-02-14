@@ -2,27 +2,27 @@ import { Link } from 'react-router-dom'
 
 export default function Footer() {
   return (
-    <footer className="mt-12 border-t border-neutral-800 bg-neutral-900 text-gray-300">
+    <footer className="mt-12 border-t border-neutral-800 bg-neutral-900 text-white">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-10 space-y-8">
         <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-8 text-center sm:text-left">
           <div className="space-y-2 max-w-sm mx-auto sm:mx-0">
-            <p className="text-xl font-extrabold tracking-tight text-white">REMALI</p>
+            <p className="text-xl font-extrabold tracking-tight text-white">Remali</p>
             <p className="text-sm">Tienda moderna con animaciones y experiencia fluida.</p>
           </div>
           <div className="space-y-2">
             <p className="font-semibold">Tienda</p>
             <ul className="space-y-1 text-sm">
-              <li><Link to="/equipos" className="hover:text-[#517ea0]">Equipos</Link></li>
-              <li><Link to="/carrito" className="hover:text-[#517ea0]">Carrito</Link></li>
-              <li><Link to="/checkout" className="hover:text-[#517ea0]">Checkout</Link></li>
+              <li><Link to="/equipos" className="text-white hover:underline">Equipos</Link></li>
+              <li><Link to="/carrito" className="text-white hover:underline">Carrito</Link></li>
+              <li><Link to="/checkout" className="text-white hover:underline">Checkout</Link></li>
             </ul>
           </div>
           <div className="space-y-2">
             <p className="font-semibold">Soporte</p>
             <ul className="space-y-1 text-sm">
-              <li><Link to="/" className="hover:text-[#517ea0]">Ayuda</Link></li>
-              <li><Link to="/" className="hover:text-[#517ea0]">Envíos</Link></li>
-              <li><Link to="/" className="hover:text-[#517ea0]">Devoluciones</Link></li>
+              <li><Link to="/" className="text-white hover:underline">Ayuda</Link></li>
+              <li><Link to="/" className="text-white hover:underline">Envíos</Link></li>
+              <li><Link to="/" className="text-white hover:underline">Devoluciones</Link></li>
             </ul>
           </div>
           <div className="space-y-3">
@@ -34,7 +34,7 @@ export default function Footer() {
             </div>
           </div>
         </div>
-        <div className="text-center text-xs text-gray-500">© {new Date().getFullYear()} Remali. Todos los derechos reservados.</div>
+        <div className="text-center text-xs text-white">© {new Date().getFullYear()} Remali. Todos los derechos reservados.</div>
       </div>
     </footer>
   )
