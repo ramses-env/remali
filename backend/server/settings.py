@@ -13,6 +13,7 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 from pathlib import Path
 import os
 import importlib
+import importlib.util
 import dj_database_url
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
