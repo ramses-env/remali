@@ -8,7 +8,6 @@ import Checkout from './routes/Checkout'
 import Login from './routes/Login'
 import Profile from './routes/Profile'
 import { useAuth } from './store/auth'
-import { useProfile } from './store/profile'
 import FloatingCart from './components/FloatingCart'
 import Footer from './components/Footer'
 import RouteLoader from './components/RouteLoader'
@@ -20,7 +19,6 @@ import Cotizacion from './routes/Cotizacion'
 
 function App() {
   const { token } = useAuth()
-  const { user } = useProfile()
   return (
     <PriceUnitProvider>
       <div className="min-h-screen flex flex-col bg-white text-neutral-900 transition-colors">
