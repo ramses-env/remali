@@ -1,25 +1,32 @@
-# Usa Python 3.11 (o la versión que uses)
 FROM python:3.11-slim
 
-# Evita archivos basura de Python y permite ver logs
+# 1. Variables de entorno
 ENV PYTHONDONTWRITEBYTECODE 1
 ENV PYTHONUNBUFFERED 1
 
 WORKDIR /app
 
-# 1. Copiamos el requirements que está dentro de la carpeta backend
+# 2. INSTALAR DEPENDENCIAS DEL SISTEMA (Esto arregla tu error de mysqlclient)
+RUN apt-get update && apt-get install -y \
+    pkg-config \
+    default-libmysqlclient-dev \
+    build-essential \
+    gcc \
+    && rm -rf /var/lib/apt/lists/*
+
+# 3. Instalar dependencias de Python
 COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 2. Copiamos todo el contenido del proyecto
+# 4. Copiar el resto del código
 COPY . .
 
-# 3. Entramos a la carpeta de Django para los comandos
+# 5. Entrar a la carpeta de Django
 WORKDIR /app/backend
 
-# 4. Recolectar estáticos (esto crea la carpeta 'staticfiles' que faltaba)
+# 6. Recolectar estáticos (Arregla el primer error que tuviste)
 RUN python manage.py collectstatic --noinput
 
-# 5. Comando de arranque
-# Nota: Como estamos dentro de /app/backend, el PYTHONPATH ayuda a encontrar 'server'
+# 7. Comando de arranque
+# Usamos el puerto dinámico de Railway
 CMD ["sh", "-c", "python manage.py migrate && PYTHONPATH=. gunicorn server.wsgi:application --bind 0.0.0.0:${PORT:-8080}"]
