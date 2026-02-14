@@ -177,24 +177,23 @@ USE_TZ = True
 
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
-WHITENOISE_ROOT = STATIC_ROOT 
-WHITENOISE_INDEX_FILE = True
 
 STATIC_URL = '/static/'
 
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 # Esto verifica si la carpeta existe antes de agregarla, evitando que Django explote
 
-FRONTEND_DIR = BASE_DIR.parent / 'frontend' / 'dist'
+
+WHITENOISE_ROOT = STATIC_ROOT 
+WHITENOISE_INDEX_FILE = True
 
 
+
+
+FRONTEND_DIR = os.path.join(BASE_DIR, '..', 'frontend', 'dist')
 STATICFILES_DIRS = []
-if FRONTEND_DIR.exists():
+if os.path.exists(FRONTEND_DIR):
     STATICFILES_DIRS.append(FRONTEND_DIR)
-else:
-    # Esto aparecerá en los logs de Railway si algo sale mal
-    print(f"ERROR: No se encontró la carpeta en {FRONTEND_DIR}")
-
 
 STORAGES = {
     "default": {
