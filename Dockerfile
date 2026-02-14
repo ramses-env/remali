@@ -1,3 +1,12 @@
+# Build frontend
+FROM node:20-alpine as frontend-build
+WORKDIR /app/frontend
+COPY frontend/package*.json ./
+RUN npm install
+COPY frontend/ .
+RUN npm run build
+
+# Build backend
 FROM python:3.11-slim
 
 # Esto instala lo que MySQL necesita para no dar error
@@ -16,6 +25,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copiamos todo tu código
 COPY . .
+
+# Copiamos el build del frontend
+COPY --from=frontend-build /app/frontend/dist /app/frontend/dist
 
 # Entramos a la carpeta de Django para ejecutarlo
 WORKDIR /app/backend
