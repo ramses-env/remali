@@ -210,16 +210,26 @@ MEDIA_ROOT = BASE_DIR / 'media'
 _cloud_name = os.environ.get('CLOUDINARY_CLOUD_NAME')
 _api_key = os.environ.get('CLOUDINARY_API_KEY')
 _api_secret = os.environ.get('CLOUDINARY_API_SECRET')
-_CLOUDINARY_URL = os.environ.get('CLOUDINARY_URL') or (
-    f'cloudinary://{_api_key}:{_api_secret}@{_cloud_name}'
-    if _cloud_name and _api_key and _api_secret else ''
-)
 
-if importlib.util.find_spec('cloudinary') and importlib.util.find_spec('cloudinary_storage') and _CLOUDINARY_URL:
-    os.environ['CLOUDINARY_URL'] = _CLOUDINARY_URL
-    STORAGES['default'] = {
-        'BACKEND': 'cloudinary_storage.storage.MediaCloudinaryStorage'
-    }
+CLOUDINARY_STORAGE = {
+    'CLOUD_NAME': _cloud_name,
+    'API_KEY': _api_key,
+    'API_SECRET': _api_secret,
+}
+
+if importlib.util.find_spec('cloudinary') and importlib.util.find_spec('cloudinary_storage'):
+    if _cloud_name and _api_key and _api_secret:
+        STORAGES['default'] = {
+            'BACKEND': 'cloudinary_storage.storage.MediaCloudinaryStorage'
+        }
+        # Ensure cloudinary is configured
+        import cloudinary
+        cloudinary.config(
+            cloud_name=_cloud_name,
+            api_key=_api_key,
+            api_secret=_api_secret,
+            secure=True
+        )
 
 REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': ['rest_framework.permissions.AllowAny'],
