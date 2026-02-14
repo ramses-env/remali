@@ -1,10 +1,14 @@
 [phases.setup]
 nixPkgs = ["python311", "nodejs_20"]
 
-[phases.build]
+[phases.install]
 cmds = [
   "pip install -r backend/requirements.txt",
-  "npm install --prefix frontend",
+  "npm install --prefix frontend"
+]
+
+[phases.build]
+cmds = [
   "npm run build --prefix frontend",
   "python3 backend/manage.py collectstatic --noinput"
 ]
@@ -13,5 +17,4 @@ cmds = [
 cmds = [
   "gunicorn server.wsgi"
 ]
-
 
