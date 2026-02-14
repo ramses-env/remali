@@ -209,5 +209,4 @@ twilio==9.6.3
 typing_extensions==4.14.1
 uritemplate==4.2.0
 urllib3==2.4.0
-wheel @ file:///opt/homebrew/Cellar/python%403.13/3.13.2/libexec/wheel-0.45.1-py3-none-any.whl#sha256=b9235939e2096903717cb6bfc132267f8a7e46deb2ec3ef9c5e234ea301795d0
 yarl==1.20.1
