@@ -6,3 +6,7 @@ python-dotenv>=1.0
 cloudinary>=1.41
 django-cloudinary-storage>=0.3
 djangorestframework-simplejwt>=5.3
+gunicorn>=20.1.0
+whitenoise>=6.5.0
+dj-database-url>=2.1.0
+psycopg2-binary>=2.9.9
