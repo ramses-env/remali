@@ -12,6 +12,7 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 
 from pathlib import Path
 import os
+import importlib
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -47,6 +48,9 @@ INSTALLED_APPS = [
     'promotions',
     'dashboard',
 ]
+
+if importlib.util.find_spec('cloudinary') and importlib.util.find_spec('cloudinary_storage'):
+    INSTALLED_APPS += ['cloudinary', 'cloudinary_storage']
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
@@ -149,6 +153,18 @@ USE_TZ = True
 STATIC_URL = 'static/'
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
+
+_cloud_name = os.environ.get('CLOUDINARY_CLOUD_NAME')
+_api_key = os.environ.get('CLOUDINARY_API_KEY')
+_api_secret = os.environ.get('CLOUDINARY_API_SECRET')
+_CLOUDINARY_URL = os.environ.get('CLOUDINARY_URL') or (
+    f'cloudinary://{_api_key}:{_api_secret}@{_cloud_name}'
+    if _cloud_name and _api_key and _api_secret else ''
+)
+
+if importlib.util.find_spec('cloudinary') and importlib.util.find_spec('cloudinary_storage') and _CLOUDINARY_URL:
+    os.environ['CLOUDINARY_URL'] = _CLOUDINARY_URL
+    DEFAULT_FILE_STORAGE = 'cloudinary_storage.storage.MediaCloudinaryStorage'
 
 REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': ['rest_framework.permissions.AllowAny'],
