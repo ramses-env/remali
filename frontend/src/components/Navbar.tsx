@@ -16,7 +16,6 @@ export default function Navbar() {
             src="/vite.svg"
             alt="Logo"
             className="h-8 w-8 cursor-pointer"
-            onClick={(e) => { e.preventDefault(); window.dispatchEvent(new CustomEvent('toggleFilters')) }}
           />
           <span className="hidden sm:inline text-xl font-extrabold tracking-tight text-[#517ea0]">Remali</span>
         </Link>

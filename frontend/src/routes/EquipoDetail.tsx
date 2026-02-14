@@ -245,10 +245,6 @@ export default function EquipoDetail() {
               <div className="hidden md:grid"></div>
             </>
           )}
-          <div className="hidden rounded-2xl bg-white border border-neutral-100 shadow-sm p-4">
-            <p className="text-lg font-extrabold">Descripción</p>
-            <p className="mt-2 text-sm text-gray-600">{e.descripcion}</p>
-          </div>
         </div>
         <div className="order-2 lg:order-2 lg:col-span-5 space-y-4">
           <h2 className="text-2xl md:text-3xl font-extrabold text-black">{e.modelo}</h2>
