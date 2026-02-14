@@ -1,13 +1,11 @@
 [phases.setup]
-nixPkgs = ["python312", "nodejs_20", "gcc", "pkg-config", "mysql80", "postgresql"]
+nixPkgs = ["python312", "gcc", "pkg-config", "mysql80", "postgresql", "portaudio"]
 
 [phases.build]
 cmds = [
-    "npm install --prefix frontend",
-    "npm run build --prefix frontend",
-    "pip install -r backend/requirements.txt",
+    "cd backend && pip install -r requirements.txt",
     "cd backend && python manage.py collectstatic --noinput"
 ]
 
 [start]
-cmd = "cd backend && gunicorn server.wsgi --log-file - --bind 0.0.0.0:$PORT"
+cmd = "cd backend && gunicorn server.wsgi --bind 0.0.0.0:$PORT"
