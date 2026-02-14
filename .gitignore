@@ -1,20 +1,23 @@
-logs
+# Logs
 *.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
+
+# Node / Frontend
 node_modules/
-dist/
 dist-ssr/
 coverage/
 .cache/
 .eslintcache
 .turbo/
-.idea/
-.DS_Store
-Thumbs.db
+
+# IMPORTANTE: Asegúrate de que NO haya una línea que diga "dist/" o "frontend/dist/" aquí
+# Queremos que Git suba el build de React para que Django lo encuentre.
+
+# Python / Django
 __pycache__/
 *.py[cod]
 *.so
@@ -22,13 +25,22 @@ __pycache__/
 .eggs/
 .mypy_cache/
 .pytest_cache/
-.env
-.env.*
-!.env.example
-.env/
-venv/
-.venv/
-env/
 db.sqlite3
 media/
 staticfiles/
+
+# Entornos virtuales (Ignoramos todos los posibles nombres)
+venv/
+.venv/
+env/
+
+# Variables de entorno (¡Seguridad!)
+.env
+.env.*
+!.env.example
+
+# OS / Editores
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

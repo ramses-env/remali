@@ -181,10 +181,16 @@ USE_TZ = True
 STATIC_URL = 'static/'
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 
-STATICFILES_DIRS = [
-    BASE_DIR.parent / 'frontend' / 'dist'/ 'assets'
-]
 
+# Esto verifica si la carpeta existe antes de agregarla, evitando que Django explote
+FRONTEND_DIR = BASE_DIR.parent / 'frontend' / 'dist'
+
+STATICFILES_DIRS = []
+if FRONTEND_DIR.exists():
+    STATICFILES_DIRS.append(FRONTEND_DIR)
+else:
+    # Esto evita que Django truene si por algo el build falla
+    print("WARNING: frontend/dist no encontrada")
 
 
 STORAGES = {
