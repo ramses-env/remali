@@ -90,8 +90,8 @@ WSGI_APPLICATION = 'server.wsgi.application'
 import os
 from dotenv import load_dotenv
 from django.core.exceptions import ImproperlyConfigured
-load_dotenv(os.path.join(BASE_DIR.parent, '.env'))
-load_dotenv(os.path.join(BASE_DIR, '.env'))
+load_dotenv(os.path.join(BASE_DIR.parent, '.env.dev'))
+load_dotenv(os.path.join(BASE_DIR, '.env.dev'))
 
 _DB_NAME = os.environ.get('DB_NAME')
 if not _DB_NAME:
