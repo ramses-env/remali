@@ -61,9 +61,9 @@ export default function Home() {
             <Carousel
               className="bg-neutral-50"
               items={[
-                { image: '/images/inicio-compactador-1.jpg', title: 'Compactador HYUNDAI', subtitle: 'Potencia y estabilidad para suelos' , ctaText: 'Ver compactadores', ctaLink: '/equipos' },
-                { image: '/images/inicio-cortadora-1.jpg', title: 'Cortadora de piso', subtitle: 'Cortes limpios y precisos' },
-                { image: '/images/inicio-demoledor-1.jpg', title: 'Demoledor eléctrico', subtitle: 'Demoliciones controladas' },
+                { image: '/images/compactador_hyundai.jpg', title: 'Compactador HYUNDAI', subtitle: 'Potencia y estabilidad para suelos' , ctaText: 'Ver compactadores', ctaLink: '/equipos' },
+                { image: '/images/compactador_2.jpeg', title: 'Cortadora de piso', subtitle: 'Cortes limpios y precisos' },
+                { image: '/images/revolvedora.jpeg', title: 'Pontente' },
               ]}
               autoPlayMs={5000}
               showDots
@@ -118,7 +118,7 @@ export default function Home() {
           <Carousel
             items={[
               { image: '/images/inicio-compactador-2.jpg', title: 'Obra urbana', subtitle: 'Compactación eficiente en campo' },
-              { image: '/images/inicio-cortadora-2.jpg', title: 'Taller y mantenimiento', subtitle: 'Corte de pavimento y concreto' },
+              { image: '/images/compactadoras.jpeg', title: 'Taller y mantenimiento', subtitle: 'Corte de pavimento y concreto' },
               { image: '/images/inicio-compactador-3.jpg', title: 'Construcción residencial', subtitle: 'Equipos confiables y potentes' },
             ]}
             autoPlayMs={4500}

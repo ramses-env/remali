@@ -18,13 +18,14 @@ from django.contrib import admin
 from django.urls import path, include, re_path
 from django.conf import settings
 from django.conf.urls.static import static
-from django.views.generic import TemplateView
+from django.views.generic import TemplateView, RedirectView
 
 admin.site.site_header = "Remali Administrador"
 admin.site.site_title = "Remali Administrador"
 admin.site.index_title = "Panel de administración"
 
 urlpatterns = [
+    path('admin', RedirectView.as_view(url='/admin/', permanent=True)),
     path('admin/', admin.site.urls),
     path('api/', include('shop.urls')),
     path('api/catalog/', include('catalog.urls')),
