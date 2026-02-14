@@ -97,7 +97,7 @@ export default function Carousel({ items, autoPlayMs = 5000, className = '', sho
           onPointerDown={e => {
             drag.current = { startX: e.clientX, active: true }
           }}
-          onPointerMove={e => {
+          onPointerMove={() => {
             if (!drag.current.active) return
           }}
           onPointerUp={e => {

@@ -1,13 +1,11 @@
 import { useState, useMemo } from 'react'
 import { useCart } from '../store/cart'
-import { usePriceUnit } from '../store/priceUnit'
 import { downloadCotizacionPdf } from '../lib/pdf'
 import { Link } from 'react-router-dom'
 import { useToast } from '../store/toast'
 
 export default function Cotizacion() {
-  const { state, dispatch, total } = useCart()
-  const { unit } = usePriceUnit()
+  const { state, dispatch } = useCart()
   const { notify } = useToast()
   const [nombre, setNombre] = useState('')
   const [empresa, setEmpresa] = useState('')

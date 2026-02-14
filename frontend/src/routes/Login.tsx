@@ -25,8 +25,6 @@ export default function Login() {
     else if (expired) setInfo('El enlace de verificación expiró. Ingresa tu correo para reenviarlo')
   }, [loc.search])
 
-  const emailValid = /[^@\s]+@[^@\s]+\.[^@\s]+/.test(email)
-
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError(null)
