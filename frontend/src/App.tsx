@@ -5,7 +5,6 @@ import Home from './routes/Home'
 // import ProductDetail from './routes/ProductDetail'
 import Cart from './routes/Cart'
 import Checkout from './routes/Checkout'
-import AdminPage from './routes/AdminPage'
 import Login from './routes/Login'
 import Profile from './routes/Profile'
 import { useAuth } from './store/auth'
@@ -22,7 +21,6 @@ import Cotizacion from './routes/Cotizacion'
 function App() {
   const { token } = useAuth()
   const { user } = useProfile()
-  const isAdmin = user ? (user.is_staff || (user?.groups || []).includes('Administrador')) : null
   return (
     <PriceUnitProvider>
       <div className="min-h-screen flex flex-col bg-white text-neutral-900 transition-colors">
@@ -39,7 +37,6 @@ function App() {
               <Route path="/cotizacion" element={<Cotizacion />} />
               <Route path="/login" element={<Login />} />
               <Route path="/perfil" element={token ? <Profile /> : <Login />} />
-              <Route path="/admin" element={token ? (isAdmin === false ? <Login /> : <AdminPage />) : <Login />} />
             </Routes>
           </ErrorBoundary>
         </div>

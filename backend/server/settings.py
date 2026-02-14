@@ -177,13 +177,14 @@ USE_TZ = True
 
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
+WHITENOISE_INDEX_FILE = True
 
 STATIC_URL = 'static/'
+
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
-
-
 # Esto verifica si la carpeta existe antes de agregarla, evitando que Django explote
 FRONTEND_DIR = BASE_DIR.parent / 'frontend' / 'dist'
+
 
 STATICFILES_DIRS = []
 if FRONTEND_DIR.exists():

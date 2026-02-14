@@ -44,7 +44,7 @@ export default function Login() {
         const r = await api.get('/auth/me/')
         const isAdmin = Boolean(r.data?.is_staff) || (Array.isArray(r.data?.groups) && r.data.groups.includes('Administrador'))
         if (next) nav(next)
-        else if (isAdmin) nav('/admin')
+        else if (isAdmin) nav('/equipos')
         else nav('/perfil')
       } catch {
         if (next) nav(next)

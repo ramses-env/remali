@@ -26,9 +26,6 @@ export default function Navbar() {
           <Link to="/cotizacion" className="px-3 py-1.5 rounded-full text-neutral-600 font-medium hover:text-neutral-800 hover:bg-neutral-100">Cotización</Link>
           {token ? (
             <>
-              {(user?.is_staff || (user?.groups || []).includes('Administrador')) && (
-                <Link to="/admin" className="px-3 py-1.5 rounded-full text-neutral-600 font-medium hover:text-neutral-800 hover:bg-neutral-100">Admin</Link>
-              )}
               <button
                 aria-label="Logout"
                 className="px-3 py-1.5 rounded-full text-neutral-600 font-medium hover:text-neutral-800 hover:bg-neutral-100"
