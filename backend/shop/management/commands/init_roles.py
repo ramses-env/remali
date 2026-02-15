@@ -1,7 +1,7 @@
 from django.core.management.base import BaseCommand
 from django.contrib.auth.models import Group, Permission
 from django.contrib.contenttypes.models import ContentType
-from shop.models import Category, Cupon, Order, OrderItem, Marca, Equipo, ProductImage
+from shop.models import Categoria, Cupon, Orden, ItemOrden, Marca, Equipo, ImagenProducto
 
 class Command(BaseCommand):
     help = 'Inicializa roles y permisos: Administrador, Cliente, Almacén'
@@ -13,7 +13,7 @@ class Command(BaseCommand):
         warehouse_group, _ = Group.objects.get_or_create(name='Almacén')
 
         # Recolectar permisos del app shop
-        shop_models = [Category, Cupon, Order, OrderItem, Marca, Equipo, ProductImage]
+        shop_models = [Categoria, Cupon, Orden, ItemOrden, Marca, Equipo, ImagenProducto]
         perms = Permission.objects.filter(content_type__in=[ContentType.objects.get_for_model(m) for m in shop_models])
 
         # Administrador: todos los permisos del app shop
@@ -25,10 +25,10 @@ class Command(BaseCommand):
             ct = ContentType.objects.get_for_model(model)
             p = Permission.objects.get(content_type=ct, codename=codename)
             client_perms.append(p)
-        add_perm('add_order', Order)
-        add_perm('add_orderitem', OrderItem)
+        add_perm('add_orden', Orden)
+        add_perm('add_itemorden', ItemOrden)
         add_perm('view_equipo', Equipo)
-        add_perm('view_category', Category)
+        add_perm('view_categoria', Categoria)
         add_perm('view_cupon', Cupon)
         client_group.permissions.set(client_perms)
 
@@ -43,7 +43,7 @@ class Command(BaseCommand):
                 pass
         # maybe_perm('adjust_inventory', Equipo) # Custom perm not defined yet
         maybe_perm('view_equipo', Equipo)
-        maybe_perm('view_category', Category)
+        maybe_perm('view_categoria', Categoria)
         Group.objects.filter(name='Almacén').update()
         warehouse_group.permissions.set(warehouse_perms)
 

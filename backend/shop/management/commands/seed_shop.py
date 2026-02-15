@@ -4,11 +4,11 @@ from shop.models import Equipo, Cupon
 class Command(BaseCommand):
     def handle(self, *args, **options):
         products = [
-            { 'modelo': 'Bolso Rosa Premium', 'precio_venta': 79.90, 'imagen': '/vite.svg', 'descripcion': 'Bolso elegante con acabados premium.' },
-            { 'modelo': 'Zapatillas Fashion', 'precio_venta': 59.50, 'imagen': '/vite.svg', 'descripcion': 'Comodidad y estilo para el día a día.' },
-            { 'modelo': 'Blusa Floral', 'precio_venta': 39.99, 'imagen': '/vite.svg', 'descripcion': 'Blusa liviana con estampado floral.' },
-            { 'modelo': 'Set de Belleza', 'precio_venta': 49.00, 'imagen': '/vite.svg', 'descripcion': 'Kit completo de cuidado personal.' },
-            { 'modelo': 'Reloj Minimalista', 'precio_venta': 89.00, 'imagen': '/vite.svg', 'descripcion': 'Diseño minimalista perfecto para cualquier ocasión.' },
+            { 'modelo': 'Bolso Rosa Premium', 'precio_dia': 79.90, 'imagen': '/vite.svg', 'descripcion': 'Bolso elegante con acabados premium.' },
+            { 'modelo': 'Zapatillas Fashion', 'precio_dia': 59.50, 'imagen': '/vite.svg', 'descripcion': 'Comodidad y estilo para el día a día.' },
+            { 'modelo': 'Blusa Floral', 'precio_dia': 39.99, 'imagen': '/vite.svg', 'descripcion': 'Blusa liviana con estampado floral.' },
+            { 'modelo': 'Set de Belleza', 'precio_dia': 49.00, 'imagen': '/vite.svg', 'descripcion': 'Kit completo de cuidado personal.' },
+            { 'modelo': 'Reloj Minimalista', 'precio_dia': 89.00, 'imagen': '/vite.svg', 'descripcion': 'Diseño minimalista perfecto para cualquier ocasión.' },
         ]
         for p in products:
             p.setdefault('condicion', 'seminuevo')

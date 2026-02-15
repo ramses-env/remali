@@ -1,22 +1,21 @@
 from django.test import TestCase
 import unittest
 from django.core.exceptions import ValidationError
-from .models import Equipo, Category, Marca, Order
-from .serializers import OrderSerializer
+from .models import Equipo, Categoria, Marca, Orden
+from .serializers import OrdenSerializer
 from django.contrib.auth.models import User, Group
 from rest_framework.test import APIRequestFactory
 from .views import register
 
 class InventoryLogicTests(TestCase):
     def setUp(self):
-        self.cat = Category.objects.create(name='TestCat')
-        self.brand = Marca.objects.create(name='Marca')
+        self.cat = Categoria.objects.create(nombre='TestCat')
+        self.brand = Marca.objects.create(nombre='Marca')
         self.e = Equipo.objects.create(
             modelo='Equipo A',
-            description='',
-            precio_venta=10,
-            precio_renta=8,
-            category=self.cat,
+            descripcion='',
+            precio_dia=8,
+            categoria=self.cat,
             marca=self.brand,
             condicion='seminuevo',
             estado='disponible'
@@ -26,15 +25,15 @@ class InventoryLogicTests(TestCase):
         payload = {
             'coupon': None,
             'items': [
-                {'equipo': self.e.id, 'price': '10.00'}
+                {'equipo': self.e.id, 'precio': '10.00'}
             ]
         }
-        ser = OrderSerializer(data=payload)
+        ser = OrdenSerializer(data=payload)
         self.assertTrue(ser.is_valid(), ser.errors)
         order = ser.save()
         self.e.refresh_from_db()
         self.assertEqual(self.e.estado, 'vendido')
-        self.assertEqual(Order.objects.count(), 1)
+        self.assertEqual(Orden.objects.count(), 1)
 
     def test_sale_blocked_when_not_disponible(self):
         self.e.estado = 'rentado'
@@ -42,10 +41,10 @@ class InventoryLogicTests(TestCase):
         payload = {
             'coupon': None,
             'items': [
-                {'equipo': self.e.id, 'price': '10.00'}
+                {'equipo': self.e.id, 'precio': '10.00'}
             ]
         }
-        ser = OrderSerializer(data=payload)
+        ser = OrdenSerializer(data=payload)
         self.assertTrue(ser.is_valid(), ser.errors)
         with self.assertRaises(ValidationError):
             ser.save()

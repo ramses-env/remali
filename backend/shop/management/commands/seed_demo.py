@@ -28,7 +28,7 @@ class Command(BaseCommand):
                 Equipo.objects.create(
                     modelo=modelo,
                     descripcion=f"{modelo}",
-                    precio_venta=price,
+                    precio_dia=price,
                     condicion='seminuevo',
                     disponible_venta=True,
                     disponible_renta=True,
