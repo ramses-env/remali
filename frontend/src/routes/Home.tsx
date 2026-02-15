@@ -1,4 +1,3 @@
-import { motion } from 'framer-motion'
 import { Link } from 'react-router-dom'
 import Carousel from '../components/Carousel'
 
@@ -9,7 +8,7 @@ export default function Home() {
         <div className="absolute -top-20 -left-32 h-72 w-72 rounded-full bg-neutral-200/30 blur-3xl" />
         <div className="absolute -bottom-24 -right-24 h-80 w-80 rounded-full bg-neutral-200/30 blur-3xl" />
         <div className="p-8 md:p-12 grid md:grid-cols-2 gap-10 items-center">
-          <motion.div initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6 }}>
+          <div>
             <div className="inline-flex items-center gap-2 rounded-full border bg-white/70 px-3 py-1 text-xs text-neutral-700">
               <span className="h-2 w-2 rounded-full bg-neutral-800" />
               <span>Lanzamiento 2026 • Alquiler y venta</span>
@@ -56,8 +55,8 @@ export default function Home() {
                 <p className="text-xs text-neutral-600">Equipos</p>
               </div>
             </div>
-          </motion.div>
-          <motion.div initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.6 }}>
+          </div>
+          <div>
             <Carousel
               className="bg-neutral-50"
               items={[
@@ -68,7 +67,7 @@ export default function Home() {
               autoPlayMs={5000}
               showDots
             />
-          </motion.div>
+          </div>
         </div>
       </section>
 
@@ -114,7 +113,7 @@ export default function Home() {
 
       <section className="space-y-6">
         <h2 className="text-2xl font-extrabold text-neutral-900">Equipos en acción</h2>
-        <motion.div initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6 }}>
+        <div>
           <Carousel
             items={[
               { image: '/images/inicio-compactador-2.jpg', title: 'Obra urbana', subtitle: 'Compactación eficiente en campo' },
@@ -124,7 +123,7 @@ export default function Home() {
             autoPlayMs={4500}
             showDots
           />
-        </motion.div>
+        </div>
       </section>
     </div>
   )

@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
 import { Link } from 'react-router-dom'
 
 type Slide = {
@@ -19,18 +18,15 @@ type Props = {
 
 export default function Carousel({ items, autoPlayMs = 5000, className = '', showDots = true }: Props) {
   const [index, setIndex] = useState(0)
-  const [direction, setDirection] = useState(1)
   const [paused, setPaused] = useState(false)
   const [progress, setProgress] = useState(0)
   const timer = useRef<number | null>(null)
   const length = items.length
-  const drag = useRef<{ startX: number; active: boolean }>({ startX: 0, active: false })
 
   useEffect(() => {
     if (length <= 1 || paused) return
     if (timer.current) window.clearInterval(timer.current)
     timer.current = window.setInterval(() => {
-      setDirection(1)
       setIndex(i => (i + 1) % length)
     }, autoPlayMs)
     return () => {
@@ -56,14 +52,7 @@ export default function Carousel({ items, autoPlayMs = 5000, className = '', sho
   }, [index, paused, autoPlayMs, length])
 
   const go = (dir: number) => {
-    setDirection(dir)
     setIndex(i => (i + dir + length) % length)
-  }
-
-  const variants = {
-    enter: (dir: number) => ({ x: dir * 40, opacity: 0 }),
-    center: { x: 0, opacity: 1 },
-    exit: (dir: number) => ({ x: -dir * 40, opacity: 0 })
   }
 
   return (
@@ -84,57 +73,31 @@ export default function Carousel({ items, autoPlayMs = 5000, className = '', sho
         <div className="h-full bg-black/50" style={{ width: `${progress}%` }} />
       </div>
 
-      <AnimatePresence mode="popLayout" custom={direction}>
-        <motion.div
-          key={index}
-          initial="enter"
-          animate="center"
-          exit="exit"
-          variants={variants}
-          custom={direction}
-          transition={{ duration: 0.45, ease: 'easeOut' }}
-          className="relative"
-          onPointerDown={e => {
-            drag.current = { startX: e.clientX, active: true }
+      <div className="relative">
+        <img
+          src={items[index].image}
+          alt={items[index].title || 'slide'}
+          className="w-full h-56 sm:h-72 md:h-[28rem] object-cover transition-opacity duration-300"
+          loading="lazy"
+          crossOrigin="anonymous"
+          referrerPolicy="no-referrer"
+          onError={e => {
+            const t = e.currentTarget
+            if (t.dataset.fallbackApplied === '1') return
+            t.dataset.fallbackApplied = '1'
+            t.src = '/hero1.svg'
           }}
-          onPointerMove={e => {
-            if (!drag.current.active) return
-          }}
-          onPointerUp={e => {
-            if (!drag.current.active) return
-            const delta = e.clientX - drag.current.startX
-            drag.current.active = false
-            if (Math.abs(delta) > 30) go(delta < 0 ? 1 : -1)
-          }}
-          onPointerCancel={() => {
-            drag.current.active = false
-          }}
-        >
-          <img
-            src={items[index].image}
-            alt={items[index].title || 'slide'}
-            className="w-full h-56 sm:h-72 md:h-[28rem] object-cover"
-            loading="lazy"
-            crossOrigin="anonymous"
-            referrerPolicy="no-referrer"
-            onError={e => {
-              const t = e.currentTarget
-              if (t.dataset.fallbackApplied === '1') return
-              t.dataset.fallbackApplied = '1'
-              t.src = '/hero1.svg'
-            }}
-          />
-          {(items[index].title || items[index].subtitle) && (
-            <div className="absolute inset-x-0 bottom-0 p-6 md:p-8 bg-gradient-to-t from-black/50 to-black/0 text-white">
-              {items[index].title && <h3 className="text-2xl md:text-3xl font-extrabold tracking-tight">{items[index].title}</h3>}
-              {items[index].subtitle && <p className="mt-1 text-sm md:text-base opacity-90">{items[index].subtitle}</p>}
-              {items[index].ctaLink && items[index].ctaText && (
-                <Link to={items[index].ctaLink} className="inline-block mt-4 px-4 py-2 rounded-full bg-white/90 text-black hover:bg-white">{items[index].ctaText}</Link>
-              )}
-            </div>
-          )}
-        </motion.div>
-      </AnimatePresence>
+        />
+        {(items[index].title || items[index].subtitle) && (
+          <div className="absolute inset-x-0 bottom-0 p-6 md:p-8 bg-gradient-to-t from-black/50 to-black/0 text-white">
+            {items[index].title && <h3 className="text-2xl md:text-3xl font-extrabold tracking-tight">{items[index].title}</h3>}
+            {items[index].subtitle && <p className="mt-1 text-sm md:text-base opacity-90">{items[index].subtitle}</p>}
+            {items[index].ctaLink && items[index].ctaText && (
+              <Link to={items[index].ctaLink} className="inline-block mt-4 px-4 py-2 rounded-full bg-white/90 text-black hover:bg-white">{items[index].ctaText}</Link>
+            )}
+          </div>
+        )}
+      </div>
 
       {length > 1 && (
         <>

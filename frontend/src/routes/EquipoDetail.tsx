@@ -6,7 +6,6 @@ import { useToast } from '../store/toast'
 import StarRating from '../components/StarRating'
 import PriceUnitToggle from '../components/PriceUnitToggle'
 import { usePriceUnit, formatCurrency } from '../store/priceUnit'
-import { motion, AnimatePresence } from 'framer-motion'
 import { useProfile } from '../store/profile'
 import { downloadEquipoPdf } from '../lib/pdf'
 
@@ -92,9 +91,29 @@ export default function EquipoDetail() {
     if (r) return 'Renta'
     return 'No disponible'
   }, [e])
-  if (!e) return null
+  if (!e) {
+    return (
+      <div className="space-y-10 animate-pulse">
+        <div className="h-6 w-48 bg-gray-200 rounded"></div>
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 md:gap-8">
+          <div className="order-1 lg:order-1 lg:col-span-7 space-y-4">
+            <div className="w-full h-80 sm:h-96 md:h-[36rem] lg:h-[42rem] bg-gray-200 rounded-3xl"></div>
+            <div className="flex gap-2">
+              <div className="w-20 h-20 bg-gray-200 rounded-xl"></div>
+              <div className="w-20 h-20 bg-gray-200 rounded-xl"></div>
+              <div className="w-20 h-20 bg-gray-200 rounded-xl"></div>
+            </div>
+          </div>
+          <div className="order-2 lg:order-2 lg:col-span-5 space-y-4">
+            <div className="h-8 w-3/4 bg-gray-200 rounded"></div>
+            <div className="h-64 bg-gray-200 rounded-xl"></div>
+          </div>
+        </div>
+      </div>
+    )
+  }
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-10">
+    <div className="space-y-10">
       <input
         ref={fileInputRef}
         type="file"
@@ -129,9 +148,9 @@ export default function EquipoDetail() {
         <span>/</span>
         <span className="text-gray-700">{e.modelo}</span>
       </div>
-      <div className="grid lg:grid-cols-12 gap-6 md:gap-8">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 md:gap-8">
         <div className="order-1 lg:order-1 lg:col-span-7 space-y-4">
-          <div className="md:flex md:items-start md:gap-4">
+          <div className="block md:flex md:items-start md:gap-4">
             <div className="hidden md:flex md:flex-col md:gap-3">
               {isAdmin && (
                 <button
@@ -158,7 +177,7 @@ export default function EquipoDetail() {
             </div>
             <div
               ref={imageWrapRef}
-              className="flex-1 bg-neutral-100 rounded-tl-3xl rounded-br-3xl overflow-hidden relative cursor-zoom-in grid place-items-center"
+              className="w-full flex-1 bg-neutral-100 rounded-tl-3xl rounded-br-3xl overflow-hidden relative cursor-zoom-in grid place-items-center min-h-[20rem]"
               onClick={() => activeImage && setFullImage(true)}
               onMouseEnter={() => setLensOn(true)}
               onMouseLeave={() => setLensOn(false)}
@@ -259,16 +278,19 @@ export default function EquipoDetail() {
               <PriceUnitToggle />
             </div>
             <p className="text-xs text-gray-600">Mostrando precio por {unit}</p>
-            <div>
+            <div className="flex justify-center w-full pt-6 pb-2">
               <button
-                className="rounded-full border px-3 py-2 text-sm bg-white shadow-sm hover:bg-neutral-50 focus:outline-none focus:ring-2 focus:ring-[#517ea0]"
+                className="fancy"
                 onClick={async () => {
                   await downloadEquipoPdf(e, unit, activeImage)
                 }}
                 title="Descargar PDF"
                 aria-label="Descargar PDF"
               >
-                Descargar PDF
+                <span className="top-key"></span>
+                <span className="text">Descargar PDF</span>
+                <span className="bottom-key-1"></span>
+                <span className="bottom-key-2"></span>
               </button>
             </div>
             <div className="flex items-center gap-2 sm:gap-3">
@@ -361,65 +383,60 @@ export default function EquipoDetail() {
         <p className="text-lg font-extrabold">Descripción</p>
         <p className="mt-2 text-sm text-gray-600">{e.descripcion}</p>
       </div>
-      <AnimatePresence>
-        {fullImage && activeImage && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 bg-black/50 grid place-items-center"
-            onClick={() => setFullImage(false)}
+      {fullImage && activeImage && (
+        <div
+          className="fixed inset-0 z-50 bg-black/50 grid place-items-center"
+          onClick={() => setFullImage(false)}
+        >
+          <div
+            className="relative w-[94vw] max-w-6xl h-[80vh] rounded-2xl bg-white shadow-2xl border border-neutral-200 p-4 md:p-6"
+            onClick={e => e.stopPropagation()}
           >
-            <div
-              className="relative w-[94vw] max-w-6xl h-[80vh] rounded-2xl bg-white shadow-2xl border border-neutral-200 p-4 md:p-6"
-              onClick={e => e.stopPropagation()}
-            >
-              <div className="grid md:grid-cols-[1fr_minmax(18rem,24rem)] gap-6 items-start h-full">
-                <div className="relative w-full h-full grid place-items-center overflow-hidden">
-                  <img
-                    src={activeImage}
-                    alt={e.modelo}
-                    className="max-w-full max-h-full object-contain"
-                    loading="eager"
-                    crossOrigin="anonymous"
-                    referrerPolicy="no-referrer"
-                    onError={ev => {
-                      const t = ev.currentTarget
-                      if (t.dataset.fallbackApplied === '1') return
-                      t.dataset.fallbackApplied = '1'
-                      t.src = '/vite.svg'
-                    }}
-                  />
+            <div className="grid grid-cols-1 md:grid-cols-[1fr_minmax(18rem,24rem)] gap-6 items-start h-full">
+              <div className="relative w-full h-full grid place-items-center overflow-hidden">
+                <img
+                  src={activeImage}
+                  alt={e.modelo}
+                  className="max-w-full max-h-full object-contain"
+                  loading="eager"
+                  crossOrigin="anonymous"
+                  referrerPolicy="no-referrer"
+                  onError={ev => {
+                    const t = ev.currentTarget
+                    if (t.dataset.fallbackApplied === '1') return
+                    t.dataset.fallbackApplied = '1'
+                    t.src = '/vite.svg'
+                  }}
+                />
+              </div>
+              <div className="hidden md:flex flex-col gap-4 h-full overflow-auto pr-1">
+                <div className="space-y-2">
+                  <p className="font-extrabold text-lg">{e.modelo}</p>
+                  <p className="text-sm text-gray-600">{(e.descripcion || '').slice(0, 220)}</p>
                 </div>
-                <div className="hidden md:flex flex-col gap-4 h-full overflow-auto pr-1">
-                  <div className="space-y-2">
-                    <p className="font-extrabold text-lg">{e.modelo}</p>
-                    <p className="text-sm text-gray-600">{(e.descripcion || '').slice(0, 220)}</p>
-                  </div>
-                  <div className="flex flex-wrap gap-3">
-                    {images.map((img, i) => (
-                      <button
-                        key={`mv-${i}`}
-                        onClick={() => setActiveImage(img)}
-                        className={`w-14 h-14 rounded-xl border grid place-items-center bg-white ${activeImage === img ? 'ring-2 ring-[#517ea0] border-[#517ea0]' : 'border-neutral-200 hover:border-[#517ea0]'}`}
-                      >
-                        <img src={img} alt={`thumb-${i}`} className="max-w-[80%] max-h-[80%] object-contain" loading="lazy" crossOrigin="anonymous" referrerPolicy="no-referrer" />
-                      </button>
-                    ))}
-                  </div>
+                <div className="flex flex-wrap gap-3">
+                  {images.map((img, i) => (
+                    <button
+                      key={`mv-${i}`}
+                      onClick={() => setActiveImage(img)}
+                      className={`w-14 h-14 rounded-xl border grid place-items-center bg-white ${activeImage === img ? 'ring-2 ring-[#517ea0] border-[#517ea0]' : 'border-neutral-200 hover:border-[#517ea0]'}`}
+                    >
+                      <img src={img} alt={`thumb-${i}`} className="max-w-[80%] max-h-[80%] object-contain" loading="lazy" crossOrigin="anonymous" referrerPolicy="no-referrer" />
+                    </button>
+                  ))}
                 </div>
               </div>
-              <button
-                aria-label="Cerrar"
-                onClick={() => setFullImage(false)}
-                className="absolute top-3 right-3 w-10 h-10 rounded-full bg-white text-black grid place-items-center shadow"
-              >
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
-              </button>
             </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </motion.div>
+            <button
+              aria-label="Cerrar"
+              onClick={() => setFullImage(false)}
+              className="absolute top-3 right-3 w-10 h-10 rounded-full bg-white text-black grid place-items-center shadow"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
   )
 }

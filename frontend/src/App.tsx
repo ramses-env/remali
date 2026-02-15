@@ -1,8 +1,6 @@
 import { Route, Routes } from 'react-router-dom'
 import Navbar from './components/Navbar'
 import Home from './routes/Home'
-// import ProductList from './routes/ProductList'
-// import ProductDetail from './routes/ProductDetail'
 import Cart from './routes/Cart'
 import Checkout from './routes/Checkout'
 import AdminPage from './routes/AdminPage'
@@ -28,7 +26,7 @@ function App() {
       <div className="min-h-screen flex flex-col bg-white text-neutral-900 transition-colors">
         <Navbar />
         <RouteLoader />
-        <div className="flex-1 mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-6 w-full">
+        <div className="flex-1 mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-6 w-full min-h-[50vh]">
           <ErrorBoundary>
             <Routes>
               <Route path="/" element={<Home />} />

@@ -25,52 +25,57 @@ export default function Cart() {
           {state.items.map(it => (
             <div
               key={it.lineId}
-              className="flex items-center gap-3 rounded-xl border border-neutral-200 bg-white p-3"
+              className="flex items-center gap-3 p-2 rounded-xl border border-neutral-200 bg-white"
             >
               <div className="shrink-0">
                 {it.image && (
                   <img
                     src={it.image}
                     alt={it.title}
-                    className="w-14 h-14 object-cover rounded-md"
+                    className="w-12 h-12 object-cover rounded-md"
                   />
                 )}
               </div>
-              <div className="flex-1">
-                <p className="font-semibold">{it.title}</p>
-                <p className="text-xs text-gray-600">
-                  ${it.price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {it.unit ? `por ${it.unit}` : 'unidad'}
+              
+              <div className="flex-1 min-w-0">
+                <p className="font-semibold text-sm truncate">{it.title}</p>
+                <p className="text-[10px] text-gray-500 truncate">
+                  ${it.price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {it.unit ? `/${it.unit}` : ''}
                 </p>
               </div>
-              <div className="flex items-center gap-2">
+
+              <div className="flex items-center gap-1 shrink-0">
                 <button
                   aria-label="Menos"
-                  className="w-8 h-8 grid place-items-center rounded-full border hover:bg-neutral-100"
+                  className="w-6 h-6 grid place-items-center rounded-full border border-neutral-200 text-xs hover:bg-neutral-50 active:scale-95 transition-transform"
                   onClick={() => dispatch({ type: 'qty', lineId: it.lineId, qty: Math.max(1, it.qty - 1) })}
                 >−</button>
-                <span className="w-8 text-center">{it.qty}</span>
+                <span className="w-6 text-center text-xs font-medium">{it.qty}</span>
                 <button
                   aria-label="Más"
-                  className="w-8 h-8 grid place-items-center rounded-full border hover:bg-neutral-100"
+                  className="w-6 h-6 grid place-items-center rounded-full border border-neutral-200 text-xs hover:bg-neutral-50 active:scale-95 transition-transform"
                   onClick={() => dispatch({ type: 'qty', lineId: it.lineId, qty: it.qty + 1 })}
                 >＋</button>
               </div>
+
+              <div className="text-right shrink-0 min-w-[60px]">
+                <p className="font-bold text-sm">
+                  ${(it.price * it.qty).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                </p>
+              </div>
+
               <button
-                className="w-8 h-8 grid place-items-center rounded-full border hover:bg-neutral-100"
+                className="w-6 h-6 grid place-items-center rounded-full text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors shrink-0"
                 onClick={() => dispatch({ type: 'remove', lineId: it.lineId })}
                 aria-label="Eliminar"
-                title="Eliminar"
               >✕</button>
-              <span className="font-semibold">
-                ${(it.price * it.qty).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-              </span>
             </div>
           ))}
         </div>
         <div className="space-y-3 rounded-xl border border-neutral-200 p-3 bg-white h-fit">
           <p className="text-lg font-extrabold">Resumen</p>
           <form
-            className="flex items-center gap-2"
+            className="flex flex-col sm:flex-row items-center gap-3 sm:gap-2"
             onSubmit={e => { e.preventDefault(); applyCoupon() }}
           >
             <div className="wave-group flex-1">
