@@ -42,10 +42,12 @@ export default function EquiposList() {
   const [inputValue, setInputValue] = useState('')
   const [showSuggestions, setShowSuggestions] = useState(false)
   const [activeSuggestion, setActiveSuggestion] = useState<number>(-1)
+  const [loading, setLoading] = useState(true)
   const gridRef = useRef<HTMLDivElement | null>(null)
   const firstCardRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
+    setLoading(true)
     const params: Record<string, string> = {}
     const categories = filters['category']?.filter(Boolean) || []
     if (categories.length) params['category'] = categories.join(',')
@@ -69,6 +71,7 @@ export default function EquiposList() {
         { id: 101, modelo: 'Equipo demo A', descripcion: 'Descripción de ejemplo', imagen: '/vite.svg', precio_dia: 500, precio_semana: 2800, precio_mes: 9500 },
         { id: 102, modelo: 'Equipo demo B', descripcion: 'Descripción de ejemplo', imagen: '/vite.svg', precio_dia: 350, precio_semana: 2100, precio_mes: 7800 },
       ]))
+      .finally(() => setLoading(false))
   }, [filters, query])
 
   useEffect(() => {
@@ -325,16 +328,19 @@ export default function EquiposList() {
                 <div className="col-span-1 md:flex-none">
                   <PriceUnitToggle />
                 </div>
-                <div className="col-span-1 md:flex-none">
+                <div className="col-span-1 md:flex-none flex justify-end mt-2 md:mt-0">
                   <button
-                    className="rounded-full border px-3 py-2 text-sm bg-white shadow-sm hover:bg-neutral-50 focus:outline-none focus:ring-2 focus:ring-[#517ea0]"
+                    className="fancy"
                     onClick={async () => {
                       await downloadEquiposPdf(filteredAll, filters, unit)
                     }}
                     title="Descargar PDF"
                     aria-label="Descargar PDF"
                   >
-                    Descargar PDF
+                    <span className="top-key"></span>
+                    <span className="text">Descargar PDF</span>
+                    <span className="bottom-key-1"></span>
+                    <span className="bottom-key-2"></span>
                   </button>
                 </div>
               </div>
@@ -352,8 +358,25 @@ export default function EquiposList() {
             </div>
           </aside>
           <div className="md:col-span-3">
+<<<<<<< HEAD
             <div ref={gridRef} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
               {shown.map((p, i) => (
+=======
+            <div ref={gridRef} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 min-h-[50vh]">
+              {loading && Array.from({ length: 6 }).map((_, i) => (
+                <div key={i} className="animate-pulse bg-neutral-200 rounded-2xl h-80 w-full" />
+              ))}
+              {!loading && shown.length === 0 && (
+                <div className="col-span-full flex flex-col items-center justify-center py-10 text-gray-500">
+                  <svg className="w-16 h-16 mb-4 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                  </svg>
+                  <p className="text-lg font-medium">No se encontraron resultados</p>
+                  <p className="text-sm">Intenta ajustar los filtros o la búsqueda.</p>
+                </div>
+              )}
+              {!loading && shown.map((p, i) => (
+>>>>>>> ramses
                 <div key={p.id} ref={i === 0 ? firstCardRef : undefined}>
                   <ProductCard id={p.id} title={p.title} price={p.price} image={p.image || ''} subtitle={p.description?.slice(0, 40)} rating={(p.id % 5) + 1} linkTo={`/equipo/${p.id}`} />
                 </div>

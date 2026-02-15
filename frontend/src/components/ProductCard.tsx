@@ -30,14 +30,10 @@ export default function ProductCard({ id, title, price, image, subtitle, rating 
   const [fav, setFav] = useState(false)
   const [saved, setSaved] = useState(false)
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 16 }}
-      animate={{ opacity: 1, y: 0 }}
-      whileHover={{ scale: 1.01 }}
-      transition={{ duration: 0.25 }}
+    <div
       className="group rounded-2xl p-4 bg-neutral-50 border border-neutral-200 shadow-sm hover:shadow-md relative w-full max-w-full min-w-0 overflow-hidden flex flex-col h-full"
     >
-      <Link to={linkTo || `/producto/${id}`} className="block">
+      <Link to={linkTo || `/equipo/${id}`} className="block">
         <div className="bg-neutral-100 rounded-tl-3xl rounded-br-3xl overflow-hidden">
           {image ? (
             <img
@@ -73,7 +69,7 @@ export default function ProductCard({ id, title, price, image, subtitle, rating 
             <path d="M12 16V8" strokeWidth="1.5"></path>
           </svg>
         </button>
-        <Link aria-label="Ver" to={linkTo || `/producto/${id}`} className={`${iconBtn} shine-button`}>
+        <Link aria-label="Ver" to={linkTo || `/equipo/${id}`} className={`${iconBtn} shine-button`}>
           <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" className={`${iconSvg} shine-icon`}>
             <path d="M5 12H18" strokeWidth="1.5" strokeLinecap="round"></path>
             <path d="M12 7L17 12L12 17" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"></path>
@@ -99,7 +95,7 @@ export default function ProductCard({ id, title, price, image, subtitle, rating 
           </svg>
           <span className="font-medium">Comprar</span>
         </button>
-        <Link to={`/producto/${id}`} className={mobileBtn}>Ver
+        <Link to={`/equipo/${id}`} className={mobileBtn}>Ver
           <svg className={mobileIcon} viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
             <circle cx="12" cy="12" r="9" strokeWidth="1.5"></circle>
             <path d="M12 15V9" strokeWidth="1.5" strokeLinecap="round"></path>
@@ -114,6 +110,6 @@ export default function ProductCard({ id, title, price, image, subtitle, rating 
           <svg className={`${saved ? 'stroke-[#517ea0] fill-[#487aa1]' : 'stroke-zinc-600 fill-none'} w-4 h-4`} viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M6 3h12a1 1 0 011 1v16l-7-4-7 4V4a1 1 0 011-1z"/></svg>
         </button>
       </div>
-    </motion.div>
+    </div>
   )
 }
