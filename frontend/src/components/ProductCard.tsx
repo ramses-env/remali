@@ -1,6 +1,5 @@
 import { Link } from 'react-router-dom'
 import { useState } from 'react'
-import { motion } from 'framer-motion'
 import StarRating from './StarRating'
 import { useCart } from '../store/cart'
 import { usePriceUnit } from '../store/priceUnit'

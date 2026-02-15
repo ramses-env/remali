@@ -358,10 +358,6 @@ export default function EquiposList() {
             </div>
           </aside>
           <div className="md:col-span-3">
-<<<<<<< HEAD
-            <div ref={gridRef} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-              {shown.map((p, i) => (
-=======
             <div ref={gridRef} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 min-h-[50vh]">
               {loading && Array.from({ length: 6 }).map((_, i) => (
                 <div key={i} className="animate-pulse bg-neutral-200 rounded-2xl h-80 w-full" />
@@ -376,7 +372,6 @@ export default function EquiposList() {
                 </div>
               )}
               {!loading && shown.map((p, i) => (
->>>>>>> ramses
                 <div key={p.id} ref={i === 0 ? firstCardRef : undefined}>
                   <ProductCard id={p.id} title={p.title} price={p.price} image={p.image || ''} subtitle={p.description?.slice(0, 40)} rating={(p.id % 5) + 1} linkTo={`/equipo/${p.id}`} />
                 </div>

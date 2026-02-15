@@ -87,46 +87,6 @@ export default function Carousel({ items, autoPlayMs = 5000, className = '', sho
             t.dataset.fallbackApplied = '1'
             t.src = '/hero1.svg'
           }}
-<<<<<<< HEAD
-          onPointerMove={() => {
-            if (!drag.current.active) return
-          }}
-          onPointerUp={e => {
-            if (!drag.current.active) return
-            const delta = e.clientX - drag.current.startX
-            drag.current.active = false
-            if (Math.abs(delta) > 30) go(delta < 0 ? 1 : -1)
-          }}
-          onPointerCancel={() => {
-            drag.current.active = false
-          }}
-        >
-          <img
-            src={items[index].image}
-            alt={items[index].title || 'slide'}
-            className="w-full h-56 sm:h-72 md:h-[28rem] object-cover"
-            loading="lazy"
-            crossOrigin="anonymous"
-            referrerPolicy="no-referrer"
-            onError={e => {
-              const t = e.currentTarget
-              if (t.dataset.fallbackApplied === '1') return
-              t.dataset.fallbackApplied = '1'
-              t.src = '/hero1.svg'
-            }}
-          />
-          {(items[index].title || items[index].subtitle) && (
-            <div className="absolute inset-x-0 bottom-0 p-6 md:p-8 bg-gradient-to-t from-black/50 to-black/0 text-white">
-              {items[index].title && <h3 className="text-2xl md:text-3xl font-extrabold tracking-tight">{items[index].title}</h3>}
-              {items[index].subtitle && <p className="mt-1 text-sm md:text-base opacity-90">{items[index].subtitle}</p>}
-              {items[index].ctaLink && items[index].ctaText && (
-                <Link to={items[index].ctaLink} className="inline-block mt-4 px-4 py-2 rounded-full bg-white/90 text-black hover:bg-white">{items[index].ctaText}</Link>
-              )}
-            </div>
-          )}
-        </motion.div>
-      </AnimatePresence>
-=======
         />
         {(items[index].title || items[index].subtitle) && (
           <div className="absolute inset-x-0 bottom-0 p-6 md:p-8 bg-gradient-to-t from-black/50 to-black/0 text-white">
@@ -138,7 +98,6 @@ export default function Carousel({ items, autoPlayMs = 5000, className = '', sho
           </div>
         )}
       </div>
->>>>>>> ramses
 
       {length > 1 && (
         <>
