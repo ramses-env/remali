@@ -21,10 +21,14 @@ export default function FloatingCart() {
 
   return (
     <>
-      <button
+      <motion.button
+        drag
+        dragMomentum={false}
+        whileDrag={{ scale: 1.1 }}
+        dragElastic={0.1}
         aria-label="Abrir carrito"
         onClick={() => setOpen(true)}
-        className="fixed right-4 bottom-6 sm:bottom-auto sm:top-1/2 sm:-translate-y-1/2 z-40 p-4 rounded-full bg-gradient-to-br from-[#5488af] to-[#487aa1] text-white shadow-lg hover:shadow-xl"
+        className="fixed right-4 bottom-6 sm:bottom-auto sm:top-1/2 sm:-translate-y-1/2 z-40 p-4 rounded-full bg-gradient-to-br from-[#5488af] to-[#487aa1] text-white shadow-lg hover:shadow-xl touch-none"
       >
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" className="w-6 h-6"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M2.25 3h1.386c.51 0 .955.343 1.088.834l.383 1.437M7.5 14.25h9.563a1.875 1.875 0 001.822-1.416l1.32-5.274A.938.938 0 0019.31 6.75H5.107" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M7.5 21a.75.75 0 100-1.5.75.75 0 000 1.5zm9 0a.75.75 0 100-1.5.75.75 0 000 1.5z"/></svg>
         {count > 0 && (
@@ -32,7 +36,7 @@ export default function FloatingCart() {
             {count}
           </span>
         )}
-      </button>
+      </motion.button>
 
       <AnimatePresence>
         {open && (
@@ -79,21 +83,50 @@ export default function FloatingCart() {
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.25 }}
                     whileHover={{ scale: 1.01 }}
-                    className="group grid grid-cols-1 sm:grid-cols-6 items-center gap-3 py-4 sm:py-3 px-3 sm:px-2 rounded-lg border-b border-neutral-200 last:border-b-0 bg-white/60 hover:bg-white transition-colors shadow-sm hover:shadow-md"
+                    className="flex items-center gap-3 p-2 rounded-xl border border-neutral-200 bg-white"
                   >
-                    <div className="order-1 sm:order-none sm:col-span-1">
-                      {it.image && <img src={it.image} alt={it.title} className="w-12 h-12 object-cover rounded-md transition-transform duration-200 group-hover:scale-105" />}
+                    <div className="shrink-0">
+                      {it.image && (
+                        <img
+                          src={it.image}
+                          alt={it.title}
+                          className="w-12 h-12 object-cover rounded-md"
+                        />
+                      )}
                     </div>
-                    <div className="order-2 sm:order-none sm:col-span-3">
-                      <p className="font-semibold uppercase text-sm">{it.title}</p>
-                      <p className="text-xs text-gray-600">${it.price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {it.unit ? `por ${it.unit}` : 'unidad'}</p>
+                    
+                    <div className="flex-1 min-w-0">
+                      <p className="font-semibold text-sm truncate text-neutral-900">{it.title}</p>
+                      <p className="text-[10px] text-gray-500 truncate">
+                        ${it.price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {it.unit ? `/${it.unit}` : ''}
+                      </p>
                     </div>
-                    <div className="order-3 sm:order-none sm:col-span-2 flex items-center justify-between sm:justify-end gap-2">
-                      <button className="px-2 py-1 rounded border hover:bg-[#e9f2f7] transition-colors" onClick={() => dispatch({ type: 'qty', lineId: it.lineId, qty: Math.max(1, it.qty - 1) })}>-</button>
-                      <span className="w-8 text-center text-sm font-semibold rounded px-2 bg-neutral-100 group-hover:bg-[#e9f2f7] transition-colors">{it.qty}</span>
-                      <button className="px-2 py-1 rounded border hover:bg-[#e9f2f7] transition-colors" onClick={() => dispatch({ type: 'qty', lineId: it.lineId, qty: it.qty + 1 })}>+</button>
-                      <button className="p-2 rounded-full border border-neutral-300 hover:bg-red-50 hover:text-red-700 focus:outline-none focus:ring-2 focus:ring-[#517ea0]" onClick={() => dispatch({ type: 'remove', lineId: it.lineId })}>✕</button>
+
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        aria-label="Menos"
+                        className="w-6 h-6 grid place-items-center rounded-full border border-neutral-200 text-xs hover:bg-neutral-50 active:scale-95 transition-transform text-neutral-600"
+                        onClick={() => dispatch({ type: 'qty', lineId: it.lineId, qty: Math.max(1, it.qty - 1) })}
+                      >−</button>
+                      <span className="w-6 text-center text-xs font-medium text-neutral-900">{it.qty}</span>
+                      <button
+                        aria-label="Más"
+                        className="w-6 h-6 grid place-items-center rounded-full border border-neutral-200 text-xs hover:bg-neutral-50 active:scale-95 transition-transform text-neutral-600"
+                        onClick={() => dispatch({ type: 'qty', lineId: it.lineId, qty: it.qty + 1 })}
+                      >＋</button>
                     </div>
+
+                    <div className="text-right shrink-0 min-w-[60px]">
+                      <p className="font-bold text-sm text-neutral-900">
+                        ${(it.price * it.qty).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                      </p>
+                    </div>
+
+                    <button
+                      className="w-6 h-6 grid place-items-center rounded-full text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors shrink-0"
+                      onClick={() => dispatch({ type: 'remove', lineId: it.lineId })}
+                      aria-label="Eliminar"
+                    >✕</button>
                   </motion.div>
                 ))}
               </div>
