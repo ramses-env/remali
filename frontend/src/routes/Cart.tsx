@@ -1,11 +1,13 @@
 import { useCart } from '../store/cart'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useState } from 'react'
 import api from '../lib/api'
 
 export default function Cart() {
   const { state, dispatch, total } = useCart()
   const [code, setCode] = useState('')
+  const nav = useNavigate()
+  
   function applyCoupon() {
     api.post('/cupones/aplicar/', { code, items: state.items })
       .then(r => {
@@ -16,11 +18,32 @@ export default function Cart() {
   }
   return (
     <div className="space-y-6">
-      <h2 className="text-2xl font-extrabold text-black">Carrito</h2>
+      <div className="flex items-center gap-3">
+        <button
+          onClick={() => nav(-1)}
+          className="w-10 h-10 grid place-items-center rounded-full hover:bg-black/5 transition-colors"
+          aria-label="Volver"
+        >
+          <svg className="w-6 h-6 text-neutral-900" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+          </svg>
+        </button>
+        <h2 className="text-2xl font-extrabold text-black">Carrito</h2>
+      </div>
       <div className="grid md:grid-cols-3 gap-6">
         <div className="md:col-span-2 space-y-3">
           {state.items.length === 0 && (
-            <p className="text-gray-600">No hay productos en el carrito</p>
+            <div className="flex flex-col items-center justify-center text-center py-10 rounded-xl border border-neutral-200 bg-white">
+              <div className="w-16 h-16 rounded-full bg-[#e9f2f7] flex items-center justify-center mb-3">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" className="w-8 h-8 text-[#517ea0]">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M2.25 3h1.386c.51 0 .955.343 1.088.834l.383 1.437M7.5 14.25h9.563a1.875 1.875 0 001.822-1.416l1.32-5.274A.938.938 0 0019.31 6.75H5.107" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M7.5 21a.75.75 0 100-1.5.75.75 0 000 1.5zm9 0a.75.75 0 100-1.5.75.75 0 000 1.5z"/>
+                </svg>
+              </div>
+              <p className="text-lg font-semibold text-neutral-800">Tu carrito está vacío</p>
+              <p className="text-sm text-neutral-500">Explora productos y añade tus favoritos</p>
+              <Link to="/equipos" className="mt-4 px-4 py-2 rounded-full bg-gradient-to-r from-[#5488af] to-[#487aa1] text-white inline-block hover:shadow-lg hover:-translate-y-0.5 transition-all">Ver productos</Link>
+            </div>
           )}
           {state.items.map(it => (
             <div
@@ -72,13 +95,13 @@ export default function Cart() {
             </div>
           ))}
         </div>
-        <div className="space-y-3 rounded-xl border border-neutral-200 p-3 bg-white h-fit">
-          <p className="text-lg font-extrabold">Resumen</p>
+        <div className="space-y-6 rounded-xl border border-neutral-200 p-6 bg-white h-fit">
+          <p className="text-xl font-extrabold">Resumen</p>
           <form
-            className="flex flex-col sm:flex-row items-center gap-3 sm:gap-2"
+            className="flex flex-col sm:flex-row items-center gap-4 sm:gap-2"
             onSubmit={e => { e.preventDefault(); applyCoupon() }}
           >
-            <div className="wave-group flex-1">
+            <div className="wave-group w-full sm:flex-1">
               <input
                 required
                 type="text"

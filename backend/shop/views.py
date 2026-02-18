@@ -147,6 +147,7 @@ def create_order(request):
 # Removed adjust_inventory view
 
 @api_view(['POST'])
+@permission_classes([permissions.AllowAny])
 def register(request):
     from django.contrib.auth.models import User
     from django.core.validators import validate_email
@@ -196,6 +197,7 @@ def register(request):
     return Response(payload)
 
 @api_view(['POST'])
+@permission_classes([permissions.AllowAny])
 def login(request):
     if not _jwt_serializer_available:
         return Response({ 'detail': 'jwt no disponible' }, status=501)
@@ -231,6 +233,7 @@ def dashboard_metrics(request):
     return Response({ 'products': products, 'orders': orders, 'revenue': float(revenue) })
 
 @api_view(['GET'])
+@permission_classes([permissions.AllowAny])
 def verify_email(request, token: str):
     from django.utils import timezone
     from datetime import timedelta
@@ -249,6 +252,7 @@ def verify_email(request, token: str):
         return HttpResponseRedirect(f"{settings.FRONTEND_URL}/login?verified=0")
 
 @api_view(['POST'])
+@permission_classes([permissions.AllowAny])
 def resend_verification(request):
     from django.contrib.auth.models import User
     email = request.data.get('email')

@@ -1,10 +1,17 @@
 import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import { useCart } from '../store/cart'
 
 export default function FloatingCart() {
   const { state, total, dispatch } = useCart()
+  const location = useLocation()
+  const isHome = location.pathname === '/'
+  const isCart = location.pathname === '/carrito'
+  const isCotizacion = location.pathname === '/cotizacion'
+  // Check if current path is an error page (starts with /403, /404, /500 or just isn't a known route - simplified by checking known error paths for now)
+  const isError = ['/404', '/500', '/403', '/mantenimiento'].includes(location.pathname)
+
   const count = state.items.reduce((s, i) => s + i.qty, 0)
   const [open, setOpen] = useState(false)
   const [badgePulse, setBadgePulse] = useState(false)
@@ -18,6 +25,8 @@ export default function FloatingCart() {
     }
     prevCountRef.current = count
   }, [count])
+
+  if (isHome || isCart || isError || isCotizacion) return null
 
   return (
     <>
@@ -57,9 +66,13 @@ export default function FloatingCart() {
             >
               <div className="p-4 border-b border-neutral-200 flex items-center justify-between">
                 <p className="text-lg font-extrabold text-[#517ea0]">Tu carrito</p>
-                <button aria-label="Cerrar" className="button button-sm" onClick={() => setOpen(false)}>
-                  <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M6 6l12 12M18 6L6 18" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"></path>
+                <button 
+                  aria-label="Cerrar" 
+                  className="w-8 h-8 flex items-center justify-center rounded-full text-red-500 hover:bg-red-100 hover:text-red-700 transition-all duration-300 hover:rotate-90"
+                  onClick={() => setOpen(false)}
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M18 6L6 18M6 6l12 12"></path>
                   </svg>
                 </button>
               </div>

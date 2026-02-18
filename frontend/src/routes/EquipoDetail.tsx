@@ -3,7 +3,6 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import api from '../lib/api'
 import { useCart } from '../store/cart'
 import { useToast } from '../store/toast'
-import StarRating from '../components/StarRating'
 import PriceUnitToggle from '../components/PriceUnitToggle'
 import { usePriceUnit, formatCurrency } from '../store/priceUnit'
 import { useProfile } from '../store/profile'
@@ -271,26 +270,26 @@ export default function EquipoDetail() {
           </div>
         </div>
         <div className="order-2 lg:order-2 lg:col-span-5 space-y-4">
-          <h2 className="text-2xl md:text-3xl font-extrabold text-black">{e.modelo}</h2>
+          <h2 className="text-2xl md:text-3xl font-extrabold text-gray-900">{e.modelo}</h2>
           <div className="lg:sticky lg:top-6 rounded-xl bg-white border border-neutral-100 shadow-sm p-3 sm:p-4 space-y-3 sm:space-y-4">
             <div className="flex items-center justify-between">
-              <p className="text-2xl sm:text-3xl font-extrabold text-black">${formatCurrency(displayPrice)}</p>
+              <p className="text-2xl sm:text-3xl font-extrabold text-gray-900">${formatCurrency(displayPrice)}</p>
               <PriceUnitToggle />
             </div>
             <p className="text-xs text-gray-600">Mostrando precio por {unit}</p>
             <div className="flex justify-center w-full pt-6 pb-2">
               <button
-                className="fancy"
+                className="text-[#517ea0] font-medium hover:text-[#487aa1] flex items-center gap-2 hover:underline transition-all"
                 onClick={async () => {
                   await downloadEquipoPdf(e, unit, activeImage)
                 }}
                 title="Descargar PDF"
                 aria-label="Descargar PDF"
               >
-                <span className="top-key"></span>
-                <span className="text">Descargar PDF</span>
-                <span className="bottom-key-1"></span>
-                <span className="bottom-key-2"></span>
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+                <span>Descargar ficha técnica (PDF)</span>
               </button>
             </div>
             <div className="flex items-center gap-2 sm:gap-3">
@@ -303,7 +302,7 @@ export default function EquipoDetail() {
             </div>
             <div className="flex flex-col sm:flex-row gap-3">
               <button
-                className="btn-universe-primary w-full sm:flex-1 rounded-full bg-gradient-to-r from-[#5488af] to-[#487aa1] text-white focus:outline-none focus:ring-2 focus:ring-[#517ea0]"
+                className="w-full sm:flex-1 py-3 px-4 rounded-full border-2 border-[#517ea0] text-[#517ea0] font-bold hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-[#517ea0] transition-colors"
                 onClick={() => {
                   dispatch({
                     type: 'add',
@@ -323,7 +322,7 @@ export default function EquipoDetail() {
                 Añadir al carrito
               </button>
               <button
-                className="btn-universe-black w-full sm:flex-1 focus:outline-none focus:ring-2 focus:ring-[#517ea0]"
+                className="w-full sm:flex-1 py-3 px-4 rounded-full bg-gradient-to-r from-[#5488af] to-[#487aa1] text-white font-bold hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-[#517ea0] transition-opacity shadow-md hover:shadow-lg"
                 onClick={() => {
                   dispatch({
                     type: 'add',

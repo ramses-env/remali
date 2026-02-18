@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { motion } from 'framer-motion'
 import ProductCard from '../components/ProductCard'
 import api from '../lib/api'
 import PriceUnitToggle from '../components/PriceUnitToggle'
@@ -33,8 +34,8 @@ export default function EquiposList() {
   const navigate = useNavigate()
   const [items, setItems] = useState<Equipo[]>([])
   const { unit } = usePriceUnit()
-  const [sortBy, setSortBy] = useState<'price'|'title'>('price')
-  const [order, setOrder] = useState<'asc'|'desc'>('asc')
+  const [sortBy] = useState<'price'|'title'>('price')
+  const [order] = useState<'asc'|'desc'>('asc')
   const [page, setPage] = useState<number>(0)
   const [pageSize, setPageSize] = useState<number>(9)
   const [filters, setFilters] = useState<Record<string, string[]>>({})
@@ -98,7 +99,7 @@ export default function EquiposList() {
     setPage(0)
   }, [query, filters, sortBy, order])
 
-  const asProduct = (e: Equipo) => {
+  const asProduct = useMemo(() => (e: Equipo) => {
     const d = toNumber(e.precio_dia)
     const s = toNumber(e.precio_semana)
     const m = toNumber(e.precio_mes)
@@ -117,7 +118,7 @@ export default function EquiposList() {
       category: (e as any).categoria?.nombre || '',
       type: (e as any).tipo?.nombre || '',
     }
-  }
+  }, [unit])
 
   const shown = useMemo(() => {
     const arr = items.map(asProduct)
@@ -213,8 +214,8 @@ export default function EquiposList() {
     <div className="space-y-6">
       <FloatingFilters value={filters} onChange={setFilters} />
       <div className="text-center space-y-2">
-        <p className="uppercase tracking-widest text-sm text-gray-500">Catálogo de Equipo</p>
-        <h2 className="text-3xl font-extrabold tracking-tight">Remali</h2>
+        <p className="uppercase tracking-widest text-base text-gray-500">Catálogo de Equipo</p>
+        <h2 className="text-2xl font-extrabold tracking-tight text-neutral-900">Remali</h2>
       </div>
       <div>
         <div className="flex flex-col gap-3 md:grid md:grid-cols-4 md:gap-3 md:items-center">
@@ -251,7 +252,7 @@ export default function EquiposList() {
                       }
                     }}
                     placeholder="Buscar equipo..."
-                    className="flex-1 min-w-0 bg-gray-100 pl-2 text-sm font-semibold outline-0 h-10 leading-10 shadow-md focus:ring-2 focus:ring-[#517ea0]"
+                    className="flex-1 min-w-0 bg-gray-100 pl-2 text-sm font-semibold outline-0 h-10 leading-10 shadow-md focus:ring-2 focus:ring-[#517ea0] placeholder-gray-500"
                   />
                   <button
                     aria-label={inputValue ? 'Limpiar búsqueda' : 'Buscar'}
@@ -283,7 +284,7 @@ export default function EquiposList() {
                       {suggestions.map((s, i) => (
                         <button
                           key={s.id}
-                          className={`w-full flex items-center gap-3 px-3 py-2 text-left ${activeSuggestion === i ? 'bg-[#e9f2f7]' : 'hover:bg-neutral-100'}`}
+                          className={`w-full flex items-center gap-3 px-3 py-2 text-left ${activeSuggestion === i ? 'bg-[#e9f2f7]' : 'hover:bg-neutral-100:bg-neutral-700'}`}
                           onMouseEnter={() => setActiveSuggestion(i)}
                           onClick={() => { setInputValue(s.title); setQuery(s.title); setShowSuggestions(false); navigate(`/equipo/${s.id}`) }}
                         >
@@ -303,7 +304,7 @@ export default function EquiposList() {
                             />
                           )}
                           <span className="flex-1 min-w-0">
-                            <span className="block font-semibold truncate">{s.title}</span>
+                            <span className="block font-semibold truncate text-neutral-900">{s.title}</span>
                             <span className="block text-xs text-gray-600 truncate">${Number(s.price).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                           </span>
                         </button>
@@ -313,51 +314,126 @@ export default function EquiposList() {
                   )}
                 </div>
               </div>
-              <div className="col-span-2 grid grid-cols-1 gap-3 px-3 sm:px-0 mt-3 mb-5 md:my-0 md:flex md:justify-end">
-                <div className="col-span-1 md:flex-none">
+              <div className="col-span-2 grid grid-cols-2 gap-3 px-3 sm:px-0 mt-3 mb-5 md:my-0 md:flex md:justify-end items-end">
+                <div className="col-span-2 md:flex-none md:hidden flex justify-center w-full">
+                  <button
+                    onClick={() => window.dispatchEvent(new Event('toggleFilters'))}
+                    className="flex items-center justify-center gap-2 px-6 py-2.5 rounded-full border border-neutral-900 bg-white text-neutral-900 font-semibold shadow-sm hover:bg-neutral-50 active:scale-95 transition-all w-full"
+                  >
+                    <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      <path d="M3 6h18M7 12h10M10 18h4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                    Filtros
+                  </button>
+                </div>
+                <div className="col-span-2 md:col-span-1 md:flex-none flex justify-center md:justify-start w-full md:w-auto">
                   <PriceUnitToggle />
                 </div>
-                <div className="col-span-1 md:flex-none flex justify-end mt-2 md:mt-0">
+                <div className="col-span-2 md:col-span-1 md:flex-none flex justify-end w-full md:w-auto">
                   <button
-                    className="fancy"
+                    className="bg-white text-[#5488af] border border-[#5488af] w-full md:w-auto h-10 md:h-auto px-4 py-2 rounded-lg font-semibold hover:bg-[#f0f9ff] transition-colors flex items-center justify-center gap-2"
                     onClick={async () => {
                       await downloadEquiposPdf(filteredAll, filters, unit)
                     }}
                     title="Descargar PDF"
                     aria-label="Descargar PDF"
                   >
-                    <span className="top-key"></span>
-                    <span className="text">Descargar PDF</span>
-                    <span className="bottom-key-1"></span>
-                    <span className="bottom-key-2"></span>
+                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                    </svg>
+                    <span>Descargar PDF</span>
                   </button>
                 </div>
               </div>
             </div>
           </div>
         </div>
-        <div className="grid md:grid-cols-4 gap-6 mt-0 sm:mt-6">
-          <aside className="hidden md:block">
-            <div className="rounded-2xl bg-neutral-50 border border-neutral-200 shadow-sm sticky top-24 max-h-[calc(100vh-6rem)] overflow-y-auto">
-              <div className="p-4 border-b border-neutral-200 flex items-center justify-between">
-                <p className="font-extrabold">Filtros</p>
-                <button className="text-sm px-3 py-1.5 rounded-full border" onClick={() => setFilters({})}>Limpiar</button>
+        <div className="flex flex-col md:flex-row gap-6 mt-0 sm:mt-6">
+          <aside className="hidden md:block w-72 shrink-0">
+            <div className="rounded-2xl bg-white border border-neutral-200 shadow-lg sticky top-24 max-h-[calc(100vh-6rem)] overflow-y-auto scrollbar-thin scrollbar-thumb-neutral-200 scrollbar-track-transparent">
+              <div className="p-5 border-b border-neutral-100 flex items-center justify-between bg-white/80 backdrop-blur-sm sticky top-0 z-10">
+                <p className="font-extrabold text-lg text-neutral-900 tracking-tight">Filtros</p>
+                <button 
+                  className="text-sm px-4 py-1.5 rounded-full border border-neutral-300 bg-white text-neutral-700 font-medium hover:bg-neutral-50 hover:border-neutral-400 active:scale-95 active:bg-neutral-100 transition-all duration-200 ease-in-out shadow-sm hover:shadow-md group flex items-center gap-1"
+                  onClick={() => setFilters({})}
+                  title="Limpiar filtros"
+                >
+                  <span>Limpiar</span>
+                  <svg className="w-3.5 h-3.5 opacity-0 -ml-2 group-hover:opacity-100 group-hover:ml-0 transition-all duration-300 text-neutral-500" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
               </div>
               <FilterSidebar value={filters} onChange={setFilters} />
             </div>
           </aside>
-          <div className="md:col-span-3">
+          <div className="w-full min-w-0 flex-1">
             <div ref={gridRef} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 min-h-[50vh]">
               {loading && Array.from({ length: 6 }).map((_, i) => (
                 <div key={i} className="animate-pulse bg-neutral-200 rounded-2xl h-80 w-full" />
               ))}
               {!loading && shown.length === 0 && (
-                <div className="col-span-full flex flex-col items-center justify-center py-10 text-gray-500">
-                  <svg className="w-16 h-16 mb-4 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                  </svg>
-                  <p className="text-lg font-medium">No se encontraron resultados</p>
-                  <p className="text-sm">Intenta ajustar los filtros o la búsqueda.</p>
+                <div className="col-span-full flex flex-col items-center justify-center py-20 text-center overflow-hidden">
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0.8 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    transition={{ duration: 0.5, ease: "easeOut" }}
+                    className="relative mb-6"
+                  >
+                    <motion.div
+                      animate={{ scale: [1, 1.2, 1], opacity: [0.3, 0.5, 0.3] }}
+                      transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
+                      className="absolute inset-0 bg-blue-100 rounded-full blur-2xl opacity-50 transform scale-150"
+                    />
+                    <div className="relative w-24 h-24 rounded-full bg-gradient-to-br from-[#e9f2f7] to-[#dbe9f2] flex items-center justify-center shadow-inner z-10">
+                      <motion.div
+                        animate={{ rotate: [0, 10, -10, 0] }}
+                        transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
+                      >
+                        <svg className="w-12 h-12 text-[#517ea0]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                        </svg>
+                      </motion.div>
+                    </div>
+                    
+                    {/* Floating question marks */}
+                    <motion.div
+                      animate={{ y: [0, -8, 0], x: [0, 5, 0], opacity: [0, 1, 0] }}
+                      transition={{ duration: 3, repeat: Infinity, ease: "easeInOut", delay: 0.5 }}
+                      className="absolute -top-2 -right-2 text-2xl font-bold text-[#517ea0]"
+                    >
+                      ?
+                    </motion.div>
+                    <motion.div
+                      animate={{ y: [0, -6, 0], x: [0, -5, 0], opacity: [0, 1, 0] }}
+                      transition={{ duration: 2.5, repeat: Infinity, ease: "easeInOut", delay: 1 }}
+                      className="absolute bottom-0 -left-2 text-xl font-bold text-[#517ea0]/70"
+                    >
+                      ?
+                    </motion.div>
+                  </motion.div>
+                  
+                  <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.3, duration: 0.5 }}
+                    className="space-y-2 max-w-sm relative z-10"
+                  >
+                    <h3 className="text-xl font-bold text-gray-400">
+                      No encontramos lo que buscas
+                    </h3>
+                    <p className="text-gray-300 text-sm">
+                      Intenta con otros términos, verifica la ortografía o elimina algunos filtros para ver más opciones.
+                    </p>
+                    <motion.button
+                      whileHover={{ scale: 1.05 }}
+                      whileTap={{ scale: 0.95 }}
+                      onClick={() => { setFilters({}); setQuery(''); setInputValue('') }}
+                      className="mt-4 px-6 py-2 rounded-full bg-white border border-gray-100 text-gray-400 text-sm font-semibold shadow-sm hover:shadow-md hover:border-[#517ea0] hover:text-[#517ea0] transition-all"
+                    >
+                      Limpiar filtros y búsqueda
+                    </motion.button>
+                  </motion.div>
                 </div>
               )}
               {!loading && shown.map((p, i) => (
