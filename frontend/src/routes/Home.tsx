@@ -255,18 +255,6 @@ export default function Home() {
             <span className="text-[10px] uppercase tracking-widest opacity-50">Scroll</span>
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M19 14l-7 7m0 0l-7-7m7 7V3"></path></svg>
           </div>
-<<<<<<< HEAD
-          <div>
-            <Carousel
-              className="bg-neutral-50"
-              items={[
-                { image: '/images/compactador_hyundai.jpg', title: 'Compactador HYUNDAI', subtitle: 'Potencia y estabilidad para suelos' , ctaText: 'Ver compactadores', ctaLink: '/equipos' },
-                { image: '/images/compactador_2.jpeg', title: 'Cortadora de piso', subtitle: 'Cortes limpios y precisos' },
-                { image: '/images/revolvedora.jpeg', title: 'Pontente' },
-              ]}
-              autoPlayMs={5000}
-              showDots
-=======
         </motion.div>
       </section>
 
@@ -403,7 +391,6 @@ export default function Home() {
               src="/images/maquinas.png"
               alt="Maquinaria ligera"
               className="absolute inset-0 w-full h-full object-cover"
->>>>>>> ramses
             />
           </div>
         </motion.div>
@@ -481,19 +468,6 @@ export default function Home() {
         </div>
       </section>
 
-<<<<<<< HEAD
-      <section className="space-y-6">
-        <h2 className="text-2xl font-extrabold text-neutral-900">Equipos en acción</h2>
-        <div>
-          <Carousel
-            items={[
-              { image: '/images/inicio-compactador-2.jpg', title: 'Obra urbana', subtitle: 'Compactación eficiente en campo' },
-              { image: '/images/compactadoras.jpeg', title: 'Taller y mantenimiento', subtitle: 'Corte de pavimento y concreto' },
-              { image: '/images/inicio-compactador-3.jpg', title: 'Construcción residencial', subtitle: 'Equipos confiables y potentes' },
-            ]}
-            autoPlayMs={4500}
-            showDots
-=======
       {/* Call to Action */}
       <section className="pb-10 px-4 pt-24 relative z-10">
         <motion.div
@@ -512,7 +486,6 @@ export default function Home() {
               ease: "linear" 
             }}
             className="absolute top-0 left-0 w-full h-full bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-30 mix-blend-color-dodge" 
->>>>>>> ramses
           />
           
           {/* Animated Background Blobs */}

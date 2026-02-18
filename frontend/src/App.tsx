@@ -15,14 +15,9 @@ import { PriceUnitProvider } from './store/priceUnit'
 import EquiposList from './routes/EquiposList'
 import EquipoDetail from './routes/EquipoDetail'
 import Cotizacion from './routes/Cotizacion'
-import ErrorPage from './routes/ErrorPage'
 
 function App() {
   const { token } = useAuth()
-<<<<<<< HEAD
-=======
-  const { user } = useProfile()
-  const isAdmin = user ? (user.is_staff || (user?.groups || []).includes('Administrador')) : null
   const location = useLocation()
   const isHome = location.pathname === '/'
 
@@ -34,8 +29,6 @@ function App() {
       document.documentElement.classList.remove('dark')
     }
   }, [isHome])
-
->>>>>>> ramses
   return (
     <PriceUnitProvider>
       <div className={`min-h-screen flex flex-col transition-colors ${isHome ? 'bg-neutral-950 text-white dark' : 'bg-white text-neutral-900'}`}>
@@ -52,13 +45,6 @@ function App() {
               <Route path="/cotizacion" element={<Cotizacion />} />
               <Route path="/login" element={<Login />} />
               <Route path="/perfil" element={token ? <Profile /> : <Login />} />
-<<<<<<< HEAD
-=======
-              <Route path="/admin" element={token ? (isAdmin === false ? <Login /> : <AdminPage />) : <Login />} />
-              <Route path="/500" element={<ErrorPage type="500" />} />
-              <Route path="/403" element={<ErrorPage type="403" />} />
-              <Route path="*" element={<ErrorPage type="404" />} />
->>>>>>> ramses
             </Routes>
           </ErrorBoundary>
         </div>
