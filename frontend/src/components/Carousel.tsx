@@ -57,7 +57,7 @@ export default function Carousel({ items, autoPlayMs = 5000, className = '', sho
 
   return (
     <div
-      className={`relative overflow-hidden rounded-2xl border bg-white ${className}`}
+      className={`relative overflow-hidden rounded-2xl bg-white ${className}`}
       onMouseEnter={() => setPaused(true)}
       onMouseLeave={() => setPaused(false)}
       onFocus={() => setPaused(true)}

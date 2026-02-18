@@ -30,7 +30,7 @@ export default function ProductCard({ id, title, price, image, subtitle, rating 
   const [saved, setSaved] = useState(false)
   return (
     <div
-      className="group rounded-2xl p-4 bg-neutral-50 border border-neutral-200 shadow-sm hover:shadow-md relative w-full max-w-full min-w-0 overflow-hidden flex flex-col h-full"
+      className="group rounded-2xl p-4 bg-white border border-neutral-200 shadow-sm hover:shadow-md relative w-full max-w-full min-w-0 overflow-hidden flex flex-col h-full transition-colors"
     >
       <Link to={linkTo || `/equipo/${id}`} className="block">
         <div className="bg-neutral-100 rounded-tl-3xl rounded-br-3xl overflow-hidden">
@@ -53,14 +53,14 @@ export default function ProductCard({ id, title, price, image, subtitle, rating 
         </div>
       </Link>
         <div className="mt-4 space-y-1 flex-1 flex flex-col">
-          <h3 className="font-extrabold uppercase tracking-wide break-words">{title}</h3>
+          <h3 className="font-extrabold uppercase tracking-wide break-words text-neutral-900">{title}</h3>
           {subtitle && <p className="text-sm text-gray-600">{subtitle}</p>}
           <div className="mt-auto flex items-center justify-between">
             <StarRating value={rating} />
           <span className="text-gray-900 font-bold">${displayPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
           </div>
         </div>
-      <div className="absolute inset-0 bg-neutral-900/40 opacity-0 group-hover:opacity-100 transition-opacity rounded-2xl md:flex hidden items-center justify-center gap-4">
+      <div className="absolute inset-0 bg-transparent opacity-0 group-hover:opacity-100 transition-opacity rounded-2xl md:flex hidden items-center justify-center gap-4">
         <button aria-label="Comprar" title="Comprar" onClick={() => { dispatch({ type: 'add', item: { lineId: Date.now() + Math.floor(Math.random() * 1000), id, title, price: displayPrice, qty: 1, image, unit } }); notify('Producto añadido al carrito') }} className={`${iconBtn} shine-button`}>
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" className={`${iconSvg} shine-icon`}>
             <path d="M12 22C17.5 22 22 17.5 22 12C22 6.5 17.5 2 12 2C6.5 2 2 6.5 2 12C2 17.5 6.5 22 12 22Z" strokeWidth="1.5"></path>

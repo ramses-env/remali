@@ -1,12 +1,13 @@
 import { useState, useMemo } from 'react'
 import { useCart } from '../store/cart'
 import { downloadCotizacionPdf } from '../lib/pdf'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useToast } from '../store/toast'
 
 export default function Cotizacion() {
   const { state, dispatch } = useCart()
   const { notify } = useToast()
+  const nav = useNavigate()
   const [nombre, setNombre] = useState('')
   const [empresa, setEmpresa] = useState('')
   const [email, setEmail] = useState('')
@@ -71,7 +72,18 @@ export default function Cotizacion() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-extrabold text-black">Cotización</h2>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => nav(-1)}
+            className="w-10 h-10 grid place-items-center rounded-full hover:bg-black/5 active:bg-black/10 transition-colors"
+            aria-label="Volver"
+          >
+            <svg className="w-6 h-6 text-neutral-900" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+            </svg>
+          </button>
+          <h2 className="text-2xl font-extrabold text-gray-900">Cotización</h2>
+        </div>
       </div>
 
       <div className="grid md:grid-cols-3 gap-6">
@@ -142,15 +154,15 @@ export default function Cotizacion() {
           
         </div>
 
-        <div className="space-y-3 rounded-xl border border-neutral-200 p-3 bg-white h-fit cotiza-form">
-          <div className="flex items-center gap-2">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" className="w-5 h-5 stroke-[#517ea0] fill-none">
-              <path d="M12 12a5 5 0 100-10 5 5 0 000 10z" strokeWidth="1.5"></path>
-              <path d="M4 20a8 8 0 0116 0" strokeWidth="1.5"></path>
-            </svg>
-            <span className="text-lg font-extrabold text-neutral-900">Datos del cliente</span>
-          </div>
-          <div className="grid grid-cols-1 gap-3">
+        <div className="rounded-xl border border-neutral-200 p-8 bg-white h-fit cotiza-form shadow-sm">
+            <div className="flex items-center gap-2 mb-8">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" className="w-6 h-6 stroke-[#517ea0] fill-none">
+                <path d="M12 12a5 5 0 100-10 5 5 0 000 10z" strokeWidth="1.5"></path>
+                <path d="M4 20a8 8 0 0116 0" strokeWidth="1.5"></path>
+              </svg>
+              <span className="text-xl font-extrabold text-neutral-900">Datos del cliente</span>
+            </div>
+          <div>
             <div className={`group ${showErrors && !validNombre ? 'invalid' : ''}`}>
               <input required type="text" className="input" placeholder=" " value={nombre} onChange={e => setNombre(e.target.value)} />
               <span className="highlight"></span>
@@ -175,12 +187,12 @@ export default function Cotizacion() {
               <span className="bar"></span>
               <label>Teléfono</label>
             </div>
-            <div className="flex items-center gap-2 mt-4 pt-2 border-t text-sm font-semibold text-neutral-700">
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" className="w-5 h-5 stroke-[#517ea0] fill-none">
+            <div className="flex items-center gap-2 mt-10 mb-8 pt-4 border-t border-neutral-200 text-sm font-semibold text-neutral-700">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" className="w-6 h-6 stroke-[#517ea0] fill-none">
                 <path d="M12 5c-3 0-5 2.5-5 5v2h10v-2c0-2.5-2-5-5-5z" strokeWidth="1.5"></path>
                 <path d="M4 14h16v4a2 2 0 01-2 2H6a2 2 0 01-2-2v-4z" strokeWidth="1.5"></path>
               </svg>
-              <span className="text-lg font-extrabold text-neutral-900">Datos de la obra</span>
+              <span className="text-xl font-extrabold text-neutral-900">Datos de la obra</span>
             </div>
             <div className={`group ${showErrors && !validResponsable ? 'invalid' : ''}`}>
               <input required type="text" className="input" placeholder=" " value={responsable} onChange={e => setResponsable(e.target.value)} />
@@ -235,12 +247,12 @@ export default function Cotizacion() {
           <div className="flex justify-center w-full pt-6">
             <button
               onClick={handleDownload}
-              className="fancy"
+              className="bg-gradient-to-r from-[#5488af] to-[#487aa1] text-white px-6 py-3 rounded-full font-bold shadow-md hover:shadow-lg hover:-translate-y-0.5 transition-all flex items-center gap-2"
             >
-              <span className="top-key"></span>
-              <span className="text">Descargar PDF</span>
-              <span className="bottom-key-1"></span>
-              <span className="bottom-key-2"></span>
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+              </svg>
+              <span>Descargar PDF</span>
             </button>
           </div>
         </div>
