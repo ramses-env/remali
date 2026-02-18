@@ -1,5 +1,4 @@
 from django.urls import path
-from rest_framework import permissions
 from . import views
 try:
     from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
@@ -20,8 +19,8 @@ urlpatterns = [
     path('ordenes/', views.create_order),
     *(
         [
-            path('auth/token/', TokenObtainPairView.as_view(permission_classes=[permissions.AllowAny])),
-            path('auth/refresh/', TokenRefreshView.as_view(permission_classes=[permissions.AllowAny])),
+            path('auth/token/', TokenObtainPairView.as_view()),
+            path('auth/refresh/', TokenRefreshView.as_view()),
         ] if _jwt_available else []
     ),
     path('auth/login/', views.login),
