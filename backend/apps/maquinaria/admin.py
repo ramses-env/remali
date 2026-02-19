@@ -2,7 +2,7 @@ from django.contrib import admin
 from django import forms
 from .models import (
     Equipo, Categoria, Marca, Tipo, ImagenProducto,
-    Cupon, Orden, ItemOrden
+    Cupon
 )
 
 class CuponAdminForm(forms.ModelForm):
@@ -70,17 +70,6 @@ class TipoAdmin(admin.ModelAdmin):
 @admin.register(ImagenProducto)
 class ImagenProductoAdmin(admin.ModelAdmin):
     list_display = ('id', 'equipo', 'fecha_creacion')
-
-class ItemOrdenInline(admin.TabularInline):
-    model = ItemOrden
-    extra = 0
-    readonly_fields = ('equipo', 'precio')
-
-@admin.register(Orden)
-class OrdenAdmin(admin.ModelAdmin):
-    list_display = ('id', 'fecha_creacion', 'cupon')
-    inlines = [ItemOrdenInline]
-    readonly_fields = ('fecha_creacion',)
 
 @admin.register(Cupon)
 class CuponAdmin(admin.ModelAdmin):

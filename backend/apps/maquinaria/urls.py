@@ -16,7 +16,7 @@ urlpatterns = [
     path('cupones/', views.CuponListCreate.as_view()),
     path('cupones/<int:pk>/', views.CuponRetrieveUpdateDestroy.as_view()),
     path('cupones/aplicar/', views.apply_coupon),
-    path('ordenes/', views.create_order),
+    # path('ordenes/', views.create_order),
     *(
         [
             path('auth/token/', TokenObtainPairView.as_view()),
@@ -24,8 +24,8 @@ urlpatterns = [
         ] if _jwt_available else []
     ),
     path('auth/login/', views.login),
-    path('auth/verificar/<str:token>/', views.verify_email),
-    path('auth/reenviar/', views.resend_verification),
+    # path('auth/verificar/<str:token>/', views.verify_email),
+    # path('auth/reenviar/', views.resend_verification),
     path('auth/me/', views.me),
     path('dashboard/metricas/', views.dashboard_metrics),
 ]

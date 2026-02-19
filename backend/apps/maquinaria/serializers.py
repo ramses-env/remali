@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Equipo, Cupon, Orden, ItemOrden, Categoria, Tipo, Marca
+from .models import Equipo, Cupon, Categoria, Tipo, Marca
 from django.db import transaction
 from django.core.exceptions import ValidationError
 
@@ -71,45 +71,6 @@ class CuponSerializer(serializers.ModelSerializer):
     class Meta:
         model = Cupon
         fields = '__all__'
-
-class ItemOrdenSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = ItemOrden
-        fields = ['equipo', 'precio']
-
-class OrdenSerializer(serializers.ModelSerializer):
-    items = ItemOrdenSerializer(many=True)
-
-    class Meta:
-        model = Orden
-        fields = ['id', 'fecha_creacion', 'cupon', 'items']
-
-    def create(self, validated_data):
-        items_data = validated_data.pop('items', [])
-        with transaction.atomic():
-            equipos_ids = []
-            for it in items_data:
-                e = it['equipo']
-                equipos_ids.append(e.id)
-            # Cargar equipos y validar
-            equipos = Equipo.objects.select_for_update().filter(id__in=equipos_ids)
-            equipos_map = {e.id: e for e in equipos}
-            for eid in equipos_ids:
-                e = equipos_map.get(eid)
-                if not e:
-                    raise ValidationError({'items': f'Equipo {eid} no existe'})
-                if e.estado != 'disponible':
-                    raise ValidationError({'items': f'Equipo "{e.modelo}" no está disponible para venta (estado: {e.estado})'})
-            # Crear orden e items
-            orden = Orden.objects.create(**validated_data)
-            for it in items_data:
-                ItemOrden.objects.create(orden=orden, **it)
-            # Actualizar estado a vendido
-            for eid in equipos_ids:
-                e = equipos_map[eid]
-                e.estado = 'vendido'
-                e.save(update_fields=['estado'])
-            return orden
 
 class EmailResendSerializer(serializers.Serializer):
     email = serializers.EmailField()

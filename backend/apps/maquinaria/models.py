@@ -100,6 +100,9 @@ class Equipo(models.Model):
         verbose_name = 'Equipo'
         verbose_name_plural = 'Equipos'
 
+
+
+
 class ImagenProducto(models.Model):
     equipo = models.ForeignKey(Equipo, related_name='imagenes', on_delete=models.CASCADE)
     imagen = models.ImageField(upload_to='products/', blank=False, null=False)
@@ -114,6 +117,7 @@ class ImagenProducto(models.Model):
     def __str__(self):
         return f"{self.equipo.modelo} #{self.id}"
 
+
 class Cupon(models.Model):
     codigo = models.CharField(max_length=50, unique=True)
     descuento = models.DecimalField(max_digits=4, decimal_places=2, help_text="Porcentaje de descuento (0-1)")
@@ -127,32 +131,31 @@ class Cupon(models.Model):
     def __str__(self):
         return self.codigo
 
-class VerificacionEmail(models.Model):
-    usuario = models.ForeignKey('auth.User', on_delete=models.CASCADE)
-    token = models.CharField(max_length=64, unique=True)
-    fecha_creacion = models.DateTimeField(auto_now_add=True)
-    usado = models.BooleanField(default=False)
 
-    class Meta:
-        db_table = 'verificaciones_email'
-        verbose_name = 'Verificación de Email'
-        verbose_name_plural = 'Verificaciones de Email'
 
-class Orden(models.Model):
-    fecha_creacion = models.DateTimeField(auto_now_add=True)
-    cupon = models.ForeignKey(Cupon, null=True, blank=True, on_delete=models.SET_NULL)
 
-    class Meta:
-        db_table = 'ordenes'
-        verbose_name = 'Orden'
-        verbose_name_plural = 'Órdenes'
 
-class ItemOrden(models.Model):
-    orden = models.ForeignKey(Orden, related_name='items', on_delete=models.CASCADE)
-    equipo = models.ForeignKey(Equipo, on_delete=models.PROTECT)
-    precio = models.DecimalField(max_digits=10, decimal_places=2)
+# maquinaria/models.py
+def estado_comercial(self):
+    """
+    Lógica de disponibilidad que verá el cliente en la web.
+    Basado en:
+    - condición (nuevo/seminuevo)
+    - unidades físicas disponibles
+    """
+    total_unidades = self.unidades.count()  # relación desde inventario
+    disponibles = self.unidades.filter(estado='disponible').count()
 
-    class Meta:
-        db_table = 'items_orden'
-        verbose_name = 'Item de Orden'
-        verbose_name_plural = 'Items de Orden'
+    # Si no hay inventario físico
+    if total_unidades == 0 or disponibles == 0:
+        return "No disponible por el momento"
+
+    # LÓGICA PARA MÁQUINAS NUEVAS (solo venta)
+    if self.condicion == 'nuevo':
+        return "Disponible salvo previa venta"
+
+    # LÓGICA PARA SEMINUEVAS (venta + renta)
+    if self.condicion == 'seminuevo':
+        return "Disponible"
+
+    return "No disponible"

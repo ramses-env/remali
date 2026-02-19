@@ -5,11 +5,11 @@ from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser
 from .models import (
     Equipo, Categoria, Marca, Tipo, ImagenProducto,
-    Cupon, Orden, ItemOrden, VerificacionEmail
+    Cupon
 )
 from .serializers import (
     EquipoSerializer, CategoriaSerializer, MarcaSerializer, TipoSerializer,
-    CuponSerializer, OrdenSerializer
+    CuponSerializer
 )
 from django.conf import settings
 from django.core.mail import send_mail
@@ -134,68 +134,6 @@ def apply_coupon(request):
         return Response({ 'discount': 0 }, status=400)
 
 @api_view(['POST'])
-@permission_classes([permissions.IsAuthenticated])
-def create_order(request):
-    if not request.user.has_perm('maquinaria.add_orden'):
-        return Response({ 'detail': 'sin permiso' }, status=403)
-    serializer = OrdenSerializer(data=request.data)
-    serializer.is_valid(raise_exception=True)
-    order = serializer.save()
-    return Response({ 'id': order.id })
-
-# Inventory adjustment is not compatible with unique items logic (Equipo)
-# Removed adjust_inventory view
-
-@api_view(['POST'])
-def register(request):
-    from django.contrib.auth.models import User
-    from django.core.validators import validate_email
-    from django.core.exceptions import ValidationError
-    from django.contrib.auth.password_validation import validate_password
-    email = request.data.get('email')
-    full_name = request.data.get('full_name')
-    password = request.data.get('password')
-    if not email or not password:
-        return Response({ 'detail': 'email/password requeridos' }, status=400)
-    try:
-        validate_email(email)
-    except ValidationError:
-        return Response({ 'detail': 'email inválido' }, status=400)
-    if User.objects.filter(email=email).exists() or User.objects.filter(username=email).exists():
-        return Response({ 'detail': 'email ya registrado' }, status=400)
-    first_name = ''
-    last_name = ''
-    if full_name:
-        parts = full_name.strip().split(' ')
-        first_name = parts[0]
-        last_name = ' '.join(parts[1:]) if len(parts) > 1 else ''
-    try:
-        validate_password(password)
-    except ValidationError as e:
-        return Response({ 'detail': 'password no cumple políticas', 'errors': e.messages }, status=400)
-    user = User.objects.create_user(username=email, email=email, password=password, first_name=first_name, last_name=last_name)
-    user.is_active = False
-    user.save()
-    try:
-        g, _ = Group.objects.get_or_create(name='Cliente')
-        user.groups.add(g)
-    except Exception:
-        pass
-    token = get_random_string(48)
-    VerificacionEmail.objects.create(usuario=user, token=token)
-    verify_url = f"{settings.BACKEND_URL}/api/auth/verify/{token}/"
-    send_mail(
-        'Verifica tu correo',
-        f'Hola {first_name or ""}, verifica tu cuenta: {verify_url}',
-        settings.DEFAULT_FROM_EMAIL,
-        [email],
-        fail_silently=True,
-        html_message=f'Hola {first_name or ""}, <a href="{verify_url}">Verificar aquí</a>'
-    )
-    payload = { 'id': user.id, 'email': user.email, 'full_name': f"{user.first_name} {user.last_name}".strip(), 'sent': True }
-    return Response(payload)
-
-@api_view(['POST'])
 def login(request):
     if not _jwt_serializer_available:
         return Response({ 'detail': 'jwt no disponible' }, status=501)
@@ -226,44 +164,10 @@ def login(request):
 def dashboard_metrics(request):
     from django.db.models import Sum, F
     products = Equipo.objects.count()
-    orders = Orden.objects.count()
-    revenue = Orden.objects.aggregate(total=Sum(F('items__precio')))['total'] or 0
-    return Response({ 'products': products, 'orders': orders, 'revenue': float(revenue) })
+    # orders y revenue removidos temporalmente por refactorización de Orden
+    return Response({ 'products': products, 'orders': 0, 'revenue': 0.0 })
 
-@api_view(['GET'])
-def verify_email(request, token: str):
-    from django.utils import timezone
-    from datetime import timedelta
-    try:
-        rec = VerificacionEmail.objects.get(token=token, usado=False)
-        timeout = getattr(settings, 'EMAIL_VERIFICATION_TIMEOUT', 14400)
-        if rec.fecha_creacion < timezone.now() - timedelta(seconds=timeout):
-            return HttpResponseRedirect(f"{settings.FRONTEND_URL}/login?verified=0&expired=1")
-        rec.usado = True
-        rec.save()
-        u = rec.usuario
-        u.is_active = True
-        u.save()
-        return HttpResponseRedirect(f"{settings.FRONTEND_URL}/login?verified=1")
-    except VerificacionEmail.DoesNotExist:
-        return HttpResponseRedirect(f"{settings.FRONTEND_URL}/login?verified=0")
 
-@api_view(['POST'])
-def resend_verification(request):
-    from django.contrib.auth.models import User
-    email = request.data.get('email')
-    try:
-        user = User.objects.get(email=email)
-        if user.is_active:
-            return Response({ 'detail': 'ya verificado' })
-        token = get_random_string(48)
-        VerificacionEmail.objects.create(usuario=user, token=token)
-        verify_url = f"{settings.BACKEND_URL}/api/auth/verify/{token}/"
-        send_mail('Verifica tu correo', f'Verifica tu cuenta: {verify_url}', settings.DEFAULT_FROM_EMAIL, [email], fail_silently=True, html_message=f'<a href="{verify_url}">Verificar aquí</a>')
-        payload = { 'sent': True }
-        return Response(payload)
-    except User.DoesNotExist:
-        return Response({ 'detail': 'email no encontrado' }, status=404)
 
 class CategoriaList(generics.ListCreateAPIView):
     queryset = Categoria.objects.all().order_by('nombre', 'id')

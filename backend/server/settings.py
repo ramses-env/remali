@@ -58,6 +58,7 @@ INSTALLED_APPS = [
     'rest_framework',
     'corsheaders',
     'maquinaria',
+    'inventario',
 ]
 
 if importlib.util.find_spec('cloudinary') and importlib.util.find_spec('cloudinary_storage'):
