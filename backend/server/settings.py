@@ -16,8 +16,13 @@ import importlib
 import importlib.util
 import dj_database_url
 
+import sys
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+# Add apps folder to sys.path
+sys.path.insert(0, os.path.join(BASE_DIR, 'apps'))
 
 
 # Quick-start development settings - unsuitable for production
@@ -52,12 +57,7 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'rest_framework',
     'corsheaders',
-    'shop',
-    'catalog',
-    'orders',
-    'accounts',
-    'promotions',
-    'dashboard',
+    'maquinaria',
 ]
 
 if importlib.util.find_spec('cloudinary') and importlib.util.find_spec('cloudinary_storage'):

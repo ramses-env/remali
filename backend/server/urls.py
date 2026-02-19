@@ -27,12 +27,7 @@ admin.site.index_title = "Panel de administración"
 urlpatterns = [
     path('admin', RedirectView.as_view(url='/admin/', permanent=True)),
     path('admin/', admin.site.urls),
-    path('api/', include('shop.urls')),
-    path('api/catalog/', include('catalog.urls')),
-    path('api/orders/', include('orders.urls')),
-    path('api/accounts/', include('accounts.urls')),
-    path('api/promotions/', include('promotions.urls')),
-    path('api/dashboard/', include('dashboard.urls')),
+    path('api/', include('maquinaria.urls')),
     # Catch-all para React Frontend
     re_path(r'^.*$', TemplateView.as_view(template_name='index.html')),
 ]
