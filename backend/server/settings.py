@@ -39,16 +39,31 @@ SECRET_KEY = os.environ.get('SECRET_KEY', 'django-insecure-)c$-2&1@^51q88$+47^%6
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.environ.get('DEBUG', 'False') == 'True'
 
-ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", "").split(",") + [
-    "remali.up.railway.app",
-    "localhost",
-    "127.0.0.1"
-]
+def _lista_env(nombre, extra):
+    """Lee una lista separada por comas y le suma los valores fijos.
 
-CSRF_TRUSTED_ORIGINS = os.environ.get("CSRF_TRUSTED_ORIGINS", "https://remali.up.railway.app").split(",") + [
+    Filtra vacíos a propósito: `"".split(",")` devuelve `['']`, y una cadena
+    vacía colada en CORS_ALLOWED_ORIGINS revienta al arrancar.
+    """
+    del_entorno = os.environ.get(nombre, "").split(",")
+    return [v.strip() for v in del_entorno + extra if v and v.strip()]
+
+
+ALLOWED_HOSTS = _lista_env("ALLOWED_HOSTS", [
+    "remali.up.railway.app",
+    "remali.mx",
+    "www.remali.mx",
+    "localhost",
+    "127.0.0.1",
+])
+
+CSRF_TRUSTED_ORIGINS = _lista_env("CSRF_TRUSTED_ORIGINS", [
+    "https://remali.up.railway.app",
+    "https://remali.mx",
+    "https://www.remali.mx",
     "http://localhost:5173",
     "http://127.0.0.1:5173",
-]
+])
 
 # Entrar con Google. El client ID es público (viaja en el HTML del botón), por eso
 # vive aquí con valor por defecto; el client secret NO se usa en este flujo: el
@@ -319,7 +334,17 @@ else:
 #   CHANNEL_LAYERS = {'default': {'BACKEND': 'channels_redis.core.RedisChannelLayer',
 #                                 'CONFIG': {'hosts': [REDIS_URL]}}}
 
-CORS_ALLOW_ALL_ORIGINS = True
+# Estaba en CORS_ALLOW_ALL_ORIGINS = True: cualquier sitio del mundo podía llamar
+# a la API desde el navegador de un usuario. En realidad casi no hace falta CORS —
+# en producción Django sirve el SPA desde el mismo origen y en desarrollo Vite hace
+# de proxy—, así que basta la lista de orígenes propios.
+CORS_ALLOWED_ORIGINS = _lista_env("CORS_ALLOWED_ORIGINS", [
+    "https://remali.up.railway.app",
+    "https://remali.mx",
+    "https://www.remali.mx",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+])
 
 
 # Default primary key field type
