@@ -65,10 +65,18 @@ CSRF_TRUSTED_ORIGINS = _lista_env("CSRF_TRUSTED_ORIGINS", [
     "http://127.0.0.1:5173",
 ])
 
-# Sitio en construcción: tapa todo el tráfico público con una sola página. Se
-# apaga poniendo la variable en False (o quitándola) y volviendo a desplegar; no
-# hace falta tocar código ni reconstruir la imagen.
-MODO_CONSTRUCCION = os.environ.get("MODO_CONSTRUCCION", "False") == "True"
+# Sitio en construcción: tapa todo el tráfico público con una sola página.
+#
+# En producción viene ENCENDIDO por defecto, a propósito. La app todavía está a
+# medias, y el riesgo no es simétrico: olvidar encenderlo publica un sistema sin
+# terminar, mientras que olvidar apagarlo solo deja el aviso un rato de más. El
+# valor por defecto debe proteger del error caro.
+#
+# En local (DEBUG=True) viene apagado, para poder trabajar sin estorbo.
+# Para mostrar el sitio real en producción: MODO_CONSTRUCCION=False y redesplegar.
+MODO_CONSTRUCCION = os.environ.get(
+    "MODO_CONSTRUCCION", "False" if DEBUG else "True"
+) == "True"
 
 # Entrar con Google. El client ID es público (viaja en el HTML del botón), por eso
 # vive aquí con valor por defecto; el client secret NO se usa en este flujo: el
