@@ -1,5 +1,6 @@
 import { createContext, useContext, useState } from 'react'
 import api from '../lib/api'
+import { olvidarAcceso } from '../lib/acceso'
 
 type AuthContextType = {
   token: string | null
@@ -34,6 +35,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
   function logout() {
     localStorage.removeItem('token')
+    // El acento y el nivel son de esa cuenta, no del navegador: si no se limpian,
+    // quien entre después vería el panel en negro y abriría en la sección del
+    // usuario anterior hasta que cargue su propio perfil.
+    olvidarAcceso()
     setToken(null)
   }
   return <AuthContext.Provider value={{ token, login, logout }}>{children}</AuthContext.Provider>

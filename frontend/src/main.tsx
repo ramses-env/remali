@@ -5,6 +5,7 @@ import { CartProvider } from './store/cart'
 import { AuthProvider } from './store/auth'
 import { ProfileProvider } from './store/profile'
 import { ToastProvider } from './store/toast'
+import { ThemeProvider } from './store/theme'
 import './index.css'
 import App from './App.tsx'
 
@@ -31,15 +32,17 @@ if (typeof window !== 'undefined') {
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <BrowserRouter>
-      <AuthProvider>
-        <ProfileProvider>
-          <CartProvider>
-            <ToastProvider>
-              <App />
-            </ToastProvider>
-          </CartProvider>
-        </ProfileProvider>
-      </AuthProvider>
+      <ThemeProvider>
+        <AuthProvider>
+          <ProfileProvider>
+            <CartProvider>
+              <ToastProvider>
+                <App />
+              </ToastProvider>
+            </CartProvider>
+          </ProfileProvider>
+        </AuthProvider>
+      </ThemeProvider>
     </BrowserRouter>
   </StrictMode>,
 )

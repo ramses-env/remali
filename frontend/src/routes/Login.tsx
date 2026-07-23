@@ -1,122 +1,185 @@
-import { useEffect, useState } from 'react'
-import { useNavigate, useLocation } from 'react-router-dom'
-import { motion } from 'framer-motion'
-import api from '../lib/api'
+import { useState } from 'react'
+import { useNavigate, useLocation, Link } from 'react-router-dom'
+import { consultarYo, entraAlPanel, recordarAcceso } from '../lib/acceso'
 import { useAuth } from '../store/auth'
+import ThemeToggle from '../components/ThemeToggle'
 
 export default function Login() {
   const { login } = useAuth()
   const nav = useNavigate()
+  const loc = useLocation()
+
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPass, setShowPass] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [fieldErrors, setFieldErrors] = useState<{ email?: string; password?: string; general?: string }>({})
-  const [info, setInfo] = useState<string | null>(null)
-  const loc = useLocation()
-
-  useEffect(() => {
-    const p = new URLSearchParams(loc.search)
-    const expired = p.get('expired') === '1'
-    const verified = p.get('verified') === '1'
-    const emailParam = p.get('email') || ''
-    if (emailParam) setEmail(emailParam)
-    if (verified) setInfo('Cuenta verificada, ya puedes entrar')
-    else if (expired) setInfo('El enlace de verificación expiró. Ingresa tu correo para reenviarlo')
-  }, [loc.search])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | undefined>(undefined)
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault()
-    setError(null)
-    setFieldErrors({})
+    setError(undefined)
+    if (!email.trim() || !password) {
+      setError('Escribe tu usuario y tu contraseña.')
+      return
+    }
+    setLoading(true)
     try {
-      if (!email.trim() || !password) {
-        const errs: { email?: string; password?: string } = {}
-        if (!email.trim()) errs.email = 'Campo obligatorio'
-        if (!password) errs.password = 'Campo obligatorio'
-        setFieldErrors(errs)
-        return
-      }
       await login(email, password)
-      const p = new URLSearchParams(loc.search)
-      const next = p.get('next') || ''
+      const next = new URLSearchParams(loc.search).get('next') || ''
       try {
-        const r = await api.get('/auth/me/')
-        const isAdmin = Boolean(r.data?.is_staff) || (Array.isArray(r.data?.groups) && r.data.groups.includes('Administrador'))
+        const yo = await consultarYo()
+        // Antes de navegar: así el panel abre de una vez con el acento y la
+        // sección que le tocan, sin pasar por los de la cuenta anterior.
+        recordarAcceso(yo)
         if (next) nav(next)
-        else if (isAdmin) nav('/equipos')
-        else nav('/perfil')
+        else if (entraAlPanel(yo)) nav('/dashboard')
+        else nav('/')
       } catch {
-        if (next) nav(next)
-        else nav('/perfil')
+        nav(next || '/')
       }
     } catch (err: any) {
       const data = err?.response?.data
       if (data?.detail) {
         const d = String(data.detail).toLowerCase()
-        if (d.includes('email')) setFieldErrors({ email: data.detail })
-        else if (d.includes('no active account')) setFieldErrors({ general: 'Tu cuenta no está activa. Contacta al administrador.' })
-        else setFieldErrors({ general: data.detail })
-      } else if (Array.isArray(data?.errors)) {
-        setFieldErrors({ password: data.errors[0] })
+        if (d.includes('no active account')) setError('Tu cuenta no está activa. Contacta al administrador.')
+        else setError(String(data.detail))
       } else {
-        setError('Error de autenticación')
+        setError('No coinciden. Revisa tu usuario y tu contraseña.')
       }
+    } finally {
+      setLoading(false)
     }
   }
 
   return (
-    <div className="min-h-[70vh] flex items-center justify-center bg-white px-4">
-      <motion.form initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }} onSubmit={onSubmit} className="relative w-full max-w-xl md:max-w-2xl sm:p-10 p-8 border rounded-3xl bg-white shadow-md hover:shadow-lg transition-shadow space-y-6">
-        <div className="absolute -top-5 left-6">
-          <div className="px-4 py-1.5 rounded-b-2xl rounded-t-lg bg-[#517ea0] text-white text-sm font-semibold shadow">
-            Login
+    <div className="min-h-screen lg:grid lg:grid-cols-[1.1fr_1fr] bg-app text-ink">
+      {/* ── Panel de marca (solo desktop) ── */}
+      <aside className="relative hidden lg:flex flex-col justify-between p-12 overflow-hidden">
+        <img
+          src="/images/remali-1.jpg"
+          alt=""
+          className="absolute inset-0 w-full h-full object-cover"
+          onError={e => { const t = e.currentTarget; if (t.dataset.fb !== '1') { t.dataset.fb = '1'; t.src = '/images/maquinas.png' } }}
+        />
+        {/* Veladura + rejilla + glow dorado */}
+        <div className="absolute inset-0 bg-gradient-to-tr from-black/90 via-black/70 to-black/40" />
+        <div className="absolute inset-0 opacity-[0.06]" style={{ backgroundImage: 'linear-gradient(#fff 1px,transparent 1px),linear-gradient(90deg,#fff 1px,transparent 1px)', backgroundSize: '54px 54px' }} />
+        <div className="absolute -bottom-24 -left-16 w-96 h-96 rounded-full bg-gold/20 blur-[120px]" />
+
+        <Link to="/" className="stagger-item relative z-10 flex items-center gap-3 w-fit">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-amber-400 to-orange-500 p-[2px]">
+            <div className="w-full h-full bg-black rounded-[10px] flex items-center justify-center">
+              <span className="text-lg font-black text-transparent bg-clip-text bg-gradient-to-tr from-amber-400 to-orange-500">R</span>
+            </div>
           </div>
-        </div>
-        <div className="flex items-center justify-between gap-3">
-          <div className="space-y-1">
-            <h1 className="text-3xl font-extrabold tracking-tight">Bienvenido</h1>
-            <p className="text-gray-600">Accede con tu correo</p>
-          </div>
+          <span className="text-xl font-black tracking-tight text-white">REMALI</span>
+        </Link>
+
+        <div className="relative z-10 max-w-md">
+          <p className="stagger-item text-gold text-[11px] font-mono uppercase tracking-[0.3em] mb-5">Panel administrativo</p>
+          <h2 className="stagger-item text-4xl xl:text-5xl font-black leading-[1.05] text-white">
+            Controla tu<br />maquinaria desde<br />un solo lugar.
+          </h2>
+          <p className="stagger-item text-white/60 mt-5 text-sm leading-relaxed">
+            Inventario por unidad con QR, rentas, ventas y mantenimiento — todo sincronizado y en tiempo real.
+          </p>
         </div>
 
-        <div className="space-y-4">
-          <div>
-            <input aria-invalid={!!fieldErrors.email} type="text" value={email} onChange={e => setEmail(e.target.value)} placeholder="Correo o usuario" className={`w-full border rounded-full px-3 py-2 ${fieldErrors.email ? 'border-red-500' : ''}`} />
-            {fieldErrors.email && <p className="text-xs text-red-600 mt-1">{fieldErrors.email}</p>}
+        <div className="stagger-item relative z-10 flex items-center gap-5 text-white/50 text-xs font-mono">
+          <span>Inventario · QR</span>
+          <span className="w-1 h-1 rounded-full bg-gold/70" />
+          <span>Rentas · Ventas</span>
+          <span className="w-1 h-1 rounded-full bg-gold/70" />
+          <span>Tiempo real</span>
+        </div>
+      </aside>
+
+      {/* ── Panel del formulario ── */}
+      <main className="relative flex items-center justify-center px-6 py-12 sm:px-10">
+        <div className="absolute top-5 right-5"><ThemeToggle /></div>
+
+        <div className="w-full max-w-sm">
+          {/* Logo en móvil */}
+          <Link to="/" className="stagger-item lg:hidden flex items-center justify-center gap-3 mb-10">
+            <div className="w-11 h-11 rounded-xl bg-gradient-to-tr from-amber-400 to-orange-500 p-[2px]">
+              <div className="w-full h-full bg-app rounded-[10px] flex items-center justify-center">
+                <span className="text-xl font-black text-transparent bg-clip-text bg-gradient-to-tr from-amber-400 to-orange-500">R</span>
+              </div>
+            </div>
+            <span className="text-2xl font-black tracking-tight text-ink">REMALI</span>
+          </Link>
+
+          <div className="stagger-item mb-8">
+            <h1 className="text-3xl font-black text-ink tracking-tight">Iniciar sesión</h1>
+            <p className="text-mute text-sm mt-2">Bienvenido de vuelta. Accede con tu cuenta.</p>
           </div>
 
-          <div className="flex items-center gap-2">
-            <input aria-invalid={!!fieldErrors.password} type={showPass ? 'text' : 'password'} value={password} onChange={e => setPassword(e.target.value)} placeholder="Contraseña" className={`w-full border rounded-full px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#517ea0] ${fieldErrors.password ? 'border-red-500' : ''}`} />
-            <button type="button" aria-label={showPass ? 'Ocultar contraseña' : 'Ver contraseña'} onClick={() => setShowPass(s => !s)} className="p-2 rounded border hover:bg-gray-50">
-              {showPass ? (
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" className="w-5 h-5">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 3l18 18M10.58 10.58A2 2 0 0112 10c1.1 0 2 .9 2 2 0 .42-.13.81-.35 1.13m-2.54-2.55A2 2 0 0010 12c0 1.1.9 2 2 2 .36 0 .7-.1 1-.28M4.11 7.2C6.05 5.42 8.74 4 12 4c4.77 0 8.88 2.66 10.89 6.5-.57 1.11-1.3 2.12-2.17 3.01M6.53 9.63C5.58 10.5 4.8 11.5 4.22 12.5c2.01 3.84 6.12 6.5 10.89 6.5 1.4 0 2.75-.23 4-.66" />
-                </svg>
+          {error && (
+            <div className="stagger-item mb-6 px-4 py-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-500 text-sm flex items-start gap-2.5">
+              <svg className="w-4 h-4 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><circle cx="12" cy="12" r="9" /><path strokeLinecap="round" d="M12 8v4m0 4h.01" /></svg>
+              <span>{error}</span>
+            </div>
+          )}
+
+          <form onSubmit={onSubmit} className="space-y-5">
+            <div className="stagger-item">
+              <label className="block text-xs font-medium text-mute mb-2 uppercase tracking-wide">Usuario o correo</label>
+              <input
+                type="text"
+                value={email}
+                onChange={e => setEmail(e.target.value)}
+                placeholder="tu usuario o tu correo"
+                autoComplete="username"
+                className="w-full bg-surface-2 border border-edge rounded-xl px-4 py-3 text-sm text-ink placeholder-mute focus:outline-none focus:border-gold/60 focus:ring-4 focus:ring-gold/10 transition-[border-color,box-shadow] duration-150"
+              />
+            </div>
+
+            <div className="stagger-item">
+              <label className="block text-xs font-medium text-mute mb-2 uppercase tracking-wide">Contraseña</label>
+              <div className="relative">
+                <input
+                  type={showPass ? 'text' : 'password'}
+                  value={password}
+                  onChange={e => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  autoComplete="current-password"
+                  className="w-full bg-surface-2 border border-edge rounded-xl px-4 py-3 pr-12 text-sm text-ink placeholder-mute focus:outline-none focus:border-gold/60 focus:ring-4 focus:ring-gold/10 transition-[border-color,box-shadow] duration-150"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPass(s => !s)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-mute hover:text-gold active:scale-90 transition-transform duration-100"
+                  aria-label={showPass ? 'Ocultar' : 'Mostrar'}
+                >
+                  {showPass ? (
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.8"><path strokeLinecap="round" strokeLinejoin="round" d="M3 3l18 18M10.58 10.58A2 2 0 0012 14a2 2 0 001.42-.58M9.88 4.24A9 9 0 0112 4c5 0 9 5 9 8a9.7 9.7 0 01-1.67 2.92M6.1 6.1A9.66 9.66 0 003 12c0 3 4 8 9 8a9 9 0 003.9-.88" /></svg>
+                  ) : (
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.8"><path strokeLinecap="round" strokeLinejoin="round" d="M2 12s4-8 10-8 10 8 10 8-4 8-10 8S2 12 2 12z" /><circle cx="12" cy="12" r="3" /></svg>
+                  )}
+                </button>
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="stagger-item w-full py-3.5 rounded-full bg-gold text-black font-bold text-sm hover:opacity-90 active:scale-[0.98] transition-[transform,opacity] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            >
+              {loading ? (
+                <><span className="w-4 h-4 border-2 border-black/30 border-t-black rounded-full animate-spin" />Verificando…</>
               ) : (
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" className="w-5 h-5">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M2 12s4-8 10-8 10 8 10 8-4 8-10 8S2 12 2 12z" />
-                  <circle cx="12" cy="12" r="3" strokeWidth="2" />
-                </svg>
+                <>Entrar
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M17 8l4 4m0 0l-4 4m4-4H3" /></svg>
+                </>
               )}
             </button>
-          </div>
-          {fieldErrors.password && <p className="text-xs text-red-600 mt-1">{fieldErrors.password}</p>}
+          </form>
+
+          <Link to="/" className="stagger-item block text-center mt-7 text-xs text-mute hover:text-ink transition-colors">
+            ← Volver al sitio
+          </Link>
         </div>
-
-        {(error || fieldErrors.general) && <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-red-600 text-sm">{fieldErrors.general || error}</motion.p>}
-        {info && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-[#517ea0] text-sm flex items-center gap-2">
-            <span>{info}</span>
-          </motion.div>
-        )}
-
-        <div className="flex items-center justify-between">
-          <button type="submit" className="px-5 py-2.5 rounded-full bg-gradient-to-r from-[#5488af] to-[#487aa1] text-white hover:shadow-md disabled:opacity-50 w-full sm:w-auto">Entrar</button>
-        </div>
-
-        {/* UI de reenviar en login eliminada según requerimiento */}
-      </motion.form>
+      </main>
     </div>
   )
 }

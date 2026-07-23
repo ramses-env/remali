@@ -1,4 +1,100 @@
 @import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ─────────────────────────────────────────────
+   PALETA DE TEMA (claro / oscuro)
+   El acento es un dorado cálido, más amable que
+   el amber puro (#fbbf24), con mejor contraste.
+───────────────────────────────────────────── */
+:root {
+  /* Diseño "REMALI Dashboard" (comp claro profesional) */
+  --c-bg:         #F6F7F9;   /* fondo gris muy claro */
+  --c-surface:    #FFFFFF;   /* tarjetas / paneles blancos */
+  --c-surface-2:  #EFF0F3;   /* chips, hover, superficies secundarias */
+  --c-border:     #E5E7EB;   /* bordes/divisores */
+  --c-ink:        #111827;   /* texto principal */
+  --c-mute:       #6B7280;   /* metadatos */
+  --c-gold:       #B8872E;   /* acento dorado */
+  --c-gold-soft:  #F7ECD9;   /* fondo suave del acento */
+  --c-gold-on:    #FFFFFF;   /* texto encima del acento */
+  --c-gold-glow:  rgba(184, 135, 46, 0.38);  /* halo del botón primario */
+  --c-yellow:     #f2b736;   /* el amarillo de la tienda; igual en ambos temas */
+  /* Estados de una unidad. Son datos, no decoración: el mismo verde/azul/ámbar
+     debe significar lo mismo en la dona, los chips y la leyenda. */
+  --c-libre:      #1F7A4D;   /* disponible, lista para operar */
+  --c-renta:      #2B5FAD;   /* rentada, en obra */
+  --c-renta-on:   #FFFFFF;   /* texto sobre el azul sólido */
+  --c-renta-glow: rgba(43, 95, 173, 0.34);
+  --c-taller:     #B8872E;   /* en mantenimiento */
+  --c-price:      #111827;   /* precios: negro en claro (el dorado no resalta) */
+  --c-stroke:     #E5E7EB;
+  --c-grid:       rgba(17, 24, 39, 1);
+}
+
+.dark {
+  --c-bg:         #0a0a0b;   /* negro neutro tipo 21st.dev (de la imagen) */
+  --c-surface:    #161618;   /* paneles/tarjetas */
+  --c-surface-2:  rgba(255, 255, 255, 0.05);
+  --c-border:     rgba(255, 255, 255, 0.09);
+  --c-ink:        #f4f4f5;   /* texto casi blanco, neutro */
+  --c-mute:       #9a9aa2;   /* gris frío */
+  --c-gold:       #f2b736;
+  --c-gold-soft:  rgba(242, 183, 54, 0.12);
+  --c-gold-on:    #111827;   /* sobre el amarillo brillante el texto va oscuro */
+  --c-gold-glow:  rgba(242, 183, 54, 0.30);
+  --c-yellow:     #f2b736;   /* mismo amarillo que en claro: el chip no cambia de tema */
+  /* Los tonos profundos del tema claro se hunden contra el panel #161618
+     (2.9:1 el azul). Aquí suben para volver a ser legibles. */
+  --c-libre:      #4ADE80;
+  --c-renta:      #7BAAF0;
+  --c-renta-on:   #0a0a0b;
+  --c-renta-glow: rgba(123, 170, 240, 0.26);
+  --c-taller:     #f2b736;
+  --c-price:      #f2b736;   /* precios: el dorado sí resalta en oscuro */
+  --c-stroke:     rgba(255, 255, 255, 0.16);
+  --c-grid:       rgba(255, 255, 255, 1);
+}
+
+/* Tokens expuestos como utilidades de Tailwind (cascada con .dark) */
+@theme inline {
+  --font-sans:  'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+  --font-mono:  'IBM Plex Mono', ui-monospace, 'SF Mono', monospace;
+  --color-app:        var(--c-bg);
+  --color-surface:    var(--c-surface);
+  --color-surface-2:  var(--c-surface-2);
+  --color-edge:       var(--c-border);
+  --color-ink:        var(--c-ink);
+  --color-mute:       var(--c-mute);
+  --color-gold:       var(--c-gold);
+  --color-gold-soft:  var(--c-gold-soft);
+  --color-gold-on:    var(--c-gold-on);
+  --color-yellow:     var(--c-yellow);
+  --color-libre:      var(--c-libre);
+  --color-renta:      var(--c-renta);
+  --color-taller:     var(--c-taller);
+  --color-price:      var(--c-price);
+  --color-amber-400:  var(--c-gold);
+  --color-amber-500:  var(--c-gold);
+  --color-background: var(--c-bg);
+  --color-foreground: var(--c-ink);
+  --color-card:       var(--c-surface);
+  --color-card-foreground: var(--c-ink);
+  --color-popover:    var(--c-surface);
+  --color-popover-foreground: var(--c-ink);
+  --color-muted:      var(--c-surface-2);
+  --color-muted-foreground: var(--c-mute);
+  --color-border:     var(--c-border);
+  --color-input:      var(--c-border);
+  --color-ring:       var(--c-stroke);
+  --color-primary:    var(--c-ink);
+  --color-primary-foreground: var(--c-bg);
+  --color-secondary:  var(--c-surface-2);
+  --color-secondary-foreground: var(--c-ink);
+  --color-accent:     var(--c-surface-2);
+  --color-accent-foreground: var(--c-ink);
+  --color-destructive: #ef4444;
+  --color-destructive-foreground: #ffffff;
+}
 
 @layer base {
   html, body, #root {
@@ -6,15 +102,19 @@
   }
   html {
     scroll-behavior: smooth;
+    color-scheme: light;
+  }
+  html.dark {
+    color-scheme: dark;
   }
   body {
-    @apply bg-neutral-50 text-neutral-900 transition-colors duration-300;
-  }
-  html.dark body {
-    /* @apply bg-neutral-950 text-neutral-100; */
+    background-color: var(--c-bg);
+    color: var(--c-ink);
+    font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    @apply transition-colors duration-300;
   }
 
-  /* Custom Scrollbar */
   ::-webkit-scrollbar {
     width: 8px;
     height: 8px;
@@ -23,30 +123,120 @@
     background: transparent;
   }
   ::-webkit-scrollbar-thumb {
-    @apply bg-neutral-300 rounded-full;
+    background-color: var(--c-border);
+    border-radius: 9999px;
   }
   ::-webkit-scrollbar-thumb:hover {
-    @apply bg-neutral-400;
+    background-color: var(--c-mute);
   }
 
-  a:not(.user-profile):not(.shine-button) {
-    color: #517ea0;
-    text-decoration-color: rgba(81, 126, 160, 0.4);
-    transition: all 0.2s ease;
-  }
-  a:not(.user-profile):not(.shine-button):hover {
-    color: #5488af;
-    text-decoration-color: rgba(84, 136, 175, 0.6);
-  }
-  a:not(.user-profile):not(.shine-button):focus {
-    outline: 2px solid rgba(81, 126, 160, 0.35);
-    outline-offset: 2px;
-  }
-  
-  /* Dark mode links removed */
+  a { color: inherit; text-decoration: none; }
 }
 
+/* Entrada escalonada (stagger) para listas — curva ease-out fuerte */
+@keyframes item-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+.stagger-item {
+  animation: item-in 260ms cubic-bezier(0.23, 1, 0.32, 1) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .stagger-item { animation: none; }
+}
+
+/* ─────────────────────────────────────────────
+   Panel del super administrador
+   El dueño ve el mismo panel, pero su acento es negro en vez de dorado: al
+   entrar sabe de inmediato que está en la cuenta que puede tocarlo todo.
+   Solo se reemplaza el acento; el resto de la paleta no se mueve.
+   ───────────────────────────────────────────── */
+.tema-dueno {
+  --c-gold:       #2b2b2b;
+  --c-gold-soft:  rgba(43, 43, 43, 0.07);
+  --c-gold-on:    #FFFFFF;
+  --c-gold-glow:  rgba(43, 43, 43, 0.34);
+}
+
+/* En tema oscuro el negro desaparece contra el fondo (#0a0a0b), así que el
+   acento se invierte a claro. Sigue siendo "el de máximo contraste".
+   Dos selectores porque `tema-dueno` puede estar en el mismo <html> que `dark`
+   (lo pone el script previo a React) o más abajo en el árbol. */
+.dark.tema-dueno,
+.dark .tema-dueno {
+  --c-gold:       #f4f4f5;
+  --c-gold-soft:  rgba(244, 244, 245, 0.10);
+  --c-gold-on:    #0a0a0b;
+  --c-gold-glow:  rgba(244, 244, 245, 0.22);
+}
+
+/* El panel tiene decenas de botones escritos como `bg-gold text-black`. Con el
+   acento negro ese texto quedaría negro sobre negro, así que el color lo decide
+   el token. Va fuera de @layer a propósito: el CSS sin capa gana sobre las
+   utilidades de Tailwind, y así no hay que tocar cada botón uno por uno. */
+.tema-dueno .bg-gold,
+.tema-dueno.bg-gold { color: var(--c-gold-on); }
+
 @layer components {
+  /* Botón primario: píldora con halo del propio acento.
+     El halo es la firma del botón; por eso vive aquí y no repetido en cada uso:
+     cambia con el tema (dorado / negro / claro) sin tocar los componentes. */
+  .btn-acento {
+    background-color: var(--c-gold);
+    color: var(--c-gold-on);
+    box-shadow: 0 8px 22px -6px var(--c-gold-glow);
+    transition: box-shadow 180ms cubic-bezier(0.23, 1, 0.32, 1),
+                transform 140ms cubic-bezier(0.23, 1, 0.32, 1),
+                filter 180ms cubic-bezier(0.23, 1, 0.32, 1);
+  }
+  .btn-acento:hover:not(:disabled) {
+    box-shadow: 0 12px 30px -6px var(--c-gold-glow);
+    filter: brightness(1.06);
+  }
+  .btn-acento:active:not(:disabled) {
+    transform: scale(0.98);
+    box-shadow: 0 4px 14px -6px var(--c-gold-glow);
+  }
+  .btn-acento:disabled {
+    opacity: 0.4;
+    box-shadow: none;
+  }
+  .btn-acento:focus-visible {
+    outline: 2px solid var(--c-gold);
+    outline-offset: 2px;
+  }
+  /* Rentar es la otra acción fuerte del panel y merece el mismo peso visual que
+     el primario, pero en el azul del sistema: así "rentar" y "vender" se
+     distinguen de un vistazo sin que uno parezca de otra aplicación.
+     El azul crudo de Tailwind (bg-blue-500) daba 3.68:1 con texto blanco y no
+     pasaba AA; este da 6.28:1. */
+  .btn-renta {
+    background-color: var(--c-renta);
+    color: var(--c-renta-on);
+    box-shadow: 0 8px 22px -6px var(--c-renta-glow);
+  }
+  .btn-renta:hover:not(:disabled) {
+    box-shadow: 0 12px 30px -6px var(--c-renta-glow);
+    filter: brightness(1.06);
+  }
+  .btn-renta:active:not(:disabled) {
+    transform: scale(0.98);
+    box-shadow: 0 4px 14px -6px var(--c-renta-glow);
+  }
+  .btn-renta:disabled { opacity: 0.4; box-shadow: none; }
+  .btn-renta:focus-visible { outline: 2px solid var(--c-renta); outline-offset: 2px; }
+  .btn-acento, .btn-renta {
+    transition: box-shadow 180ms cubic-bezier(0.23, 1, 0.32, 1),
+                transform 140ms cubic-bezier(0.23, 1, 0.32, 1),
+                filter 180ms cubic-bezier(0.23, 1, 0.32, 1);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .btn-acento, .btn-renta { transition: none; }
+    .btn-acento:active:not(:disabled),
+    .btn-renta:active:not(:disabled) { transform: none; }
+  }
+
   /* Cotiza Form Inputs Restoration */
   .cotiza-form .group {
     position: relative;

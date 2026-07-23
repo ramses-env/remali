@@ -1,18 +1,21 @@
 import { Link, useNavigate, useLocation } from 'react-router-dom'
+import { createPortal } from 'react-dom'
 import { useAuth } from '../store/auth'
 import { useProfile } from '../store/profile'
+import { useCart } from '../store/cart'
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
+import ThemeToggle from './ThemeToggle'
 
 export default function Navbar() {
   const { token, logout } = useAuth()
   const nav = useNavigate()
   const location = useLocation()
   const { user } = useProfile()
+  const { state } = useCart()
+  const cartCount = state.items.reduce((n, i) => n + i.qty, 0)
   const [confirm, setConfirm] = useState(false)
   const [scrolled, setScrolled] = useState(false)
-
-  const isHome = location.pathname === '/'
 
   useEffect(() => {
     const handleScroll = () => setScrolled(window.scrollY > 20)
@@ -20,141 +23,141 @@ export default function Navbar() {
     return () => window.removeEventListener('scroll', handleScroll)
   }, [])
 
+  const isActive = (path: string) => location.pathname === path
+
   return (
-    <header 
+    <header
       className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 border-b ${
-        isHome
-          ? scrolled 
-            ? 'bg-neutral-900/90 backdrop-blur-md border-neutral-800 py-3 shadow-sm' 
-            : 'bg-neutral-900/80 backdrop-blur-md border-transparent py-5'
-          : scrolled 
-            ? 'bg-neutral-100/90 backdrop-blur-md border-neutral-200 py-3 shadow-sm' 
-            : 'bg-neutral-100/80 backdrop-blur-md border-transparent py-5'
+        scrolled
+          ? 'bg-app/90 backdrop-blur-md border-edge py-3'
+          : 'bg-app/70 backdrop-blur-md border-transparent py-5'
       }`}
     >
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 flex items-center justify-between">
+        {/* Logo */}
         <Link to="/" className="flex items-center gap-3 group">
-          <div className="relative w-10 h-10 overflow-hidden rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-600 p-[2px]">
-            <div className="w-full h-full bg-white rounded-[10px] flex items-center justify-center">
-              <span className="text-xl font-black text-transparent bg-clip-text bg-gradient-to-tr from-blue-600 to-indigo-600">R</span>
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-amber-400 to-orange-500 p-[2px]">
+            <div className="w-full h-full bg-app rounded-[10px] flex items-center justify-center">
+              <span className="text-xl font-black text-transparent bg-clip-text bg-gradient-to-tr from-amber-400 to-orange-500">R</span>
             </div>
           </div>
-          <span className={`text-xl font-bold tracking-tight transition-opacity group-hover:opacity-80 hidden sm:block ${isHome ? 'text-white' : 'text-neutral-900'}`}>
-            Remali
+          <span className="text-xl font-black tracking-tight text-ink group-hover:opacity-80 transition-opacity hidden sm:block">
+            REMALI
           </span>
         </Link>
 
-        <div className="flex-1 flex items-center justify-end gap-3 sm:gap-8 pr-4 sm:pr-8">
-          <NavLink to="/" text="Inicio" isHome={isHome} />
-          <NavLink to="/equipos" text="Equipos" isHome={isHome} />
-          <NavLink to="/cotizacion" text="Cotización" isHome={isHome} />
-        </div>
-
-        <nav className="flex items-center gap-4">
-          <div className={`flex items-center gap-3 pl-4 sm:pl-8 border-l ${isHome ? 'border-neutral-800' : 'border-neutral-200'}`}>
-            
-            {token ? (
-              <div className="flex items-center gap-3">
-                <Link
-                  to="/perfil"
-                  className={`hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
-                    isHome 
-                      ? 'bg-neutral-800 text-neutral-200 hover:bg-neutral-700' 
-                      : 'bg-neutral-100 text-neutral-700 hover:bg-neutral-200'
-                  }`}
-                >
-                  <div className="w-6 h-6 rounded-full bg-gradient-to-tr from-blue-500 to-purple-500 flex items-center justify-center text-[10px] text-white font-bold uppercase">
-                    {(user?.username?.[0] || user?.email?.[0] || 'U')}
-                  </div>
-                  <span className="max-w-[100px] truncate">{user?.first_name || 'Mi Perfil'}</span>
-                </Link>
-                <button
-                  onClick={() => setConfirm(true)}
-                  className={`p-2 rounded-full transition-colors ${
-                    isHome 
-                      ? 'text-neutral-400 hover:text-red-400 hover:bg-red-500/10' 
-                      : 'text-neutral-500 hover:text-red-500 hover:bg-red-50'
-                  }`}
-                  aria-label="Cerrar sesión"
-                >
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" /></svg>
-                </button>
-              </div>
-            ) : (
-              <Link
-                to="/login"
-                className="group relative flex items-center justify-center gap-2 rounded-full sm:rounded-2xl font-semibold shadow-lg shadow-blue-900/20 transition-all hover:-translate-y-0.5 hover:shadow-blue-900/40 overflow-hidden bg-gradient-to-r from-blue-600 to-indigo-600 text-white p-2 sm:px-6 sm:py-2.5"
-              >
-                <span className="relative z-10">
-                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-                    <circle cx="12" cy="7" r="4" />
-                  </svg>
-                </span>
-                <span className="relative z-10 hidden sm:block">Ingresar</span>
-                <div className="absolute inset-0 bg-white/20 opacity-0 group-hover:opacity-100 transition-opacity" />
-              </Link>
-            )}
-          </div>
+        {/* Links */}
+        <nav className="flex-1 flex items-center justify-center gap-6 sm:gap-10">
+          {[
+            { to: '/', label: 'Inicio' },
+            { to: '/equipos', label: 'Equipos' },
+          ].map(l => (
+            <Link
+              key={l.to}
+              to={l.to}
+              className={`text-sm font-medium transition-colors ${isActive(l.to) ? 'text-gold' : 'text-mute hover:text-ink'}`}
+            >
+              {l.label}
+            </Link>
+          ))}
         </nav>
+
+        {/* Acciones */}
+        <div className="flex items-center gap-3">
+          {/* Carrito / cotización del cliente */}
+          <Link to="/cotizacion" aria-label="Tu cotización" className="relative w-9 h-9 rounded-full border border-edge bg-surface-2 text-mute hover:text-gold transition-colors flex items-center justify-center">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="9" cy="21" r="1" /><circle cx="20" cy="21" r="1" /><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6" /></svg>
+            {cartCount > 0 && (
+              <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-gold text-black text-[10px] font-black flex items-center justify-center">{cartCount}</span>
+            )}
+          </Link>
+          <ThemeToggle />
+
+          {token ? (
+            <div className="flex items-center gap-2">
+              <Link
+                to="/dashboard"
+                className="hidden sm:flex items-center gap-2 px-3 py-2 rounded-full bg-surface-2 text-ink text-sm font-medium hover:text-gold transition-colors"
+              >
+                <div className="w-6 h-6 rounded-full bg-gradient-to-tr from-amber-400 to-orange-500 flex items-center justify-center text-[10px] text-black font-black uppercase">
+                  {(user?.username?.[0] || user?.email?.[0] || 'A')}
+                </div>
+                <span className="max-w-[100px] truncate">Panel</span>
+              </Link>
+              <button
+                onClick={() => setConfirm(true)}
+                className="w-9 h-9 rounded-full border border-edge bg-surface-2 text-mute hover:text-red-400 transition-colors flex items-center justify-center"
+                aria-label="Cerrar sesión"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" /></svg>
+              </button>
+            </div>
+          ) : (
+            <Link
+              to="/login"
+              className="flex items-center gap-2 rounded-full font-bold bg-gold text-black px-5 py-2.5 text-sm hover:opacity-90 transition-opacity"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" />
+              </svg>
+              <span className="hidden sm:block">Ingresar</span>
+            </Link>
+          )}
+        </div>
       </div>
 
-
-
-      <AnimatePresence>
-        {confirm && (
-          <motion.div 
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4"
-          >
-            <motion.div 
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-              className="bg-white border border-neutral-200 rounded-3xl p-8 max-w-sm w-full shadow-2xl"
+      {/* Modal de confirmación (portal a body para centrar sobre toda la pantalla) */}
+      {createPortal(
+        <AnimatePresence>
+          {confirm && (
+            <motion.div
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50 backdrop-blur-md"
+              onClick={() => setConfirm(false)}
             >
-              <div className="text-center">
-                <div className="w-16 h-16 rounded-full bg-red-100 text-red-600 mx-auto flex items-center justify-center mb-4">
-                  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18.36 6.64a9 9 0 1 1-12.73 0" /><line x1="12" y1="2" x2="12" y2="12" /></svg>
+              <motion.div
+                initial={{ scale: 0.96, opacity: 0, y: 8 }}
+                animate={{ scale: 1, opacity: 1, y: 0 }}
+                exit={{ scale: 0.97, opacity: 0, y: 6 }}
+                transition={{ type: 'spring', stiffness: 320, damping: 26 }}
+                onClick={e => e.stopPropagation()}
+                className="relative w-full max-w-[380px] bg-surface border border-edge rounded-2xl p-7 shadow-[0_24px_70px_-15px_rgba(0,0,0,0.55)] overflow-hidden"
+              >
+                {/* Acento dorado superior sutil */}
+                <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-gold/50 to-transparent" />
+
+                <div className="flex items-center justify-center w-12 h-12 rounded-xl bg-surface-2 border border-edge text-gold mb-5">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.8">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4m7 14l5-5m0 0l-5-5m5 5H9" />
+                  </svg>
                 </div>
-                <h3 className="text-xl font-bold text-neutral-900 mb-2">¿Cerrar sesión?</h3>
-                <p className="text-neutral-500 mb-8">Tendrás que volver a ingresar tus credenciales para acceder a tu cuenta.</p>
-                <div className="grid grid-cols-2 gap-4">
-                  <button 
+
+                <h3 className="text-lg font-bold text-ink tracking-tight">¿Cerrar sesión?</h3>
+                <p className="text-mute text-sm mt-1.5 leading-relaxed">
+                  Saldrás de tu cuenta y tendrás que volver a ingresar tus credenciales para acceder al panel.
+                </p>
+
+                <div className="flex gap-2.5 mt-7">
+                  <button
                     onClick={() => setConfirm(false)}
-                    className="px-4 py-2.5 rounded-xl border border-neutral-200 text-neutral-700 font-medium hover:bg-neutral-50 transition-colors"
+                    className="flex-1 px-4 py-2.5 rounded-full border border-edge text-ink text-sm font-semibold hover:bg-surface-2 transition-colors"
                   >
                     Cancelar
                   </button>
-                  <button 
+                  <button
                     onClick={() => { setConfirm(false); logout(); nav('/') }}
-                    className="px-4 py-2.5 rounded-xl bg-red-600 text-white font-medium hover:bg-red-700 transition-colors shadow-lg shadow-red-600/20"
+                    className="flex-1 px-4 py-2.5 rounded-full bg-ink text-app text-sm font-semibold hover:opacity-90 transition-opacity"
                   >
                     Cerrar sesión
                   </button>
                 </div>
-              </div>
+              </motion.div>
             </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+          )}
+        </AnimatePresence>,
+        document.body
+      )}
     </header>
-  )
-}
-
-function NavLink({ to, text, isHome }: { to: string, text: string, isHome?: boolean }) {
-  return (
-    <Link 
-      to={to} 
-      className={`text-sm sm:text-base font-medium transition-colors hover:text-blue-500 ${
-        isHome 
-          ? 'text-neutral-300' 
-          : 'text-neutral-600'
-      }`}
-    >
-      {text}
-    </Link>
   )
 }

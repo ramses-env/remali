@@ -1,57 +1,56 @@
 import { Route, Routes, useLocation } from 'react-router-dom'
-import { useEffect } from 'react'
 import Navbar from './components/Navbar'
 import Home from './routes/Home'
-import Cart from './routes/Cart'
-import Checkout from './routes/Checkout'
-import Login from './routes/Login'
-import Profile from './routes/Profile'
-import { useAuth } from './store/auth'
-import FloatingCart from './components/FloatingCart'
-import Footer from './components/Footer'
-import RouteLoader from './components/RouteLoader'
-import ErrorBoundary from './components/ErrorBoundary'
-import { PriceUnitProvider } from './store/priceUnit'
 import EquiposList from './routes/EquiposList'
 import EquipoDetail from './routes/EquipoDetail'
 import Cotizacion from './routes/Cotizacion'
+import Login from './routes/Login'
+import Dashboard from './routes/Dashboard'
+import Footer from './components/Footer'
+import ErrorBoundary from './components/ErrorBoundary'
+import RequireAdmin from './components/RequireAdmin'
+import { PriceUnitProvider } from './store/priceUnit'
+import { I18nProvider } from './lib/i18n'
 
 function App() {
-  const { token } = useAuth()
   const location = useLocation()
-  const isHome = location.pathname === '/'
+  // Rutas que NO usan el chrome público (navbar + footer)
+  const bare = location.pathname.startsWith('/dashboard') || location.pathname === '/login'
 
-  // Force dark mode on Home page
-  useEffect(() => {
-    if (isHome) {
-      document.documentElement.classList.add('dark')
-    } else {
-      document.documentElement.classList.remove('dark')
-    }
-  }, [isHome])
   return (
-    <PriceUnitProvider>
-      <div className={`min-h-screen flex flex-col transition-colors ${isHome ? 'bg-neutral-950 text-white dark' : 'bg-white text-neutral-900'}`}>
-        <Navbar />
-        <RouteLoader />
-        <div className={`flex-1 w-full min-h-[50vh] ${isHome ? '' : 'pt-24 mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-6'}`}>
-          <ErrorBoundary>
-            <Routes>
-              <Route path="/" element={<Home />} />
-              <Route path="/equipos" element={<EquiposList />} />
-              <Route path="/equipo/:id" element={<EquipoDetail />} />
-              <Route path="/carrito" element={<Cart />} />
-              <Route path="/checkout" element={<Checkout />} />
-              <Route path="/cotizacion" element={<Cotizacion />} />
-              <Route path="/login" element={<Login />} />
-              <Route path="/perfil" element={token ? <Profile /> : <Login />} />
-            </Routes>
-          </ErrorBoundary>
-        </div>
-        <FloatingCart />
-        <Footer />
-      </div>
-    </PriceUnitProvider>
+    <I18nProvider>
+      {bare ? (
+        <ErrorBoundary>
+          <Routes>
+            <Route path="/login" element={<Login />} />
+            <Route path="/dashboard" element={<RequireAdmin><Dashboard /></RequireAdmin>} />
+          </Routes>
+        </ErrorBoundary>
+      ) : (
+        <PriceUnitProvider>
+          {/* La tienda pública usa el amarillo brillante del sistema (no el dorado del admin).
+              Se sobreescribe el token solo aquí, así el panel admin queda intacto. */}
+          <div
+            className="min-h-screen flex flex-col bg-[#080808] text-white"
+            style={{ ['--c-gold' as any]: '#f2b736', ['--c-gold-soft' as any]: 'rgba(242,183,54,0.14)' }}
+          >
+            <Navbar />
+            <div className="flex-1 w-full">
+              <ErrorBoundary>
+                <Routes>
+                  <Route path="/" element={<Home />} />
+                  <Route path="/equipos" element={<EquiposList />} />
+                  <Route path="/equipo/:id" element={<EquipoDetail />} />
+                  <Route path="/cotizacion" element={<Cotizacion />} />
+                  <Route path="*" element={<Home />} />
+                </Routes>
+              </ErrorBoundary>
+            </div>
+            <Footer />
+          </div>
+        </PriceUnitProvider>
+      )}
+    </I18nProvider>
   )
 }
 

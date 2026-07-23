@@ -232,8 +232,11 @@ type ExtraItem = { id: number; title: string; price: number; qty: number }
 type ClientInfo = { nombre?: string; empresa?: string; email?: string; telefono?: string; direccion?: string; responsable?: string; obra_telefono?: string; obra_email?: string }
 type Coupon = { code: string; discount: number }
 
+/** En una cotización cada partida es venta o renta por unidad de tiempo. */
+type Modalidad = 'venta' | Unit
+
 export async function downloadCotizacionPdf(args: {
-  items: Array<CartItem & { unit?: Unit }>
+  items: Array<CartItem & { unit?: Modalidad }>
   extras?: ExtraItem[]
   client?: ClientInfo
   coupon?: Coupon
@@ -264,8 +267,9 @@ export async function downloadCotizacionPdf(args: {
   const ivaAmt = iva ? preTaxTotal * 0.16 : 0
   const total = preTaxTotal + ivaAmt
 
-  const units = items.map(i => i.unit).filter(Boolean) as Unit[]
-  const commonUnit = units.length && units.every(u => u === units[0]) ? units[0] : null
+  // Solo tiene sentido anunciar "unidad de precio" si TODO se renta con la misma.
+  const units = items.map(i => i.unit).filter(u => u && u !== 'venta') as Unit[]
+  const commonUnit = units.length === items.length && units.every(u => u === units[0]) ? units[0] : null
   const drawHeaderFooter = (data: any) => {
     doc.setFont('helvetica', 'bold')
     doc.setFontSize(16)
@@ -357,7 +361,9 @@ export async function downloadCotizacionPdf(args: {
   const detalleRows: Array<[string, string, string, string, string, string, string]> = []
   for (const i of items) {
     try {
-      const u: Unit | undefined = i.unit
+      const modalidad: Modalidad | undefined = i.unit
+      const esVenta = modalidad === 'venta'
+      const u: Unit | undefined = esVenta ? undefined : (modalidad as Unit | undefined)
       const r = await api.get(`/equipos/${i.id}/` + (u ? `?unit=${u}` : ''))
       const e = r.data || {}
       const precioDia = toNumber(e?.precio_dia)
@@ -365,13 +371,13 @@ export async function downloadCotizacionPdf(args: {
       const precioMes = toNumber(e?.precio_mes)
       const precioPorUnidadApi = toNumber((e as any)?.precio_por_unidad)
       const unidadEfectivaApi: Unit | null = ((e as any)?.unidad_efectiva || null)
-      let displayPrice =
+      let displayPrice = esVenta ? (toNumber(e?.precio_venta) ?? i.price) :
         precioPorUnidadApi != null ? precioPorUnidadApi :
         u === 'dia' ? (precioDia ?? precioSemana ?? precioMes ?? i.price) :
         u === 'semana' ? (precioSemana ?? (precioDia ? precioDia * 7 : null) ?? precioMes ?? i.price) :
         u === 'mes' ? (precioMes ?? (precioDia ? precioDia * 30 : null) ?? (precioSemana ? precioSemana * 4 : null) ?? i.price) :
         (precioDia ?? precioSemana ?? precioMes ?? i.price)
-      const rentUnit: Unit | null =
+      const rentUnit: Unit | null = esVenta ? null :
         unidadEfectivaApi ? unidadEfectivaApi :
         u ? u :
         (precioDia != null) ? 'dia' :
@@ -387,15 +393,16 @@ export async function downloadCotizacionPdf(args: {
       const mNum = precioMes != null ? Number(precioMes) : null
       const dispNum = displayPrice != null ? Number(displayPrice) : null
       let rentUnitResolved: Unit | null = rentUnit
-      if (dispNum != null) {
+      if (dispNum != null && !esVenta) {
         if (eq(dNum, dispNum)) rentUnitResolved = 'dia'
         else if (eq(sNum, dispNum)) rentUnitResolved = 'semana'
         else if (eq(mNum, dispNum)) rentUnitResolved = 'mes'
       }
       const unitLabel =
-        rentUnitResolved === 'mes' ? 'Mes' :
-        rentUnitResolved === 'semana' ? 'Semana' :
-        rentUnitResolved === 'dia' ? 'Día' :
+        esVenta ? 'Venta' :
+        rentUnitResolved === 'mes' ? 'Renta / mes' :
+        rentUnitResolved === 'semana' ? 'Renta / semana' :
+        rentUnitResolved === 'dia' ? 'Renta / día' :
         null
       detalleRows.push([
         String(e?.modelo || i.title || '—'),
@@ -427,7 +434,7 @@ export async function downloadCotizacionPdf(args: {
     startY: y,
     margin: { top: margin + 70, bottom: margin + 30, left: margin, right: margin },
     didDrawPage: drawHeaderFooter,
-    head: [['Modelo', 'Marca', 'Tipo', 'Cantidad', 'Estado', 'Rentado por', 'Precio']],
+    head: [['Modelo', 'Marca', 'Tipo', 'Cantidad', 'Estado', 'Modalidad', 'Precio']],
     body: detalleRows,
     styles: { fontSize: 10, cellPadding: 6, valign: 'middle', overflow: 'linebreak' },
     headStyles: { fillColor: [84, 136, 175], textColor: 255 },
