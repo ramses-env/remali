@@ -20,8 +20,15 @@ RESPALDO = {
     'negocio_nombre': 'REMALI',
     'telefono': '744 373 7201',
     'whatsapp': '7443737201',
-    'direccion': 'Acapulco, Guerrero',
 }
+
+# La dirección y el mapa van fijos, no desde ConfiguracionSitio: no existe un
+# campo para el enlace de Google Maps, y si la dirección viniera de la base
+# podría no corresponder al pin (hoy la configuración guarda una dirección de
+# prueba distinta a la real). Mostrar un texto que no coincide con el mapa manda
+# a un cliente al lugar equivocado, así que ambos viajan juntos.
+DIRECCION = 'Lázaro Cárdenas, Los Tulipanes, Acapulco de Juárez, Gro. C.P. 39908'
+MAPS_URL = 'https://maps.app.goo.gl/McMz4ZHaBPpoWwTRA'
 
 
 class ModoConstruccionMiddleware:
@@ -52,7 +59,7 @@ class ModoConstruccionMiddleware:
         recién creada, migraciones sin correr), y un error aquí dejaría al visitante
         mirando una pantalla de error en vez del aviso.
         """
-        datos = dict(RESPALDO)
+        datos = dict(RESPALDO, direccion=DIRECCION, maps_url=MAPS_URL)
         try:
             from maquinaria.models import ConfiguracionSitio
             cfg = ConfiguracionSitio.objects.first()
@@ -60,7 +67,6 @@ class ModoConstruccionMiddleware:
                 datos['negocio_nombre'] = cfg.negocio_nombre or datos['negocio_nombre']
                 datos['telefono'] = cfg.negocio_telefono or datos['telefono']
                 datos['whatsapp'] = cfg.whatsapp_principal or datos['whatsapp']
-                datos['direccion'] = cfg.negocio_direccion or datos['direccion']
         except Exception:
             pass
 
