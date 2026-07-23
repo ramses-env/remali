@@ -19,6 +19,7 @@ from django.urls import path, include, re_path
 from django.conf import settings
 from django.conf.urls.static import static
 from django.views.generic import TemplateView, RedirectView
+from django.views.static import serve
 
 admin.site.site_header = "Remali Administrador"
 admin.site.site_title = "Remali Administrador"
@@ -28,9 +29,21 @@ urlpatterns = [
     path('admin', RedirectView.as_view(url='/admin/', permanent=True)),
     path('admin/', admin.site.urls),
     path('api/', include('maquinaria.urls')),
+    path('api/', include('ventas.urls')),
+    path('api/', include('renta.urls')),
+    path('api/', include('inventario.urls')),
+    path('api/', include('empresas.urls')),
+    path('api/', include('refacciones.urls')),
+    path('api/', include('geo.urls')),
+    path('api/', include('facturacion.urls')),
+    path('api/', include('cotizaciones.urls')),
+    re_path(r'^media/(?P<path>.*)$', serve, {'document_root': settings.MEDIA_ROOT}),
     # Catch-all para React Frontend
     re_path(r'^.*$', TemplateView.as_view(template_name='index.html')),
 ]
+
+if settings.MEDIA_URL and settings.MEDIA_ROOT:
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
 
 if settings.DEBUG:
     urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)

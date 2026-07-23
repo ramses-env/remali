@@ -1,1 +1,1 @@
-web: PYTHONPATH=backend gunicorn server.wsgi:application
+web: PYTHONPATH=backend gunicorn server.wsgi:application --worker-class gthread --workers ${WEB_CONCURRENCY:-2} --threads ${WEB_THREADS:-4} --timeout ${WEB_TIMEOUT:-60} --access-logfile - --error-logfile -

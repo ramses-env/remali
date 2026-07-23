@@ -29,7 +29,7 @@ class Command(BaseCommand):
                     modelo=modelo,
                     descripcion=f"{modelo}",
                     precio_dia=price,
-                    condicion='seminuevo',
+                    condicion='seminueva',
                     disponible_venta=True,
                     disponible_renta=True,
                     imagen='/vite.svg',

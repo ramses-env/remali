@@ -1,31 +1,56 @@
 from django.urls import path
-from . import views
-try:
-    from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
-    _jwt_available = True
-except Exception:
-    _jwt_available = False
+from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
+
+from . import views, views_usuarios
 
 urlpatterns = [
+    # Equipos (catálogo)
     path('equipos/', views.EquipoListCreate.as_view()),
     path('equipos/<int:pk>/', views.EquipoRetrieveUpdateDestroy.as_view()),
     path('equipos/<int:pk>/imagenes/', views.upload_product_images),
+
+    # Catálogos
     path('categorias/', views.CategoriaList.as_view()),
+    path('categorias/<int:pk>/', views.CategoriaDetail.as_view()),
     path('tipos/', views.TipoList.as_view()),
+    path('tipos/<int:pk>/', views.TipoDetail.as_view()),
     path('marcas/', views.MarcaList.as_view()),
+    path('marcas/<int:pk>/', views.MarcaDetail.as_view()),
+
+    # Cupones
+    # Configuración del sitio (WhatsApp, negocio, correos de aviso)
+    path('config/publica/', views.configuracion_publica),                 # público (tienda)
+    path('config/', views.ConfiguracionDetail.as_view()),                 # admin
+    path('config/correos/verificar/', views.verificar_correo_aviso),      # público (link del correo)
+    path('config/correos/', views.CorreosAvisoList.as_view()),
+    path('config/correos/<int:pk>/', views.correo_aviso_eliminar),
+    path('config/correos/<int:pk>/reenviar/', views.correo_aviso_reenviar),
     path('cupones/', views.CuponListCreate.as_view()),
     path('cupones/<int:pk>/', views.CuponRetrieveUpdateDestroy.as_view()),
     path('cupones/aplicar/', views.apply_coupon),
-    # path('ordenes/', views.create_order),
-    *(
-        [
-            path('auth/token/', TokenObtainPairView.as_view()),
-            path('auth/refresh/', TokenRefreshView.as_view()),
-        ] if _jwt_available else []
-    ),
+
+    # Autenticación / perfil
+    path('auth/token/', TokenObtainPairView.as_view()),
+    path('auth/refresh/', TokenRefreshView.as_view()),
     path('auth/login/', views.login),
-    # path('auth/verificar/<str:token>/', views.verify_email),
-    # path('auth/reenviar/', views.resend_verification),
     path('auth/me/', views.me),
+    path('auth/perfil/', views.PerfilDetail.as_view()),
+    path('usuarios/', views_usuarios.usuarios),
+    path('usuarios/roles/', views_usuarios.roles_disponibles),
+    path('usuarios/<int:pk>/', views_usuarios.usuario_detalle),
+
+    # Notificaciones
+    path('notificaciones/', views.NotificacionesList.as_view()),
+    path('notificaciones/<int:pk>/leer/', views.marcar_notificacion_leida),
+    path('notificaciones/leer-todas/', views.marcar_todas_leidas),
+
+    path('mensajeria/contacto/', views.crear_contacto_soporte),
+    path('mensajeria/conversaciones/', views.ConversacionesSoporteList.as_view()),
+    path('mensajeria/conversaciones/<int:pk>/', views.ConversacionSoporteDetail.as_view()),
+    path('mensajeria/conversaciones/<int:pk>/responder/', views.responder_soporte),
+    path('mensajeria/conversaciones/<int:pk>/cerrar/', views.cerrar_conversacion_soporte),
+    path('mensajeria/conversaciones/<int:pk>/abrir/', views.abrir_conversacion_soporte),
+
+    # Dashboard
     path('dashboard/metricas/', views.dashboard_metrics),
 ]

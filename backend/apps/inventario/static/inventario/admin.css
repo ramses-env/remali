@@ -1,0 +1,36 @@
+a.imprimir-etiqueta-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-weight: 600;
+  font-size: 13px;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+a.imprimir-etiqueta-btn:hover {
+  filter: brightness(0.95);
+}
+
+a.imprimir-etiqueta-btn:focus-visible {
+  outline: 2px solid rgba(30, 144, 255, 0.7);
+  outline-offset: 2px;
+}
+
+@media (max-width: 640px) {
+  a.imprimir-etiqueta-btn {
+    width: 100%;
+    justify-content: center;
+    padding: 8px 12px;
+    margin: 4px 0;
+  }
+}
+
+@media (max-width: 420px) {
+  a.imprimir-etiqueta-btn {
+    font-size: 12px;
+    gap: 0.3rem;
+  }
+}

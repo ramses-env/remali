@@ -17,6 +17,11 @@ import importlib.util
 import dj_database_url
 
 import sys
+try:
+    import pymysql  # Permite usar PyMySQL como reemplazo de MySQLdb
+    pymysql.install_as_MySQLdb()
+except Exception:
+    pass
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -59,14 +64,20 @@ INSTALLED_APPS = [
     'corsheaders',
     'maquinaria',
     'inventario',
+    'refacciones',
+    'ventas',
+    'renta',
+    'empresas',
+    'facturacion',
+    'cotizaciones',
 ]
+
 
 if importlib.util.find_spec('cloudinary') and importlib.util.find_spec('cloudinary_storage'):
     INSTALLED_APPS += ['cloudinary', 'cloudinary_storage']
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
-    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -76,7 +87,10 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 
-STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
+_has_whitenoise = importlib.util.find_spec('whitenoise') is not None
+if _has_whitenoise:
+    MIDDLEWARE.insert(1, 'whitenoise.middleware.WhiteNoiseMiddleware')
+    STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 
 
 ROOT_URLCONF = 'server.urls'
@@ -84,7 +98,7 @@ ROOT_URLCONF = 'server.urls'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [BASE_DIR.parent / 'frontend' / 'dist'],
+        'DIRS': [BASE_DIR / 'templates', BASE_DIR.parent / 'frontend' / 'dist'],
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
@@ -103,7 +117,6 @@ WSGI_APPLICATION = 'server.wsgi.application'
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
 
-import os
 from dotenv import load_dotenv
 from django.core.exceptions import ImproperlyConfigured
 load_dotenv(os.path.join(BASE_DIR.parent, '.env.dev'))
@@ -201,10 +214,15 @@ STORAGES = {
     "default": {
         "BACKEND": "django.core.files.storage.FileSystemStorage",
     },
-    "staticfiles": {
-        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
-    },
 }
+if _has_whitenoise:
+    STORAGES["staticfiles"] = {
+        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+    }
+else:
+    STORAGES["staticfiles"] = {
+        "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+    }
 
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
@@ -234,17 +252,61 @@ if importlib.util.find_spec('cloudinary') and importlib.util.find_spec('cloudina
         )
 
 REST_FRAMEWORK = {
-    'DEFAULT_PERMISSION_CLASSES': ['rest_framework.permissions.AllowAny'],
-    'DEFAULT_AUTHENTICATION_CLASSES': (
-        ['rest_framework_simplejwt.authentication.JWTAuthentication']
-        if __import__('importlib').import_module('importlib').util.find_spec('rest_framework_simplejwt')
-        else []
-    ),
+    # Seguro por defecto: toda vista exige sesión salvo que declare explícitamente
+    # AllowAny (login, alta de contacto) o lectura pública vía get_permissions (catálogo).
+    'DEFAULT_PERMISSION_CLASSES': ['rest_framework.permissions.IsAuthenticated'],
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'rest_framework_simplejwt.authentication.JWTAuthentication',
+    ],
     'DEFAULT_FILTER_BACKENDS': [
         'rest_framework.filters.SearchFilter',
         'rest_framework.filters.OrderingFilter',
     ],
+    # Solo se aplica donde la vista lo pide (throttle_classes). Los endpoints
+    # públicos sin sesión necesitan techo: cada solicitud de cotización dispara
+    # correos a los avisos, así que sin límite es un buzón inundado a un clic.
+    'DEFAULT_THROTTLE_RATES': {
+        'solicitud_publica': '10/hour',   # cotizaciones que manda un mismo visitante
+        'anon_publico': '120/hour',       # navegación anónima del catálogo
+        'subida_evidencia': '200/hour',   # fotos de entrega/devolución por técnico
+    },
 }
+
+# JWT: tokens de acceso de larga duración para que la sesión del admin no expire a los 5 min
+from datetime import timedelta
+SIMPLE_JWT = {
+    'ACCESS_TOKEN_LIFETIME': timedelta(hours=12),
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
+}
+
+# ─────────────────────────────────────────────
+#  CACHE — listo para Redis
+#  Si REDIS_URL está definido se usa Redis; si no, cache local en memoria.
+#  En el futuro, esta misma URL sirve para Celery y Channels.
+# ─────────────────────────────────────────────
+REDIS_URL = os.environ.get('REDIS_URL', '')
+if REDIS_URL:
+    CACHES = {
+        'default': {
+            'BACKEND': 'django.core.cache.backends.redis.RedisCache',
+            'LOCATION': REDIS_URL,
+        }
+    }
+    # Sesiones servidas desde cache (Redis) cuando esté disponible
+    SESSION_ENGINE = 'django.contrib.sessions.backends.cache'
+    SESSION_CACHE_ALIAS = 'default'
+else:
+    CACHES = {
+        'default': {
+            'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+            'LOCATION': 'remali-locmem',
+        }
+    }
+
+# Cuando se integre Celery/Channels, reutilizar REDIS_URL como broker:
+#   CELERY_BROKER_URL = REDIS_URL
+#   CHANNEL_LAYERS = {'default': {'BACKEND': 'channels_redis.core.RedisChannelLayer',
+#                                 'CONFIG': {'hosts': [REDIS_URL]}}}
 
 CORS_ALLOW_ALL_ORIGINS = True
 
@@ -262,7 +324,7 @@ EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD', '')
 EMAIL_USE_TLS = os.environ.get('EMAIL_USE_TLS', '1') == '1'
 EMAIL_USE_SSL = os.environ.get('EMAIL_USE_SSL', '0') == '1'
 EMAIL_TIMEOUT = int(os.environ.get('EMAIL_TIMEOUT', '10'))
-DEFAULT_FROM_EMAIL = os.environ.get('DEFAULT_FROM_EMAIL', 'no-reply@shoping-fal.local')
+DEFAULT_FROM_EMAIL = os.environ.get('DEFAULT_FROM_EMAIL', 'no-reply@remali.up.railway.app')
 
 
 
@@ -281,3 +343,11 @@ EMAIL_VERIFICATION_TIMEOUT = int(os.environ.get('EMAIL_VERIFICATION_TIMEOUT', '1
 
 if EMAIL_USE_SSL:
     EMAIL_USE_TLS = False
+
+# ─────────────────────────────────────────────
+#  Aviso a los respaldos de solicitudes de cotización del cliente
+#  Cada solicitud nueva del cliente les llega de INMEDIATO por correo (además de
+#  la notificación en el panel) para que puedan contactarlo manualmente.
+#  ESCALACION_EMAILS = correos de los respaldos (separados por coma).
+# ─────────────────────────────────────────────
+ESCALACION_EMAILS = [e.strip() for e in os.environ.get('ESCALACION_EMAILS', '').split(',') if e.strip()]
