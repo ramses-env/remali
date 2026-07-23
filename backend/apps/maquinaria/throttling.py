@@ -36,6 +36,16 @@ class SubidaEvidenciaThrottle(AnonRateThrottle):
         return None   # sin sesión no llega aquí; lo frena el permiso
 
 
+class RegistroThrottle(AnonRateThrottle):
+    """Alta de cuentas de cliente desde la tienda.
+
+    Sin tope, un script crea miles de cuentas en minutos y ensucia la base de
+    clientes. Cinco por hora por IP es holgado hasta para una familia que
+    comparte internet, y ridículo para un bot.
+    """
+    scope = 'registro'
+
+
 class LoginThrottle(AnonRateThrottle):
     """Freno al login por IP: acota fuerza bruta y credential stuffing.
 

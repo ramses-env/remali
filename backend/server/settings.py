@@ -270,6 +270,7 @@ REST_FRAMEWORK = {
         'anon_publico': '120/hour',       # navegación anónima del catálogo
         'subida_evidencia': '200/hour',   # fotos de entrega/devolución por técnico
         'login': '10/min',                # intentos de login por IP (anti fuerza bruta)
+        'registro': '5/hour',             # altas de cuenta de cliente por IP
     },
 }
 

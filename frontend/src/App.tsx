@@ -5,6 +5,7 @@ import EquiposList from './routes/EquiposList'
 import EquipoDetail from './routes/EquipoDetail'
 import Cotizacion from './routes/Cotizacion'
 import Login from './routes/Login'
+import Registro from './routes/Registro'
 import Dashboard from './routes/Dashboard'
 import Footer from './components/Footer'
 import ErrorBoundary from './components/ErrorBoundary'
@@ -16,7 +17,10 @@ import { I18nProvider } from './lib/i18n'
 function App() {
   const location = useLocation()
   // Rutas que NO usan el chrome público (navbar + footer)
-  const bare = location.pathname.startsWith('/dashboard') || location.pathname === '/login'
+  const bare =
+    location.pathname.startsWith('/dashboard') ||
+    location.pathname === '/login' ||
+    location.pathname === '/registro'
 
   return (
     <I18nProvider>
@@ -25,6 +29,7 @@ function App() {
         <ErrorBoundary>
           <Routes>
             <Route path="/login" element={<Login />} />
+            <Route path="/registro" element={<Registro />} />
             <Route path="/dashboard" element={<RequireAdmin><Dashboard /></RequireAdmin>} />
           </Routes>
         </ErrorBoundary>

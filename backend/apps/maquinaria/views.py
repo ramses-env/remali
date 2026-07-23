@@ -1,8 +1,14 @@
 from datetime import timedelta
 
+from django.db import IntegrityError
 from django.db.models import Q, ProtectedError
 from django.utils import timezone
 from django.shortcuts import get_object_or_404
+from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Group
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
+from django.core.validators import validate_email
 
 from rest_framework import generics, permissions, status
 from rest_framework.filters import SearchFilter, OrderingFilter
@@ -13,7 +19,7 @@ from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 from .permissions import EsDueno, EsOperador, EsOperadorEditaAdmin, puede_de
-from .throttling import SolicitudPublicaThrottle, LoginThrottle
+from .throttling import SolicitudPublicaThrottle, LoginThrottle, RegistroThrottle
 
 from django.conf import settings
 
@@ -327,6 +333,61 @@ def apply_coupon(request):
 # ─────────────────────────────────────────────
 #  AUTENTICACIÓN / PERFIL
 # ─────────────────────────────────────────────
+@api_view(['POST'])
+@permission_classes([permissions.AllowAny])  # público: alta de cliente desde la tienda
+@throttle_classes([RegistroThrottle])
+def registro(request):
+    """Alta de cuenta de cliente desde la tienda.
+
+    Esto SOLO crea clientes. El rol no se lee del payload en ningún caso: si
+    llegara `is_staff`, `is_superuser` o `groups`, se ignoran. Un alta pública
+    que aceptara el rol del cliente sería una puerta directa a hacerse
+    administrador. Quien necesite técnico o admin lo da de alta el Dueño.
+    """
+    nombre = (request.data.get('nombre') or '').strip()
+    email = (request.data.get('email') or '').strip().lower()
+    password = request.data.get('password') or ''
+
+    if not email or not password:
+        return Response({'detail': 'Correo y contraseña son obligatorios.'}, status=400)
+
+    try:
+        validate_email(email)
+    except DjangoValidationError:
+        return Response({'detail': 'Escribe un correo válido.'}, status=400)
+
+    # El correo hace de usuario, y `username` tope a 150.
+    if len(email) > 150:
+        return Response({'detail': 'Ese correo es demasiado largo.'}, status=400)
+
+    User = get_user_model()
+    if User.objects.filter(Q(email__iexact=email) | Q(username__iexact=email)).exists():
+        return Response({'detail': 'Ya existe una cuenta con ese correo.'}, status=400)
+
+    # Las reglas de fuerza de contraseña son las del proyecto (AUTH_PASSWORD_VALIDATORS),
+    # no una copia paralela que se quede desactualizada.
+    try:
+        validate_password(password)
+    except DjangoValidationError as e:
+        return Response({'detail': ' '.join(e.messages)}, status=400)
+
+    try:
+        user = User.objects.create_user(username=email, email=email, password=password)
+    except IntegrityError:
+        # Dos altas simultáneas con el mismo correo: la segunda choca con el índice.
+        return Response({'detail': 'Ya existe una cuenta con ese correo.'}, status=400)
+
+    user.first_name = nombre[:150]
+    user.is_staff = False
+    user.is_superuser = False
+    user.save(update_fields=['first_name', 'is_staff', 'is_superuser'])
+
+    grupo, _ = Group.objects.get_or_create(name='Cliente')
+    user.groups.add(grupo)
+
+    return Response({'detail': 'Cuenta creada.'}, status=201)
+
+
 @api_view(['POST'])
 @permission_classes([permissions.AllowAny])  # público: punto de entrada de sesión
 @throttle_classes([LoginThrottle])           # anti fuerza bruta: cuenta intentos por IP
