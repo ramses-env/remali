@@ -16,10 +16,14 @@
   body{
     background:#000;color:#f4f4f5;
     font-family:'Plus Jakarta Sans',system-ui,-apple-system,'Segoe UI',sans-serif;
-    display:flex;align-items:center;justify-content:center;
-    padding:2rem 1.25rem;position:relative;overflow:hidden;
+    display:flex;flex-direction:column;min-height:100%;
+    position:relative;overflow-x:hidden;
     -webkit-font-smoothing:antialiased;
   }
+  /* El aviso ocupa el alto disponible y el footer queda abajo. El overflow se
+     limita solo en horizontal: así la página puede desplazarse en pantallas
+     cortas sin que el cielo (que es fixed) se arrastre con ella. */
+  .hero{flex:1;display:flex;align-items:center;justify-content:center;padding:3.5rem 1.25rem 2.5rem}
   /* Halo dorado, ahora discreto: subido de opacidad se comía las estrellas. */
   body::after{
     content:'';position:fixed;left:50%;top:-20%;width:min(900px,130vw);height:min(900px,130vw);
@@ -51,7 +55,7 @@
       radial-gradient(1px 1px at 30px 205px,rgba(255,255,255,.55),transparent),
       radial-gradient(1px 1px at 245px 150px,rgba(255,255,255,.4),transparent),
       radial-gradient(1px 1px at 120px 240px,rgba(255,255,255,.6),transparent);
-    animation:deriva1 150s linear infinite;
+    animation:deriva1 90s linear infinite;
   }
   .capa-2{
     top:-380px;height:calc(100% + 380px);background-size:380px 380px;
@@ -62,7 +66,7 @@
       radial-gradient(1.5px 1.5px at 340px 330px,rgba(255,255,255,.7),transparent),
       radial-gradient(1.5px 1.5px at 20px 300px,rgba(255,255,255,.8),transparent),
       radial-gradient(1.5px 1.5px at 250px 20px,rgba(255,255,255,.65),transparent);
-    animation:deriva2 100s linear infinite;
+    animation:deriva2 58s linear infinite;
   }
   .capa-3{
     top:-520px;height:calc(100% + 520px);background-size:520px 520px;
@@ -71,7 +75,7 @@
       radial-gradient(2px 2px at 420px 220px,#fff,transparent),
       radial-gradient(2px 2px at 260px 420px,rgba(255,255,255,.95),transparent),
       radial-gradient(2px 2px at 480px 470px,rgba(255,255,255,.9),transparent);
-    animation:deriva3 65s linear infinite,titilar 6s ease-in-out infinite;
+    animation:deriva3 34s linear infinite,titilar 6s ease-in-out infinite;
   }
   @keyframes deriva1{to{transform:translate3d(0,260px,0)}}
   @keyframes deriva2{to{transform:translate3d(0,380px,0)}}
@@ -82,12 +86,14 @@
   /* flex y no inline-flex: siendo inline se acomodaba en la misma línea que el
      badge de abajo y el margen inferior no separaba nada. */
   .marca{display:flex;justify-content:center;align-items:center;gap:.75rem;margin-bottom:3rem}
-  .marca .glifo{
+  /* El glifo va suelto y no acotado a .marca: lo reusa también el footer, y
+     atado al padre se quedaba sin fondo ahí. */
+  .glifo{
     width:44px;height:44px;border-radius:13px;display:grid;place-items:center;
-    background:linear-gradient(135deg,#fbbf24,#f97316);
+    background:linear-gradient(135deg,#fbbf24,#f97316);flex:none;
   }
-  .marca .glifo span{
-    width:38px;height:38px;border-radius:10px;background:#0a0a0b;
+  .glifo span{
+    width:38px;height:38px;border-radius:10px;background:#000;
     display:grid;place-items:center;font-weight:800;font-size:1.1rem;
     background-clip:padding-box;color:#f2b736;
   }
@@ -114,13 +120,44 @@
   .btn-oro:hover{opacity:.9}
   .btn-borde{border:1px solid rgba(255,255,255,.16);color:#f4f4f5}
   .btn-borde:hover{border-color:rgba(242,183,54,.5);color:#f2b736}
-  .pie{border-top:1px solid rgba(255,255,255,.08);padding-top:1.5rem;font-size:.82rem;color:#6f6f78;line-height:1.7}
-  .pie .mapa{
-    display:inline-flex;align-items:center;gap:.4rem;margin-bottom:.5rem;
-    color:#f2b736;text-decoration:none;font-weight:600;
+  /* ── Footer (mismo contenido que el del sitio) ─────────────────────────── */
+  .pie-web{
+    position:relative;z-index:2;
+    border-top:1px solid rgba(255,255,255,.08);
+    background:rgba(0,0,0,.5);backdrop-filter:blur(6px);
+    padding:2.75rem 1.5rem 1.6rem;
   }
-  .pie .mapa:hover{text-decoration:underline}
-  .pie .dir{display:block;margin-bottom:.35rem}
+  .pie-inner{max-width:1000px;margin:0 auto;text-align:left}
+  .pie-grid{display:grid;gap:2.25rem;margin-bottom:2rem}
+  @media(min-width:760px){.pie-grid{grid-template-columns:1.7fr 1fr 1.3fr}}
+  .marca-pie{display:flex;align-items:center;gap:.6rem;margin-bottom:.9rem}
+  .marca-pie .glifo{width:34px;height:34px;border-radius:10px}
+  .marca-pie .glifo span{width:29px;height:29px;border-radius:8px;font-size:.9rem}
+  .marca-pie strong{font-size:1.05rem}
+  .pie-col h3{
+    margin:0 0 .85rem;font-size:.72rem;font-weight:600;letter-spacing:.14em;
+    text-transform:uppercase;color:#f4f4f5;
+  }
+  .pie-col p{margin:0 0 .45rem;font-size:.88rem;color:#9a9aa2;line-height:1.7;max-width:24rem}
+  .pie-col a{color:#9a9aa2;text-decoration:none;font-size:.88rem;line-height:1.95}
+  .pie-col a:hover{color:#f2b736}
+  .pie-lista a{display:block}
+  .mapa{
+    display:inline-flex;align-items:center;gap:.4rem;
+    color:#f2b736;font-weight:600;margin-top:.45rem;
+  }
+  .mapa:hover{text-decoration:underline}
+  .pie-bajo{
+    border-top:1px solid rgba(255,255,255,.08);padding-top:1.4rem;
+    display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;
+    gap:.9rem;font-size:.78rem;color:#6f6f78;
+  }
+  .redes a{
+    display:grid;place-items:center;width:34px;height:34px;border-radius:50%;
+    border:1px solid rgba(255,255,255,.14);color:#9a9aa2;
+  }
+  .redes a:hover{border-color:#f2b736;color:#f2b736}
+  .byrix strong{color:#f4f4f5;font-weight:600}
   @media (prefers-reduced-motion:reduce){
     /* El cielo se queda quieto, pero las estrellas siguen ahí: se quita el
        movimiento, no el diseño. */
@@ -137,7 +174,8 @@
     <div class="capa capa-3"></div>
   </div>
 
-  <main class="envoltura">
+  <main class="hero">
+   <div class="envoltura">
     <div class="marca">
       <div class="glifo"><span>R</span></div>
       <strong>REMALI</strong>
@@ -168,16 +206,52 @@
       
     </div>
 
-    <footer class="pie">
-      
-      <a class="mapa" href="https://maps.app.goo.gl/McMz4ZHaBPpoWwTRA" target="_blank" rel="noopener">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0"/><circle cx="12" cy="10" r="3"/></svg>
-        Cómo llegar
-      </a>
-      
-      <span class="dir">Lázaro Cárdenas, Los Tulipanes, Acapulco de Juárez, Gro. C.P. 39908</span>
-      Renta y venta de maquinaria ligera
-    </footer>
+   </div>
   </main>
+
+  <footer class="pie-web">
+    <div class="pie-inner">
+      <div class="pie-grid">
+        <div class="pie-col">
+          <div class="marca-pie">
+            <div class="glifo"><span>R</span></div>
+            <strong>REMALI</strong>
+          </div>
+          <p>Maquinaria ligera para construcción. Renta y venta de equipos confiables con soporte técnico especializado.</p>
+        </div>
+
+        <div class="pie-col">
+          <h3>Contacto</h3>
+          <div class="pie-lista">
+            <a href="https://wa.me/527443737201" rel="noopener">WhatsApp</a>
+            <a href="tel:7443737201">744 373 7201</a>
+          </div>
+        </div>
+
+        <div class="pie-col">
+          <h3>Ubicación</h3>
+          <p>Lázaro Cárdenas, Los Tulipanes, Acapulco de Juárez, Gro. C.P. 39908</p>
+          
+          <a class="mapa" href="https://maps.app.goo.gl/McMz4ZHaBPpoWwTRA" target="_blank" rel="noopener">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0"/><circle cx="12" cy="10" r="3"/></svg>
+            Cómo llegar
+          </a>
+          
+        </div>
+      </div>
+
+      <div class="pie-bajo">
+        <span>&copy; 2026 REMALI. Todos los derechos reservados.</span>
+
+        <div class="redes">
+          <a href="https://www.facebook.com/share/195rWcDTof/" target="_blank" rel="noopener" aria-label="Facebook de REMALI">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 8h3V6a3 3 0 0 1 3-3h2v3h-2a1 1 0 0 0-1 1v2h3l-1 3h-2v7h-3v-7H9V8z"/></svg>
+          </a>
+        </div>
+
+        <span class="byrix">Desarrollado por <strong>Byrix</strong></span>
+      </div>
+    </div>
+  </footer>
 </body>
 </html>
