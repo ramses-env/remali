@@ -65,6 +65,11 @@ CSRF_TRUSTED_ORIGINS = _lista_env("CSRF_TRUSTED_ORIGINS", [
     "http://127.0.0.1:5173",
 ])
 
+# Sitio en construcción: tapa todo el tráfico público con una sola página. Se
+# apaga poniendo la variable en False (o quitándola) y volviendo a desplegar; no
+# hace falta tocar código ni reconstruir la imagen.
+MODO_CONSTRUCCION = os.environ.get("MODO_CONSTRUCCION", "False") == "True"
+
 # Entrar con Google. El client ID es público (viaja en el HTML del botón), por eso
 # vive aquí con valor por defecto; el client secret NO se usa en este flujo: el
 # navegador recibe un ID token firmado y el backend lo verifica contra las llaves
@@ -115,6 +120,12 @@ _has_whitenoise = importlib.util.find_spec('whitenoise') is not None
 if _has_whitenoise:
     MIDDLEWARE.insert(1, 'whitenoise.middleware.WhiteNoiseMiddleware')
     STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
+
+# Va DESPUÉS del bloque de WhiteNoise para quedar delante de él en la lista.
+# Importa: WhiteNoise sirve el index.html del SPA en "/" y corta la cadena ahí,
+# así que un middleware colocado más abajo tapa todo el sitio menos la portada,
+# que es justo la URL que más se visita.
+MIDDLEWARE.insert(1, 'server.construccion.ModoConstruccionMiddleware')
 
 
 ROOT_URLCONF = 'server.urls'
