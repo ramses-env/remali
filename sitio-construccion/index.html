@@ -14,25 +14,71 @@
   *,*::before,*::after{box-sizing:border-box}
   html,body{margin:0;padding:0;height:100%}
   body{
-    background:#0a0a0b;color:#f4f4f5;
+    background:#000;color:#f4f4f5;
     font-family:'Plus Jakarta Sans',system-ui,-apple-system,'Segoe UI',sans-serif;
     display:flex;align-items:center;justify-content:center;
-    padding:2rem 1.25rem;position:relative;overflow-x:hidden;
+    padding:2rem 1.25rem;position:relative;overflow:hidden;
     -webkit-font-smoothing:antialiased;
   }
-  /* Textura y halo dorado: puro CSS, sin imágenes, para que la página no dependa
-     de que collectstatic haya corrido — justo cuando algo puede estar roto. */
-  body::before{
-    content:'';position:fixed;inset:0;opacity:.04;pointer-events:none;
-    background-image:linear-gradient(#fff 1px,transparent 1px),linear-gradient(90deg,#fff 1px,transparent 1px);
-    background-size:56px 56px;
-  }
+  /* Halo dorado, ahora discreto: subido de opacidad se comía las estrellas. */
   body::after{
-    content:'';position:fixed;left:50%;top:-10%;width:min(760px,120vw);height:min(760px,120vw);
-    transform:translateX(-50%);border-radius:50%;pointer-events:none;
-    background:radial-gradient(circle,rgba(242,183,54,.16),transparent 65%);filter:blur(40px);
+    content:'';position:fixed;left:50%;top:-20%;width:min(900px,130vw);height:min(900px,130vw);
+    transform:translateX(-50%);border-radius:50%;pointer-events:none;z-index:1;
+    background:radial-gradient(circle,rgba(242,183,54,.09),transparent 62%);filter:blur(60px);
   }
-  .envoltura{position:relative;z-index:1;width:100%;max-width:560px;text-align:center}
+
+  /* ── Cielo estrellado ──────────────────────────────────────────────────
+     Tres capas con tamaños y velocidades distintas: las estrellas grandes van
+     más rápido y las pequeñas más lento, que es lo que da sensación de fondo.
+     Todo con radial-gradients repetidos: sin imágenes ni JavaScript, para que
+     la página siga siendo un archivo suelto que funciona en cualquier lado.
+
+     Cada capa sobresale por arriba justo el alto de su mosaico y se desplaza
+     exactamente esa distancia, así el ciclo cierra sin saltos. Se anima
+     `transform` (no `background-position`) para que lo mueva la GPU. */
+  .cielo{position:fixed;inset:0;overflow:hidden;pointer-events:none;z-index:0}
+  .capa{position:absolute;left:0;right:0;will-change:transform}
+
+  .capa-1{
+    top:-260px;height:calc(100% + 260px);background-size:260px 260px;
+    background-image:
+      radial-gradient(1px 1px at 18px 32px,rgba(255,255,255,.7),transparent),
+      radial-gradient(1px 1px at 96px 12px,rgba(255,255,255,.5),transparent),
+      radial-gradient(1px 1px at 142px 88px,rgba(255,255,255,.65),transparent),
+      radial-gradient(1px 1px at 54px 130px,rgba(255,255,255,.45),transparent),
+      radial-gradient(1px 1px at 210px 60px,rgba(255,255,255,.6),transparent),
+      radial-gradient(1px 1px at 178px 190px,rgba(255,255,255,.5),transparent),
+      radial-gradient(1px 1px at 30px 205px,rgba(255,255,255,.55),transparent),
+      radial-gradient(1px 1px at 245px 150px,rgba(255,255,255,.4),transparent),
+      radial-gradient(1px 1px at 120px 240px,rgba(255,255,255,.6),transparent);
+    animation:deriva1 150s linear infinite;
+  }
+  .capa-2{
+    top:-380px;height:calc(100% + 380px);background-size:380px 380px;
+    background-image:
+      radial-gradient(1.5px 1.5px at 60px 50px,rgba(255,255,255,.9),transparent),
+      radial-gradient(1.5px 1.5px at 300px 120px,rgba(255,255,255,.75),transparent),
+      radial-gradient(1.5px 1.5px at 180px 260px,rgba(255,255,255,.85),transparent),
+      radial-gradient(1.5px 1.5px at 340px 330px,rgba(255,255,255,.7),transparent),
+      radial-gradient(1.5px 1.5px at 20px 300px,rgba(255,255,255,.8),transparent),
+      radial-gradient(1.5px 1.5px at 250px 20px,rgba(255,255,255,.65),transparent);
+    animation:deriva2 100s linear infinite;
+  }
+  .capa-3{
+    top:-520px;height:calc(100% + 520px);background-size:520px 520px;
+    background-image:
+      radial-gradient(2px 2px at 90px 100px,#fff,transparent),
+      radial-gradient(2px 2px at 420px 220px,#fff,transparent),
+      radial-gradient(2px 2px at 260px 420px,rgba(255,255,255,.95),transparent),
+      radial-gradient(2px 2px at 480px 470px,rgba(255,255,255,.9),transparent);
+    animation:deriva3 65s linear infinite,titilar 6s ease-in-out infinite;
+  }
+  @keyframes deriva1{to{transform:translate3d(0,260px,0)}}
+  @keyframes deriva2{to{transform:translate3d(0,380px,0)}}
+  @keyframes deriva3{to{transform:translate3d(0,520px,0)}}
+  @keyframes titilar{0%,100%{opacity:1}50%{opacity:.55}}
+  /* Por encima del cielo (0) y del halo (1). */
+  .envoltura{position:relative;z-index:2;width:100%;max-width:560px;text-align:center}
   /* flex y no inline-flex: siendo inline se acomodaba en la misma línea que el
      badge de abajo y el margen inferior no separaba nada. */
   .marca{display:flex;justify-content:center;align-items:center;gap:.75rem;margin-bottom:3rem}
@@ -76,12 +122,21 @@
   .pie .mapa:hover{text-decoration:underline}
   .pie .dir{display:block;margin-bottom:.35rem}
   @media (prefers-reduced-motion:reduce){
+    /* El cielo se queda quieto, pero las estrellas siguen ahí: se quita el
+       movimiento, no el diseño. */
+    .capa{animation:none}
     .punto{animation:none}
     .btn{transition:none}
   }
 </style>
 </head>
 <body>
+  <div class="cielo" aria-hidden="true">
+    <div class="capa capa-1"></div>
+    <div class="capa capa-2"></div>
+    <div class="capa capa-3"></div>
+  </div>
+
   <main class="envoltura">
     <div class="marca">
       <div class="glifo"><span>R</span></div>
