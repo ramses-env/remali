@@ -7,6 +7,8 @@ type AuthContextType = {
   token: string | null
   /** `recordar` decide si la sesión sobrevive al cierre del navegador. */
   login: (usuario: string, password: string, recordar?: boolean) => Promise<void>
+  /** Entra con un token que el backend ya emitió (p. ej. tras validar el de Google). */
+  entrarConToken: (access: string, recordar?: boolean) => void
   logout: () => void
 }
 
@@ -37,6 +39,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setToken(t)
   }
 
+  function entrarConToken(access: string, recordar = true) {
+    guardarToken(access, recordar)
+    setToken(access)
+  }
+
   function logout() {
     borrarToken()
     // El acento y el nivel son de esa cuenta, no del navegador: si no se limpian,
@@ -46,7 +53,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setToken(null)
   }
 
-  return <AuthContext.Provider value={{ token, login, logout }}>{children}</AuthContext.Provider>
+  return (
+    <AuthContext.Provider value={{ token, login, entrarConToken, logout }}>
+      {children}
+    </AuthContext.Provider>
+  )
 }
 
 export function useAuth() {

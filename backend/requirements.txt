@@ -11,6 +11,7 @@ django-filter==25.2
 djangorestframework==3.16.1
 djangorestframework_simplejwt==5.5.1
 filelock==3.20.0
+google-auth==2.56.2
 gunicorn==25.1.0
 idna==3.11
 mysqlclient==2.2.7
@@ -18,6 +19,8 @@ packaging==26.0
 pillow==12.0.0
 platformdirs==4.5.0
 psycopg2-binary==2.9.11
+pyasn1==0.6.4
+pyasn1_modules==0.4.2
 PyJWT==2.10.1
 python-dotenv==1.2.1
 qrcode==8.2

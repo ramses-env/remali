@@ -17,6 +17,10 @@ from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
+from rest_framework_simplejwt.tokens import RefreshToken
+
+from google.auth.transport import requests as google_requests
+from google.oauth2 import id_token as google_id_token
 
 from .permissions import EsDueno, EsOperador, EsOperadorEditaAdmin, puede_de
 from .throttling import SolicitudPublicaThrottle, LoginThrottle, RegistroThrottle
@@ -386,6 +390,86 @@ def registro(request):
     user.groups.add(grupo)
 
     return Response({'detail': 'Cuenta creada.'}, status=201)
+
+
+@api_view(['POST'])
+@permission_classes([permissions.AllowAny])  # público: punto de entrada de sesión
+@throttle_classes([LoginThrottle])
+def google_login(request):
+    """Entrar con Google.
+
+    Recibe el ID token que el botón de Google le entregó al navegador y, si es
+    legítimo, emite el JWT propio del proyecto.
+
+    Todo depende de la verificación: el token llega desde el cliente, así que sin
+    comprobarlo cualquiera mandaría un JSON con el correo del dueño y entraría.
+    `verify_oauth2_token` valida la firma contra las llaves públicas de Google,
+    la caducidad, el emisor, y —lo más importante— que el token se haya emitido
+    PARA esta aplicación (`aud` == nuestro client ID). Sin ese último punto
+    serviría un token sacado de cualquier otro sitio que use Google.
+    """
+    credential = request.data.get('credential') or ''
+    if not credential:
+        return Response({'detail': 'Falta el token de Google.'}, status=400)
+
+    client_id = getattr(settings, 'GOOGLE_CLIENT_ID', '')
+    if not client_id:
+        return Response({'detail': 'Entrar con Google no está configurado.'}, status=503)
+
+    try:
+        info = google_id_token.verify_oauth2_token(
+            credential, google_requests.Request(), client_id
+        )
+    except ValueError:
+        # Token inválido, caducado o emitido para otra aplicación.
+        return Response({'detail': 'No pudimos validar tu cuenta de Google.'}, status=401)
+    except Exception:
+        # Fallo al consultar las llaves de Google: es un problema nuestro, no del
+        # usuario. Distinguirlo evita culpar a quien sí traía un token bueno.
+        return Response({'detail': 'No pudimos contactar a Google. Intenta de nuevo.'}, status=503)
+
+    if info.get('iss') not in ('accounts.google.com', 'https://accounts.google.com'):
+        return Response({'detail': 'Token de origen inesperado.'}, status=401)
+
+    email = (info.get('email') or '').strip().lower()
+    if not email or not info.get('email_verified'):
+        # Sin correo verificado no hay prueba de que la cuenta sea suya, y enlazar
+        # por correo sin esa prueba es la vía directa a suplantar a otro usuario.
+        return Response({'detail': 'Tu correo de Google no está verificado.'}, status=403)
+
+    User = get_user_model()
+    # Se enlaza por correo, nunca por el nombre que venga en el token. El
+    # `exclude(email='')` no es cosmético: sin él, las cuentas sin correo harían
+    # match entre ellas y entrarías a la primera que apareciera.
+    user = (
+        User.objects.exclude(email='').filter(email__iexact=email).first()
+        or User.objects.filter(username__iexact=email).first()
+    )
+
+    creada = False
+    if user is None:
+        if len(email) > 150:
+            return Response({'detail': 'Ese correo es demasiado largo.'}, status=400)
+        # Alta implícita: mismo criterio que el registro público, solo cliente.
+        # El rol jamás sale del token de Google.
+        user = User.objects.create_user(username=email, email=email)
+        user.set_unusable_password()   # entra por Google, no tiene contraseña
+        user.first_name = (info.get('given_name') or '')[:150]
+        user.last_name = (info.get('family_name') or '')[:150]
+        user.is_staff = False
+        user.is_superuser = False
+        user.save()
+        grupo, _ = Group.objects.get_or_create(name='Cliente')
+        user.groups.add(grupo)
+        creada = True
+
+    if not user.is_active:
+        # Mismo criterio fail-closed que nivel_de: cuenta desactivada no entra,
+        # aunque su Google sea válido.
+        return Response({'detail': 'Tu cuenta no está activa. Contacta al administrador.'}, status=403)
+
+    refresh = RefreshToken.for_user(user)
+    return Response({'access': str(refresh.access_token), 'refresh': str(refresh), 'creada': creada})
 
 
 @api_view(['POST'])

@@ -1,12 +1,11 @@
 import { useState } from 'react'
-import { Link, useLocation, useNavigate } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import * as z from 'zod'
 import { Eye, EyeOff, Loader2 } from 'lucide-react'
 
-import { consultarYo, destinoTrasEntrar, recordarAcceso } from '../lib/acceso'
-import { useRedirigirSiHaySesion } from '../lib/sesion'
+import { useIrTrasEntrar, useRedirigirSiHaySesion } from '../lib/sesion'
 import { useAuth } from '../store/auth'
 import { AuthItem, AuthSplitScreen } from '@/components/ui/auth-split-screen'
 import { SocialAuthButtons } from '@/components/ui/social-auth-buttons'
@@ -28,8 +27,7 @@ const esquema = z.object({
 type Valores = z.infer<typeof esquema>
 
 export default function Login() {
-  const { login } = useAuth()
-  const nav = useNavigate()
+  const { login, entrarConToken } = useAuth()
   const loc = useLocation()
   const params = new URLSearchParams(loc.search)
   const next = params.get('next') || ''
@@ -39,6 +37,7 @@ export default function Login() {
   const [verPass, setVerPass] = useState(false)
 
   const verificando = useRedirigirSiHaySesion(next)
+  const irTrasEntrar = useIrTrasEntrar(next)
 
   const form = useForm<Valores>({
     resolver: zodResolver(esquema),
@@ -50,15 +49,7 @@ export default function Login() {
     setError(undefined)
     try {
       await login(datos.usuario, datos.password, datos.recordar)
-      try {
-        const yo = await consultarYo()
-        // Antes de navegar: así el panel abre de una vez con el acento y la
-        // sección que le tocan, sin pasar por los de la cuenta anterior.
-        recordarAcceso(yo)
-        nav(destinoTrasEntrar(yo, next), { replace: true })
-      } catch {
-        nav(next || '/', { replace: true })
-      }
+      await irTrasEntrar()
     } catch (err: any) {
       const data = err?.response?.data
       if (data?.detail) {
@@ -207,7 +198,14 @@ export default function Login() {
       </Form>
 
       <AuthItem>
-        <SocialAuthButtons />
+        <SocialAuthButtons
+          onToken={async access => {
+            setError(undefined)
+            entrarConToken(access, form.getValues('recordar'))
+            await irTrasEntrar()
+          }}
+          onError={setError}
+        />
       </AuthItem>
     </AuthSplitScreen>
   )

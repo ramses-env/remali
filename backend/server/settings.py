@@ -50,6 +50,15 @@ CSRF_TRUSTED_ORIGINS = os.environ.get("CSRF_TRUSTED_ORIGINS", "https://remali.up
     "http://127.0.0.1:5173",
 ]
 
+# Entrar con Google. El client ID es público (viaja en el HTML del botón), por eso
+# vive aquí con valor por defecto; el client secret NO se usa en este flujo: el
+# navegador recibe un ID token firmado y el backend lo verifica contra las llaves
+# públicas de Google. Si algún día se rota el cliente OAuth, basta la variable.
+GOOGLE_CLIENT_ID = os.environ.get(
+    "GOOGLE_CLIENT_ID",
+    "796001180849-c0i77104ckd95n1rdortq92iffg47ahj.apps.googleusercontent.com",
+)
+
 
 # Application definition
 

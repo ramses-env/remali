@@ -34,6 +34,7 @@ urlpatterns = [
     path('auth/refresh/', TokenRefreshView.as_view()),
     path('auth/login/', views.login),
     path('auth/registro/', views.registro),
+    path('auth/google/', views.google_login),
     path('auth/me/', views.me),
     path('auth/perfil/', views.PerfilDetail.as_view()),
     path('usuarios/', views_usuarios.usuarios),

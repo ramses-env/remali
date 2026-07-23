@@ -6,8 +6,7 @@ import * as z from 'zod'
 import { Eye, EyeOff, Loader2 } from 'lucide-react'
 
 import api from '../lib/api'
-import { consultarYo, destinoTrasEntrar, recordarAcceso } from '../lib/acceso'
-import { useRedirigirSiHaySesion } from '../lib/sesion'
+import { useIrTrasEntrar, useRedirigirSiHaySesion } from '../lib/sesion'
 import { useAuth } from '../store/auth'
 import { AuthItem, AuthSplitScreen } from '@/components/ui/auth-split-screen'
 import { SocialAuthButtons } from '@/components/ui/social-auth-buttons'
@@ -32,7 +31,7 @@ const esquema = z
 type Valores = z.infer<typeof esquema>
 
 export default function Registro() {
-  const { login } = useAuth()
+  const { login, entrarConToken } = useAuth()
   const nav = useNavigate()
   const loc = useLocation()
   const next = new URLSearchParams(loc.search).get('next') || ''
@@ -41,6 +40,7 @@ export default function Registro() {
   const [verPass, setVerPass] = useState(false)
 
   const verificando = useRedirigirSiHaySesion(next)
+  const irTrasEntrar = useIrTrasEntrar(next)
 
   const form = useForm<Valores>({
     resolver: zodResolver(esquema),
@@ -67,9 +67,7 @@ export default function Registro() {
     // la contraseña recién escritos sería trabajo de más sin ninguna ganancia.
     try {
       await login(datos.email, datos.password, true)
-      const yo = await consultarYo()
-      recordarAcceso(yo)
-      nav(destinoTrasEntrar(yo, next), { replace: true })
+      await irTrasEntrar()
     } catch {
       // La cuenta sí quedó creada; solo falló entrar. Que lo intente a mano.
       nav('/login?creada=1', { replace: true })
@@ -226,7 +224,14 @@ export default function Registro() {
       </Form>
 
       <AuthItem>
-        <SocialAuthButtons />
+        <SocialAuthButtons
+          onToken={async access => {
+            setError(undefined)
+            entrarConToken(access, true)
+            await irTrasEntrar()
+          }}
+          onError={setError}
+        />
       </AuthItem>
     </AuthSplitScreen>
   )
