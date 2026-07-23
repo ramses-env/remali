@@ -269,6 +269,7 @@ REST_FRAMEWORK = {
         'solicitud_publica': '10/hour',   # cotizaciones que manda un mismo visitante
         'anon_publico': '120/hour',       # navegación anónima del catálogo
         'subida_evidencia': '200/hour',   # fotos de entrega/devolución por técnico
+        'login': '10/min',                # intentos de login por IP (anti fuerza bruta)
     },
 }
 

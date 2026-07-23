@@ -34,3 +34,14 @@ class SubidaEvidenciaThrottle(AnonRateThrottle):
         if request.user and request.user.is_authenticated:
             return self.cache_format % {'scope': self.scope, 'ident': request.user.pk}
         return None   # sin sesión no llega aquí; lo frena el permiso
+
+
+class LoginThrottle(AnonRateThrottle):
+    """Freno al login por IP: acota fuerza bruta y credential stuffing.
+
+    El login es sin sesión, así que se cuenta por IP. El rate es por minuto (no
+    por hora) para que un usuario legítimo que teclea mal su clave se recupere en
+    segundos, no en una hora. Ojo NAT: en una oficina varios comparten IP, por eso
+    el tope es holgado para el uso normal y aun así frena el barrido automatizado.
+    """
+    scope = 'login'

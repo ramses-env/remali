@@ -13,7 +13,7 @@ from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 from .permissions import EsDueno, EsOperador, EsOperadorEditaAdmin, puede_de
-from .throttling import SolicitudPublicaThrottle
+from .throttling import SolicitudPublicaThrottle, LoginThrottle
 
 from django.conf import settings
 
@@ -329,6 +329,7 @@ def apply_coupon(request):
 # ─────────────────────────────────────────────
 @api_view(['POST'])
 @permission_classes([permissions.AllowAny])  # público: punto de entrada de sesión
+@throttle_classes([LoginThrottle])           # anti fuerza bruta: cuenta intentos por IP
 def login(request):
     """Login flexible: acepta username o email + password."""
     username_or_email = request.data.get('username') or request.data.get('email')
