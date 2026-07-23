@@ -41,20 +41,53 @@ Hemos configurado el archivo `nixpacks.toml` en la raíz para que Railway instal
 
 ---
 
-## Variables de Entorno Comunes (Copiar y Pegar)
+## Variables de Entorno
 
-```env
-# Django
-SECRET_KEY=tu_clave_secreta_aqui
-DEBUG=False
-ALLOWED_HOSTS=*
+**La lista completa y comentada está en [`backend/.env.example`](backend/.env.example).**
+Ese archivo es la única fuente de verdad: cada variable con su para qué.
 
-# Cloudinary (Imagenes)
-CLOUDINARY_CLOUD_NAME=dmfeqx8gt
-CLOUDINARY_API_KEY=575199477538695
-CLOUDINARY_API_SECRET=9kqfc-N_yb2qPR7IYtwbfeZEAS0
-CLOUDINARY_UPLOAD_PRESET=remali-upload
+> ⚠️ **Nunca pongas valores reales en este documento ni en ningún archivo del
+> repositorio.** Las credenciales van en la pestaña *Variables* de Railway (y en
+> un `.env` local, que está ignorado por git). Un secreto commiteado sigue en el
+> historial aunque después se borre del archivo: hay que rotarlo.
+
+Para trabajar en local:
+
+```bash
+cp backend/.env.example backend/.env
 ```
+
+Lo mínimo indispensable para que arranque en Railway:
+
+| Variable | Para qué |
+|----------|----------|
+| `SECRET_KEY` | Clave de Django. Larga y aleatoria. |
+| `DEBUG` | `False` en producción, siempre. |
+| `MYSQL_URL` / `DATABASE_URL` | Las inyecta solo Railway al agregar el servicio MySQL. |
+| `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET` | Imágenes y respaldos. El *secret* da control total del almacenamiento. |
+| `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD` | SMTP para los avisos. Van en el entorno, **no** en la configuración del panel (ahí quedarían en texto plano en la base). |
+| `GOOGLE_CLIENT_ID` | Entrar con Google. Es público; el *client secret* no se usa en este flujo. |
+
+`ALLOWED_HOSTS`, `CSRF_TRUSTED_ORIGINS` y `CORS_ALLOWED_ORIGINS` se pueden dejar
+vacías: `settings.py` ya incluye `remali.mx`, `www.remali.mx`, el dominio de
+Railway y localhost. Lo que pongas ahí **se suma** a esa lista.
+
+---
+
+## Dominio propio (remali.mx)
+
+1. Railway → servicio web → **Settings → Networking → Custom Domain** → `remali.mx`.
+2. Railway devuelve un destino DNS. En **Cloudflare** crea el registro que indique
+   **con la nube gris (DNS only)**, no naranja: con el proxy activado desde el
+   inicio, Railway no puede validar el dominio y se queda sin emitir el certificado.
+3. Cuando el certificado ya esté emitido, si quieres el proxy de Cloudflare,
+   actívalo y pon SSL en **Full (strict)**.
+4. Agrega `https://remali.mx` a los **orígenes autorizados de JavaScript** del
+   cliente OAuth en Google Cloud, o el botón de Google fallará en producción.
+
+Al ser dominio con HTTPS real, la **cámara** para las fotos de evidencia abre
+correctamente en el celular de los técnicos (por `http://` muchos navegadores
+solo permiten elegir de la galería).
 
 ---
 
