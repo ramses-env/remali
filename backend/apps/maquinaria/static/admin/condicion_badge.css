@@ -1,0 +1,12 @@
+/* Estilos mínimos para la visualización de la condición en el Admin */
+.trae-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #fff;
+}
+.badge-success { background-color: #2e7d32; }
+.badge-warning { background-color: #f9a825; }
+

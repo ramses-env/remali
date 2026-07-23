@@ -1,122 +1,212 @@
-import { useEffect, useState } from 'react'
-import { useNavigate, useLocation } from 'react-router-dom'
-import { motion } from 'framer-motion'
-import api from '../lib/api'
+import { useState } from 'react'
+import { Link, useLocation } from 'react-router-dom'
+import { useForm } from 'react-hook-form'
+import { zodResolver } from '@hookform/resolvers/zod'
+import * as z from 'zod'
+import { Eye, EyeOff, Loader2 } from 'lucide-react'
+
+import { useIrTrasEntrar, useRedirigirSiHaySesion } from '../lib/sesion'
 import { useAuth } from '../store/auth'
+import { AuthItem, AuthSplitScreen } from '@/components/ui/auth-split-screen'
+import { SocialAuthButtons } from '@/components/ui/social-auth-buttons'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
+import { Input } from '@/components/ui/input'
+
+/* Ojo con este esquema: NO valida formato de correo ni exige largo mínimo de
+   contraseña. Entrar no es registrarse — el acceso acepta usuario o correo
+   (admin_prueba y tecnico_prueba son usuarios, no correos) y la contraseña ya
+   existe: exigir aquí 8 caracteres dejaría fuera a cuentas válidas. Las reglas
+   de fuerza van en el registro, que es donde se crea la contraseña. */
+const esquema = z.object({
+  usuario: z.string().min(1, { message: 'Escribe tu usuario o tu correo.' }),
+  password: z.string().min(1, { message: 'Escribe tu contraseña.' }),
+  recordar: z.boolean(),
+})
+
+type Valores = z.infer<typeof esquema>
 
 export default function Login() {
-  const { login } = useAuth()
-  const nav = useNavigate()
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [showPass, setShowPass] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [fieldErrors, setFieldErrors] = useState<{ email?: string; password?: string; general?: string }>({})
-  const [info, setInfo] = useState<string | null>(null)
+  const { login, entrarConToken } = useAuth()
   const loc = useLocation()
+  const params = new URLSearchParams(loc.search)
+  const next = params.get('next') || ''
+  const sesionExpirada = params.get('expired') === '1'
 
-  useEffect(() => {
-    const p = new URLSearchParams(loc.search)
-    const expired = p.get('expired') === '1'
-    const verified = p.get('verified') === '1'
-    const emailParam = p.get('email') || ''
-    if (emailParam) setEmail(emailParam)
-    if (verified) setInfo('Cuenta verificada, ya puedes entrar')
-    else if (expired) setInfo('El enlace de verificación expiró. Ingresa tu correo para reenviarlo')
-  }, [loc.search])
+  const [error, setError] = useState<string | undefined>(undefined)
+  const [verPass, setVerPass] = useState(false)
 
-  async function onSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    setError(null)
-    setFieldErrors({})
+  const verificando = useRedirigirSiHaySesion(next)
+  const irTrasEntrar = useIrTrasEntrar(next)
+
+  const form = useForm<Valores>({
+    resolver: zodResolver(esquema),
+    defaultValues: { usuario: '', password: '', recordar: true },
+  })
+  const enviando = form.formState.isSubmitting
+
+  async function onSubmit(datos: Valores) {
+    setError(undefined)
     try {
-      if (!email.trim() || !password) {
-        const errs: { email?: string; password?: string } = {}
-        if (!email.trim()) errs.email = 'Campo obligatorio'
-        if (!password) errs.password = 'Campo obligatorio'
-        setFieldErrors(errs)
-        return
-      }
-      await login(email, password)
-      const p = new URLSearchParams(loc.search)
-      const next = p.get('next') || ''
-      try {
-        const r = await api.get('/auth/me/')
-        const isAdmin = Boolean(r.data?.is_staff) || (Array.isArray(r.data?.groups) && r.data.groups.includes('Administrador'))
-        if (next) nav(next)
-        else if (isAdmin) nav('/equipos')
-        else nav('/perfil')
-      } catch {
-        if (next) nav(next)
-        else nav('/perfil')
-      }
+      await login(datos.usuario, datos.password, datos.recordar)
+      await irTrasEntrar()
     } catch (err: any) {
       const data = err?.response?.data
       if (data?.detail) {
         const d = String(data.detail).toLowerCase()
-        if (d.includes('email')) setFieldErrors({ email: data.detail })
-        else if (d.includes('no active account')) setFieldErrors({ general: 'Tu cuenta no está activa. Contacta al administrador.' })
-        else setFieldErrors({ general: data.detail })
-      } else if (Array.isArray(data?.errors)) {
-        setFieldErrors({ password: data.errors[0] })
+        if (d.includes('no active account')) setError('Tu cuenta no está activa. Contacta al administrador.')
+        else setError(String(data.detail))
+      } else if (err?.response?.status === 429) {
+        setError('Demasiados intentos. Espera un minuto y vuelve a probar.')
       } else {
-        setError('Error de autenticación')
+        setError('No coinciden. Revisa tu usuario y tu contraseña.')
       }
     }
   }
 
+  if (verificando) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-app">
+        <div className="flex flex-col items-center gap-4">
+          <span className="w-8 h-8 border-2 border-edge border-t-gold rounded-full animate-spin" />
+          <p className="text-mute text-sm">Verificando tu sesión…</p>
+        </div>
+      </div>
+    )
+  }
+
   return (
-    <div className="min-h-[70vh] flex items-center justify-center bg-white px-4">
-      <motion.form initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }} onSubmit={onSubmit} className="relative w-full max-w-xl md:max-w-2xl sm:p-10 p-8 border rounded-3xl bg-white shadow-md hover:shadow-lg transition-shadow space-y-6">
-        <div className="absolute -top-5 left-6">
-          <div className="px-4 py-1.5 rounded-b-2xl rounded-t-lg bg-[#517ea0] text-white text-sm font-semibold shadow">
-            Login
+    <AuthSplitScreen
+      title="Iniciar sesión"
+      description="Administración y técnicos entran al panel; los clientes, a la tienda."
+      footer={
+        <>
+          ¿No tienes cuenta?{' '}
+          <Link to="/registro" className="font-semibold text-gold hover:underline">
+            Crea una aquí
+          </Link>
+          .
+        </>
+      }
+    >
+      {sesionExpirada && !error && (
+        <AuthItem>
+          <div className="px-4 py-3 rounded-xl bg-gold-soft border border-gold/30 text-sm text-ink">
+            Tu sesión expiró. Vuelve a entrar.
           </div>
-        </div>
-        <div className="flex items-center justify-between gap-3">
-          <div className="space-y-1">
-            <h1 className="text-3xl font-extrabold tracking-tight">Bienvenido</h1>
-            <p className="text-gray-600">Accede con tu correo</p>
-          </div>
-        </div>
+        </AuthItem>
+      )}
 
-        <div className="space-y-4">
-          <div>
-            <input aria-invalid={!!fieldErrors.email} type="text" value={email} onChange={e => setEmail(e.target.value)} placeholder="Correo o usuario" className={`w-full border rounded-full px-3 py-2 ${fieldErrors.email ? 'border-red-500' : ''}`} />
-            {fieldErrors.email && <p className="text-xs text-red-600 mt-1">{fieldErrors.email}</p>}
+      {error && (
+        <AuthItem>
+          <div className="px-4 py-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-600 dark:text-red-400 text-sm">
+            {error}
           </div>
+        </AuthItem>
+      )}
 
-          <div className="flex items-center gap-2">
-            <input aria-invalid={!!fieldErrors.password} type={showPass ? 'text' : 'password'} value={password} onChange={e => setPassword(e.target.value)} placeholder="Contraseña" className={`w-full border rounded-full px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#517ea0] ${fieldErrors.password ? 'border-red-500' : ''}`} />
-            <button type="button" aria-label={showPass ? 'Ocultar contraseña' : 'Ver contraseña'} onClick={() => setShowPass(s => !s)} className="p-2 rounded border hover:bg-gray-50">
-              {showPass ? (
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" className="w-5 h-5">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 3l18 18M10.58 10.58A2 2 0 0112 10c1.1 0 2 .9 2 2 0 .42-.13.81-.35 1.13m-2.54-2.55A2 2 0 0010 12c0 1.1.9 2 2 2 .36 0 .7-.1 1-.28M4.11 7.2C6.05 5.42 8.74 4 12 4c4.77 0 8.88 2.66 10.89 6.5-.57 1.11-1.3 2.12-2.17 3.01M6.53 9.63C5.58 10.5 4.8 11.5 4.22 12.5c2.01 3.84 6.12 6.5 10.89 6.5 1.4 0 2.75-.23 4-.66" />
-                </svg>
-              ) : (
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" className="w-5 h-5">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M2 12s4-8 10-8 10 8 10 8-4 8-10 8S2 12 2 12z" />
-                  <circle cx="12" cy="12" r="3" strokeWidth="2" />
-                </svg>
+      <Form {...form}>
+        <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+          <AuthItem>
+            <FormField
+              control={form.control}
+              name="usuario"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel className="text-mute">Usuario o correo</FormLabel>
+                  <FormControl>
+                    <Input
+                      placeholder="tu usuario o tu correo"
+                      autoComplete="username"
+                      className="h-11 rounded-xl bg-surface-2 border-edge text-ink placeholder:text-mute focus-visible:ring-gold/30"
+                      disabled={enviando}
+                      {...field}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
               )}
+            />
+          </AuthItem>
+
+          <AuthItem>
+            <FormField
+              control={form.control}
+              name="password"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel className="text-mute">Contraseña</FormLabel>
+                  <FormControl>
+                    <div className="relative">
+                      <Input
+                        type={verPass ? 'text' : 'password'}
+                        placeholder="••••••••"
+                        autoComplete="current-password"
+                        className="h-11 rounded-xl bg-surface-2 border-edge pr-12 text-ink placeholder:text-mute focus-visible:ring-gold/30"
+                        disabled={enviando}
+                        {...field}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setVerPass(v => !v)}
+                        aria-label={verPass ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-mute hover:text-gold transition-colors"
+                      >
+                        {verPass ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </button>
+                    </div>
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+          </AuthItem>
+
+          <AuthItem className="flex items-center justify-between">
+            <FormField
+              control={form.control}
+              name="recordar"
+              render={({ field }) => (
+                <FormItem className="flex flex-row items-center space-x-2 space-y-0">
+                  <FormControl>
+                    <Checkbox
+                      checked={field.value}
+                      onCheckedChange={field.onChange}
+                      disabled={enviando}
+                    />
+                  </FormControl>
+                  <FormLabel className="font-normal text-mute cursor-pointer">Recordarme</FormLabel>
+                </FormItem>
+              )}
+            />
+            <Link to="/" className="text-sm font-medium text-mute hover:text-gold transition-colors">
+              ¿Olvidaste tu contraseña?
+            </Link>
+          </AuthItem>
+
+          <AuthItem>
+            <button
+              type="submit"
+              disabled={enviando}
+              className="w-full h-11 rounded-full bg-gold text-gold-on font-bold text-sm hover:opacity-90 active:scale-[0.98] transition-[transform,opacity] duration-150 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            >
+              {enviando && <Loader2 className="h-4 w-4 animate-spin" />}
+              {enviando ? 'Verificando…' : 'Entrar'}
             </button>
-          </div>
-          {fieldErrors.password && <p className="text-xs text-red-600 mt-1">{fieldErrors.password}</p>}
-        </div>
+          </AuthItem>
+        </form>
+      </Form>
 
-        {(error || fieldErrors.general) && <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-red-600 text-sm">{fieldErrors.general || error}</motion.p>}
-        {info && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-[#517ea0] text-sm flex items-center gap-2">
-            <span>{info}</span>
-          </motion.div>
-        )}
-
-        <div className="flex items-center justify-between">
-          <button type="submit" className="px-5 py-2.5 rounded-full bg-gradient-to-r from-[#5488af] to-[#487aa1] text-white hover:shadow-md disabled:opacity-50 w-full sm:w-auto">Entrar</button>
-        </div>
-
-        {/* UI de reenviar en login eliminada según requerimiento */}
-      </motion.form>
-    </div>
+      <AuthItem>
+        <SocialAuthButtons
+          onToken={async access => {
+            setError(undefined)
+            entrarConToken(access, form.getValues('recordar'))
+            await irTrasEntrar()
+          }}
+          onError={setError}
+        />
+      </AuthItem>
+    </AuthSplitScreen>
   )
 }

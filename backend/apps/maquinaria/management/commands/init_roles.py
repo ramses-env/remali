@@ -1,50 +1,60 @@
-from django.core.management.base import BaseCommand
+"""Crea los roles del panel y, opcionalmente, limpia permisos huérfanos.
+
+Los roles son grupos de Django. El control de acceso real (`IsAdminGroupOrStaff`)
+pregunta si el usuario pertenece a 'Administrador'; los permisos finos de Django
+no se usan hoy, pero se asignan para que el admin de Django sea coherente.
+
+Este comando estaba roto: importaba modelos (Orden, ItemOrden…) de cuando la app
+se llamaba 'shop'. De ese renombre quedaron ContentTypes apuntando a modelos que
+ya no existen, y con ellos los permisos de los grupos. `--limpiar` los borra.
+
+Uso:
+    python manage.py init_roles
+    python manage.py init_roles --limpiar     # además, quita los huérfanos
+"""
+from django.apps import apps
 from django.contrib.auth.models import Group, Permission
 from django.contrib.contenttypes.models import ContentType
-from maquinaria.models import Categoria, Cupon, Orden, ItemOrden, Marca, Equipo, ImagenProducto
+from django.core.management.base import BaseCommand
+
+# Apps cuyos permisos administra el panel.
+APPS_PANEL = ['maquinaria', 'inventario', 'refacciones', 'renta', 'ventas', 'cotizaciones', 'empresas', 'facturacion']
+
+ROLES = {
+    'Administrador': 'todo',
+    'Técnico': ['view', 'change'],   # ve y ajusta equipo; no borra ni configura
+}
+
 
 class Command(BaseCommand):
-    help = 'Inicializa roles y permisos: Administrador, Cliente, Almacén'
+    help = 'Crea los roles del panel (Administrador, Técnico) y asigna sus permisos.'
 
-    def handle(self, *args, **options):
-        # Crear grupos
-        admin_group, _ = Group.objects.get_or_create(name='Administrador')
-        client_group, _ = Group.objects.get_or_create(name='Cliente')
-        warehouse_group, _ = Group.objects.get_or_create(name='Almacén')
+    def add_arguments(self, parser):
+        parser.add_argument('--limpiar', action='store_true',
+                            help='Borra ContentTypes y permisos de apps que ya no existen.')
 
-        # Recolectar permisos del app maquinaria
-        maquinaria_models = [Categoria, Cupon, Orden, ItemOrden, Marca, Equipo, ImagenProducto]
-        perms = Permission.objects.filter(content_type__in=[ContentType.objects.get_for_model(m) for m in maquinaria_models])
+    def handle(self, *args, **opts):
+        vivas = {a.label for a in apps.get_app_configs()}
 
-        # Administrador: todos los permisos del app maquinaria
-        admin_group.permissions.set(perms)
+        if opts['limpiar']:
+            huerfanos = ContentType.objects.exclude(app_label__in=vivas)
+            etiquetas = sorted({c.app_label for c in huerfanos})
+            n_perms = Permission.objects.filter(content_type__in=huerfanos).count()
+            n_ct = huerfanos.count()
+            huerfanos.delete()   # arrastra sus permisos y las filas de grupo
+            self.stdout.write(self.style.WARNING(
+                f'Limpiados {n_ct} contenttypes y {n_perms} permisos de apps que ya no existen: '
+                f'{", ".join(etiquetas) or "ninguna"}.'
+            ))
 
-        # Cliente: puede crear órdenes y ver productos/categorías/cupones
-        client_perms = []
-        def add_perm(codename, model):
-            ct = ContentType.objects.get_for_model(model)
-            p = Permission.objects.get(content_type=ct, codename=codename)
-            client_perms.append(p)
-        add_perm('add_orden', Orden)
-        add_perm('add_itemorden', ItemOrden)
-        add_perm('view_equipo', Equipo)
-        add_perm('view_categoria', Categoria)
-        add_perm('view_cupon', Cupon)
-        client_group.permissions.set(client_perms)
+        del_panel = Permission.objects.filter(content_type__app_label__in=APPS_PANEL)
 
-        # Almacén: ajustar inventario y ver productos/categorías
-        warehouse_perms = []
-        def maybe_perm(codename, model):
-            ct = ContentType.objects.get_for_model(model)
-            try:
-                p = Permission.objects.get(content_type=ct, codename=codename)
-                warehouse_perms.append(p)
-            except Permission.DoesNotExist:
-                pass
-        # maybe_perm('adjust_inventory', Equipo) # Custom perm not defined yet
-        maybe_perm('view_equipo', Equipo)
-        maybe_perm('view_categoria', Categoria)
-        Group.objects.filter(name='Almacén').update()
-        warehouse_group.permissions.set(warehouse_perms)
-
-        self.stdout.write(self.style.SUCCESS('Roles y permisos inicializados'))
+        for nombre, alcance in ROLES.items():
+            grupo, creado = Group.objects.get_or_create(name=nombre)
+            permisos = del_panel if alcance == 'todo' else del_panel.filter(
+                codename__regex=r'^(' + '|'.join(alcance) + ')_'
+            )
+            grupo.permissions.set(permisos)
+            self.stdout.write(self.style.SUCCESS(
+                f'{"Creado" if creado else "Actualizado"} rol "{nombre}" con {permisos.count()} permisos.'
+            ))

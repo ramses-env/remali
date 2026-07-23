@@ -11,7 +11,7 @@ class Command(BaseCommand):
             { 'modelo': 'Reloj Minimalista', 'precio_dia': 89.00, 'imagen': '/vite.svg', 'descripcion': 'Diseño minimalista perfecto para cualquier ocasión.' },
         ]
         for p in products:
-            p.setdefault('condicion', 'seminuevo')
+            p.setdefault('condicion', 'seminueva')
             p.setdefault('disponible_venta', True)
             p.setdefault('disponible_renta', True)
             Equipo.objects.get_or_create(modelo=p['modelo'], defaults=p)

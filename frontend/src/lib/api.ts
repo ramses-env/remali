@@ -1,4 +1,6 @@
 import axios from 'axios'
+import { notificarMutacion } from './realtime'
+import { borrarToken, leerToken } from './token'
 
 function normalizeBase(url?: string) {
   let u = (url || '').trim()
@@ -12,9 +14,33 @@ function normalizeBase(url?: string) {
 const api = axios.create({ baseURL: normalizeBase(import.meta.env.VITE_API_URL) })
 
 api.interceptors.request.use(config => {
-  const token = localStorage.getItem('token')
+  const token = leerToken()
   if (token) config.headers.Authorization = `Bearer ${token}`
   return config
 })
+
+// Si el token expira o es inválido (401), limpiar sesión y mandar a login
+api.interceptors.response.use(
+  response => {
+    // Toda mutación exitosa avisa al bus: lo que quedó viejo se recarga solo.
+    notificarMutacion(response.config?.url || '', response.config?.method || '')
+    return response
+  },
+  error => {
+    const status = error?.response?.status
+    const hadToken = Boolean(leerToken())
+    const url: string = error?.config?.url || ''
+    // No redirigir por el propio intento de login
+    const isAuthCall = url.includes('/auth/token') || url.includes('/auth/login')
+    if (status === 401 && hadToken && !isAuthCall) {
+      borrarToken()
+      const path = window.location.pathname
+      if (!path.startsWith('/login')) {
+        window.location.href = `/login?next=${encodeURIComponent(path)}&expired=1`
+      }
+    }
+    return Promise.reject(error)
+  }
+)
 
 export default api

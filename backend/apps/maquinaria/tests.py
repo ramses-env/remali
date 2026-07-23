@@ -1,67 +1,24 @@
-from django.test import TestCase
-import unittest
-from django.core.exceptions import ValidationError
-from .models import Equipo, Categoria, Marca, Orden
-from .serializers import OrdenSerializer
-from django.contrib.auth.models import User, Group
-from rest_framework.test import APIRequestFactory
-from .views import register
+from decimal import Decimal
 
-class InventoryLogicTests(TestCase):
+from django.test import TestCase
+
+from maquinaria.models import Equipo
+
+
+class EquipoPrecioTest(TestCase):
     def setUp(self):
-        self.cat = Categoria.objects.create(nombre='TestCat')
-        self.brand = Marca.objects.create(nombre='Marca')
-        self.e = Equipo.objects.create(
-            modelo='Equipo A',
-            descripcion='',
-            precio_dia=8,
-            categoria=self.cat,
-            marca=self.brand,
-            condicion='seminuevo',
-            estado='disponible'
+        self.equipo = Equipo.objects.create(
+            modelo='CMP-50',
+            precio_dia=Decimal('100'),
+            precio_semana=Decimal('600'),
+            precio_mes=Decimal('2000'),
         )
 
-    def test_order_marks_vendido(self):
-        payload = {
-            'coupon': None,
-            'items': [
-                {'equipo': self.e.id, 'precio': '10.00'}
-            ]
-        }
-        ser = OrdenSerializer(data=payload)
-        self.assertTrue(ser.is_valid(), ser.errors)
-        order = ser.save()
-        self.e.refresh_from_db()
-        self.assertEqual(self.e.estado, 'vendido')
-        self.assertEqual(Orden.objects.count(), 1)
+    def test_get_precio_por_unidad(self):
+        self.assertEqual(self.equipo.get_precio_por_unidad('dia'), Decimal('100'))
+        self.assertEqual(self.equipo.get_precio_por_unidad('semana'), Decimal('600'))
+        self.assertEqual(self.equipo.get_precio_por_unidad('mes'), Decimal('2000'))
+        self.assertIsNone(self.equipo.get_precio_por_unidad('inexistente'))
 
-    def test_sale_blocked_when_not_disponible(self):
-        self.e.estado = 'rentado'
-        self.e.save()
-        payload = {
-            'coupon': None,
-            'items': [
-                {'equipo': self.e.id, 'precio': '10.00'}
-            ]
-        }
-        ser = OrdenSerializer(data=payload)
-        self.assertTrue(ser.is_valid(), ser.errors)
-        with self.assertRaises(ValidationError):
-            ser.save()
-
-@unittest.skip("Registro deshabilitado temporalmente")
-class RegistrationGroupTests(TestCase):
-    def test_register_assigns_cliente_group(self):
-        factory = APIRequestFactory()
-        req = factory.post('/api/auth/register/', {
-            'email': 'c@example.com',
-            'full_name': 'Cliente Uno',
-            'password': 'Testpass123!'
-        }, format='json')
-        resp = register(req)
-        self.assertEqual(resp.status_code, 200)
-        u = User.objects.get(email='c@example.com')
-        g = Group.objects.get(name='Cliente')
-        self.assertTrue(u.groups.filter(id=g.id).exists())
-
-# Create your tests here.
+    def test_estado_resumen_sin_unidades(self):
+        self.assertEqual(self.equipo.estado_resumen, 'Sin stock')

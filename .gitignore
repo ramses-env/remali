@@ -14,8 +14,9 @@ coverage/
 .eslintcache
 .turbo/
 
-# IMPORTANTE: Asegúrate de que NO haya una línea que diga "dist/" o "frontend/dist/" aquí
-# Queremos que Git suba el build de React para que Django lo encuentre.
+# El build del frontend (frontend/dist/) NO se versiona: la imagen de Docker lo
+# reconstruye en la etapa frontend-build (ver Dockerfile) y lo copia a la imagen.
+# Versionarlo solo mete artefactos que quedan obsoletos. Ignorado en frontend/.gitignore.
 
 # Python / Django
 __pycache__/
@@ -46,3 +47,10 @@ env/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# Respaldos de BD (dumps de datos, no se versionan)
+backups/
+
+# Config local de herramientas (Claude Code, etc.)
+.claude/
+test.txt

@@ -5,12 +5,20 @@
     <link rel="icon" type="image/png" href="/favicon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Remali</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet" />
     <script>
       (function() {
         try {
-          localStorage.setItem('theme', 'light');
-          document.documentElement.classList.remove('dark');
-          document.documentElement.style.colorScheme = 'light';
+          var saved = localStorage.getItem('theme');
+          // Diseño REMALI: claro por defecto (el comp es tema claro)
+          var theme = (saved === 'light' || saved === 'dark') ? saved : 'light';
+          document.documentElement.classList.toggle('dark', theme === 'dark');
+          document.documentElement.style.colorScheme = theme;
+          // Acento del dueño: se aplica ANTES de montar React. El perfil llega
+          // por red y tarda; sin esto el panel se pinta dorado y salta a negro.
+          document.documentElement.classList.toggle('tema-dueno', localStorage.getItem('remali_dueno') === '1');
         } catch (e) {}
       })();
     </script>

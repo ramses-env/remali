@@ -17,6 +17,11 @@ import importlib.util
 import dj_database_url
 
 import sys
+try:
+    import pymysql  # Permite usar PyMySQL como reemplazo de MySQLdb
+    pymysql.install_as_MySQLdb()
+except Exception:
+    pass
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -34,16 +39,45 @@ SECRET_KEY = os.environ.get('SECRET_KEY', 'django-insecure-)c$-2&1@^51q88$+47^%6
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.environ.get('DEBUG', 'False') == 'True'
 
-ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", "").split(",") + [
-    "remali.up.railway.app",
-    "localhost",
-    "127.0.0.1"
-]
+def _lista_env(nombre, extra):
+    """Lee una lista separada por comas y le suma los valores fijos.
 
-CSRF_TRUSTED_ORIGINS = os.environ.get("CSRF_TRUSTED_ORIGINS", "https://remali.up.railway.app").split(",") + [
+    Filtra vacíos a propósito: `"".split(",")` devuelve `['']`, y una cadena
+    vacía colada en CORS_ALLOWED_ORIGINS revienta al arrancar.
+    """
+    del_entorno = os.environ.get(nombre, "").split(",")
+    return [v.strip() for v in del_entorno + extra if v and v.strip()]
+
+
+ALLOWED_HOSTS = _lista_env("ALLOWED_HOSTS", [
+    "remali.up.railway.app",
+    "remali.mx",
+    "www.remali.mx",
+    "localhost",
+    "127.0.0.1",
+])
+
+CSRF_TRUSTED_ORIGINS = _lista_env("CSRF_TRUSTED_ORIGINS", [
+    "https://remali.up.railway.app",
+    "https://remali.mx",
+    "https://www.remali.mx",
     "http://localhost:5173",
     "http://127.0.0.1:5173",
-]
+])
+
+# Sitio en construcción: tapa todo el tráfico público con una sola página. Se
+# apaga poniendo la variable en False (o quitándola) y volviendo a desplegar; no
+# hace falta tocar código ni reconstruir la imagen.
+MODO_CONSTRUCCION = os.environ.get("MODO_CONSTRUCCION", "False") == "True"
+
+# Entrar con Google. El client ID es público (viaja en el HTML del botón), por eso
+# vive aquí con valor por defecto; el client secret NO se usa en este flujo: el
+# navegador recibe un ID token firmado y el backend lo verifica contra las llaves
+# públicas de Google. Si algún día se rota el cliente OAuth, basta la variable.
+GOOGLE_CLIENT_ID = os.environ.get(
+    "GOOGLE_CLIENT_ID",
+    "796001180849-c0i77104ckd95n1rdortq92iffg47ahj.apps.googleusercontent.com",
+)
 
 
 # Application definition
@@ -58,14 +92,21 @@ INSTALLED_APPS = [
     'rest_framework',
     'corsheaders',
     'maquinaria',
+    'inventario',
+    'refacciones',
+    'ventas',
+    'renta',
+    'empresas',
+    'facturacion',
+    'cotizaciones',
 ]
+
 
 if importlib.util.find_spec('cloudinary') and importlib.util.find_spec('cloudinary_storage'):
     INSTALLED_APPS += ['cloudinary', 'cloudinary_storage']
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
-    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -75,7 +116,16 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 
-STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
+_has_whitenoise = importlib.util.find_spec('whitenoise') is not None
+if _has_whitenoise:
+    MIDDLEWARE.insert(1, 'whitenoise.middleware.WhiteNoiseMiddleware')
+    STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
+
+# Va DESPUÉS del bloque de WhiteNoise para quedar delante de él en la lista.
+# Importa: WhiteNoise sirve el index.html del SPA en "/" y corta la cadena ahí,
+# así que un middleware colocado más abajo tapa todo el sitio menos la portada,
+# que es justo la URL que más se visita.
+MIDDLEWARE.insert(1, 'server.construccion.ModoConstruccionMiddleware')
 
 
 ROOT_URLCONF = 'server.urls'
@@ -83,7 +133,7 @@ ROOT_URLCONF = 'server.urls'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [BASE_DIR.parent / 'frontend' / 'dist'],
+        'DIRS': [BASE_DIR / 'templates', BASE_DIR.parent / 'frontend' / 'dist'],
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
@@ -102,7 +152,6 @@ WSGI_APPLICATION = 'server.wsgi.application'
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
 
-import os
 from dotenv import load_dotenv
 from django.core.exceptions import ImproperlyConfigured
 load_dotenv(os.path.join(BASE_DIR.parent, '.env'))
@@ -200,10 +249,15 @@ STORAGES = {
     "default": {
         "BACKEND": "django.core.files.storage.FileSystemStorage",
     },
-    "staticfiles": {
-        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
-    },
 }
+if _has_whitenoise:
+    STORAGES["staticfiles"] = {
+        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+    }
+else:
+    STORAGES["staticfiles"] = {
+        "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+    }
 
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
@@ -233,19 +287,75 @@ if importlib.util.find_spec('cloudinary') and importlib.util.find_spec('cloudina
         )
 
 REST_FRAMEWORK = {
-    'DEFAULT_PERMISSION_CLASSES': ['rest_framework.permissions.AllowAny'],
-    'DEFAULT_AUTHENTICATION_CLASSES': (
-        ['rest_framework_simplejwt.authentication.JWTAuthentication']
-        if __import__('importlib').import_module('importlib').util.find_spec('rest_framework_simplejwt')
-        else []
-    ),
+    # Seguro por defecto: toda vista exige sesión salvo que declare explícitamente
+    # AllowAny (login, alta de contacto) o lectura pública vía get_permissions (catálogo).
+    'DEFAULT_PERMISSION_CLASSES': ['rest_framework.permissions.IsAuthenticated'],
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'rest_framework_simplejwt.authentication.JWTAuthentication',
+    ],
     'DEFAULT_FILTER_BACKENDS': [
         'rest_framework.filters.SearchFilter',
         'rest_framework.filters.OrderingFilter',
     ],
+    # Solo se aplica donde la vista lo pide (throttle_classes). Los endpoints
+    # públicos sin sesión necesitan techo: cada solicitud de cotización dispara
+    # correos a los avisos, así que sin límite es un buzón inundado a un clic.
+    'DEFAULT_THROTTLE_RATES': {
+        'solicitud_publica': '10/hour',   # cotizaciones que manda un mismo visitante
+        'anon_publico': '120/hour',       # navegación anónima del catálogo
+        'subida_evidencia': '200/hour',   # fotos de entrega/devolución por técnico
+        'login': '10/min',                # intentos de login por IP (anti fuerza bruta)
+        'registro': '5/hour',             # altas de cuenta de cliente por IP
+    },
 }
 
-CORS_ALLOW_ALL_ORIGINS = True
+# JWT: tokens de acceso de larga duración para que la sesión del admin no expire a los 5 min
+from datetime import timedelta
+SIMPLE_JWT = {
+    'ACCESS_TOKEN_LIFETIME': timedelta(hours=12),
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
+}
+
+# ─────────────────────────────────────────────
+#  CACHE — listo para Redis
+#  Si REDIS_URL está definido se usa Redis; si no, cache local en memoria.
+#  En el futuro, esta misma URL sirve para Celery y Channels.
+# ─────────────────────────────────────────────
+REDIS_URL = os.environ.get('REDIS_URL', '')
+if REDIS_URL:
+    CACHES = {
+        'default': {
+            'BACKEND': 'django.core.cache.backends.redis.RedisCache',
+            'LOCATION': REDIS_URL,
+        }
+    }
+    # Sesiones servidas desde cache (Redis) cuando esté disponible
+    SESSION_ENGINE = 'django.contrib.sessions.backends.cache'
+    SESSION_CACHE_ALIAS = 'default'
+else:
+    CACHES = {
+        'default': {
+            'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+            'LOCATION': 'remali-locmem',
+        }
+    }
+
+# Cuando se integre Celery/Channels, reutilizar REDIS_URL como broker:
+#   CELERY_BROKER_URL = REDIS_URL
+#   CHANNEL_LAYERS = {'default': {'BACKEND': 'channels_redis.core.RedisChannelLayer',
+#                                 'CONFIG': {'hosts': [REDIS_URL]}}}
+
+# Estaba en CORS_ALLOW_ALL_ORIGINS = True: cualquier sitio del mundo podía llamar
+# a la API desde el navegador de un usuario. En realidad casi no hace falta CORS —
+# en producción Django sirve el SPA desde el mismo origen y en desarrollo Vite hace
+# de proxy—, así que basta la lista de orígenes propios.
+CORS_ALLOWED_ORIGINS = _lista_env("CORS_ALLOWED_ORIGINS", [
+    "https://remali.up.railway.app",
+    "https://remali.mx",
+    "https://www.remali.mx",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+])
 
 
 # Default primary key field type
@@ -261,7 +371,7 @@ EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD', '')
 EMAIL_USE_TLS = os.environ.get('EMAIL_USE_TLS', '1') == '1'
 EMAIL_USE_SSL = os.environ.get('EMAIL_USE_SSL', '0') == '1'
 EMAIL_TIMEOUT = int(os.environ.get('EMAIL_TIMEOUT', '10'))
-DEFAULT_FROM_EMAIL = os.environ.get('DEFAULT_FROM_EMAIL', 'no-reply@shoping-fal.local')
+DEFAULT_FROM_EMAIL = os.environ.get('DEFAULT_FROM_EMAIL', 'no-reply@remali.up.railway.app')
 
 
 
@@ -280,3 +390,11 @@ EMAIL_VERIFICATION_TIMEOUT = int(os.environ.get('EMAIL_VERIFICATION_TIMEOUT', '1
 
 if EMAIL_USE_SSL:
     EMAIL_USE_TLS = False
+
+# ─────────────────────────────────────────────
+#  Aviso a los respaldos de solicitudes de cotización del cliente
+#  Cada solicitud nueva del cliente les llega de INMEDIATO por correo (además de
+#  la notificación en el panel) para que puedan contactarlo manualmente.
+#  ESCALACION_EMAILS = correos de los respaldos (separados por coma).
+# ─────────────────────────────────────────────
+ESCALACION_EMAILS = [e.strip() for e in os.environ.get('ESCALACION_EMAILS', '').split(',') if e.strip()]

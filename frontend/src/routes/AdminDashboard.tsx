@@ -176,8 +176,8 @@ export default function AdminDashboard() {
               onChange={e => setP({ ...p, condicion: e.target.value })}
             >
               <option value="">Condición</option>
-              <option value="nuevo">Nuevo</option>
-              <option value="seminuevo">Seminuevo</option>
+              <option value="nueva">Nuevo</option>
+              <option value="seminueva">Seminuevo</option>
             </select>
 
             <input 
