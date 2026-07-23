@@ -39,6 +39,31 @@ export function entraAlPanel(yo: Yo | null | undefined): boolean {
 }
 
 /**
+ * A dónde va cada quien al quedar autenticado.
+ *
+ * El login es el mismo para los tres públicos; lo que cambia es el destino:
+ * dueño, administrador y técnico operan en el panel; el cliente (nivel 0) tiene
+ * cuenta pero su lugar es la tienda.
+ */
+export function destinoSegun(yo: Yo | null | undefined): string {
+  return entraAlPanel(yo) ? '/dashboard' : '/'
+}
+
+/**
+ * Destino final tomando en cuenta el `next` con el que el guard mandó al login.
+ *
+ * El `next` NO se obedece a ciegas: un cliente que llega con `next=/dashboard`
+ * entraría, el guard lo rechazaría y lo devolvería al login con el mismo `next`,
+ * en bucle. Si no entra al panel, una ruta del panel no es destino válido.
+ */
+export function destinoTrasEntrar(yo: Yo | null | undefined, next?: string | null): string {
+  const base = destinoSegun(yo)
+  if (!next) return base
+  if (!entraAlPanel(yo) && next.startsWith('/dashboard')) return base
+  return next
+}
+
+/**
  * Guarda lo que el panel necesita ANTES de pintarse: el acento del dueño y la
  * sección donde abre. Ambos dependen del rol, y el perfil llega por red.
  */

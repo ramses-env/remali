@@ -1,13 +1,38 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate, useLocation, Link } from 'react-router-dom'
-import { consultarYo, entraAlPanel, recordarAcceso } from '../lib/acceso'
+import { consultarYo, destinoTrasEntrar, recordarAcceso } from '../lib/acceso'
 import { useAuth } from '../store/auth'
 import ThemeToggle from '../components/ThemeToggle'
 
 export default function Login() {
-  const { login } = useAuth()
+  const { token, login, logout } = useAuth()
   const nav = useNavigate()
   const loc = useLocation()
+  const next = new URLSearchParams(loc.search).get('next') || ''
+
+  /* Con sesión abierta el formulario no se pinta: se manda a cada quien a su
+     lugar. Solo al montar, porque lo que importa es la sesión con la que se
+     llegó; el login posterior navega por su cuenta. */
+  const [verificando, setVerificando] = useState(() => Boolean(token))
+  useEffect(() => {
+    if (!token) return
+    let vivo = true
+    consultarYo()
+      .then(yo => {
+        if (!vivo) return
+        recordarAcceso(yo)
+        nav(destinoTrasEntrar(yo, next), { replace: true })
+      })
+      .catch(() => {
+        // Token vencido o cuenta desactivada: se limpia y se muestra el formulario,
+        // en vez de dejar al usuario atorado en una pantalla que no avanza.
+        if (!vivo) return
+        logout()
+        setVerificando(false)
+      })
+    return () => { vivo = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -25,17 +50,14 @@ export default function Login() {
     setLoading(true)
     try {
       await login(email, password)
-      const next = new URLSearchParams(loc.search).get('next') || ''
       try {
         const yo = await consultarYo()
         // Antes de navegar: así el panel abre de una vez con el acento y la
         // sección que le tocan, sin pasar por los de la cuenta anterior.
         recordarAcceso(yo)
-        if (next) nav(next)
-        else if (entraAlPanel(yo)) nav('/dashboard')
-        else nav('/')
+        nav(destinoTrasEntrar(yo, next), { replace: true })
       } catch {
-        nav(next || '/')
+        nav(next || '/', { replace: true })
       }
     } catch (err: any) {
       const data = err?.response?.data
@@ -49,6 +71,17 @@ export default function Login() {
     } finally {
       setLoading(false)
     }
+  }
+
+  if (verificando) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-app">
+        <div className="flex flex-col items-center gap-4">
+          <span className="w-8 h-8 border-2 border-edge border-t-gold rounded-full animate-spin" />
+          <p className="text-mute text-sm">Verificando tu sesión…</p>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -76,7 +109,7 @@ export default function Login() {
         </Link>
 
         <div className="relative z-10 max-w-md">
-          <p className="stagger-item text-gold text-[11px] font-mono uppercase tracking-[0.3em] mb-5">Panel administrativo</p>
+          <p className="stagger-item text-gold text-[11px] font-mono uppercase tracking-[0.3em] mb-5">Acceso a tu cuenta</p>
           <h2 className="stagger-item text-4xl xl:text-5xl font-black leading-[1.05] text-white">
             Controla tu<br />maquinaria desde<br />un solo lugar.
           </h2>
@@ -112,6 +145,7 @@ export default function Login() {
           <div className="stagger-item mb-8">
             <h1 className="text-3xl font-black text-ink tracking-tight">Iniciar sesión</h1>
             <p className="text-mute text-sm mt-2">Bienvenido de vuelta. Accede con tu cuenta.</p>
+            <p className="text-mute text-xs mt-1.5">Administración y técnicos entran al panel; los clientes, a la tienda.</p>
           </div>
 
           {error && (
