@@ -9,6 +9,7 @@ import Dashboard from './routes/Dashboard'
 import Footer from './components/Footer'
 import ErrorBoundary from './components/ErrorBoundary'
 import RequireAdmin from './components/RequireAdmin'
+import RouteLoader from './components/RouteLoader'
 import { PriceUnitProvider } from './store/priceUnit'
 import { I18nProvider } from './lib/i18n'
 
@@ -19,6 +20,7 @@ function App() {
 
   return (
     <I18nProvider>
+      <RouteLoader />
       {bare ? (
         <ErrorBoundary>
           <Routes>

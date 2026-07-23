@@ -1,46 +1,138 @@
+/* Overlay de carga a pantalla completa. Lo dispara RouteLoader en cada cambio
+   de ruta. El scrim sigue el tema (antes era blanco fijo: destellaba en oscuro). */
 .loader-overlay {
   position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background: rgba(255, 255, 255, 0.8);
+  inset: 0;
   z-index: 40;
   display: grid;
   place-items: center;
+  /* Scrim neutro: funciona en claro, oscuro y en la tienda pública (que fuerza
+     fondo oscuro aunque el tema sea claro), sin destello pálido. */
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(2px);
 }
 
-.loader {
-  --color: #a5a5b0;
-  --size: 70px;
-  width: var(--size);
-  height: var(--size);
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 5px;
+/* ── Spinner de 5 cuadros ──────────────────────────────────────────────
+   Base: Uiverse.io (Nawsome). Adaptado: los cuadros toman el acento del panel
+   (--c-gold → dorado/amarillo, y negro/blanco para el Dueño) en vez de un naranja
+   fijo, e IDs → clases para poder montar más de uno sin colisionar. */
+.loadingspinner {
+  --square: 26px;
+  --offset: 30px;
+  --duration: 2.4s;
+  --delay: 0.2s;
+  --timing-function: ease-in-out;
+  --in-duration: 0.4s;
+  --in-delay: 0.1s;
+  --in-timing-function: ease-out;
+  --square-color: var(--c-gold);   /* cámbialo aquí si quieres el naranja original */
+  width: calc(3 * var(--offset) + var(--square));
+  height: calc(2 * var(--offset) + var(--square));
+  position: relative;
+  margin: 0;
 }
 
-.loader span {
-  width: 100%;
-  height: 100%;
-  background-color: var(--color);
-  animation: keyframes-blink 0.6s alternate infinite linear;
+.loadingspinner .sq {
+  position: absolute;
+  width: var(--square);
+  height: var(--square);
+  border-radius: 3px;
+  background: var(--square-color);
 }
 
-.loader span:nth-child(1) { animation-delay: 0ms; }
-.loader span:nth-child(2) { animation-delay: 200ms; }
-.loader span:nth-child(3) { animation-delay: 300ms; }
-.loader span:nth-child(4) { animation-delay: 400ms; }
-.loader span:nth-child(5) { animation-delay: 500ms; }
-.loader span:nth-child(6) { animation-delay: 600ms; }
+.loadingspinner .sq1 {
+  left: calc(0 * var(--offset));
+  top: calc(0 * var(--offset));
+  animation: square1 var(--duration) var(--delay) var(--timing-function) infinite,
+             squarefadein var(--in-duration) calc(1 * var(--in-delay)) var(--in-timing-function) both;
+}
 
-@keyframes keyframes-blink {
-  0% {
-    opacity: 0.3;
-    transform: scale(0.5) rotate(5deg);
-  }
-  50% {
-    opacity: 1;
-    transform: scale(1);
-  }
+.loadingspinner .sq2 {
+  left: calc(0 * var(--offset));
+  top: calc(1 * var(--offset));
+  animation: square2 var(--duration) var(--delay) var(--timing-function) infinite,
+             squarefadein var(--in-duration) calc(1 * var(--in-delay)) var(--in-timing-function) both;
+}
+
+.loadingspinner .sq3 {
+  left: calc(1 * var(--offset));
+  top: calc(1 * var(--offset));
+  animation: square3 var(--duration) var(--delay) var(--timing-function) infinite,
+             squarefadein var(--in-duration) calc(2 * var(--in-delay)) var(--in-timing-function) both;
+}
+
+.loadingspinner .sq4 {
+  left: calc(2 * var(--offset));
+  top: calc(1 * var(--offset));
+  animation: square4 var(--duration) var(--delay) var(--timing-function) infinite,
+             squarefadein var(--in-duration) calc(3 * var(--in-delay)) var(--in-timing-function) both;
+}
+
+.loadingspinner .sq5 {
+  left: calc(3 * var(--offset));
+  top: calc(1 * var(--offset));
+  animation: square5 var(--duration) var(--delay) var(--timing-function) infinite,
+             squarefadein var(--in-duration) calc(4 * var(--in-delay)) var(--in-timing-function) both;
+}
+
+@keyframes square1 {
+  0%   { left: calc(0 * var(--offset)); top: calc(0 * var(--offset)); }
+  8.333% { left: calc(0 * var(--offset)); top: calc(1 * var(--offset)); }
+  100% { left: calc(0 * var(--offset)); top: calc(1 * var(--offset)); }
+}
+
+@keyframes square2 {
+  0%      { left: calc(0 * var(--offset)); top: calc(1 * var(--offset)); }
+  8.333%  { left: calc(0 * var(--offset)); top: calc(2 * var(--offset)); }
+  16.67%  { left: calc(1 * var(--offset)); top: calc(2 * var(--offset)); }
+  25.00%  { left: calc(1 * var(--offset)); top: calc(1 * var(--offset)); }
+  83.33%  { left: calc(1 * var(--offset)); top: calc(1 * var(--offset)); }
+  91.67%  { left: calc(1 * var(--offset)); top: calc(0 * var(--offset)); }
+  100%    { left: calc(0 * var(--offset)); top: calc(0 * var(--offset)); }
+}
+
+@keyframes square3 {
+  0%,100% { left: calc(1 * var(--offset)); top: calc(1 * var(--offset)); }
+  16.67%  { left: calc(1 * var(--offset)); top: calc(1 * var(--offset)); }
+  25.00%  { left: calc(1 * var(--offset)); top: calc(0 * var(--offset)); }
+  33.33%  { left: calc(2 * var(--offset)); top: calc(0 * var(--offset)); }
+  41.67%  { left: calc(2 * var(--offset)); top: calc(1 * var(--offset)); }
+  66.67%  { left: calc(2 * var(--offset)); top: calc(1 * var(--offset)); }
+  75.00%  { left: calc(2 * var(--offset)); top: calc(2 * var(--offset)); }
+  83.33%  { left: calc(1 * var(--offset)); top: calc(2 * var(--offset)); }
+  91.67%  { left: calc(1 * var(--offset)); top: calc(1 * var(--offset)); }
+}
+
+@keyframes square4 {
+  0%      { left: calc(2 * var(--offset)); top: calc(1 * var(--offset)); }
+  33.33%  { left: calc(2 * var(--offset)); top: calc(1 * var(--offset)); }
+  41.67%  { left: calc(2 * var(--offset)); top: calc(2 * var(--offset)); }
+  50.00%  { left: calc(3 * var(--offset)); top: calc(2 * var(--offset)); }
+  58.33%  { left: calc(3 * var(--offset)); top: calc(1 * var(--offset)); }
+  100%    { left: calc(3 * var(--offset)); top: calc(1 * var(--offset)); }
+}
+
+@keyframes square5 {
+  0%      { left: calc(3 * var(--offset)); top: calc(1 * var(--offset)); }
+  50.00%  { left: calc(3 * var(--offset)); top: calc(1 * var(--offset)); }
+  58.33%  { left: calc(3 * var(--offset)); top: calc(0 * var(--offset)); }
+  66.67%  { left: calc(2 * var(--offset)); top: calc(0 * var(--offset)); }
+  75.00%  { left: calc(2 * var(--offset)); top: calc(1 * var(--offset)); }
+  100%    { left: calc(2 * var(--offset)); top: calc(1 * var(--offset)); }
+}
+
+@keyframes squarefadein {
+  0%   { transform: scale(0.75); opacity: 0; }
+  100% { transform: scale(1);    opacity: 1; }
+}
+
+/* Accesibilidad: sin baile de cuadros para quien pide menos movimiento
+   (PRODUCT.md). Se queda un pulso suave que sigue comunicando "cargando". */
+@media (prefers-reduced-motion: reduce) {
+  .loadingspinner .sq { animation: squarepulse 1.4s ease-in-out infinite; }
+}
+
+@keyframes squarepulse {
+  0%, 100% { opacity: 0.4; }
+  50%      { opacity: 1; }
 }
