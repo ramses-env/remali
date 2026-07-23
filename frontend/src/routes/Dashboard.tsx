@@ -2801,13 +2801,26 @@ function RentasAdmin({ reload, notify }: { reload: () => void; notify: (m: strin
                   </td>
                   <td className="px-5 py-3 text-right">
                     <div className="flex items-center justify-end gap-2">
-                      <button onClick={() => setVerRenta(r)} title="Ver detalle de la renta" className="inline-flex items-center gap-1.5 px-3 h-8 rounded-lg border border-edge text-mute text-xs font-semibold hover:text-ink hover:border-ink/30 transition-colors">
+                      <button onClick={() => setVerRenta(r)} title="Ver detalle de la renta" className="inline-flex items-center gap-1.5 px-2.5 h-8 rounded-lg border border-edge text-mute text-xs font-semibold hover:text-ink hover:border-ink/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/20 transition-colors">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
                         Ver
                       </button>
-                      <button onClick={() => setTicketId(r.id)} title="Ver / imprimir comprobante" className="px-3 h-8 rounded-lg border border-edge text-mute text-xs font-semibold hover:text-gold hover:border-gold/40 transition-colors">🖨 Ticket</button>
-                      {estado === 'activa' && <button onClick={() => devolver(r)} className="px-3 h-8 rounded-lg border border-blue-500/30 text-blue-500 text-xs font-semibold hover:bg-blue-500/10 transition-colors">Marcar devuelto</button>}
-                      {(estado === 'activa' || estado === 'reservada') && <button onClick={() => cancelar(r)} className="px-3 h-8 rounded-lg border border-red-500/30 text-red-500 text-xs font-semibold hover:bg-red-500/10 transition-colors">Cancelar</button>}
+                      <button onClick={() => setTicketId(r.id)} title="Ver / imprimir comprobante" className="inline-flex items-center gap-1.5 px-2.5 h-8 rounded-lg border border-edge text-mute text-xs font-semibold hover:text-ink hover:border-ink/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/20 transition-colors">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+                        Ticket
+                      </button>
+                      {estado === 'activa' && (
+                        <button onClick={() => devolver(r)} title="Marcar la renta como devuelta" className="inline-flex items-center gap-1.5 px-2.5 h-8 rounded-lg border border-renta/30 text-renta text-xs font-semibold hover:bg-renta/10 hover:border-renta/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-renta/30 transition-colors">
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 14 4 9 9 4"/><path d="M20 20v-7a4 4 0 0 0-4-4H4"/></svg>
+                          Marcar devuelto
+                        </button>
+                      )}
+                      {(estado === 'activa' || estado === 'reservada') && (
+                        <button onClick={() => cancelar(r)} title="Cancelar la renta" className="inline-flex items-center gap-1.5 px-2.5 h-8 rounded-lg border border-red-500/30 text-red-600 dark:text-red-400 text-xs font-semibold hover:bg-red-500/10 hover:border-red-500/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/30 transition-colors">
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                          Cancelar
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -3137,8 +3150,14 @@ function VentasAdmin({ ventas, reload, notify }: { ventas: Venta[]; reload: () =
                         {v.iva && <p className="text-[10px] text-mute">IVA ${Number(v.iva).toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>}
                         {v.estado === 'cancelada' && <p className="text-[10px] text-red-500 font-semibold uppercase">Cancelada</p>}
                       </div>
-                      <button onClick={() => setTicketId(v.id)} title="Ver / imprimir ticket" className="w-8 h-8 rounded-lg border border-edge text-mute hover:text-gold hover:border-gold/40 transition-colors flex items-center justify-center shrink-0">🖨</button>
-                      {v.estado !== 'cancelada' && <button onClick={() => cancelar(v)} title="Cancelar venta" className="w-8 h-8 rounded-lg border border-red-500/30 text-red-500 hover:bg-red-500/10 transition-colors flex items-center justify-center shrink-0">✕</button>}
+                      <button onClick={() => setTicketId(v.id)} title="Ver / imprimir ticket" aria-label="Ver o imprimir ticket" className="w-8 h-8 rounded-lg border border-edge text-mute hover:text-ink hover:border-ink/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/20 transition-colors flex items-center justify-center shrink-0">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+                      </button>
+                      {v.estado !== 'cancelada' && (
+                        <button onClick={() => cancelar(v)} title="Cancelar venta" aria-label="Cancelar venta" className="w-8 h-8 rounded-lg border border-red-500/30 text-red-600 dark:text-red-400 hover:bg-red-500/10 hover:border-red-500/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/30 transition-colors flex items-center justify-center shrink-0">
+                          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>
