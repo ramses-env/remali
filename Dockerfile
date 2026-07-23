@@ -32,8 +32,14 @@ COPY --from=frontend-build /app/frontend/dist /app/frontend/dist
 # Entramos a la carpeta de Django para ejecutarlo
 WORKDIR /app/backend
 
-# Creamos los archivos estáticos
-RUN python manage.py collectstatic --noinput
+# Creamos los archivos estáticos.
+#
+# --skip-checks es obligatorio aquí, no un adorno: los checks de Django con MySQL
+# se conectan a la base para deducir tipos de columna, y esto corre en tiempo de
+# BUILD, cuando la red privada de Railway (*.railway.internal) todavía no existe.
+# Sin esto el build muere con "Unknown server host 'mysql.railway.internal'".
+# collectstatic en sí no necesita la base para nada.
+RUN python manage.py collectstatic --noinput --skip-checks
 
 # Arrancamos el servidor.
 #
@@ -43,7 +49,13 @@ RUN python manage.py collectstatic --noinput
 #
 # WEB_CONCURRENCY y WEB_THREADS se pueden ajustar por variable de entorno sin
 # reconstruir la imagen: si el plan tiene poca RAM, baja WEB_CONCURRENCY a 1.
-CMD ["sh", "-c", "python manage.py migrate && PYTHONPATH=. gunicorn server.wsgi:application \
+# El migrate NO tumba el arranque si falla. Antes iba con `&&`: si la base no
+# respondía, gunicorn nunca arrancaba y el dominio no mostraba absolutamente
+# nada. La página de "en construcción" está hecha para funcionar sin base, así
+# que es mejor servir algo y dejar el error a la vista en los logs que dejar el
+# sitio caído. Cuando se apague el modo construcción, una base rota se nota de
+# inmediato porque todo responde error.
+CMD ["sh", "-c", "python manage.py migrate --skip-checks || echo '>>> AVISO: migrate falló (¿base no disponible?). Arranco igual: la página de construcción no necesita base.'; PYTHONPATH=. gunicorn server.wsgi:application \
   --bind 0.0.0.0:${PORT:-8080} \
   --worker-class gthread \
   --workers ${WEB_CONCURRENCY:-2} \
