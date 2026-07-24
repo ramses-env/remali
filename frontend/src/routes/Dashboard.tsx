@@ -5774,9 +5774,27 @@ function UbicacionesAdmin({ notify }: { notify: (m: string, t?: 'ok' | 'err') =>
       {/* Un resumen de una línea, no un tablero. El técnico quiere el número, no gráficas. */}
       <div className="bg-surface border border-edge rounded-2xl px-5 sm:px-6 py-5">
         {cargando ? (
-          <p className="text-sm text-mute">Cargando tus tareas…</p>
+          // Esqueleto con la forma del resumen (línea + dos chips): el técnico ve
+          // lo que va a llegar y la espera se siente más corta que un "Cargando…".
+          <div aria-busy="true" aria-label="Cargando tu jornada">
+            <div className="h-4 w-2/3 rounded-md bg-surface-2 animate-pulse" />
+            <div className="flex gap-2 mt-3.5">
+              <div className="h-6 w-24 rounded-full bg-surface-2 animate-pulse" />
+              <div className="h-6 w-20 rounded-full bg-surface-2 animate-pulse" />
+            </div>
+          </div>
         ) : resumen.total === 0 ? (
-          <p className="text-sm text-ink font-semibold">Sin pendientes por ahora. Todo entregado. 👍</p>
+          // Vacío que dice qué significa estar en cero, con un icono en verde
+          // "disponible". Sin emoji.
+          <div className="flex items-center gap-3.5">
+            <span className="shrink-0 w-10 h-10 rounded-full grid place-items-center bg-libre/12 text-libre">
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>
+            </span>
+            <div>
+              <p className="text-[15px] font-black text-ink leading-tight">Vas al día</p>
+              <p className="text-[13px] text-mute mt-0.5">Sin entregas, recolecciones ni reparaciones pendientes.</p>
+            </div>
+          </div>
         ) : (
           <>
             <p className="text-[15px] text-ink">
@@ -5799,8 +5817,10 @@ function UbicacionesAdmin({ notify }: { notify: (m: string, t?: 'ok' | 'err') =>
       ))}
 
       {/* Próximas: se agenda, no urge. Colapsadas visualmente. */}
+      {/* space-y-2.5 en el contenedor: las próximas se apilaban pegadas, sin el
+          gap que sí tienen las pendientes por vivir en el contenedor de arriba. */}
       {proximas.length > 0 && (
-        <div className="pt-2">
+        <div className="pt-2 space-y-2.5">
           <p className="text-[12px] font-bold text-mute uppercase tracking-wide px-1 mb-2">Próximas ({proximas.length})</p>
           {proximas.map((t, i) => (
             <TareaCard key={`prox-${t.renta_id}-${i}`} t={t} atenuada
@@ -5835,8 +5855,10 @@ function TareaCard({ t, atenuada, onEntregar, onReparar }: {
   const esCampo = t.tipo === 'entregar' || t.tipo === 'recoger'
   const fotos = t.tipo === 'recoger' ? (t.evidencias?.devolucion ?? 0) : (t.evidencias?.entrega ?? 0)
 
+  // Borde rojo tenue solo si está vencida: dirige el ojo a lo urgente sin pintar
+  // todo el card (el ruido cansa). Borde completo, no franja lateral.
   return (
-    <div className={`bg-surface border border-edge rounded-2xl overflow-hidden ${atenuada ? 'opacity-70' : ''}`}>
+    <div className={`bg-surface border rounded-2xl overflow-hidden ${t.urgencia === 'vencida' ? 'border-red-500/35' : 'border-edge'} ${atenuada ? 'opacity-70' : ''}`}>
       <div className="px-5 sm:px-6 py-4">
         <div className="flex items-start gap-3.5">
           <span className={`shrink-0 w-11 h-11 rounded-full grid place-items-center ${meta.anillo}`}>
@@ -5871,13 +5893,13 @@ function TareaCard({ t, atenuada, onEntregar, onReparar }: {
       {/* Barra de acciones: llamar / mapa a la izquierda, la acción principal a la derecha */}
       <div className="px-5 sm:px-6 py-3 bg-surface-2/40 border-t border-edge flex items-center gap-2">
         {esCampo && tel && (
-          <a href={`tel:${tel}`} aria-label="Llamar" className="shrink-0 w-9 h-9 rounded-lg grid place-items-center border border-edge bg-surface text-ink hover:border-gold/40 transition-colors">
+          <a href={`tel:${tel}`} aria-label="Llamar" className="shrink-0 w-9 h-9 rounded-lg grid place-items-center border border-edge bg-surface text-ink hover:border-gold/40 hover:text-gold active:scale-95 transition-[transform,border-color,color] duration-150 motion-reduce:active:scale-100">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.9"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a1 1 0 0 1-1 1A16 16 0 0 1 4 5a1 1 0 0 1 1-1z" /></svg>
           </a>
         )}
         {esCampo && (
           <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(t.lugar || '')}`} target="_blank" rel="noopener noreferrer" aria-label="Cómo llegar"
-            className="shrink-0 w-9 h-9 rounded-lg grid place-items-center border border-edge bg-surface text-ink hover:border-gold/40 transition-colors">
+            className="shrink-0 w-9 h-9 rounded-lg grid place-items-center border border-edge bg-surface text-ink hover:border-gold/40 hover:text-gold active:scale-95 transition-[transform,border-color,color] duration-150 motion-reduce:active:scale-100">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.9"><path d="M12 21s7-5.5 7-11a7 7 0 1 0-14 0c0 5.5 7 11 7 11z" /><circle cx="12" cy="10" r="2.5" /></svg>
           </a>
         )}
