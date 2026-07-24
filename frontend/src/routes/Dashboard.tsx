@@ -787,7 +787,10 @@ export default function Dashboard() {
       {/* ─── TOPBAR ─── */}
       <div className="flex-none px-2 pt-2">
         <div className="h-[68px] bg-surface border border-edge rounded-[18px] shadow-[0_1px_3px_rgba(33,29,22,0.04)] flex items-center gap-2 sm:gap-3 px-3 sm:px-5">
-          <button onClick={() => setSidebarOpen(true)} className="lg:hidden w-9 h-9 rounded-lg flex items-center justify-center hover:bg-surface-2 text-ink shrink-0" aria-label="Abrir menú">
+          {/* El técnico no ve el hamburguesa en celular: ahí tiene el dock abajo
+              con sus tres secciones. Entre 768 y 1024 (tablet, sin dock) sí lo ve.
+              Los demás roles, sin cambios (visible hasta lg). */}
+          <button onClick={() => setSidebarOpen(true)} className={`${puede?.nivel === 1 ? 'hidden md:flex' : 'flex'} lg:hidden w-9 h-9 rounded-lg items-center justify-center hover:bg-surface-2 text-ink shrink-0`} aria-label="Abrir menú">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" d="M4 6h16M4 12h16M4 18h16" /></svg>
           </button>
           <Link to="/" className="flex items-center gap-2 shrink-0">

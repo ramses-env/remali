@@ -669,23 +669,48 @@ def dashboard_metrics(request):
 
 
 def _sync_alertas_vencimiento():
-    """Genera notificaciones de rentas vencidas / por vencer (idempotente vía ref)."""
+    """Notificaciones de entregas y recolecciones que ya tocan (idempotente vía ref).
+
+    Igual que Mi jornada: mientras la renta no se haya entregado, la tarea es
+    ENTREGAR; una vez entregada, se vigila la RECOLECCIÓN. Una renta genera una u
+    otra, no las dos.
+    """
     try:
         from renta.models import Renta  # import diferido para evitar import circular
     except Exception:
         return
     hoy = timezone.localdate()
-    activas = Renta.objects.filter(estado='activa').select_related('inventario', 'inventario__equipo')
+    # Reservadas incluidas: una reserva cuyo día de inicio ya llegó necesita
+    # entrega aunque el cron todavía no la haya pasado a activa.
+    rentas = Renta.objects.filter(estado__in=['activa', 'reservada']).select_related('inventario', 'inventario__equipo')
 
     # Se arman las notificaciones candidatas en memoria y se deduplica/inserta en
     # bloque: antes era 1 exists() + 1 insert POR renta (N+1) en cada consulta de
     # notificaciones; ahora son 2 queries fijas (existentes + bulk_create).
     candidatas = []
-    for r in activas:
-        equipo = r.inventario.equipo.modelo if r.inventario.equipo else 'Equipo'
+    for r in rentas:
+        equipo = r.inventario.equipo.modelo if r.inventario and r.inventario.equipo else 'Equipo'
         cliente = r.cliente or 'Cliente'
-        dias = (r.fecha_fin - hoy).days
         data = {'renta_id': r.id, 'inventario_id': r.inventario_id, 'equipo_id': getattr(r.inventario, 'equipo_id', None), 'codigo': getattr(r.inventario, 'codigo', None)}
+
+        # Falta ENTREGAR: solo se avisa cuando ya toca (hoy o atrasada). Las
+        # entregas a futuro se agendan en Mi jornada, no se notifican.
+        if not r.entregada_en:
+            if r.fecha_inicio and r.fecha_inicio <= hoy:
+                atrasada = r.fecha_inicio < hoy
+                candidatas.append(Notificacion(
+                    tipo='alerta',
+                    titulo=f'{"Entrega atrasada" if atrasada else "Entregar hoy"} · {equipo}',
+                    mensaje=(f'Entregar a {cliente}. Ubicación: {r.direccion}.'
+                             + (f' Debía salir el {r.fecha_inicio}.' if atrasada else '')),
+                    seccion='rentas', ref=f'renta-entrega-{r.id}-{r.fecha_inicio}', data=data,
+                ))
+            continue
+
+        # Ya entregada: ahora toca vigilar la RECOLECCIÓN, solo en rentas activas.
+        if r.estado != 'activa':
+            continue
+        dias = (r.fecha_fin - hoy).days
         if dias < 0:
             candidatas.append(Notificacion(
                 tipo='alerta', titulo=f'Renta vencida · {equipo}',
