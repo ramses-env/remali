@@ -165,6 +165,21 @@ from django.core.exceptions import ImproperlyConfigured
 load_dotenv(os.path.join(BASE_DIR.parent, '.env'))
 load_dotenv(os.path.join(BASE_DIR, '.env'))
 
+# Y si existe .env.dev, manda: esa es la máquina de alguien desarrollando.
+#
+# En Railway no existe ninguno de los dos archivos —están ignorados por git, así
+# que no viajan en la imagen— y las variables las inyecta la plataforma.
+_dev1 = load_dotenv(os.path.join(BASE_DIR.parent, '.env.dev'), override=True)
+_dev2 = load_dotenv(os.path.join(BASE_DIR, '.env.dev'), override=True)
+
+# Cargar .env.dev no basta: no define MYSQL_URL, así que no puede sobrescribirlo,
+# y la selección de base de abajo comprueba MYSQL_URL ANTES que las DB_*. El
+# MYSQL_URL de producción que vive en .env apunta a mysql.railway.internal, un
+# host que solo resuelve dentro de Railway: en local deja el proyecto sin base.
+# Si el entorno de desarrollo trae su propia base, se descarta esa herencia.
+if (_dev1 or _dev2) and os.environ.get('DB_NAME'):
+    os.environ.pop('MYSQL_URL', None)
+
 _DB_NAME = os.environ.get('DB_NAME')
 
 if os.environ.get('MYSQL_URL'):
