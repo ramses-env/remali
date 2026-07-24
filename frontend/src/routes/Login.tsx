@@ -95,7 +95,7 @@ export default function Login() {
               control={form.control}
               name="usuario"
               render={({ field }) => (
-                <FormItem className="space-y-3">
+                <FormItem className="space-y-4">
                   <FormLabel className="text-mute">Usuario o correo</FormLabel>
                   <FormControl>
                     <Input
@@ -117,7 +117,7 @@ export default function Login() {
               control={form.control}
               name="password"
               render={({ field }) => (
-                <FormItem className="space-y-3">
+                <FormItem className="space-y-4">
                   <FormLabel className="text-mute">Contraseña</FormLabel>
                   <FormControl>
                     <div className="relative">
