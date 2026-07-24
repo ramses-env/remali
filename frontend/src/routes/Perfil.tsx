@@ -36,8 +36,10 @@ type ValoresPassword = z.infer<typeof esquemaPassword>
 
 type Perfil = ValoresPerfil & {
   email?: string
+  username?: string
   datos_completos?: boolean
   tiene_password?: boolean
+  puede?: { rol?: string }
 }
 
 const CAMPO = 'h-11 rounded-xl bg-surface-2 border-edge text-ink placeholder:text-mute focus-visible:ring-gold/30'
@@ -69,9 +71,11 @@ export default function Perfil() {
   }, [token])
 
   if (cargando) {
+    // pt-28: la barra de la tienda es fija y mide 81px. Sin este respiro se
+    // monta encima del contenido, que es lo que pasaba en esta pantalla.
     return (
-      <div className="mx-auto max-w-5xl px-6 py-24 flex justify-center">
-        <span className="w-8 h-8 border-2 border-edge border-t-gold rounded-full animate-spin" />
+      <div className="mx-auto flex max-w-5xl justify-center px-6 pt-28 pb-16">
+        <span className="h-8 w-8 animate-spin rounded-full border-2 border-edge border-t-gold" />
       </div>
     )
   }
@@ -82,10 +86,42 @@ export default function Perfil() {
   ] as const
 
   return (
-    <div className="mx-auto max-w-5xl px-6 py-12">
-      <header className="mb-8">
-        <h1 className="text-3xl font-black tracking-tight text-ink">Tu cuenta</h1>
-        <p className="text-sm text-mute mt-1.5">{perfil?.email || 'Datos y acceso'}</p>
+    /* pt-28 (112px) despeja los 81px de la barra fija y deja aire. Cada página de
+       la tienda repite este cálculo con un número distinto; convendría subirlo al
+       layout algún día, pero eso toca cuatro pantallas. */
+    <div className="mx-auto max-w-5xl px-6 pt-28 pb-16">
+      {/* Cabecera de identidad: quién eres, con qué correo y qué eres aquí. Antes
+          solo había un título; nadie sabía con qué cuenta estaba mirando. */}
+      <header className="mb-9 flex flex-wrap items-center gap-5">
+        <div className="grid h-16 w-16 shrink-0 place-items-center rounded-2xl bg-gradient-to-tr from-amber-400 to-orange-500 p-[2px]">
+          <div className="grid h-full w-full place-items-center rounded-[14px] bg-app text-xl font-black uppercase text-gold">
+            {(perfil?.first_name?.[0] || perfil?.email?.[0] || 'C')}
+          </div>
+        </div>
+
+        <div className="min-w-0">
+          <h1 className="truncate text-2xl font-black tracking-tight text-ink sm:text-3xl">
+            {perfil?.first_name?.trim() || 'Tu cuenta'}
+          </h1>
+          <p className="mt-1 truncate text-sm text-mute">{perfil?.email || perfil?.username}</p>
+          <div className="mt-2.5 flex flex-wrap items-center gap-2">
+            {perfil?.puede?.rol && (
+              <span className="rounded-full border border-edge px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wider text-mute">
+                {perfil.puede.rol}
+              </span>
+            )}
+            <span
+              className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold ${
+                perfil?.datos_completos
+                  ? 'bg-libre/10 text-libre'
+                  : 'bg-gold-soft text-gold'
+              }`}
+            >
+              {perfil?.datos_completos ? <Check className="h-3 w-3" /> : <TriangleAlert className="h-3 w-3" />}
+              {perfil?.datos_completos ? 'Datos completos' : 'Faltan datos'}
+            </span>
+          </div>
+        </div>
       </header>
 
       <div className="grid gap-6 md:grid-cols-[220px_1fr] md:items-start">
