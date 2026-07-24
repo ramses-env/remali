@@ -71,13 +71,18 @@ export function AuthSplitScreen({
     else nav('/')
   }
 
+  /* En escritorio el alto se fija a UNA pantalla. Antes solo era min-h-screen:
+     cuando el formulario pasaba del alto de la ventana, el documento crecía y la
+     foto —que ocupa el alto completo— se estiraba con él, quedando enorme. Ahora
+     la columna de la foto mide exactamente una pantalla y, si el formulario no
+     cabe, se desplaza solo él. */
   return (
-    <div className="relative flex min-h-screen w-full flex-col md:flex-row bg-app text-ink">
+    <div className="relative flex min-h-screen w-full flex-col bg-app text-ink md:h-screen md:flex-row md:overflow-hidden">
       {/* ── Formulario ── */}
       {/* `relative` aquí, no solo en el contenedor de afuera: si no, "Volver" y el
           selector de tema se posicionan contra la pantalla completa y en escritorio
           el segundo termina encima de la foto, donde no se ve ni se puede usar. */}
-      <div className="relative flex w-full flex-col items-center justify-center px-6 py-12 sm:px-10 md:w-1/2">
+      <div className="relative flex w-full flex-col items-center justify-center px-6 py-10 sm:px-10 md:h-screen md:w-1/2 md:overflow-y-auto">
         <button
           type="button"
           onClick={volver}
@@ -95,7 +100,7 @@ export function AuthSplitScreen({
             variants={reducir ? contenedorQuieto : contenedor}
             initial="hidden"
             animate="visible"
-            className="flex flex-col gap-6"
+            className="flex flex-col gap-5"
           >
             <AuthItem>
               {/* Solo el glifo, centrado: el nombre ya lo dice el sitio y repetirlo
@@ -128,7 +133,7 @@ export function AuthSplitScreen({
       </div>
 
       {/* ── Imagen ── */}
-      <div className="relative hidden w-1/2 md:block">
+      <div className="relative hidden w-1/2 md:block md:h-screen">
         <img
           src="/images/remali-1.jpg"
           alt=""
