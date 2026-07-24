@@ -19,6 +19,37 @@ const TAMANOS = {
   lg: 'h-16 w-16 text-xl',
 } as const
 
+/* Colores de identidad, uno por persona.
+ *
+ * Son fijos y no cambian con el tema: el avatar lleva su propio fondo, así que
+ * se ve igual en claro y en oscuro. Eso ayuda a reconocer a alguien de un
+ * vistazo, que es justo para lo que sirve.
+ *
+ * Ninguno es el dorado de la marca ni los semánticos (verde = disponible,
+ * azul = rentado, ámbar = taller). Un avatar verde se leería como un estado, y
+ * el dorado compite con los botones que sí hay que pulsar.
+ *
+ * Todos pasan contraste AA con texto blanco encima; está comprobado.
+ */
+const PALETA = [
+  '#4F46E5', // índigo
+  '#0F766E', // verde azulado
+  '#BE185D', // frambuesa
+  '#1D4ED8', // azul tinta
+  '#7E22CE', // púrpura
+  '#C2410C', // terracota
+  '#0E7490', // cian profundo
+  '#A21CAF', // magenta
+] as const
+
+/** Mismo usuario, siempre el mismo color. Con pocos colores habrá repeticiones,
+ *  que es aceptable: el objetivo es variedad, no identificar por color. */
+function colorDe(semilla: string) {
+  let h = 0
+  for (let i = 0; i < semilla.length; i++) h = (h * 31 + semilla.charCodeAt(i)) >>> 0
+  return PALETA[h % PALETA.length]
+}
+
 /** Hasta dos letras: "Juan Pérez" -> JP. Con una sola palabra o un correo, una. */
 export function iniciales(...partes: (string | undefined | null)[]) {
   const nombre = partes.map(p => (p || '').trim()).find(Boolean) || ''
@@ -44,16 +75,16 @@ export function AvatarInicial({
   className?: string
 }) {
   const texto = iniciales(nombre, correo)
+  // La semilla es el correo antes que el nombre: el nombre se puede editar y el
+  // color cambiaría de golpe, y un color que salta deja de servir para reconocer.
+  const fondo = colorDe((correo || nombre || '').trim().toLowerCase() || 'cliente')
 
   return (
     <span
-      // El aro dorado es un borde de 1.5px, no un relleno degradado: el dorado
-      // es el acento de las acciones principales y un avatar macizo compite con
-      // el botón que sí quieres que pulsen.
+      style={{ backgroundColor: fondo }}
       className={cn(
         'relative grid shrink-0 place-items-center rounded-full',
-        'bg-surface-2 ring-[1.5px] ring-gold/45',
-        'font-black uppercase tracking-tight text-gold select-none',
+        'font-black uppercase tracking-tight text-white select-none',
         TAMANOS[tamano],
         className,
       )}
