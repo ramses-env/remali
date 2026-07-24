@@ -6,9 +6,9 @@ import * as z from 'zod'
 import { Eye, EyeOff, Loader2 } from 'lucide-react'
 
 import api from '../lib/api'
-import { useIrTrasEntrar, useRedirigirSiHaySesion } from '../lib/sesion'
+import { useIrTrasEntrar } from '../lib/sesion'
 import { useAuth } from '../store/auth'
-import { AuthItem, AuthSplitScreen } from '@/components/ui/auth-split-screen'
+import { AuthCabecera, AuthItem } from '@/components/ui/auth-split-screen'
 import { SocialAuthButtons } from '@/components/ui/social-auth-buttons'
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
@@ -39,7 +39,7 @@ export default function Registro() {
   const [error, setError] = useState<string | undefined>(undefined)
   const [verPass, setVerPass] = useState(false)
 
-  const verificando = useRedirigirSiHaySesion(next)
+  // El redirect "si ya hay sesión" lo hace el layout, una sola vez para ambas.
   const irTrasEntrar = useIrTrasEntrar(next)
 
   const form = useForm<Valores>({
@@ -74,31 +74,13 @@ export default function Registro() {
     }
   }
 
-  if (verificando) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-app">
-        <div className="flex flex-col items-center gap-4">
-          <span className="w-8 h-8 border-2 border-edge border-t-gold rounded-full animate-spin" />
-          <p className="text-mute text-sm">Verificando tu sesión…</p>
-        </div>
-      </div>
-    )
-  }
-
   return (
-    <AuthSplitScreen
-      title="Crear cuenta"
-      description="Regístrate para cotizar y dar seguimiento a tus rentas."
-      footer={
-        <>
-          ¿Ya tienes cuenta?{' '}
-          <Link to="/login" className="font-semibold text-gold hover:underline">
-            Inicia sesión
-          </Link>
-          .
-        </>
-      }
-    >
+    <>
+      <AuthCabecera
+        title="Crear cuenta"
+        description="Regístrate para cotizar y dar seguimiento a tus rentas."
+      />
+
       {error && (
         <AuthItem>
           <div className="px-4 py-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-600 dark:text-red-400 text-sm">
@@ -233,6 +215,14 @@ export default function Registro() {
           onError={setError}
         />
       </AuthItem>
-    </AuthSplitScreen>
+
+      <AuthItem className="text-center text-sm text-mute">
+        ¿Ya tienes cuenta?{' '}
+        <Link to="/login" className="font-semibold text-gold hover:underline">
+          Inicia sesión
+        </Link>
+        .
+      </AuthItem>
+    </>
   )
 }

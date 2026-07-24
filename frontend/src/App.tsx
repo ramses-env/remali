@@ -6,6 +6,7 @@ import EquipoDetail from './routes/EquipoDetail'
 import Cotizacion from './routes/Cotizacion'
 import Login from './routes/Login'
 import Registro from './routes/Registro'
+import { AuthSplitScreen } from '@/components/ui/auth-split-screen'
 import Dashboard from './routes/Dashboard'
 import Footer from './components/Footer'
 import ErrorBoundary from './components/ErrorBoundary'
@@ -28,8 +29,13 @@ function App() {
       {bare ? (
         <ErrorBoundary>
           <Routes>
-            <Route path="/login" element={<Login />} />
-            <Route path="/registro" element={<Registro />} />
+            {/* Ruta de layout: el marco (foto, logo, botones) se monta una sola
+                vez y solo cambia el contenido, que es lo que permite animar el
+                paso de login a registro sin que parezca otra ventana. */}
+            <Route element={<AuthSplitScreen />}>
+              <Route path="/login" element={<Login />} />
+              <Route path="/registro" element={<Registro />} />
+            </Route>
             <Route path="/dashboard" element={<RequireAdmin><Dashboard /></RequireAdmin>} />
           </Routes>
         </ErrorBoundary>
