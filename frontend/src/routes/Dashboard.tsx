@@ -893,12 +893,9 @@ export default function Dashboard() {
                         <div className="text-[12.5px] text-mute truncate">{me?.email || 'admin@gmail.com'}</div>
                       </div>
                     </div>
-                    {/* Con qué permisos estás entrando: importa cuando hay varias cuentas. */}
-                    {puede && (
-                      <div className="px-4 pb-3 -mt-1">
-                        <span className={`inline-block text-[10px] uppercase font-semibold px-2 py-1 rounded-full ${esDueno ? 'bg-ink text-app' : 'bg-yellow text-[#111827]'}`}>{puede.rol}</span>
-                      </div>
-                    )}
+                    {/* El rol no va en este menú: el avatar, el nombre y el correo
+                        ya dicen de qué cuenta se trata. Si hace falta, está en el
+                        perfil. */}
                     <div className="border-t border-edge py-1">
                       <button onClick={() => { setAccountOpen(false); go('perfil') }} className="w-full flex items-center gap-3 px-4 py-3 text-[14px] font-semibold text-ink hover:bg-surface-2 transition-colors">
                         <svg className="w-4 h-4 text-mute" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.6"><circle cx="12" cy="8" r="4" /><path d="M4.5 20a7.5 7.5 0 0 1 15 0" /></svg>Perfil

@@ -22,7 +22,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token as google_id_token
 
-from .permissions import EsDueno, EsOperador, EsOperadorEditaAdmin, puede_de
+from .permissions import EsDueno, EsOperador, EsOperadorEditaAdmin, puede_de, nivel_de, NIVEL_ADMIN
 from .throttling import (
     SolicitudPublicaThrottle, LoginThrottle, RegistroThrottle, CambioPasswordThrottle,
 )
@@ -708,30 +708,53 @@ def _sync_alertas_vencimiento():
         Notificacion.objects.bulk_create(nuevas)
 
 
+# Notificaciones que son trabajo de campo: entregas, recolecciones, rentas
+# vencidas (hay que ir por la máquina) y movimientos de inventario/taller. El
+# resto —ventas, cotizaciones (tipo 'sistema'), respaldos, avisos de sistema— son
+# del negocio y solo los ve administración.
+TIPOS_OPERATIVOS = ('renta', 'alerta', 'inventario')
+
+
+def _notifs_visibles(user):
+    """Las notificaciones que le tocan a este usuario.
+
+    El técnico (por debajo de administrador) solo ve lo operativo: su trabajo es
+    el campo, no las cuentas del negocio. Administración y dueño ven todo.
+    """
+    qs = Notificacion.objects.all()
+    if nivel_de(user) < NIVEL_ADMIN:
+        qs = qs.filter(tipo__in=TIPOS_OPERATIVOS)
+    return qs
+
+
 class NotificacionesList(generics.ListAPIView):
     permission_classes = [permissions.IsAuthenticated]
     serializer_class = NotificacionSerializer
 
     def list(self, request, *args, **kwargs):
         _sync_alertas_vencimiento()
-        qs = Notificacion.objects.all()[:100]
+        visibles = _notifs_visibles(request.user)
         return Response({
-            'notificaciones': self.get_serializer(qs, many=True).data,
-            'no_leidas': Notificacion.objects.filter(leida=False).count(),
+            'notificaciones': self.get_serializer(visibles[:100], many=True).data,
+            'no_leidas': visibles.filter(leida=False).count(),
         })
 
 
 @api_view(['POST'])
 @permission_classes([permissions.IsAuthenticated])
 def marcar_notificacion_leida(request, pk: int):
-    Notificacion.objects.filter(pk=pk).update(leida=True)
-    return Response({'ok': True, 'no_leidas': Notificacion.objects.filter(leida=False).count()})
+    # Scope a lo que el usuario ve: un técnico no marca (ni cuenta) notificaciones
+    # de administración que ni siquiera le aparecen.
+    visibles = _notifs_visibles(request.user)
+    visibles.filter(pk=pk).update(leida=True)
+    return Response({'ok': True, 'no_leidas': visibles.filter(leida=False).count()})
 
 
 @api_view(['POST'])
 @permission_classes([permissions.IsAuthenticated])
 def marcar_todas_leidas(request):
-    Notificacion.objects.filter(leida=False).update(leida=True)
+    # Solo las que el usuario ve: el técnico no debe marcar leídas las del negocio.
+    _notifs_visibles(request.user).filter(leida=False).update(leida=True)
     return Response({'ok': True, 'no_leidas': 0})
 
 
