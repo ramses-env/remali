@@ -3,7 +3,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import * as z from 'zod'
-import { Check, Eye, EyeOff, Loader2, ShieldCheck, TriangleAlert, User } from 'lucide-react'
+import { Check, Eye, EyeOff, Loader2, Lock, ShieldCheck, TriangleAlert, User } from 'lucide-react'
 
 import api from '../lib/api'
 import { useAuth } from '../store/auth'
@@ -306,8 +306,12 @@ function PanelSeguridad({
   return (
     <>
       <div className="mb-7 flex items-start gap-4">
+        {/* Candado y no escudo: el escudo con palomita lee "verificado", que es un
+            estado. Esta tarjeta es una acción sobre una contraseña, y el candado
+            es la convención para eso. El escudo se queda en la navegación, donde
+            sí nombra la sección entera. */}
         <div className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-surface-2 text-gold">
-          <ShieldCheck className="h-5 w-5" />
+          <Lock className="h-5 w-5" />
         </div>
         <div>
           <h2 className="text-lg font-black tracking-tight text-ink">
