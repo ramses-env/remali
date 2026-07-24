@@ -88,13 +88,23 @@ class PerfilUsuarioSerializer(serializers.ModelSerializer):
     groups = serializers.SerializerMethodField()
     avatar = serializers.ImageField(required=False, allow_null=True)
     avatar_url = serializers.SerializerMethodField()
+    # Solo lectura: lo decide el modelo. Si el cliente pudiera enviarlo, se
+    # marcaría "completo" sin haber llenado nada.
+    datos_completos = serializers.BooleanField(read_only=True)
+    # Quien entró con Google no tiene contraseña: la pantalla de seguridad usa
+    # esto para pedir "la actual" solo a quien realmente tiene una.
+    tiene_password = serializers.SerializerMethodField()
 
     class Meta:
         model = PerfilUsuario
         fields = [
             'id', 'username', 'email', 'first_name', 'last_name', 'is_staff', 'is_superuser', 'puede', 'groups',
             'telefono', 'puesto', 'bio', 'avatar', 'avatar_url',
+            'empresa', 'obra_direccion', 'obra_responsable', 'datos_completos', 'tiene_password',
         ]
+
+    def get_tiene_password(self, obj):
+        return obj.usuario.has_usable_password()
 
     def get_groups(self, obj):
         return list(obj.usuario.groups.values_list('name', flat=True))

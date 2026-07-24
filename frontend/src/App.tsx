@@ -6,6 +6,7 @@ import EquipoDetail from './routes/EquipoDetail'
 import Cotizacion from './routes/Cotizacion'
 import Login from './routes/Login'
 import Registro from './routes/Registro'
+import Perfil from './routes/Perfil'
 import { AuthSplitScreen } from '@/components/ui/auth-split-screen'
 import Dashboard from './routes/Dashboard'
 import Footer from './components/Footer'
@@ -55,6 +56,9 @@ function App() {
                   <Route path="/equipos" element={<EquiposList />} />
                   <Route path="/equipo/:id" element={<EquipoDetail />} />
                   <Route path="/cotizacion" element={<Cotizacion />} />
+                  {/* El perfil del cliente vive en la tienda, con su navbar y su
+                      footer: es su casa, no una sección del panel de operación. */}
+                  <Route path="/perfil" element={<Perfil />} />
                   <Route path="*" element={<Home />} />
                 </Routes>
               </ErrorBoundary>

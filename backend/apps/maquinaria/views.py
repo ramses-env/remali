@@ -23,7 +23,9 @@ from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token as google_id_token
 
 from .permissions import EsDueno, EsOperador, EsOperadorEditaAdmin, puede_de
-from .throttling import SolicitudPublicaThrottle, LoginThrottle, RegistroThrottle
+from .throttling import (
+    SolicitudPublicaThrottle, LoginThrottle, RegistroThrottle, CambioPasswordThrottle,
+)
 
 from django.conf import settings
 
@@ -337,6 +339,40 @@ def apply_coupon(request):
 # ─────────────────────────────────────────────
 #  AUTENTICACIÓN / PERFIL
 # ─────────────────────────────────────────────
+@api_view(['POST'])
+@permission_classes([permissions.IsAuthenticated])
+@throttle_classes([CambioPasswordThrottle])
+def cambiar_password(request):
+    """Cambiar la propia contraseña.
+
+    Ojo con el caso que no es obvio: quien entró con Google NO tiene contraseña
+    utilizable. Para esa cuenta esto es ponerla por primera vez, así que exigirle
+    la "actual" la dejaría sin poder crear una nunca. Se detecta y se salta ese
+    requisito; sigue siendo seguro porque ya viene autenticado.
+    """
+    usuario = request.user
+    actual = request.data.get('password_actual') or ''
+    nueva = request.data.get('password_nueva') or ''
+
+    if not nueva:
+        return Response({'detail': 'Escribe tu contraseña nueva.'}, status=400)
+
+    tenia_password = usuario.has_usable_password()
+    if tenia_password and not usuario.check_password(actual):
+        return Response({'detail': 'Tu contraseña actual no es correcta.'}, status=400)
+
+    # Se le pasa el usuario para que el validador de similitud pueda comparar la
+    # contraseña con su nombre y su correo.
+    try:
+        validate_password(nueva, usuario)
+    except DjangoValidationError as e:
+        return Response({'detail': ' '.join(e.messages)}, status=400)
+
+    usuario.set_password(nueva)
+    usuario.save(update_fields=['password'])
+    return Response({'detail': 'Contraseña actualizada.', 'tenia_password': tenia_password})
+
+
 @api_view(['POST'])
 @permission_classes([permissions.AllowAny])  # público: alta de cliente desde la tienda
 @throttle_classes([RegistroThrottle])

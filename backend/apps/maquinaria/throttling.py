@@ -46,6 +46,21 @@ class RegistroThrottle(AnonRateThrottle):
     scope = 'registro'
 
 
+class CambioPasswordThrottle(AnonRateThrottle):
+    """Freno al cambio de contraseña propia.
+
+    El endpoint pide la contraseña ACTUAL, así que sin tope se convierte en un
+    oráculo para adivinarla desde una sesión robada. Va por cuenta y no por IP:
+    aquí ya sabemos quién es, y la oficina comparte salida a internet.
+    """
+    scope = 'cambio_password'
+
+    def get_cache_key(self, request, view):
+        if request.user and request.user.is_authenticated:
+            return self.cache_format % {'scope': self.scope, 'ident': request.user.pk}
+        return None   # sin sesión no llega aquí; lo frena el permiso
+
+
 class LoginThrottle(AnonRateThrottle):
     """Freno al login por IP: acota fuerza bruta y credential stuffing.
 

@@ -30,6 +30,33 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, os.path.join(BASE_DIR, 'apps'))
 
 
+# ── Variables de entorno: SE CARGAN AQUÍ, ANTES QUE NADA ───────────────────
+#
+# Esto vivía más abajo, junto a la configuración de la base, y era un error
+# silencioso: SECRET_KEY, DEBUG, ALLOWED_HOSTS y demás se leen unas líneas más
+# adelante, así que se evaluaban ANTES de que existieran los archivos .env. En
+# la práctica, el DEBUG=True de .env.dev nunca se aplicaba y el proyecto corría
+# en local con la configuración de producción sin avisar.
+from dotenv import load_dotenv  # noqa: E402
+
+# Base: en Railway estos archivos no existen (git los ignora, no viajan en la
+# imagen) y las variables las inyecta la plataforma; load_dotenv no pisa lo que
+# ya está en el entorno.
+load_dotenv(os.path.join(BASE_DIR.parent, '.env'))
+load_dotenv(os.path.join(BASE_DIR, '.env'))
+
+# Y si existe .env.dev, manda: esa es la máquina de alguien desarrollando.
+_dev1 = load_dotenv(os.path.join(BASE_DIR.parent, '.env.dev'), override=True)
+_dev2 = load_dotenv(os.path.join(BASE_DIR, '.env.dev'), override=True)
+
+# Cargar .env.dev no basta: no define MYSQL_URL, así que no puede sobrescribirlo,
+# y la selección de base de más abajo comprueba MYSQL_URL ANTES que las DB_*. El
+# MYSQL_URL de producción que vive en .env apunta a mysql.railway.internal, un
+# host que solo resuelve dentro de Railway: en local deja el proyecto sin base.
+if (_dev1 or _dev2) and os.environ.get('DB_NAME'):
+    os.environ.pop('MYSQL_URL', None)
+
+
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
@@ -160,25 +187,8 @@ WSGI_APPLICATION = 'server.wsgi.application'
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
 
-from dotenv import load_dotenv
+# El entorno ya se cargó arriba del todo, antes de leer SECRET_KEY y DEBUG.
 from django.core.exceptions import ImproperlyConfigured
-load_dotenv(os.path.join(BASE_DIR.parent, '.env'))
-load_dotenv(os.path.join(BASE_DIR, '.env'))
-
-# Y si existe .env.dev, manda: esa es la máquina de alguien desarrollando.
-#
-# En Railway no existe ninguno de los dos archivos —están ignorados por git, así
-# que no viajan en la imagen— y las variables las inyecta la plataforma.
-_dev1 = load_dotenv(os.path.join(BASE_DIR.parent, '.env.dev'), override=True)
-_dev2 = load_dotenv(os.path.join(BASE_DIR, '.env.dev'), override=True)
-
-# Cargar .env.dev no basta: no define MYSQL_URL, así que no puede sobrescribirlo,
-# y la selección de base de abajo comprueba MYSQL_URL ANTES que las DB_*. El
-# MYSQL_URL de producción que vive en .env apunta a mysql.railway.internal, un
-# host que solo resuelve dentro de Railway: en local deja el proyecto sin base.
-# Si el entorno de desarrollo trae su propia base, se descarta esa herencia.
-if (_dev1 or _dev2) and os.environ.get('DB_NAME'):
-    os.environ.pop('MYSQL_URL', None)
 
 _DB_NAME = os.environ.get('DB_NAME')
 
@@ -329,6 +339,7 @@ REST_FRAMEWORK = {
         'subida_evidencia': '200/hour',   # fotos de entrega/devolución por técnico
         'login': '10/min',                # intentos de login por IP (anti fuerza bruta)
         'registro': '5/hour',             # altas de cuenta de cliente por IP
+        'cambio_password': '10/hour',     # cambios de contraseña propia, por cuenta
     },
 }
 

@@ -31,6 +31,25 @@ class PerfilUsuario(models.Model):
     telefono = models.CharField(max_length=30, blank=True, default='')
     puesto = models.CharField(max_length=80, blank=True, default='')
     bio = models.TextField(blank=True, default='')
+
+    # ── Datos que declara el propio cliente ────────────────────────────────
+    # Van como texto y NO enlazados a Empresa/Obra a propósito. Esos catálogos
+    # los cura administración; si cada cliente pudiera crear registros al
+    # registrarse, en un mes habría "Constructora ABC", "constructora abc" y
+    # "ABC S.A. de C.V." como tres empresas distintas. Aquí queda lo que el
+    # cliente declara, y administración lo concilia con el catálogo real.
+    empresa = models.CharField(
+        max_length=180, blank=True, default='',
+        help_text='Empresa para la que trabaja el cliente (declarada por él)',
+    )
+    obra_direccion = models.CharField(
+        max_length=255, blank=True, default='',
+        help_text='Dónde se entrega la maquinaria',
+    )
+    obra_responsable = models.CharField(
+        max_length=180, blank=True, default='',
+        help_text='Quién recibe en la obra',
+    )
     fecha_actualizacion = models.DateTimeField(auto_now=True)
 
     class Meta:
@@ -40,6 +59,21 @@ class PerfilUsuario(models.Model):
 
     def __str__(self):
         return f'Perfil de {self.usuario.username}'
+
+    @property
+    def datos_completos(self) -> bool:
+        """¿Ya hay lo necesario para atenderle sin perseguirlo por teléfono?
+
+        Se calcula en vez de guardarse: un booleano aparte se queda desfasado en
+        cuanto alguien edita el perfil por otra vía (el admin de Django, por
+        ejemplo) y nadie se acuerda de recalcularlo.
+        """
+        return all([
+            self.telefono.strip(),
+            self.empresa.strip(),
+            self.obra_direccion.strip(),
+            self.obra_responsable.strip(),
+        ])
 
 
 class Categoria(models.Model):

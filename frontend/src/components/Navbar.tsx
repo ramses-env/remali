@@ -1,5 +1,6 @@
 import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { createPortal } from 'react-dom'
+import api from '../lib/api'
 import { useAuth } from '../store/auth'
 import { useProfile } from '../store/profile'
 import { useCart } from '../store/cart'
@@ -16,6 +17,23 @@ export default function Navbar() {
   const cartCount = state.items.reduce((n, i) => n + i.qty, 0)
   const [confirm, setConfirm] = useState(false)
   const [scrolled, setScrolled] = useState(false)
+  const [perfilIncompleto, setPerfilIncompleto] = useState(false)
+
+  // Nivel 0 = cuenta sin rol en el panel, que es lo que son los clientes.
+  const esCliente = Boolean(token) && (user?.puede?.nivel ?? 0) === 0
+
+  useEffect(() => {
+    if (!esCliente) {
+      setPerfilIncompleto(false)
+      return
+    }
+    let vivo = true
+    api
+      .get('/auth/perfil/')
+      .then(r => vivo && setPerfilIncompleto(!r.data?.datos_completos))
+      .catch(() => {})
+    return () => { vivo = false }
+  }, [esCliente])
 
   useEffect(() => {
     const handleScroll = () => setScrolled(window.scrollY > 20)
@@ -75,14 +93,21 @@ export default function Navbar() {
 
           {token ? (
             <div className="flex items-center gap-2">
+              {/* El cliente (nivel 0) no entra al panel: mandarlo ahí solo para que
+                  el guard lo rebote es prometerle una puerta que no abre. Su
+                  destino es su propio perfil. */}
               <Link
-                to="/dashboard"
+                to={esCliente ? '/perfil' : '/dashboard'}
                 className="hidden sm:flex items-center gap-2 px-3 py-2 rounded-full bg-surface-2 text-ink text-sm font-medium hover:text-gold transition-colors"
               >
-                <div className="w-6 h-6 rounded-full bg-gradient-to-tr from-amber-400 to-orange-500 flex items-center justify-center text-[10px] text-black font-black uppercase">
+                <div className="relative w-6 h-6 rounded-full bg-gradient-to-tr from-amber-400 to-orange-500 flex items-center justify-center text-[10px] text-black font-black uppercase">
                   {(user?.username?.[0] || user?.email?.[0] || 'A')}
+                  {/* Punto de aviso: el perfil incompleto se nota sin abrirlo. */}
+                  {esCliente && perfilIncompleto && (
+                    <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-gold ring-2 ring-surface" />
+                  )}
                 </div>
-                <span className="max-w-[100px] truncate">Panel</span>
+                <span className="max-w-[100px] truncate">{esCliente ? 'Perfil' : 'Panel'}</span>
               </Link>
               <button
                 onClick={() => setConfirm(true)}

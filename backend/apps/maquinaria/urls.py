@@ -37,6 +37,7 @@ urlpatterns = [
     path('auth/google/', views.google_login),
     path('auth/me/', views.me),
     path('auth/perfil/', views.PerfilDetail.as_view()),
+    path('auth/password/', views.cambiar_password),
     path('usuarios/', views_usuarios.usuarios),
     path('usuarios/roles/', views_usuarios.roles_disponibles),
     path('usuarios/<int:pk>/', views_usuarios.usuario_detalle),

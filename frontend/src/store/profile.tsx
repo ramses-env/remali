@@ -10,6 +10,9 @@ type User = {
   last_name: string
   is_staff?: boolean
   groups?: string[]
+  /* `/auth/me/` ya devuelve las capacidades; sin tiparlas, la tienda no puede
+     distinguir a un cliente de alguien de administración. */
+  puede?: { nivel: number; rol: string }
 }
 
 type ProfileContextType = {
