@@ -1,0 +1,39 @@
+import { useLocation } from 'react-router-dom'
+import { Home, LayoutGrid, ClipboardList, User, LogIn } from 'lucide-react'
+
+import Dock, { type DockItem } from '@/components/ui/dock'
+import { useAuth } from '../store/auth'
+import { useProfile } from '../store/profile'
+import { useCart } from '../store/cart'
+
+/**
+ * Dock de la tienda pública, para el pulgar en móvil.
+ *
+ * El último elemento se adapta a la sesión: quien entró va a su perfil; quien no,
+ * al acceso. Poner "Perfil" a un visitante anónimo lo mandaría al login igual,
+ * pero con una etiqueta que le miente sobre a dónde va.
+ */
+export default function DockTienda() {
+  const loc = useLocation()
+  const { token } = useAuth()
+  const { user } = useProfile()
+  const { state } = useCart()
+
+  const enCotizacion = state.items.reduce((n, i) => n + i.qty, 0)
+  const esCliente = Boolean(token) && (user?.puede?.nivel ?? 0) === 0
+  const perfilIncompleto = esCliente && user?.datos_completos === false
+
+  const ruta = loc.pathname
+  const catalogoActivo = ruta === '/equipos' || ruta.startsWith('/equipo/')
+
+  const items: DockItem[] = [
+    { key: 'inicio', label: 'Inicio', to: '/', activo: ruta === '/', icon: <Home className="h-[22px] w-[22px]" /> },
+    { key: 'catalogo', label: 'Catálogo', to: '/equipos', activo: catalogoActivo, icon: <LayoutGrid className="h-[22px] w-[22px]" /> },
+    { key: 'cotizacion', label: 'Cotización', to: '/cotizacion', activo: ruta === '/cotizacion', badge: enCotizacion, icon: <ClipboardList className="h-[22px] w-[22px]" /> },
+    token
+      ? { key: 'cuenta', label: 'Perfil', to: '/perfil', activo: ruta === '/perfil', punto: perfilIncompleto, icon: <User className="h-[22px] w-[22px]" /> }
+      : { key: 'entrar', label: 'Entrar', to: '/login', activo: ruta === '/login', icon: <LogIn className="h-[22px] w-[22px]" /> },
+  ]
+
+  return <Dock items={items} />
+}

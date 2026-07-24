@@ -59,7 +59,9 @@ export default function RecordatorioPerfil() {
           animate={{ opacity: 1, y: 0 }}
           exit={reducir ? { opacity: 0 } : { opacity: 0, y: 12 }}
           transition={{ duration: 0.28, ease: [0.23, 1, 0.32, 1] }}
-          className="fixed bottom-5 right-5 left-5 z-40 sm:left-auto sm:max-w-[340px]"
+          /* En móvil sube por encima del dock (bottom-24) para no encimarse; en
+             md+ no hay dock, así que baja a la esquina. */
+          className="fixed bottom-24 left-4 right-4 z-40 md:bottom-5 md:left-auto md:right-5 md:max-w-[340px]"
         >
           <div className="relative">
             <Link

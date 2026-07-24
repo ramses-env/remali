@@ -9,6 +9,7 @@ import OrdenCartaModal from '../components/OrdenCartaModal'
 import CotizacionCartaModal from '../components/CotizacionCartaModal'
 import FichaTecnicaModal from '../components/FichaTecnicaModal'
 import AddressAutocomplete from '../components/AddressAutocomplete'
+import Dock, { type DockItem } from '../components/ui/dock'
 import { formatAddress, addressToFields, type AddressResult } from '../lib/geocoding'
 import { REGIMEN_FISCAL, USO_CFDI, RFC_PUBLICO_GENERAL } from '../lib/sat'
 import { usePrintSettings, charsPerLine } from '../lib/printSettings'
@@ -981,7 +982,9 @@ export default function Dashboard() {
         </aside>
 
         {/* MAIN */}
-        <main className="flex-1 overflow-auto min-w-0">
+        {/* pb en móvil solo para el técnico: es a quien le sale el dock, y sin
+            este respiro el dock taparía el final del contenido. */}
+        <main className={`flex-1 overflow-auto min-w-0 ${puede?.nivel === 1 ? 'pb-24 md:pb-0' : ''}`}>
           <div className="p-3 sm:p-4 lg:p-5">
           {/* Encabezado de página: breadcrumb + título + subtítulo */}
           <div className="mb-5">
@@ -1068,6 +1071,30 @@ export default function Dashboard() {
           </div>
         </main>
       </div>
+
+      {/* ─── DOCK DEL TÉCNICO (solo móvil) ───
+          Solo nivel 1. El admin y el dueño manejan ~15 módulos: no caben en un
+          dock, para ellos queda el cajón lateral. El técnico ve tres cosas, así
+          que un dock al alcance del pulgar le sirve mejor que un menú que abrir.
+          Los items salen de navGroups, que ya está filtrado por rol. */}
+      {puede?.nivel === 1 && (
+        <Dock
+          items={navGroups.flatMap(g => g.items).map<DockItem>(it => ({
+            key: it.key,
+            // Etiqueta corta: "Notificaciones"/"Configuración" no caben bajo un
+            // icono de dock. La larga se queda en el cajón lateral.
+            label: ({ ubicaciones: 'Tu día', notificaciones: 'Avisos', configuracion: 'Ajustes', mensajeria: 'Mensajes' } as Record<string, string>)[it.key] ?? it.label,
+            badge: it.badge,
+            activo: section === it.key,
+            onClick: () => go(it.key),
+            icon: (
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+                {it.icon}
+              </svg>
+            ),
+          }))}
+        />
+      )}
 
       {/* ─── TOAST ─── */}
       {toast && (

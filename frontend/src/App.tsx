@@ -8,6 +8,7 @@ import Login from './routes/Login'
 import Registro from './routes/Registro'
 import Perfil from './routes/Perfil'
 import RecordatorioPerfil from './components/RecordatorioPerfil'
+import DockTienda from './components/DockTienda'
 import { AuthSplitScreen } from '@/components/ui/auth-split-screen'
 import Dashboard from './routes/Dashboard'
 import Footer from './components/Footer'
@@ -46,7 +47,9 @@ function App() {
           {/* La tienda pública usa el amarillo brillante del sistema (no el dorado del admin).
               Se sobreescribe el token solo aquí, así el panel admin queda intacto. */}
           <div
-            className="min-h-screen flex flex-col bg-[#080808] text-white"
+            /* pb en móvil: reserva el alto del dock flotante para que no tape el
+               final del contenido. En md+ el dock no existe, así que sin padding. */
+            className="min-h-screen flex flex-col bg-[#080808] text-white pb-24 md:pb-0"
             style={{ ['--c-gold' as any]: '#f2b736', ['--c-gold-soft' as any]: 'rgba(242,183,54,0.14)' }}
           >
             <Navbar />
@@ -68,6 +71,8 @@ function App() {
             {/* Recordatorio flotante para clientes con el perfil a medias. Vive
                 aquí, no en cada página, para aparecer en toda la tienda. */}
             <RecordatorioPerfil />
+            {/* Dock inferior (solo móvil): navegación al alcance del pulgar. */}
+            <DockTienda />
           </div>
         </PriceUnitProvider>
       )}
