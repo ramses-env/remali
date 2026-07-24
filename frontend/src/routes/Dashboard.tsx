@@ -3515,13 +3515,10 @@ function NotificacionesAdmin({ notifs, reload, go, onOpen }: {
 
   return (
     <div className="max-w-6xl mx-auto space-y-4">
-      <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-gold text-[11px] font-mono uppercase tracking-[0.2em] mb-1.5">Centro de actividad</p>
-          <p className="text-sm text-mute max-w-2xl">
-            Revisa eventos operativos, abre el contexto y resuelve pendientes. Puedes filtrar por tipo, buscar y marcar como leído.
-          </p>
-        </div>
+      {/* El eyebrow "Centro de actividad" y su descripción se quitaron: la sección
+          ya tiene su título y subtítulo arriba, repetirlo era relleno. Quedan las
+          acciones, alineadas a la derecha. */}
+      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-end gap-3">
         <div className="flex items-center gap-2.5 shrink-0">
           <button
             onClick={reload}
