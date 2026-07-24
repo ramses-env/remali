@@ -11,7 +11,7 @@ import { empiezaPeticion, terminaPeticion } from './cargando'
    - /notificaciones/            el panel lo sondea cada 5 s.
    - /mensajeria/conversaciones/ el panel lo sondea cada 9 s.
    - /rentas/tareas/             no se sondea, pero lo recarga el bus de tiempo
-                                 real tras cada mutación y la pantalla "Tu día"
+                                 real tras cada mutación y la pantalla "Mi jornada"
                                  ya muestra su propio estado de carga. Taparla
                                  además con un overlay a pantalla completa
                                  después de cada acción del técnico estorba. */

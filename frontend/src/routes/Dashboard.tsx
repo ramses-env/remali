@@ -203,7 +203,7 @@ const SECTION_META: Record<Section, { title: string; subtitle: string }> = {
   mensajeria: { title: 'Mensajería', subtitle: 'Conversaciones de soporte con clientes.' },
   empresas: { title: 'Empresas', subtitle: 'Clientes registrados y sus obras.' },
   perfil: { title: 'Perfil', subtitle: 'Tu información de cuenta.' },
-  ubicaciones: { title: 'Tu día', subtitle: 'Dónde está cada máquina y qué espera en el taller.' },
+  ubicaciones: { title: 'Mi jornada', subtitle: 'Dónde está cada máquina y qué espera en el taller.' },
   usuarios: { title: 'Usuarios', subtitle: 'Quién entra al panel y qué puede hacer.' },
   configuracion: { title: 'Configuración', subtitle: 'Tu cuenta, el negocio y cómo te avisamos.' },
 }
@@ -599,8 +599,8 @@ export default function Dashboard() {
     cupones: 'editar_catalogo',
     catalogos: 'editar_catalogo',
     mensajeria: 'cotizar',
-    // El técnico opera todo desde "Tu día"; estos módulos de gestión son para
-    // administración. Su acceso por API sigue existiendo (lo usa "Tu día"), aquí
+    // El técnico opera todo desde "Mi jornada"; estos módulos de gestión son para
+    // administración. Su acceso por API sigue existiendo (lo usa "Mi jornada"), aquí
     // solo se decide qué aparece en el menú. Por eso van con capacidades de
     // administración, no con las del técnico.
     equipos: 'editar_catalogo',
@@ -608,7 +608,7 @@ export default function Dashboard() {
     refacciones: 'editar_catalogo',
     rentas: 'ver_dinero',
     reparaciones: 'ver_dinero',
-    ubicaciones: 'operar_inventario',   // "Tu día": esto sí lo ve el técnico
+    ubicaciones: 'operar_inventario',   // "Mi jornada": esto sí lo ve el técnico
     usuarios: 'gestionar_usuarios',
   }
   const seccionPermitida = (s: Section) => {
@@ -636,7 +636,7 @@ export default function Dashboard() {
     {
       title: 'navgroup.operacion',
       items: [
-        { key: 'ubicaciones', label: 'Tu día', icon: <><path d="M12 21s7-5.5 7-11a7 7 0 1 0-14 0c0 5.5 7 11 7 11z" /><circle cx="12" cy="10" r="2.5" /></> },
+        { key: 'ubicaciones', label: 'Mi jornada', icon: <><path d="M12 21s7-5.5 7-11a7 7 0 1 0-14 0c0 5.5 7 11 7 11z" /><circle cx="12" cy="10" r="2.5" /></> },
         { key: 'rentas', label: 'Rentas', badge: rentasActivas, icon: <><path d="M7 4.5v2.5M17 4.5v2.5" /><path d="M5.5 8h13" /><path d="M6.5 7.5h11a2 2 0 0 1 2 2v9.5a2 2 0 0 1-2 2h-11a2 2 0 0 1-2-2V9.5a2 2 0 0 1 2-2z" /><path d="M12 13v3l2 1" /></> },
         { key: 'ventas', label: 'Ventas', badge: ventas.length, icon: <><path d="M6.5 9.5h15l-1.6 8.2a2 2 0 0 1-2 1.6H9.2a2 2 0 0 1-2-1.6z" /><path d="M6.5 9.5l-1.2-5h-3" /><path d="M10 21a1 1 0 1 0 0-2 1 1 0 0 0 0 2zM18 21a1 1 0 1 0 0-2 1 1 0 0 0 0 2z" /></> },
         { key: 'reparaciones', label: 'Reparaciones', badge: ordenesAbiertas, icon: <><path d="M14.7 6.3a4 4 0 0 0-5.6 5.6l-6 6v3h3l6-6a4 4 0 0 0 5.6-5.6l-2.5 2.5-2.1-2.1z" /><path d="M14 14l6 6" /></> },
@@ -1083,7 +1083,7 @@ export default function Dashboard() {
             key: it.key,
             // Etiqueta corta: "Notificaciones"/"Configuración" no caben bajo un
             // icono de dock. La larga se queda en el cajón lateral.
-            label: ({ ubicaciones: 'Tu día', notificaciones: 'Avisos', configuracion: 'Ajustes', mensajeria: 'Mensajes' } as Record<string, string>)[it.key] ?? it.label,
+            label: ({ ubicaciones: 'Jornada', notificaciones: 'Avisos', configuracion: 'Ajustes', mensajeria: 'Mensajes' } as Record<string, string>)[it.key] ?? it.label,
             badge: it.badge,
             activo: section === it.key,
             onClick: () => go(it.key),
