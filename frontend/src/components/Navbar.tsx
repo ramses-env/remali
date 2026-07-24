@@ -85,9 +85,14 @@ export default function Navbar() {
               {/* El cliente (nivel 0) no entra al panel: mandarlo ahí solo para que
                   el guard lo rebote es prometerle una puerta que no abre. Su
                   destino es su propio perfil. */}
+              {/* Antes era `hidden sm:flex`: en móvil desaparecía y no quedaba
+                  forma de ir al perfil/panel desde la barra. Ahora se ve siempre,
+                  compacto (solo el avatar) en celular y con etiqueta en pantallas
+                  grandes. */}
               <Link
                 to={esCliente ? '/perfil' : '/dashboard'}
-                className="hidden sm:flex items-center gap-2 px-3 py-2 rounded-full bg-surface-2 text-ink text-sm font-medium hover:text-gold transition-colors"
+                aria-label={esCliente ? 'Tu perfil' : 'Ir al panel'}
+                className="flex items-center gap-2 p-1.5 sm:px-3 sm:py-2 rounded-full bg-surface-2 text-ink text-sm font-medium hover:text-gold transition-colors"
               >
                 <span className="relative">
                   <AvatarInicial
@@ -102,7 +107,7 @@ export default function Navbar() {
                     <span className="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-gold ring-2 ring-surface" />
                   )}
                 </span>
-                <span className="max-w-[100px] truncate">{esCliente ? 'Perfil' : 'Panel'}</span>
+                <span className="hidden sm:block max-w-[100px] truncate">{esCliente ? 'Perfil' : 'Panel'}</span>
               </Link>
               <button
                 onClick={() => setConfirm(true)}
