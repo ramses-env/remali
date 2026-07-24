@@ -7,6 +7,7 @@ import { useCart } from '../store/cart'
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import ThemeToggle from './ThemeToggle'
+import { AvatarInicial } from '@/components/ui/avatar-inicial'
 
 export default function Navbar() {
   const { token, logout } = useAuth()
@@ -100,13 +101,19 @@ export default function Navbar() {
                 to={esCliente ? '/perfil' : '/dashboard'}
                 className="hidden sm:flex items-center gap-2 px-3 py-2 rounded-full bg-surface-2 text-ink text-sm font-medium hover:text-gold transition-colors"
               >
-                <div className="relative w-6 h-6 rounded-full bg-gradient-to-tr from-amber-400 to-orange-500 flex items-center justify-center text-[10px] text-black font-black uppercase">
-                  {(user?.username?.[0] || user?.email?.[0] || 'A')}
-                  {/* Punto de aviso: el perfil incompleto se nota sin abrirlo. */}
+                <span className="relative">
+                  <AvatarInicial
+                    nombre={user?.first_name || user?.username}
+                    correo={user?.email}
+                    tamano="sm"
+                  />
+                  {/* Punto de aviso: el perfil incompleto se nota sin abrirlo. El
+                      aro del color del fondo lo despega del avatar; sin él los dos
+                      círculos se tocan y se lee como una mancha. */}
                   {esCliente && perfilIncompleto && (
-                    <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-gold ring-2 ring-surface" />
+                    <span className="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-gold ring-2 ring-surface" />
                   )}
-                </div>
+                </span>
                 <span className="max-w-[100px] truncate">{esCliente ? 'Perfil' : 'Panel'}</span>
               </Link>
               <button

@@ -7,6 +7,7 @@ import { Check, Eye, EyeOff, Loader2, Lock, ShieldCheck, TriangleAlert, User } f
 
 import api from '../lib/api'
 import { useAuth } from '../store/auth'
+import { AvatarInicial } from '@/components/ui/avatar-inicial'
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
 
@@ -93,11 +94,7 @@ export default function Perfil() {
       {/* Cabecera de identidad: quién eres, con qué correo y qué eres aquí. Antes
           solo había un título; nadie sabía con qué cuenta estaba mirando. */}
       <header className="mb-9 flex flex-wrap items-center gap-5">
-        <div className="grid h-16 w-16 shrink-0 place-items-center rounded-2xl bg-gradient-to-tr from-amber-400 to-orange-500 p-[2px]">
-          <div className="grid h-full w-full place-items-center rounded-[14px] bg-app text-xl font-black uppercase text-gold">
-            {(perfil?.first_name?.[0] || perfil?.email?.[0] || 'C')}
-          </div>
-        </div>
+        <AvatarInicial nombre={perfil?.first_name} correo={perfil?.email} tamano="lg" />
 
         <div className="min-w-0">
           <h1 className="truncate text-2xl font-black tracking-tight text-ink sm:text-3xl">
