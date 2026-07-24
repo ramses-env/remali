@@ -35,19 +35,23 @@ export default function Dock({ items, className }: { items: DockItem[]; classNam
     <nav
       aria-label="Navegación principal"
       className={cn(
-        'fixed inset-x-0 bottom-0 z-40 flex justify-center px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:hidden',
+        // px-2.5: poco margen a los lados. El dock se estira casi de borde a
+        // borde y se adapta a cualquier ancho de pantalla.
+        'fixed inset-x-0 bottom-0 z-40 flex justify-center px-2.5 pb-[max(0.6rem,env(safe-area-inset-bottom))] md:hidden',
         'pointer-events-none',
         className,
       )}
     >
       <ul
         className={cn(
-          'pointer-events-auto flex items-stretch gap-1 rounded-[22px] border border-edge/80 bg-surface/85 p-1.5',
+          // w-full + items flex-1: ocupan todo el ancho disponible y se reparten
+          // parejo, en vez de encogerse al centro dejando aire a los lados.
+          'pointer-events-auto flex w-full items-stretch gap-0.5 rounded-[22px] border border-edge/80 bg-surface/85 p-1.5',
           'shadow-lg shadow-black/25 backdrop-blur-md',
         )}
       >
         {items.map(it => (
-          <li key={it.key}>
+          <li key={it.key} className="flex-1">
             <DockBoton item={it} />
           </li>
         ))}
@@ -80,7 +84,8 @@ function DockBoton({ item }: { item: DockItem }) {
   // Presionar hunde un poco el botón (feedback táctil), pero no cuando se pide
   // menos movimiento. El estado activo se marca con el acento, no con tamaño.
   const clases = cn(
-    'flex min-w-[62px] flex-col items-center justify-center gap-1.5 rounded-2xl px-3 py-2',
+    // w-full para llenar la celda flex-1; sin min-width que fuerce el centrado.
+    'flex w-full flex-col items-center justify-center gap-1.5 rounded-2xl px-1.5 py-2',
     'transition-[color,background-color,transform] duration-150 ease-out',
     'active:scale-[0.94] motion-reduce:transition-none motion-reduce:active:scale-100',
     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40',
