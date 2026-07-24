@@ -708,11 +708,16 @@ def _sync_alertas_vencimiento():
         Notificacion.objects.bulk_create(nuevas)
 
 
-# Notificaciones que son trabajo de campo: entregas, recolecciones, rentas
-# vencidas (hay que ir por la máquina) y movimientos de inventario/taller. El
-# resto —ventas, cotizaciones (tipo 'sistema'), respaldos, avisos de sistema— son
-# del negocio y solo los ve administración.
-TIPOS_OPERATIVOS = ('renta', 'alerta', 'inventario')
+# Lo único que el técnico ve por notificación son AVISOS DE ACCIÓN de campo, y
+# todos son tipo 'alerta': renta vencida (ir a recoger), renta por vencer, y
+# reparación estancada. Nada más.
+#
+# En particular NO ve tipo 'renta': "Nueva renta" y las confirmaciones de
+# "entregó/recogió" son eventos del negocio; que se rentó un equipo no es asunto
+# suyo, y la entrega ya le aparece como tarea en Mi jornada el día que toca.
+# Tampoco 'venta', 'inventario' (estados de mantenimiento) ni 'sistema'
+# (cotizaciones, respaldos): todo eso es de administración.
+TIPOS_OPERATIVOS = ('alerta',)
 
 
 def _notifs_visibles(user):
