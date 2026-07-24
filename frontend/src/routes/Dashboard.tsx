@@ -694,8 +694,17 @@ export default function Dashboard() {
     if (!n.leida) api.post(`/notificaciones/${n.id}/leer/`).then(loadNotifs).catch(() => {})
     closeNotifPanel()
 
+    // A dónde puede ir esta cuenta. El técnico no entra a Inventario/Productos
+    // (es de administración), así que abrir ahí el detalle de un equipo desde una
+    // notificación lo dejaba en botones de Rentar/Vender que no son suyos. Si no
+    // puede ver la sección destino, cae en su pantalla: Mi jornada, donde está la
+    // tarea (ir a recoger la máquina vencida, por ejemplo).
+    const inicioPropio: Section = seccionPermitida('ubicaciones')
+      ? 'ubicaciones'
+      : (navGroups[0]?.items[0]?.key ?? 'perfil')
+
     const equipoId = Number(n.data?.equipo_id || 0) || null
-    if (equipoId) {
+    if (equipoId && seccionPermitida('equipos')) {
       go('equipos')
       const e = equipos.find(x => x.id === equipoId)
       if (e) setInvEquipo(e)
@@ -706,7 +715,12 @@ export default function Dashboard() {
       return
     }
 
-    if (n.seccion) go(n.seccion as Section)
+    if (n.seccion && seccionPermitida(n.seccion as Section)) {
+      go(n.seccion as Section)
+      return
+    }
+
+    go(inicioPropio)
   }
 
   function closeNotifPanel() {
