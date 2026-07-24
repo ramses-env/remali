@@ -1,6 +1,20 @@
 import axios from 'axios'
 import { notificarMutacion } from './realtime'
 import { borrarToken, leerToken } from './token'
+import { empiezaPeticion, terminaPeticion } from './cargando'
+
+/* Peticiones que NO deben encender el indicador de carga: el panel las repite
+   solas cada pocos segundos y el loader estaría parpadeando todo el tiempo sin
+   que el usuario haya pedido nada. Un indicador que aparece sin motivo enseña a
+   ignorarlo, y entonces ya no sirve cuando de verdad hace falta.
+   Una llamada puntual puede excluirse pasando `{ fondo: true }` en su config. */
+const SONDEOS = ['/notificaciones/', '/rentas/tareas/']
+
+function esDeFondo(config: any) {
+  if (config?.fondo) return true
+  const url: string = config?.url || ''
+  return SONDEOS.some(s => url.includes(s))
+}
 
 function normalizeBase(url?: string) {
   let u = (url || '').trim()
@@ -16,17 +30,33 @@ const api = axios.create({ baseURL: normalizeBase(import.meta.env.VITE_API_URL) 
 api.interceptors.request.use(config => {
   const token = leerToken()
   if (token) config.headers.Authorization = `Bearer ${token}`
+  // Se marca la propia petición: al llegar la respuesta hay que saber si esta
+  // llegó a contarse, o el contador se desbalancea y el loader se queda pegado.
+  if (!esDeFondo(config)) {
+    ;(config as any).__contada = true
+    empiezaPeticion()
+  }
   return config
 })
+
+/** Descuenta una petición contada, venga por respuesta buena o por error. */
+function cerrar(config: any) {
+  if (config?.__contada) {
+    config.__contada = false
+    terminaPeticion()
+  }
+}
 
 // Si el token expira o es inválido (401), limpiar sesión y mandar a login
 api.interceptors.response.use(
   response => {
+    cerrar(response.config)
     // Toda mutación exitosa avisa al bus: lo que quedó viejo se recarga solo.
     notificarMutacion(response.config?.url || '', response.config?.method || '')
     return response
   },
   error => {
+    cerrar(error?.config)
     const status = error?.response?.status
     const hadToken = Boolean(leerToken())
     const url: string = error?.config?.url || ''
