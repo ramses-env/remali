@@ -5745,7 +5745,7 @@ const TAREA_META: Record<TipoTarea, { label: string; anillo: string; icono: Reac
 }
 // La urgencia tiñe solo la etiqueta de tiempo, no todo el card: el ruido cansa.
 const URGENCIA_TXT: Record<Urgencia, string> = {
-  vencida: 'text-red-500', hoy: 'text-amber-600 dark:text-amber-500',
+  vencida: 'text-red-600 dark:text-red-400', hoy: 'text-amber-600 dark:text-amber-500',
   reparar: 'text-mute', manana: 'text-ink', proxima: 'text-mute',
 }
 
@@ -5799,7 +5799,7 @@ function UbicacionesAdmin({ notify }: { notify: (m: string, t?: 'ok' | 'err') =>
           <>
             <p className="text-[15px] text-ink">
               Tienes <b className="font-black">{pendientes.length}</b> {pendientes.length === 1 ? 'tarea pendiente' : 'tareas pendientes'}
-              {resumen.vencidas > 0 && <span className="text-red-500 font-bold">, {resumen.vencidas} vencida{resumen.vencidas > 1 ? 's' : ''}</span>}.
+              {resumen.vencidas > 0 && <span className="text-red-600 dark:text-red-400 font-bold">, {resumen.vencidas} vencida{resumen.vencidas > 1 ? 's' : ''}</span>}.
             </p>
             <div className="flex flex-wrap gap-2 mt-3">
               {resumen.entregar > 0 && <TareaResumenChip n={resumen.entregar} label="entregar" tipo="entregar" />}
