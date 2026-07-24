@@ -804,15 +804,19 @@ export default function Dashboard() {
               </button>
 
               {notifMounted && (
+                <>
+                {/* Fondo oscuro solo en móvil: el panel se lee como una capa
+                    encima, no como un recuadro flotando sobre el contenido. */}
+                <div onClick={closeNotifPanel} aria-hidden="true" className={`fixed inset-0 z-[54] bg-black/40 sm:hidden transition-opacity duration-200 motion-reduce:transition-none ${notifOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'}`} />
                 <div
                   ref={notifPanelRef} role="dialog" aria-label="Notificaciones"
-                  className={`absolute right-0 top-full mt-2 w-[380px] max-w-[calc(100vw-2rem)] rounded-2xl border border-edge bg-surface shadow-[0_20px_50px_rgba(17,24,39,0.18)] overflow-hidden origin-top-right transform-gpu transition-[transform,opacity] duration-200 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none ${notifOpen ? 'opacity-100 scale-100' : 'opacity-0 scale-[0.96] pointer-events-none'}`}
+                  className={`fixed inset-x-3 top-[84px] z-[55] origin-top sm:absolute sm:inset-x-auto sm:right-0 sm:top-full sm:mt-2 sm:w-[380px] sm:max-w-[calc(100vw-2rem)] sm:z-auto sm:origin-top-right rounded-2xl border border-edge bg-surface shadow-[0_20px_50px_rgba(17,24,39,0.18)] overflow-hidden transform-gpu transition-[transform,opacity] duration-200 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none ${notifOpen ? 'opacity-100 scale-100' : 'opacity-0 scale-[0.96] pointer-events-none'}`}
                 >
                   <div className="px-5 py-4 border-b border-edge flex items-center justify-between gap-3">
                     <div className="text-lg font-extrabold text-ink">Notificaciones</div>
                     <button onClick={marcarTodasNotifs} className="text-[13px] font-bold text-ink hover:text-gold transition-colors">Marcar todas leídas</button>
                   </div>
-                  <div className="max-h-[360px] overflow-y-auto">
+                  <div className="max-h-[min(55vh,360px)] overflow-y-auto">
                     {notifsRecientes.length === 0 && (
                       <div className="py-12 text-center px-6">
                         <div className="w-12 h-12 rounded-full bg-surface-2 flex items-center justify-center mx-auto mb-3 text-mute">
@@ -846,6 +850,7 @@ export default function Dashboard() {
                     <span className="w-3.5 h-3.5 rounded-full border-[1.6px] border-current" /> Ver todas las notificaciones
                   </button>
                 </div>
+                </>
               )}
             </div>
 
