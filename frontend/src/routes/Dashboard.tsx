@@ -5799,7 +5799,9 @@ function UbicacionesAdmin({ notify }: { notify: (m: string, t?: 'ok' | 'err') =>
           <>
             <p className="text-[15px] text-ink">
               Tienes <b className="font-black">{pendientes.length}</b> {pendientes.length === 1 ? 'tarea pendiente' : 'tareas pendientes'}
-              {resumen.vencidas > 0 && <span className="text-red-600 dark:text-red-500 font-bold">, {resumen.vencidas} vencida{resumen.vencidas > 1 ? 's' : ''}</span>}.
+              {/* La coma va FUERA del span: es puntuación normal, no parte del
+                  rojo. Solo "N vencida(s)" se pinta. */}
+              {resumen.vencidas > 0 && <>, <span className="text-red-600 dark:text-red-500 font-bold">{resumen.vencidas} vencida{resumen.vencidas > 1 ? 's' : ''}</span></>}.
             </p>
             <div className="flex flex-wrap gap-2 mt-3">
               {resumen.entregar > 0 && <TareaResumenChip n={resumen.entregar} label="entregar" tipo="entregar" />}
