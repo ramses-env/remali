@@ -3,17 +3,24 @@ import { notificarMutacion } from './realtime'
 import { borrarToken, leerToken } from './token'
 import { empiezaPeticion, terminaPeticion } from './cargando'
 
-/* Peticiones que NO deben encender el indicador de carga: el panel las repite
-   solas cada pocos segundos y el loader estaría parpadeando todo el tiempo sin
-   que el usuario haya pedido nada. Un indicador que aparece sin motivo enseña a
-   ignorarlo, y entonces ya no sirve cuando de verdad hace falta.
-   Una llamada puntual puede excluirse pasando `{ fondo: true }` en su config. */
-const SONDEOS = ['/notificaciones/', '/rentas/tareas/']
+/* Peticiones que NO deben encender el indicador global de carga. Un indicador
+   que se enciende sin que el usuario haya pedido nada enseña a ignorarlo, y
+   entonces ya no sirve cuando de verdad hace falta.
+   Una llamada suelta puede excluirse pasando `{ fondo: true }` en su config.
+
+   - /notificaciones/            el panel lo sondea cada 5 s.
+   - /mensajeria/conversaciones/ el panel lo sondea cada 9 s.
+   - /rentas/tareas/             no se sondea, pero lo recarga el bus de tiempo
+                                 real tras cada mutación y la pantalla "Tu día"
+                                 ya muestra su propio estado de carga. Taparla
+                                 además con un overlay a pantalla completa
+                                 después de cada acción del técnico estorba. */
+const SIN_INDICADOR = ['/notificaciones/', '/mensajeria/conversaciones/', '/rentas/tareas/']
 
 function esDeFondo(config: any) {
   if (config?.fondo) return true
   const url: string = config?.url || ''
-  return SONDEOS.some(s => url.includes(s))
+  return SIN_INDICADOR.some(s => url.includes(s))
 }
 
 function normalizeBase(url?: string) {
