@@ -95,7 +95,7 @@ export default function Login() {
               control={form.control}
               name="usuario"
               render={({ field }) => (
-                <FormItem className="space-y-4">
+                <FormItem className="gap-3">
                   <FormLabel className="text-mute">Usuario o correo</FormLabel>
                   <FormControl>
                     <Input
@@ -117,7 +117,7 @@ export default function Login() {
               control={form.control}
               name="password"
               render={({ field }) => (
-                <FormItem className="space-y-4">
+                <FormItem className="gap-3">
                   <FormLabel className="text-mute">Contraseña</FormLabel>
                   <FormControl>
                     <div className="relative">
@@ -150,7 +150,7 @@ export default function Login() {
               control={form.control}
               name="recordar"
               render={({ field }) => (
-                <FormItem className="flex flex-row items-center space-x-2 space-y-0">
+                <FormItem className="flex flex-row items-center gap-2">
                   <FormControl>
                     <Checkbox
                       checked={field.value}

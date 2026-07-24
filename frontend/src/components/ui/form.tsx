@@ -63,7 +63,12 @@ const FormItem = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivEl
     const id = React.useId()
     return (
       <FormItemContext.Provider value={{ id }}>
-        <div ref={ref} className={cn('space-y-2', className)} {...props} />
+        {/* grid + gap y no space-y: space-y separa poniendo margen a los hijos, y
+            <label> es display:inline por defecto, donde los márgenes verticales
+            NO tienen efecto. Con space-y la etiqueta quedaba pegada al campo por
+            mucho que se subiera el número — el margen se calculaba y el navegador
+            lo ignoraba. El gap de grid no depende del display de los hijos. */}
+        <div ref={ref} className={cn('grid gap-2', className)} {...props} />
       </FormItemContext.Provider>
     )
   },
