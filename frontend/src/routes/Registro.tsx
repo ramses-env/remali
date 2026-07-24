@@ -58,8 +58,15 @@ export default function Registro() {
       })
     } catch (err: any) {
       const status = err?.response?.status
-      if (status === 429) setError('Demasiadas altas desde esta red. Intenta más tarde.')
-      else setError(err?.response?.data?.detail || 'No se pudo crear la cuenta. Revisa tus datos.')
+      // "Altas" es palabra de sistema, no de cliente. Y el mensaje genérico dice
+      // qué pasó pero no qué hacer: se le agrega la salida.
+      if (status === 429)
+        setError('Se crearon varias cuentas desde esta red. Espera un rato e intenta de nuevo.')
+      else
+        setError(
+          err?.response?.data?.detail ||
+            'No se pudo crear la cuenta. Revisa los datos y vuelve a intentar.',
+        )
       return
     }
 
@@ -76,10 +83,11 @@ export default function Registro() {
 
   return (
     <>
-      <AuthCabecera
-        title="Crear cuenta"
-        description="Regístrate para cotizar y dar seguimiento a tus rentas."
-      />
+      {/* La bajada anterior prometía "dar seguimiento a tus rentas", y eso todavía
+          no existe: la cuenta de cliente aún no muestra nada propio. Prometer de
+          más se paga en la primera visita. Esta dice algo cierto y útil: cuánto
+          cuesta registrarse. */}
+      <AuthCabecera title="Crear cuenta" description="Solo necesitas tu nombre y un correo." />
 
       {error && (
         <AuthItem>
@@ -99,8 +107,9 @@ export default function Registro() {
                 <FormItem className="gap-3">
                   <FormLabel className="text-mute">Nombre</FormLabel>
                   <FormControl>
+                    {/* Un ejemplo enseña más que repetir la etiqueta. */}
                     <Input
-                      placeholder="Tu nombre"
+                      placeholder="Juan Pérez"
                       autoComplete="name"
                       className="h-11 rounded-xl bg-surface-2 border-edge text-ink placeholder:text-mute focus-visible:ring-gold/30"
                       disabled={enviando}

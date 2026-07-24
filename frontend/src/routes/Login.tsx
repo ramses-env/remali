@@ -58,18 +58,23 @@ export default function Login() {
         if (d.includes('no active account')) setError('Tu cuenta no está activa. Contacta al administrador.')
         else setError(String(data.detail))
       } else if (err?.response?.status === 429) {
-        setError('Demasiados intentos. Espera un minuto y vuelve a probar.')
+        setError('Demasiados intentos seguidos. Espera un minuto y vuelve a probar.')
       } else {
-        setError('No coinciden. Revisa tu usuario y tu contraseña.')
+        // "No coinciden" no dice qué no coincide. Y no se precisa cuál de los dos
+        // está mal a propósito: decirlo confirmaría a un atacante qué usuarios existen.
+        setError('Usuario o contraseña incorrectos. Revísalos e intenta de nuevo.')
       }
     }
   }
 
   return (
     <>
+      {/* La bajada anterior explicaba a dónde va cada rol: eso es cómo funciona el
+          sistema por dentro, y quien va a teclear su contraseña ya sabe quién es.
+          Esta responde la duda que sí tiene: no hacen falta dos cuentas. */}
       <AuthCabecera
         title="Iniciar sesión"
-        description="Administración y técnicos entran al panel; los clientes, a la tienda."
+        description="La misma cuenta sirve para el panel y para la tienda."
       />
 
       {sesionExpirada && !error && (
@@ -98,8 +103,10 @@ export default function Login() {
                 <FormItem className="gap-3">
                   <FormLabel className="text-mute">Usuario o correo</FormLabel>
                   <FormControl>
+                    {/* Muestra las dos formas válidas en vez de repetir la
+                        etiqueta, que no aportaba nada. */}
                     <Input
-                      placeholder="tu usuario o tu correo"
+                      placeholder="tu usuario o tu@correo.com"
                       autoComplete="username"
                       className="h-11 rounded-xl bg-surface-2 border-edge text-ink placeholder:text-mute focus-visible:ring-gold/30"
                       disabled={enviando}
@@ -123,7 +130,6 @@ export default function Login() {
                     <div className="relative">
                       <Input
                         type={verPass ? 'text' : 'password'}
-                        placeholder="••••••••"
                         autoComplete="current-password"
                         className="h-11 rounded-xl bg-surface-2 border-edge pr-12 text-ink placeholder:text-mute focus-visible:ring-gold/30"
                         disabled={enviando}
@@ -140,12 +146,19 @@ export default function Login() {
                     </div>
                   </FormControl>
                   <FormMessage />
+                  {/* Antes esto era un enlace "¿Olvidaste tu contraseña?" que
+                      llevaba a la portada: prometía recuperarla y no hacía nada.
+                      No existe flujo de restablecimiento, así que aquí va la ruta
+                      real, y donde surge la duda: junto al campo. */}
+                  <p className="text-xs text-mute">
+                    ¿La olvidaste? Pídele al administrador que te la restablezca.
+                  </p>
                 </FormItem>
               )}
             />
           </AuthItem>
 
-          <AuthItem className="flex items-center justify-between">
+          <AuthItem>
             <FormField
               control={form.control}
               name="recordar"
@@ -158,13 +171,14 @@ export default function Login() {
                       disabled={enviando}
                     />
                   </FormControl>
-                  <FormLabel className="font-normal text-mute cursor-pointer">Recordarme</FormLabel>
+                  {/* "Recordarme" no dice qué recuerda. Esto sí describe lo que
+                      hace la casilla: la sesión sobrevive al cerrar el navegador. */}
+                  <FormLabel className="font-normal text-mute cursor-pointer">
+                    Mantener la sesión abierta
+                  </FormLabel>
                 </FormItem>
               )}
             />
-            <Link to="/" className="text-sm font-medium text-mute hover:text-gold transition-colors">
-              ¿Olvidaste tu contraseña?
-            </Link>
           </AuthItem>
 
           <AuthItem>
@@ -173,8 +187,10 @@ export default function Login() {
               disabled={enviando}
               className="w-full h-11 rounded-full bg-gold text-gold-on font-bold text-sm hover:opacity-90 active:scale-[0.98] transition-[transform,opacity] duration-150 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
+              {/* El botón dice lo mismo que el título: una acción conserva su
+                  nombre durante todo el flujo. "Entrar" era un verbo suelto. */}
               {enviando && <Loader2 className="h-4 w-4 animate-spin" />}
-              {enviando ? 'Verificando…' : 'Entrar'}
+              {enviando ? 'Iniciando sesión…' : 'Iniciar sesión'}
             </button>
           </AuthItem>
         </form>
@@ -191,12 +207,13 @@ export default function Login() {
         />
       </AuthItem>
 
+      {/* "Crea una aquí" hace del enlace la palabra "aquí", que fuera de contexto
+          no dice nada (un lector de pantalla los anuncia sueltos). */}
       <AuthItem className="text-center text-sm text-mute">
-        ¿No tienes cuenta?{' '}
+        ¿Todavía no tienes cuenta?{' '}
         <Link to="/registro" className="font-semibold text-gold hover:underline">
-          Crea una aquí
+          Crear una cuenta
         </Link>
-        .
       </AuthItem>
     </>
   )

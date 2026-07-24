@@ -207,8 +207,12 @@ export function AuthSplitScreen() {
           <p className="text-gold text-[11px] font-mono uppercase tracking-[0.3em] mb-3">
             Renta y venta de maquinaria
           </p>
-          <p className="text-white text-2xl font-black leading-tight max-w-sm">
-            Controla tu maquinaria desde un solo lugar.
+          {/* "Controla tu maquinaria desde un solo lugar" era relleno de plantilla:
+              describe cualquier software. Esta dice lo que el panel hace de verdad
+              —seguir cada unidad, quién la tiene y cuándo vuelve— con las palabras
+              del negocio. */}
+          <p className="text-white text-2xl font-black leading-tight max-w-sm text-balance">
+            Sabes qué máquina salió, con quién y cuándo vuelve.
           </p>
         </div>
       </div>
