@@ -542,6 +542,11 @@ def login(request):
 @permission_classes([permissions.IsAuthenticated])
 def me(request):
     u = request.user
+    # datos_completos viaja aquí para que la tienda decida si recordarle al cliente
+    # que complete su perfil sin pedir otro endpoint en cada página. filter().first()
+    # y no u.perfil: una cuenta recién creada por Google todavía no tiene perfil, y
+    # acceder al reverse lanzaría DoesNotExist.
+    perfil = PerfilUsuario.objects.filter(usuario=u).first()
     return Response({
         'id': u.id,
         'email': u.email,
@@ -552,6 +557,7 @@ def me(request):
         'is_superuser': u.is_superuser,
         'groups': list(u.groups.values_list('name', flat=True)),
         'puede': puede_de(u),
+        'datos_completos': bool(perfil and perfil.datos_completos),
     })
 
 

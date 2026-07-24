@@ -7,6 +7,7 @@ import { Check, Eye, EyeOff, Loader2, Lock, ShieldCheck, TriangleAlert, User } f
 
 import api from '../lib/api'
 import { useAuth } from '../store/auth'
+import { useProfile } from '../store/profile'
 import { AvatarInicial } from '@/components/ui/avatar-inicial'
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
@@ -101,23 +102,16 @@ export default function Perfil() {
             {perfil?.first_name?.trim() || 'Tu cuenta'}
           </h1>
           <p className="mt-1 truncate text-sm text-mute">{perfil?.email || perfil?.username}</p>
-          <div className="mt-2.5 flex flex-wrap items-center gap-2">
-            {perfil?.puede?.rol && (
-              <span className="rounded-full border border-edge px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wider text-mute">
-                {perfil.puede.rol}
-              </span>
-            )}
-            <span
-              className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold ${
-                perfil?.datos_completos
-                  ? 'bg-libre/10 text-libre'
-                  : 'bg-gold-soft text-gold'
-              }`}
-            >
-              {perfil?.datos_completos ? <Check className="h-3 w-3" /> : <TriangleAlert className="h-3 w-3" />}
-              {perfil?.datos_completos ? 'Datos completos' : 'Faltan datos'}
+          {/* Solo se marca cuando está COMPLETO, como refuerzo positivo. El
+              "faltan datos" ya no vive aquí: lo dice el aviso de abajo, y
+              repetirlo como badge era decir dos veces lo mismo. Tampoco va el rol
+              ("Sin acceso" asusta a un cliente y no le sirve en su propia cuenta). */}
+          {perfil?.datos_completos && (
+            <span className="mt-2.5 inline-flex items-center gap-1.5 rounded-full bg-libre/10 px-2.5 py-1 text-[11px] font-semibold text-libre">
+              <Check className="h-3 w-3" />
+              Datos completos
             </span>
-          </div>
+          )}
         </div>
       </header>
 
@@ -168,6 +162,7 @@ function PanelPerfil({
 }) {
   const [error, setError] = useState<string | undefined>(undefined)
   const [guardado, setGuardado] = useState(false)
+  const { refresh } = useProfile()
 
   const form = useForm<ValoresPerfil>({
     resolver: zodResolver(esquemaPerfil),
@@ -190,6 +185,9 @@ function PanelPerfil({
       onGuardado(r.data)
       form.reset(datos)
       setGuardado(true)
+      // Refresca /auth/me/ global: así el recordatorio flotante y el punto del
+      // navbar se apagan en cuanto el perfil queda completo, sin recargar.
+      refresh()
     } catch (err: any) {
       setError(err?.response?.data?.detail || 'No se pudieron guardar los cambios.')
     }

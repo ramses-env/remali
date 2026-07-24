@@ -7,6 +7,7 @@ import Cotizacion from './routes/Cotizacion'
 import Login from './routes/Login'
 import Registro from './routes/Registro'
 import Perfil from './routes/Perfil'
+import RecordatorioPerfil from './components/RecordatorioPerfil'
 import { AuthSplitScreen } from '@/components/ui/auth-split-screen'
 import Dashboard from './routes/Dashboard'
 import Footer from './components/Footer'
@@ -64,6 +65,9 @@ function App() {
               </ErrorBoundary>
             </div>
             <Footer />
+            {/* Recordatorio flotante para clientes con el perfil a medias. Vive
+                aquí, no en cada página, para aparecer en toda la tienda. */}
+            <RecordatorioPerfil />
           </div>
         </PriceUnitProvider>
       )}

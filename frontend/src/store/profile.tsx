@@ -13,6 +13,8 @@ type User = {
   /* `/auth/me/` ya devuelve las capacidades; sin tiparlas, la tienda no puede
      distinguir a un cliente de alguien de administración. */
   puede?: { nivel: number; rol: string }
+  /* Para saber si al cliente le falta completar su perfil sin pedir otro endpoint. */
+  datos_completos?: boolean
 }
 
 type ProfileContextType = {

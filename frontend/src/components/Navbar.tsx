@@ -1,6 +1,5 @@
 import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { createPortal } from 'react-dom'
-import api from '../lib/api'
 import { useAuth } from '../store/auth'
 import { useProfile } from '../store/profile'
 import { useCart } from '../store/cart'
@@ -18,23 +17,12 @@ export default function Navbar() {
   const cartCount = state.items.reduce((n, i) => n + i.qty, 0)
   const [confirm, setConfirm] = useState(false)
   const [scrolled, setScrolled] = useState(false)
-  const [perfilIncompleto, setPerfilIncompleto] = useState(false)
 
   // Nivel 0 = cuenta sin rol en el panel, que es lo que son los clientes.
   const esCliente = Boolean(token) && (user?.puede?.nivel ?? 0) === 0
-
-  useEffect(() => {
-    if (!esCliente) {
-      setPerfilIncompleto(false)
-      return
-    }
-    let vivo = true
-    api
-      .get('/auth/perfil/')
-      .then(r => vivo && setPerfilIncompleto(!r.data?.datos_completos))
-      .catch(() => {})
-    return () => { vivo = false }
-  }, [esCliente])
+  // datos_completos viene de /auth/me/ (lo carga el store al entrar): sin fetch
+  // aparte, y se refresca solo cuando el perfil llama a refresh() al guardar.
+  const perfilIncompleto = esCliente && user?.datos_completos === false
 
   useEffect(() => {
     const handleScroll = () => setScrolled(window.scrollY > 20)
