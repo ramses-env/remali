@@ -1,6 +1,7 @@
 import * as React from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { motion, useReducedMotion } from 'framer-motion'
+import { ArrowLeft } from 'lucide-react'
 
 import ThemeToggle from '@/components/ThemeToggle'
 
@@ -58,11 +59,34 @@ export function AuthSplitScreen({
   footer?: React.ReactNode
 }) {
   const reducir = useReducedMotion()
+  const nav = useNavigate()
+  const loc = useLocation()
+  const vinoDelGuard = new URLSearchParams(loc.search).has('next')
+
+  function volver() {
+    // Si el guard lo trajo aquí (llegó con ?next=), retroceder lo devolvería a la
+    // ruta protegida y el guard lo rebotaría al login otra vez: bucle. En ese caso
+    // el único destino seguro es el inicio.
+    if (!vinoDelGuard && window.history.length > 1) nav(-1)
+    else nav('/')
+  }
+
   return (
     <div className="relative flex min-h-screen w-full flex-col md:flex-row bg-app text-ink">
       {/* ── Formulario ── */}
-      <div className="flex w-full flex-col items-center justify-center px-6 py-12 sm:px-10 md:w-1/2">
-        <div className="absolute top-5 right-5 md:right-auto md:left-5">
+      {/* `relative` aquí, no solo en el contenedor de afuera: si no, "Volver" y el
+          selector de tema se posicionan contra la pantalla completa y en escritorio
+          el segundo termina encima de la foto, donde no se ve ni se puede usar. */}
+      <div className="relative flex w-full flex-col items-center justify-center px-6 py-12 sm:px-10 md:w-1/2">
+        <button
+          type="button"
+          onClick={volver}
+          className="absolute top-5 left-5 inline-flex items-center gap-1.5 h-9 px-3 rounded-full text-sm text-mute hover:text-ink hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/30 transition-colors"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          Volver
+        </button>
+        <div className="absolute top-5 right-5">
           <ThemeToggle />
         </div>
 
@@ -74,19 +98,24 @@ export function AuthSplitScreen({
             className="flex flex-col gap-6"
           >
             <AuthItem>
-              <Link to="/" className="flex items-center gap-3 w-fit">
-                <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-amber-400 to-orange-500 p-[2px]">
-                  <div className="w-full h-full bg-app rounded-[10px] flex items-center justify-center">
-                    <span className="text-lg font-black text-transparent bg-clip-text bg-gradient-to-tr from-amber-400 to-orange-500">
-                      R
-                    </span>
-                  </div>
+              {/* Solo el glifo, centrado: el nombre ya lo dice el sitio y repetirlo
+                  encima del título recargaba la cabecera. */}
+              <Link
+                to="/"
+                aria-label="Ir al inicio"
+                className="mx-auto block w-12 h-12 rounded-xl bg-gradient-to-tr from-amber-400 to-orange-500 p-[2px]"
+              >
+                <div className="w-full h-full bg-app rounded-[10px] flex items-center justify-center">
+                  <span className="text-xl font-black text-transparent bg-clip-text bg-gradient-to-tr from-amber-400 to-orange-500">
+                    R
+                  </span>
                 </div>
-                <span className="text-xl font-black tracking-tight text-ink">REMALI</span>
               </Link>
             </AuthItem>
 
-            <AuthItem className="text-left">
+            {/* Cabecera centrada para acompañar al glifo; el formulario se queda
+                alineado a la izquierda, que es como se leen las etiquetas. */}
+            <AuthItem className="text-center">
               <h1 className="text-3xl font-black tracking-tight text-ink">{title}</h1>
               <p className="text-sm text-mute mt-1.5">{description}</p>
             </AuthItem>

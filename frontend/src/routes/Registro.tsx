@@ -114,7 +114,7 @@ export default function Registro() {
               control={form.control}
               name="nombre"
               render={({ field }) => (
-                <FormItem>
+                <FormItem className="space-y-3">
                   <FormLabel className="text-mute">Nombre</FormLabel>
                   <FormControl>
                     <Input
@@ -136,7 +136,7 @@ export default function Registro() {
               control={form.control}
               name="email"
               render={({ field }) => (
-                <FormItem>
+                <FormItem className="space-y-3">
                   <FormLabel className="text-mute">Correo</FormLabel>
                   <FormControl>
                     <Input
@@ -159,7 +159,7 @@ export default function Registro() {
               control={form.control}
               name="password"
               render={({ field }) => (
-                <FormItem>
+                <FormItem className="space-y-3">
                   <FormLabel className="text-mute">Contraseña</FormLabel>
                   <FormControl>
                     <div className="relative">
@@ -192,7 +192,7 @@ export default function Registro() {
               control={form.control}
               name="confirmar"
               render={({ field }) => (
-                <FormItem>
+                <FormItem className="space-y-3">
                   <FormLabel className="text-mute">Confirmar contraseña</FormLabel>
                   <FormControl>
                     <Input
