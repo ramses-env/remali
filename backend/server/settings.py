@@ -84,7 +84,7 @@ MODO_CONSTRUCCION = os.environ.get(
 # públicas de Google. Si algún día se rota el cliente OAuth, basta la variable.
 GOOGLE_CLIENT_ID = os.environ.get(
     "GOOGLE_CLIENT_ID",
-    "796001180849-c0i77104ckd95n1rdortq92iffg47ahj.apps.googleusercontent.com",
+    "796001180849-nqdgu48bai3retv926fliliebfnscl94.apps.googleusercontent.com",
 )
 
 

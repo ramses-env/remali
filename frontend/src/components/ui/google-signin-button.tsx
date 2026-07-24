@@ -7,7 +7,7 @@ import { useTheme } from '@/store/theme'
    y puede tener valor por defecto. El client secret NO participa en este flujo. */
 const CLIENT_ID =
   import.meta.env.VITE_GOOGLE_CLIENT_ID ||
-  '796001180849-c0i77104ckd95n1rdortq92iffg47ahj.apps.googleusercontent.com'
+  '796001180849-nqdgu48bai3retv926fliliebfnscl94.apps.googleusercontent.com'
 
 /* Un solo <script> por pestaña aunque se monten sign-in y sign-up: la promesa se
    comparte a nivel de módulo. Cargarlo dos veces reinicia el estado de Google. */
