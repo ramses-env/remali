@@ -4,11 +4,13 @@ import api from '../lib/api'
 import { formatMoney } from '../lib/utils'
 import { useConfigPublica } from '../lib/configPublica'
 import { waLink } from '../lib/whatsapp'
+import resolveMediaUrl from '../lib/resolveMediaUrl'
 
 type Cot = {
   folio: string; estado: string; estado_label: string; tipo: string; total: string
   creada?: string; vence_el?: string | null; pdf?: string | null
   items: { descripcion: string; cantidad: number }[]
+  carrito?: { id: number; title: string; qty: number; unit?: string; image?: string }[]
 }
 
 const monoLabel = 'text-[10.5px] font-mono tracking-[0.14em] text-mute uppercase'
@@ -21,6 +23,7 @@ export default function MisCotizacionEstado() {
   const [cot, setCot] = useState<Cot | null>(null)
   const [cargando, setCargando] = useState(true)
   const [copiada, setCopiada] = useState(false)
+  const [fotos, setFotos] = useState<Record<number, string>>({})
 
   useEffect(() => {
     api.get<{ cotizaciones: Cot[] }>('/cotizaciones/mias/')
@@ -28,6 +31,16 @@ export default function MisCotizacionEstado() {
       .catch(() => setCot(null))
       .finally(() => setCargando(false))
   }, [folio])
+
+  useEffect(() => {
+    api.get<{ id: number; imagen?: string | null; imagenes?: string[] }[]>('/equipos/')
+      .then(r => {
+        const m: Record<number, string> = {}
+        for (const e of r.data || []) { const im = e.imagen || (e.imagenes || [])[0]; if (im) m[e.id] = im }
+        setFotos(m)
+      })
+      .catch(() => {})
+  }, [])
 
   if (cargando) return <div className="bg-app min-h-screen grid place-items-center"><div className="w-8 h-8 rounded-full border-2 border-gold border-t-transparent animate-spin" /></div>
   if (!cot) return (
@@ -56,6 +69,9 @@ export default function MisCotizacionEstado() {
     : { txt: 'Paso 2 de 4 · en revisión ahora', cls: 'text-gold border-gold/40' }
 
   const wa = waLink(cfg.whatsapp_principal, `Hola REMALI, quiero seguimiento de mi cotización ${cot.folio}.`)
+  const diasRestantes = cot.vence_el ? Math.ceil((new Date(cot.vence_el + 'T23:59:59').getTime() - Date.now()) / 86400000) : null
+  const porVencer = !venc && !rech && !acep && diasRestantes !== null && diasRestantes <= 3
+  const UNIT_TXT: Record<string, string> = { venta: 'Compra', dia: 'Renta por día', semana: 'Renta por semana', mes: 'Renta por mes' }
 
   async function copiar() {
     if (!cot?.pdf) return
@@ -111,21 +127,71 @@ export default function MisCotizacionEstado() {
           </div>
         </div>
 
-        <div className="rounded-[20px] border border-edge bg-surface overflow-hidden">
-          <div className="px-6 sm:px-8 py-6 flex flex-wrap items-end gap-x-10 gap-y-4 justify-between border-b border-edge">
-            <div className="flex flex-wrap gap-x-10 gap-y-4">
-              <div><p className={monoLabel}>Folio</p><p className="font-mono text-[15px] font-bold mt-1">{cot.folio}</p></div>
-              <div><p className={monoLabel}>Total</p><p className="text-[15px] font-extrabold text-price mt-1">{formatMoney(cot.total)}</p></div>
-              {cot.vence_el && <div><p className={monoLabel}>Vigencia</p><p className="text-[15px] font-bold mt-1">{cot.vence_el}</p></div>}
+        <div className="grid min-[980px]:grid-cols-[minmax(0,1fr)_360px] gap-5 items-start">
+          <div className="rounded-[20px] border border-edge bg-surface overflow-hidden">
+            <div className="px-6 sm:px-8 py-6 flex flex-wrap items-end gap-x-10 gap-y-4 justify-between border-b border-edge">
+              <div className="flex flex-wrap gap-x-10 gap-y-4">
+                <div><p className={monoLabel}>Folio</p><p className="font-mono text-[15px] font-bold mt-1">{cot.folio}</p></div>
+                <div><p className={monoLabel}>Total</p><p className="text-[15px] font-extrabold text-price mt-1">{formatMoney(cot.total)}</p></div>
+                {cot.vence_el && <div><p className={monoLabel}>Vigencia</p><p className="text-[15px] font-bold mt-1">{cot.vence_el}</p></div>}
+              </div>
+              {cot.pdf && <a href={cot.pdf} target="_blank" rel="noopener noreferrer" className="text-[14px] font-semibold text-gold hover:opacity-80">Ver completa →</a>}
             </div>
-            {cot.pdf && <a href={cot.pdf} target="_blank" rel="noopener noreferrer" className="text-[14px] font-semibold text-gold hover:opacity-80">Ver completa →</a>}
+            {(cot.carrito && cot.carrito.length > 0 ? cot.carrito : null)?.map((l, i) => {
+              const foto = l.image || fotos[l.id]
+              return (
+                <div key={i} className="px-6 sm:px-8 py-4 border-b border-edge/60 flex items-center gap-4">
+                  <div className="w-14 h-14 rounded-xl bg-surface-2 border border-edge shrink-0 overflow-hidden grid place-items-center">
+                    {foto ? <img src={resolveMediaUrl(foto)} alt={l.title} className="w-full h-full object-cover" loading="lazy" crossOrigin="anonymous" referrerPolicy="no-referrer" /> : <span className="text-[9px] text-mute">Sin foto</span>}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[15px] font-bold leading-snug line-clamp-1">{l.title}</p>
+                    <p className="text-[13px] text-mute mt-0.5">{UNIT_TXT[l.unit || 'venta'] || 'Compra'} · {l.qty} equipo{l.qty === 1 ? '' : 's'}</p>
+                  </div>
+                </div>
+              )
+            }) || cot.items.map((it, i) => (
+              <div key={i} className="px-6 sm:px-8 py-4 border-b border-edge/60 flex items-center justify-between gap-4">
+                <p className="text-[14.5px] font-semibold line-clamp-1">{it.descripcion}</p>
+                <span className="text-[13.5px] text-mute shrink-0">× {it.cantidad}</span>
+              </div>
+            ))}
+            {cot.vence_el && <p className="px-6 sm:px-8 py-4 text-[12.5px] text-mute">Precios vigentes hasta el {cot.vence_el}.</p>}
           </div>
-          {cot.items.map((it, i) => (
-            <div key={i} className="px-6 sm:px-8 py-4 border-b border-edge/60 flex items-center justify-between gap-4">
-              <p className="text-[14.5px] font-semibold line-clamp-1">{it.descripcion}</p>
-              <span className="text-[13.5px] text-mute shrink-0">× {it.cantidad}</span>
+
+          <div className="flex flex-col gap-5">
+            <div className="rounded-[20px] border border-edge bg-surface p-6">
+              <p className={`${monoLabel} mb-4`}>Te está atendiendo</p>
+              <div className="flex items-center gap-3.5 mb-4">
+                <div className="w-11 h-11 rounded-full bg-gold-soft text-gold grid place-items-center font-extrabold text-[15px]">
+                  {(cfg.negocio_representante || 'R').split(' ').map(p => p[0]).slice(0, 2).join('').toUpperCase()}
+                </div>
+                <div>
+                  <p className="text-[15px] font-bold">{cfg.negocio_representante || cfg.negocio_nombre || 'REMALI'}</p>
+                  <p className="text-[12.5px] text-mute">REMALI · Acapulco, Gro.</p>
+                </div>
+              </div>
+              {(cfg.negocio_telefono || cfg.whatsapp_principal) && (
+                <div className="flex justify-between text-[13.5px] py-1.5"><span className="text-mute">Teléfono</span><span className="font-semibold">{cfg.negocio_telefono || cfg.whatsapp_principal}</span></div>
+              )}
+              {cfg.negocio_email && <div className="flex justify-between text-[13.5px] py-1.5 gap-3"><span className="text-mute">Correo</span><span className="font-semibold truncate">{cfg.negocio_email}</span></div>}
             </div>
-          ))}
+
+            {porVencer && (
+              <div className="rounded-[20px] border border-gold/40 bg-gold-soft/40 p-6">
+                <p className="text-[15px] font-extrabold">Tu cotización vence {diasRestantes === 0 ? 'hoy' : diasRestantes === 1 ? 'mañana' : `en ${diasRestantes} días`}</p>
+                <p className="text-[13px] text-mute mt-1.5 leading-snug">Para respetarte estos precios, confírmanos por WhatsApp antes de la fecha.</p>
+                {wa && <a href={wa} target="_blank" rel="noopener noreferrer" className="inline-block mt-4 px-5 h-[42px] leading-[42px] rounded-xl bg-gold text-black text-[14px] font-bold btn-acento">Confirmar por WhatsApp</a>}
+              </div>
+            )}
+            {venc && (
+              <div className="rounded-[20px] border border-edge bg-surface p-6">
+                <p className="text-[15px] font-extrabold">Esta cotización venció</p>
+                <p className="text-[13px] text-mute mt-1.5 leading-snug">Los precios ya no están garantizados, pero puedes rearmarla en un clic con los mismos equipos.</p>
+                <Link to="/mis-cotizaciones" className="inline-block mt-4 px-5 h-[42px] leading-[42px] rounded-xl bg-gold text-black text-[14px] font-bold btn-acento">Volver a cotizar</Link>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>
