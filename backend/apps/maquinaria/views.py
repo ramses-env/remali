@@ -719,7 +719,7 @@ def google_login(request):
 @throttle_classes([LoginThrottle])           # anti fuerza bruta: cuenta intentos por IP
 def login(request):
     """Login flexible: acepta username o email + password."""
-    username_or_email = request.data.get('username') or request.data.get('email')
+    username_or_email = ((request.data.get('username') or request.data.get('email')) or '').strip().lower()
     password = request.data.get('password')
     if not username_or_email or not password:
         return Response({'detail': 'username/email y password requeridos'}, status=400)
@@ -1040,7 +1040,7 @@ def marcar_todas_leidas(request):
 @throttle_classes([SolicitudPublicaThrottle])  # crea registros sin sesión: mismo techo
 def crear_contacto_soporte(request):
     nombre = (request.data.get('nombre') or '').strip()
-    email = (request.data.get('email') or '').strip()
+    email = (request.data.get('email') or '').strip().lower()
     telefono = (request.data.get('telefono') or '').strip()
     asunto = (request.data.get('asunto') or '').strip()
     mensaje = (request.data.get('mensaje') or '').strip()

@@ -425,14 +425,14 @@ export default function Cotizacion() {
                 <Field label="TU NOMBRE" ok={validNombre} showErrors={showErrors}><input className={inp(validNombre)} value={nombre} onChange={e => setNombre(e.target.value)} placeholder="Nombre y apellido" /></Field>
                 <Field label="EMPRESA / OBRA" ok={validEmpresa} showErrors={showErrors}><input className={inp(validEmpresa)} value={empresa} onChange={e => setEmpresa(e.target.value)} placeholder="Constructora o nombre de la obra" /></Field>
                 <Field label="TELÉFONO / WHATSAPP" ok={validTelefono} showErrors={showErrors}><input type="tel" inputMode="numeric" maxLength={10} className={inp(validTelefono)} value={telefono} onChange={e => setTelefono(e.target.value.replace(/\D+/g, '').slice(0, 10))} placeholder="10 dígitos" /></Field>
-                <Field label="CORREO (OPCIONAL)" ok={validClientEmail} showErrors={showErrors}><input type="email" className={inp(validClientEmail)} value={email} onChange={e => setEmail(e.target.value)} placeholder="correo@ejemplo.com" /></Field>
+                <Field label="CORREO (OPCIONAL)" ok={validClientEmail} showErrors={showErrors}><input type="email" className={inp(validClientEmail)} value={email} onChange={e => setEmail(e.target.value.toLowerCase())} placeholder="correo@ejemplo.com" /></Field>
                 <Field label="QUIÉN AUTORIZA" ok={validResponsable} showErrors={showErrors}><input className={inp(validResponsable)} value={responsable} onChange={e => setResponsable(e.target.value)} placeholder="Encargado o jefe de obra" /></Field>
                 <Field label="TELÉFONO EN OBRA" ok={validObraTelefono} showErrors={showErrors}><input type="tel" inputMode="numeric" maxLength={10} className={inp(validObraTelefono)} value={obraTelefono} onChange={e => setObraTelefono(e.target.value.replace(/\D+/g, '').slice(0, 10))} placeholder="10 dígitos" /></Field>
                 <div className="sm:col-span-2">
                   <Field label="DIRECCIÓN DE ENTREGA" ok={validDireccion} showErrors={showErrors}><input className={inp(validDireccion)} value={direccion} onChange={e => setDireccion(e.target.value)} placeholder="Calle, número, colonia" /></Field>
                 </div>
                 <div className="sm:col-span-2">
-                  <Field label="CORREO DE LA OBRA" ok={validObraEmail} showErrors={showErrors}><input type="email" className={inp(validObraEmail)} value={obraEmail} onChange={e => setObraEmail(e.target.value)} placeholder="Le llega la cotización" /></Field>
+                  <Field label="CORREO DE LA OBRA" ok={validObraEmail} showErrors={showErrors}><input type="email" className={inp(validObraEmail)} value={obraEmail} onChange={e => setObraEmail(e.target.value.toLowerCase())} placeholder="Le llega la cotización" /></Field>
                 </div>
               </div>
             </div>

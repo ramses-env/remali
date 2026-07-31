@@ -149,7 +149,7 @@ def crear_cotizacion_publica(request):
             usuario=request.user if request.user.is_authenticated else None,
             cliente_nombre=nombre,
             cliente_telefono=(cliente.get('telefono') or '').strip(),
-            cliente_email=(cliente.get('email') or '').strip(),
+            cliente_email=(cliente.get('email') or '').strip().lower(),
             aplica_iva=bool(d.get('requiere_factura')),
             datos_solicitud={
                 'empresa': (cliente.get('empresa') or '').strip(),
@@ -157,7 +157,7 @@ def crear_cotizacion_publica(request):
                     'responsable': (obra.get('responsable') or '').strip(),
                     'direccion': (obra.get('direccion') or '').strip(),
                     'telefono': (obra.get('telefono') or '').strip(),
-                    'email': (obra.get('email') or '').strip(),
+                    'email': (obra.get('email') or '').strip().lower(),
                 },
                 'carrito': carrito,
             },
