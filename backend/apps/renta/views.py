@@ -605,6 +605,29 @@ def mis_tareas(request):
         'vencidas': sum(1 for t in tareas if t['urgencia'] == 'vencida'),
         'proximas': sum(1 for t in tareas if t['urgencia'] == 'proxima'),
     }
+    # Entregas PROMETIDAS de hoy (cotizaciones aceptadas con fecha, aún sin
+    # convertir): el técnico las ve en su día aunque la venta/renta formal no
+    # exista todavía. Sin botones de acción: son un compromiso, no una renta.
+    try:
+        from cotizaciones.models import Cotizacion as _Cot
+        hoy_ini = timezone.make_aware(timezone.datetime.combine(hoy, timezone.datetime.min.time()))
+        hoy_fin = hoy_ini + timezone.timedelta(days=1)
+        for c in _Cot.objects.filter(estado='aceptada', entrega_prometida__gte=hoy_ini,
+                                     entrega_prometida__lt=hoy_fin,
+                                     conversiones__isnull=True, rentas_convertidas__isnull=True):
+            obra = (c.datos_solicitud or {}).get('obra') or {}
+            tareas.append({
+                'renta_id': None, 'cotizacion_folio': c.folio,
+                'equipo': ', '.join(i.descripcion for i in c.items.all()[:2]) or 'Equipo',
+                'codigo': c.folio, 'numero_serie': '',
+                'fecha_inicio': hoy, 'fecha_fin': None, 'evidencias': None,
+                'lugar': obra.get('direccion') or c.cliente_nombre or '',
+                'tipo': 'entrega_prometida', 'urgencia': 'hoy',
+                'etiqueta': f"Entrega prometida · {timezone.localtime(c.entrega_prometida):%H:%M}",
+            })
+    except Exception:
+        pass
+
     return Response({'tareas': tareas, 'resumen': resumen})
 
 
