@@ -202,6 +202,32 @@ export default function Cotizacion() {
 
   const monoLabel = 'text-[10.5px] font-mono tracking-[0.14em] text-mute uppercase'
 
+  /* ── Borradores del cliente (en SU navegador) ─────────────────────────────
+     Puede armar varias versiones, bajar el PDF de cada una para su jefe, y
+     cuando decidan, cargar UNA y enviarla a REMALI. El folio nace al enviar,
+     nunca antes — los borradores no existen para el sistema. */
+  type Borrador = { id: number; nombre: string; items: typeof state.items; coupon?: typeof state.coupon; creado: string }
+  const [borradores, setBorradores] = useState<Borrador[]>(() => {
+    try { return JSON.parse(localStorage.getItem('remali_borradores') || '[]') } catch { return [] }
+  })
+  const persistir = (bs: Borrador[]) => {
+    setBorradores(bs)
+    try { localStorage.setItem('remali_borradores', JSON.stringify(bs)) } catch { /* cuota llena */ }
+  }
+  function guardarBorrador() {
+    if (!state.items.length) { notify('Agrega equipos antes de guardar el borrador', 'x'); return }
+    if (borradores.length >= 8) { notify('Máximo 8 borradores; borra alguno primero', 'x'); return }
+    const tipo = state.items[0].unit === 'venta' ? 'Venta' : 'Renta'
+    const nombre = `${tipo} · ${state.items.length} equipo${state.items.length === 1 ? '' : 's'} · ${money(totalConIVA)}`
+    persistir([...borradores, { id: Date.now(), nombre, items: state.items, coupon: state.coupon, creado: new Date().toISOString() }])
+    notify('Borrador guardado')
+  }
+  function cargarBorrador(b: Borrador) {
+    dispatch({ type: 'reemplazar', items: b.items })
+    notify('Borrador cargado — revisa y envía cuando quieras')
+  }
+  const borrarBorrador = (id: number) => persistir(borradores.filter(b => b.id !== id))
+
   if (sentFolio) {
     const wa = waLink(cfg.whatsapp_principal, sentWaMsg)
     const pasos = [
@@ -327,6 +353,40 @@ export default function Cotizacion() {
           <h1 className="text-[34px] sm:text-[44px] font-extrabold tracking-tight leading-none">Arma tu cotización</h1>
           <p className="text-mute text-[15px] mt-2.5 max-w-[560px]">Ajusta cantidades, llena los datos de tu obra y envíala — te contactamos para confirmar disponibilidad.</p>
         </div>
+
+        {/* Mis borradores: varias versiones para comparar o mandar al jefe */}
+        {(borradores.length > 0 || state.items.length > 0) && (
+          <div className="mb-6 rounded-[20px] border border-edge bg-surface px-6 py-5">
+            <div className="flex items-center justify-between gap-4 flex-wrap mb-3">
+              <div>
+                <p className="text-[15px] font-bold">Mis borradores</p>
+                <p className="text-[12.5px] text-mute mt-0.5">Guarda versiones, baja el PDF de cada una, y envía a REMALI solo la elegida.</p>
+              </div>
+              {state.items.length > 0 && (
+                <button onClick={guardarBorrador} className="h-[40px] px-4 rounded-xl border border-gold/50 text-gold text-[13.5px] font-bold hover:bg-gold-soft transition-colors">
+                  + Guardar como borrador
+                </button>
+              )}
+            </div>
+            {borradores.length > 0 && (
+              <div className="flex gap-2 flex-wrap">
+                {borradores.map(b => (
+                  <div key={b.id} className="relative group/bd">
+                    <button onClick={() => cargarBorrador(b)}
+                      className="flex flex-col items-start gap-0.5 pl-4 pr-8 py-2.5 rounded-xl border border-edge bg-app text-left hover:border-gold/60 transition-colors active:scale-[0.98]">
+                      <span className="text-[13.5px] font-bold text-ink">{b.nombre}</span>
+                      <span className="text-[11.5px] text-mute">{new Date(b.creado).toLocaleDateString('es-MX', { day: '2-digit', month: 'short' })} · toca para cargar</span>
+                    </button>
+                    <button aria-label="Borrar borrador" onClick={() => borrarBorrador(b.id)}
+                      className="absolute top-1.5 right-1.5 w-5 h-5 grid place-items-center rounded-full text-mute hover:text-red-500 hover:bg-red-500/10 transition-colors">
+                      <svg viewBox="0 0 24 24" className="w-3 h-3 stroke-current fill-none" strokeWidth="2.2" strokeLinecap="round"><path d="M6 6l12 12M18 6L6 18" /></svg>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         <div className="grid min-[980px]:grid-cols-[minmax(0,1fr)_400px] gap-7 items-start">
           {/* ── Columna izquierda ── */}
