@@ -1524,6 +1524,33 @@ function EquiposAdmin({ equipos, categorias, tipos, marcas, reload, notify }: {
   equipos: Equipo[]; categorias: Option[]; tipos: Option[]; marcas: Option[]
   reload: () => void; notify: (m: string, t?: 'ok' | 'err') => void
 }) {
+
+  // Clasificación exprés desde la lista: tres toques (categoría → tipo → marca)
+  // con los modales de la casa, sin abrir el formulario completo.
+  async function clasificarEquipo(e: Equipo) {
+    const pedirUno = async (titulo: string, lista: Option[], actualId?: number) => {
+      const sel = await elegir({
+        titulo, mensaje: e.modelo,
+        opciones: [
+          ...lista.map(o => ({ valor: String(o.id), label: o.nombre, detalle: o.id === actualId ? 'Actual' : undefined })),
+          { valor: '', label: 'Sin asignar' },
+        ],
+      })
+      return sel === null ? null : (sel[0] || '')
+    }
+    const cat = await pedirUno('Categoría', categorias, e.categoria?.id); if (cat === null) return
+    const tip = await pedirUno('Tipo', tipos, e.tipo?.id); if (tip === null) return
+    const mar = await pedirUno('Marca', marcas, e.marca?.id); if (mar === null) return
+    try {
+      await api.patch(`/equipos/${e.id}/`, {
+        categoria_id: cat ? Number(cat) : null,
+        tipo_id: tip ? Number(tip) : null,
+        marca_id: mar ? Number(mar) : null,
+      })
+      notify('Clasificación guardada')
+      reload()
+    } catch { notify('No se pudo guardar la clasificación', 'err') }
+  }
   const empty: Equipo = { modelo: '', descripcion: '', precio_dia: '', precio_semana: '', precio_mes: '', precio_venta: '', especificaciones: [], que_incluye: [], promo_pct: 0 }
   const [form, setForm] = useState<Equipo>(empty)
   // Helpers del editor de especificaciones técnicas (etiqueta → valor)
@@ -1580,9 +1607,9 @@ function EquiposAdmin({ equipos, categorias, tipos, marcas, reload, notify }: {
       const v = form[k]
       if (v !== '' && v != null) fd.append(k, String(v))
     }
-    if (form.categoria?.id) fd.append('categoria', String(form.categoria.id))
-    if (form.tipo?.id) fd.append('tipo', String(form.tipo.id))
-    if (form.marca?.id) fd.append('marca', String(form.marca.id))
+    if (form.categoria?.id) fd.append('categoria_id', String(form.categoria.id))
+    if (form.tipo?.id) fd.append('tipo_id', String(form.tipo.id))
+    if (form.marca?.id) fd.append('marca_id', String(form.marca.id))
     if (imageFile) fd.append('imagen', imageFile)
     if (fichaFile) fd.append('ficha_tecnica', fichaFile)
     // Especificaciones técnicas (el backend descarta las filas incompletas)
@@ -1714,10 +1741,18 @@ function EquiposAdmin({ equipos, categorias, tipos, marcas, reload, notify }: {
                         </div>
                       </div>
                     </td>
-                    {/* Clasificación */}
+                    {/* Clasificación: clic para asignarla ahí mismo, sin abrir el formulario */}
                     <td className="px-3 py-3">
-                      <p className="text-xs text-ink">{e.categoria?.nombre || '—'}</p>
-                      <p className="text-[11px] text-mute">{e.marca?.nombre || '—'} · {e.tipo?.nombre || '—'}</p>
+                      {(e.categoria || e.tipo || e.marca) ? (
+                        <button onClick={() => clasificarEquipo(e)} className="text-left group/cl" title="Cambiar clasificación">
+                          <p className="text-xs text-ink group-hover/cl:text-gold transition-colors">{e.categoria?.nombre || '—'}</p>
+                          <p className="text-[11px] text-mute">{[e.marca?.nombre, e.tipo?.nombre].filter(Boolean).join(' · ') || '—'}</p>
+                        </button>
+                      ) : (
+                        <button onClick={() => clasificarEquipo(e)} className="text-[11px] px-2.5 py-1 rounded-md border border-dashed border-edge text-mute hover:text-gold hover:border-gold/50 transition-colors">
+                          Asignar
+                        </button>
+                      )}
                     </td>
                     {/* Condición */}
                     <td className="px-3 py-3">

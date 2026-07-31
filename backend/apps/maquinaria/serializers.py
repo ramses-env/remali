@@ -167,6 +167,15 @@ class PerfilUsuarioSerializer(serializers.ModelSerializer):
         return instance
 
 class EquipoSerializer(serializers.ModelSerializer):
+    # Con depth=1 las relaciones se leen anidadas pero DRF las vuelve de solo
+    # lectura: lo que el formulario mandaba en 'categoria' se descartaba en
+    # silencio. Estos alias escriben la relación sin perder la lectura anidada.
+    categoria_id = serializers.PrimaryKeyRelatedField(
+        source='categoria', queryset=Categoria.objects.all(), required=False, allow_null=True, write_only=True)
+    tipo_id = serializers.PrimaryKeyRelatedField(
+        source='tipo', queryset=Tipo.objects.all(), required=False, allow_null=True, write_only=True)
+    marca_id = serializers.PrimaryKeyRelatedField(
+        source='marca', queryset=Marca.objects.all(), required=False, allow_null=True, write_only=True)
     # Escribible (acepta el archivo al crear/editar) y en lectura devuelve la URL.
     imagen = serializers.ImageField(required=False, allow_null=True)
     imagenes = serializers.SerializerMethodField()
@@ -218,6 +227,10 @@ class EquipoSerializer(serializers.ModelSerializer):
         return limpio
 
     def validate(self, attrs):
+        # Un PATCH de metadatos (p. ej. solo clasificación) no debe fallar por
+        # specs que faltaban de antes: la regla aplica al crear o al tocarlas.
+        if self.instance is not None and 'condicion' not in attrs and 'especificaciones' not in attrs:
+            return attrs
         # Los equipos de VENTA (nueva) deben traer características: con ellas se
         # arma la ficha que ve el cliente. Renta no las exige.
         condicion = attrs.get('condicion') or getattr(self.instance, 'condicion', 'nueva')
