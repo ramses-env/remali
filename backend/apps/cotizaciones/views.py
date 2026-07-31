@@ -203,7 +203,9 @@ def crear_cotizacion_publica(request):
     #    autoriza. Sin esto manda la solicitud y se queda sin comprobante.
     _enviar_acuse_cliente(cot)
 
-    return Response({'detalle': 'Solicitud recibida', 'folio': cot.folio, 'id': cot.id}, status=201)
+    # Liga pública (PDF con token): el cliente la puede copiar y compartir.
+    liga = request.build_absolute_uri(f'/api/cotizaciones/publica/{cot.token_publico}/pdf/') if getattr(cot, 'token_publico', None) else None
+    return Response({'detalle': 'Solicitud recibida', 'folio': cot.folio, 'id': cot.id, 'liga': liga}, status=201)
 
 
 @api_view(['GET'])

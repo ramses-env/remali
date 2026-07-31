@@ -3,7 +3,7 @@ import { useCart, MODALIDAD_LABEL } from '../store/cart'
 // Solo el TIPO: la función se importa dinámicamente al descargar, para que
 // jsPDF (~350 KB) no entre al bundle inicial de la tienda.
 import type { downloadCotizacionPdf } from '../lib/pdf'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import { useToast } from '../store/toast'
 import api from '../lib/api'
 import { waLink } from '../lib/whatsapp'
@@ -36,7 +36,6 @@ type ObraCli = { id: number; nombre: string; responsable: string; direccion: str
 export default function Cotizacion() {
   const { state, dispatch } = useCart()
   const { notify } = useToast()
-  const nav = useNavigate()
   const cfg = useConfigPublica()   // WhatsApp del negocio, configurado en el panel
   const { user } = useProfile()    // si hay sesión, precargamos su perfil
   const [prefilled, setPrefilled] = useState(false)
@@ -56,6 +55,9 @@ export default function Cotizacion() {
   const [sentWaMsg, setSentWaMsg] = useState('')
   // Snapshot para poder descargar el PDF DESPUÉS de enviar (el carrito ya se limpió).
   const [sentPdfArgs, setSentPdfArgs] = useState<Parameters<typeof downloadCotizacionPdf>[0] | null>(null)
+  // Liga pública (PDF con token) que regresa el backend al crear la solicitud.
+  const [sentLiga, setSentLiga] = useState<string | null>(null)
+  const [ligaCopiada, setLigaCopiada] = useState(false)
 
   // Autorrelleno desde el perfil: le ahorra al cliente volver a escribir sus
   // datos. Solo rellena lo que está vacío (con `v || ...`), así nunca pisa lo
@@ -142,7 +144,7 @@ export default function Cotizacion() {
     }
     setSending(true)
     try {
-      const r = await api.post<{ folio: string }>('/tienda/cotizacion/', {
+      const r = await api.post<{ folio: string; liga?: string }>('/tienda/cotizacion/', {
         items: state.items.map(i => ({ equipo_id: i.id, cantidad: i.qty, unit: i.unit || 'venta' })),
         cliente: { nombre, empresa, email, telefono },
         obra: { responsable, direccion, telefono: obraTelefono, email: obraEmail },
@@ -152,6 +154,7 @@ export default function Cotizacion() {
       const resumen = state.items.map(i => `${i.qty}x ${i.title}`).join(', ')
       setSentWaMsg(`Hola, soy ${nombre}. Envié la solicitud de cotización ${r.data.folio}${resumen ? ` (${resumen})` : ''}. Quisiera continuar por aquí.`)
       setSentPdfArgs(pdfArgs())   // conserva los datos para descargar el PDF tras limpiar
+      setSentLiga(r.data.liga || null)
       setSentFolio(r.data.folio)
       dispatch({ type: 'clear' })
     } catch (err: any) {
@@ -180,6 +183,17 @@ export default function Cotizacion() {
 
   const inp = (ok: boolean) => `${inputBase} ${showErrors && !ok ? 'border-red-500' : 'border-edge focus:border-gold/60'}`
 
+  async function copiarLiga() {
+    if (!sentLiga) { notify('Primero envía tu solicitud: la liga se genera con el folio', 'x'); return }
+    try {
+      await navigator.clipboard.writeText(sentLiga)
+      setLigaCopiada(true)
+      window.setTimeout(() => setLigaCopiada(false), 2000)
+    } catch { notify('No se pudo copiar. Mantén presionado para copiar manualmente', 'x') }
+  }
+
+  const monoLabel = 'text-[10.5px] font-mono tracking-[0.14em] text-mute uppercase'
+
   if (sentFolio) {
     return (
       <div className="bg-app min-h-screen text-ink flex flex-col items-center justify-center px-6 text-center py-32">
@@ -188,145 +202,216 @@ export default function Cotizacion() {
         </div>
         <h1 className="text-2xl font-extrabold text-ink">¡Solicitud enviada!</h1>
         <p className="text-mute text-sm mt-2 max-w-sm">Recibimos tu solicitud <b className="text-ink font-mono">{sentFolio}</b>. Para agilizar, escríbenos por WhatsApp y continuamos por ahí.</p>
-        <div className="flex flex-col sm:flex-row gap-3 mt-6">
+        <div className="flex flex-col sm:flex-row flex-wrap justify-center gap-3 mt-6">
           {waLink(cfg.whatsapp_principal, sentWaMsg) && (
             <a href={waLink(cfg.whatsapp_principal, sentWaMsg)} target="_blank" rel="noopener noreferrer" className="px-5 py-2.5 rounded-full bg-[#25D366] text-white text-sm font-bold hover:opacity-90 transition-opacity flex items-center justify-center gap-2">
-              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M17.5 14.4c-.3-.1-1.7-.8-1.9-.9-.3-.1-.5-.1-.7.1-.2.3-.7.9-.9 1.1-.2.2-.3.2-.6.1-.3-.1-1.2-.5-2.3-1.4-.9-.8-1.4-1.7-1.6-2-.2-.3 0-.5.1-.6.1-.1.3-.3.4-.5.1-.1.2-.3.2-.4.1-.2 0-.3 0-.5-.1-.1-.7-1.6-.9-2.2-.2-.6-.5-.5-.7-.5h-.6c-.2 0-.5.1-.8.4-.3.3-1 1-1 2.5s1.1 2.9 1.2 3.1c.1.2 2.1 3.2 5.1 4.5.7.3 1.3.5 1.7.6.7.2 1.4.2 1.9.1.6-.1 1.7-.7 2-1.4.2-.7.2-1.3.2-1.4-.1-.1-.3-.2-.6-.3zM12 2C6.5 2 2 6.5 2 12c0 1.8.5 3.5 1.3 5L2 22l5.1-1.3c1.4.8 3.1 1.2 4.9 1.2 5.5 0 10-4.5 10-10S17.5 2 12 2z" /></svg>
               Continuar por WhatsApp
             </a>
+          )}
+          {sentLiga && (
+            <button onClick={copiarLiga}
+              className={`px-5 py-2.5 rounded-full border text-sm font-bold transition-colors flex items-center justify-center gap-2 active:scale-[0.98] ${ligaCopiada ? 'border-emerald-500/50 text-emerald-600' : 'border-edge text-ink hover:bg-surface-2'}`}>
+              {ligaCopiada ? '✓ Liga copiada' : '⧉ Copiar liga de la cotización'}
+            </button>
           )}
           {sentPdfArgs && (
             <button onClick={() => pedirPdf(sentPdfArgs)}
               className="px-5 py-2.5 rounded-full border border-edge text-ink text-sm font-bold hover:bg-surface-2 transition-colors flex items-center justify-center gap-2 active:scale-[0.98]">
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.7}><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
               Descargar PDF
             </button>
           )}
           <Link to="/equipos" className="px-5 py-2.5 rounded-full border border-edge text-ink text-sm font-bold hover:bg-surface-2 transition-colors flex items-center justify-center">Seguir viendo equipos</Link>
         </div>
+        {sentLiga && <p className="text-[11.5px] text-mute mt-4 max-w-sm">La liga abre el PDF oficial de tu cotización — compártela con quien autoriza.</p>}
       </div>
     )
   }
 
+  const tipoActual = state.items.length ? (state.items[0].unit === 'venta' ? 'venta' : 'renta') : null
+
   return (
     <div className="bg-app min-h-screen text-ink">
-      <div className="max-w-[1240px] mx-auto px-4 sm:px-8 lg:px-12 pt-24 pb-16">
-        <div className="flex items-center gap-2 mb-6">
-          <button onClick={() => nav(-1)} aria-label="Volver" className="w-10 h-10 grid place-items-center rounded-full text-mute hover:text-ink hover:bg-surface-2 transition-colors">
-            <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" /></svg>
-          </button>
-          <h1 className="text-2xl font-extrabold text-ink">Tu cotización</h1>
+      <div className="max-w-[1320px] mx-auto px-4 sm:px-8 pt-24 pb-16">
+
+        {/* Encabezado */}
+        <div className="mb-8">
+          <Link to="/equipos" className="inline-flex items-center gap-2 text-[13.5px] text-mute hover:text-ink transition-colors mb-4">← Volver al catálogo</Link>
+          <h1 className="text-[34px] sm:text-[44px] font-extrabold tracking-tight leading-none">Arma tu cotización</h1>
+          <p className="text-mute text-[15px] mt-2.5 max-w-[560px]">Ajusta cantidades, llena los datos de tu obra y envíala — te contactamos para confirmar disponibilidad.</p>
         </div>
 
-        <div className="grid min-[900px]:grid-cols-[1fr_420px] gap-6 items-start">
-          {/* ── Equipos a cotizar ── */}
-          <div className="space-y-2.5">
-            {state.items.length === 0 ? (
-              <div className="flex flex-col items-center justify-center text-center py-16 rounded-2xl border border-edge bg-surface">
-                <div className="w-16 h-16 rounded-full bg-gold-soft flex items-center justify-center mb-4">
-                  <svg className="w-8 h-8 text-gold" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.5"><path d="M7 3h6l4 4v12a2 2 0 01-2 2H7a2 2 0 01-2-2V5a2 2 0 012-2z" /><path d="M13 3v5h5" /><path d="M8 12h8M8 16h8" strokeLinecap="round" /></svg>
-                </div>
-                <p className="text-lg font-bold text-ink">No hay equipos para cotizar</p>
-                <p className="text-sm text-mute mt-1">Explora el catálogo y añade los que necesites.</p>
-                <Link to="/equipos" className="mt-5 px-5 py-2.5 rounded-full bg-gold text-black text-sm font-bold hover:opacity-90 transition-opacity">Ver equipos</Link>
+        <div className="grid min-[980px]:grid-cols-[minmax(0,1fr)_400px] gap-7 items-start">
+          {/* ── Columna izquierda ── */}
+          <div className="flex flex-col gap-5 min-w-0">
+
+            {/* Equipos */}
+            <div className="rounded-[20px] border border-edge bg-surface overflow-hidden">
+              <div className="flex items-center justify-between gap-4 px-6 py-5 border-b border-edge">
+                <span className="text-[16px] font-bold">Equipos <span className="text-mute font-semibold">({state.items.length})</span>{tipoActual && <span className="ml-2 text-[11px] font-bold uppercase tracking-wide text-gold">{tipoActual}</span>}</span>
+                {state.items.length > 0 && (
+                  <button onClick={() => dispatch({ type: 'clear' })} className="text-[13.5px] text-mute hover:text-red-500 transition-colors">Vaciar</button>
+                )}
               </div>
-            ) : (
-              state.items.map(it => (
-                <div key={it.lineId} className="flex items-center gap-3 p-3 rounded-2xl border border-edge bg-surface">
-                  <div className="w-14 h-14 rounded-xl bg-surface-2 border border-edge shrink-0 flex items-center justify-center overflow-hidden">
-                    {it.image ? <img src={it.image} alt={it.title} className="w-full h-full object-contain" /> : <span className="text-[10px] text-mute">Sin foto</span>}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-bold text-sm text-ink truncate">{it.title}</p>
-                    <p className="text-xs text-mute">{money(it.price)} · {MODALIDAD_LABEL[it.unit || 'venta']}</p>
-                  </div>
-                  <div className="flex items-center gap-1.5 shrink-0 border border-edge rounded-lg px-1.5 py-1">
-                    <button aria-label="Menos" onClick={() => dispatch({ type: 'qty', lineId: it.lineId, qty: Math.max(1, it.qty - 1) })} className="w-6 h-6 grid place-items-center rounded-md text-ink hover:bg-surface-2 font-bold">−</button>
-                    <span className="w-6 text-center text-sm font-bold text-ink">{it.qty}</span>
-                    <button aria-label="Más" onClick={() => dispatch({ type: 'qty', lineId: it.lineId, qty: it.qty + 1 })} className="w-6 h-6 grid place-items-center rounded-md text-ink hover:bg-surface-2 font-bold">＋</button>
-                  </div>
-                  <div className="text-right shrink-0 min-w-[70px]">
-                    <p className="font-extrabold text-sm text-price">{money(it.price * it.qty)}</p>
-                  </div>
-                  <button onClick={() => dispatch({ type: 'remove', lineId: it.lineId })} aria-label="Eliminar" className="w-7 h-7 grid place-items-center rounded-full text-mute hover:text-red-500 hover:bg-red-500/10 transition-colors shrink-0">✕</button>
+
+              {state.items.length === 0 ? (
+                <div className="px-6 py-16 text-center">
+                  <p className="text-lg font-bold">Tu cotización está vacía</p>
+                  <p className="text-sm text-mute mt-2">Agrega equipos desde el catálogo para calcular el total.</p>
+                  <Link to="/equipos" className="inline-block mt-5 px-6 py-3 rounded-xl bg-gold text-black text-sm font-bold hover:opacity-90 transition-opacity">Ver equipos</Link>
                 </div>
-              ))
-            )}
+              ) : (
+                state.items.map(it => (
+                  <div key={it.lineId} className="grid grid-cols-[64px_minmax(0,1fr)_auto] sm:grid-cols-[80px_minmax(0,1fr)_auto] gap-4 sm:gap-5 px-6 py-5 border-b border-edge items-center">
+                    <div className="aspect-square rounded-xl bg-surface-2 border border-edge overflow-hidden grid place-items-center">
+                      {it.image ? <img src={it.image} alt={it.title} className="w-full h-full object-contain p-1" /> : <span className="text-[9px] text-mute">Sin foto</span>}
+                    </div>
+                    <div className="min-w-0 flex flex-col gap-2.5">
+                      <div>
+                        <p className="text-[15.5px] font-bold leading-snug line-clamp-1">{it.title}</p>
+                        <p className={`${monoLabel} mt-1`}>{MODALIDAD_LABEL[it.unit || 'venta']}</p>
+                      </div>
+                      <div className="flex items-center gap-2.5 flex-wrap">
+                        <div className="flex items-center border border-edge rounded-[9px] bg-app overflow-hidden">
+                          <button aria-label="Menos" onClick={() => dispatch({ type: 'qty', lineId: it.lineId, qty: Math.max(1, it.qty - 1) })} className="w-8 h-[34px] grid place-items-center text-ink hover:bg-surface-2 transition-colors">−</button>
+                          <span className="min-w-[44px] text-center text-[13.5px] font-bold">{it.qty} eq.</span>
+                          <button aria-label="Más" onClick={() => dispatch({ type: 'qty', lineId: it.lineId, qty: it.qty + 1 })} className="w-8 h-[34px] grid place-items-center text-ink hover:bg-surface-2 transition-colors">+</button>
+                        </div>
+                        <span className="text-[13px] text-mute">{money(it.price)} {it.unit === 'venta' ? 'c/u' : `por ${MODALIDAD_LABEL[it.unit || 'dia'].replace('renta por ', '')}`}</span>
+                      </div>
+                    </div>
+                    <div className="text-right flex flex-col items-end gap-2">
+                      <span className="text-[17px] sm:text-[19px] font-extrabold tracking-tight">{money(it.price * it.qty)}</span>
+                      <button onClick={() => dispatch({ type: 'remove', lineId: it.lineId })} className="text-[13px] text-mute hover:text-red-500 transition-colors">Quitar</button>
+                    </div>
+                  </div>
+                ))
+              )}
+
+              {state.items.length > 0 && (
+                <div className="px-6 py-4 flex items-center justify-between gap-4">
+                  <span className="text-[13px] text-mute hidden sm:block">¿Falta algo? Agrega más equipo sin perder esta lista.</span>
+                  <Link to="/equipos" className="shrink-0 px-4 py-2 rounded-[10px] border border-edge text-[13.5px] font-semibold text-ink hover:bg-surface-2 transition-colors">+ Agregar equipo</Link>
+                </div>
+              )}
+            </div>
+
+            {/* Datos de contacto y obra */}
+            <div className="rounded-[20px] border border-edge bg-surface p-6">
+              <div className="flex items-center justify-between gap-4 mb-5 flex-wrap">
+                <span className="text-[16px] font-bold">Datos de contacto y obra</span>
+                {prefilled && <span className="text-[11px] font-bold uppercase tracking-wide text-gold">✓ Desde tu perfil</span>}
+              </div>
+
+              {(obras.length > 0 || user) && (
+                <div className="mb-6">
+                  <p className={`${monoLabel} mb-2.5`}>Mis obras guardadas</p>
+                  <div className="flex gap-2 flex-wrap">
+                    {obras.map(o => (
+                      <button key={o.id} type="button" onClick={() => usarObra(o)}
+                        className="flex flex-col items-start gap-0.5 px-4 py-2.5 rounded-xl border border-edge bg-app text-left hover:border-gold/60 transition-colors active:scale-[0.98]">
+                        <span className="text-[13.5px] font-bold text-ink max-w-[160px] truncate">{o.nombre}</span>
+                        {o.responsable && <span className="text-[12px] text-mute max-w-[160px] truncate">{o.responsable}</span>}
+                      </button>
+                    ))}
+                    {user && (
+                      <button type="button" onClick={guardarObra}
+                        className="px-4 py-2.5 rounded-xl border border-dashed border-edge text-[13.5px] font-semibold text-mute hover:text-gold hover:border-gold/50 transition-colors">
+                        + Guardar esta obra
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              <div className="grid sm:grid-cols-2 gap-4">
+                <Field label="TU NOMBRE" ok={validNombre} showErrors={showErrors}><input className={inp(validNombre)} value={nombre} onChange={e => setNombre(e.target.value)} placeholder="Nombre y apellido" /></Field>
+                <Field label="EMPRESA / OBRA" ok={validEmpresa} showErrors={showErrors}><input className={inp(validEmpresa)} value={empresa} onChange={e => setEmpresa(e.target.value)} placeholder="Constructora o nombre de la obra" /></Field>
+                <Field label="TELÉFONO / WHATSAPP" ok={validTelefono} showErrors={showErrors}><input type="tel" inputMode="numeric" maxLength={10} className={inp(validTelefono)} value={telefono} onChange={e => setTelefono(e.target.value.replace(/\D+/g, '').slice(0, 10))} placeholder="10 dígitos" /></Field>
+                <Field label="CORREO (OPCIONAL)" ok={validClientEmail} showErrors={showErrors}><input type="email" className={inp(validClientEmail)} value={email} onChange={e => setEmail(e.target.value)} placeholder="correo@ejemplo.com" /></Field>
+                <Field label="QUIÉN AUTORIZA" ok={validResponsable} showErrors={showErrors}><input className={inp(validResponsable)} value={responsable} onChange={e => setResponsable(e.target.value)} placeholder="Encargado o jefe de obra" /></Field>
+                <Field label="TELÉFONO EN OBRA" ok={validObraTelefono} showErrors={showErrors}><input type="tel" inputMode="numeric" maxLength={10} className={inp(validObraTelefono)} value={obraTelefono} onChange={e => setObraTelefono(e.target.value.replace(/\D+/g, '').slice(0, 10))} placeholder="10 dígitos" /></Field>
+                <div className="sm:col-span-2">
+                  <Field label="DIRECCIÓN DE ENTREGA" ok={validDireccion} showErrors={showErrors}><input className={inp(validDireccion)} value={direccion} onChange={e => setDireccion(e.target.value)} placeholder="Calle, número, colonia" /></Field>
+                </div>
+                <div className="sm:col-span-2">
+                  <Field label="CORREO DE LA OBRA" ok={validObraEmail} showErrors={showErrors}><input type="email" className={inp(validObraEmail)} value={obraEmail} onChange={e => setObraEmail(e.target.value)} placeholder="Le llega la cotización" /></Field>
+                </div>
+              </div>
+            </div>
           </div>
 
-          {/* ── Datos + resumen (sticky) ── */}
-          <div className="min-[900px]:sticky min-[900px]:top-24 rounded-2xl border border-edge bg-surface p-6 space-y-5">
-            <div>
-              <p className="text-sm font-extrabold text-ink mb-3 flex items-center gap-2"><span className="w-1.5 h-4 rounded-full bg-gold" /> Datos del cliente
-                {prefilled && <span className="stagger-item ml-auto text-[10px] font-semibold uppercase tracking-wide text-gold/90">Desde tu perfil</span>}
-              </p>
-              <div className="space-y-3">
-                <Field label="Nombre" ok={validNombre} showErrors={showErrors}><input className={inp(validNombre)} value={nombre} onChange={e => setNombre(e.target.value)} placeholder="Tu nombre" /></Field>
-                <Field label="Empresa" ok={validEmpresa} showErrors={showErrors}><input className={inp(validEmpresa)} value={empresa} onChange={e => setEmpresa(e.target.value)} placeholder="Empresa" /></Field>
-                <Field label="Email (opcional)" ok={validClientEmail} showErrors={showErrors}><input type="email" className={inp(validClientEmail)} value={email} onChange={e => setEmail(e.target.value)} placeholder="correo@ejemplo.com" /></Field>
-                <Field label="Teléfono" ok={validTelefono} showErrors={showErrors}><input type="tel" inputMode="numeric" maxLength={10} className={inp(validTelefono)} value={telefono} onChange={e => setTelefono(e.target.value.replace(/\D+/g, '').slice(0, 10))} placeholder="10 dígitos" /></Field>
-              </div>
-            </div>
+          {/* ── Resumen (sticky) ── */}
+          <aside className="min-[980px]:sticky min-[980px]:top-24 flex flex-col gap-4">
+            <div className="rounded-[20px] border border-edge bg-surface p-6 flex flex-col gap-5">
+              <span className="text-[16px] font-bold">Resumen</span>
 
-            <div className="pt-4 border-t border-edge">
-              <p className="text-sm font-extrabold text-ink mb-3 flex items-center gap-2"><span className="w-1.5 h-4 rounded-full bg-gold" /> Datos de la obra</p>
-              {obras.length > 0 && (
-                <div className="mb-3 flex flex-wrap items-center gap-2">
-                  <span className="text-[11px] text-mute">Tus obras:</span>
-                  {obras.map(o => (
-                    <button key={o.id} type="button" onClick={() => usarObra(o)}
-                      className="max-w-[170px] truncate text-xs px-2.5 py-1 rounded-full border border-edge text-ink transition-colors hover:border-gold/60 hover:text-gold active:scale-[0.97]">
-                      {o.nombre}
-                    </button>
-                  ))}
+              <div className="flex flex-col gap-2.5 text-sm">
+                {subRenta > 0 && <div className="flex justify-between gap-3"><span className="text-mute">Renta (sin IVA)</span><span className="font-semibold">{money(rentaNeta)}</span></div>}
+                {subVenta > 0 && <div className="flex justify-between gap-3"><span className="text-mute">Venta (IVA incluido)</span><span className="font-semibold">{money(ventaNeta)}</span></div>}
+                {state.coupon && <div className="flex justify-between gap-3"><span className="text-mute">Descuento ({(state.coupon.discount * 100).toFixed(0)}%)</span><span className="font-semibold text-red-500">− {money(discountAmt)}</span></div>}
+                {factura && (
+                  <div className="border-t border-edge pt-2.5 flex flex-col gap-2.5">
+                    <div className="flex justify-between gap-3"><span className="text-mute">Base (sin IVA)</span><span className="font-semibold">{money(baseSinIVA)}</span></div>
+                    <div className="flex justify-between gap-3"><span className="text-mute">IVA 16%</span><span className="font-semibold">{money(ivaAmt)}</span></div>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex items-start gap-3 border-t border-edge pt-4">
+                <button type="button" role="switch" aria-checked={factura} onClick={() => setFactura(f => !f)}
+                  className={`w-[46px] h-[26px] rounded-full flex-none p-[3px] flex transition-colors ${factura ? 'bg-gold justify-end' : 'bg-ink/15 justify-start'}`}>
+                  <span className="w-5 h-5 rounded-full bg-white shadow block" />
+                </button>
+                <div>
+                  <p className="text-sm font-semibold">Necesito factura</p>
+                  <p className="text-[12.5px] text-mute mt-0.5 leading-snug">{subRenta > 0 ? 'La renta suma IVA 16%; la venta ya lo incluye.' : 'El precio de venta ya incluye IVA — solo se desglosa.'}</p>
                 </div>
-              )}
-              <div className="space-y-3">
-                <Field label="Responsable" ok={validResponsable} showErrors={showErrors}><input className={inp(validResponsable)} value={responsable} onChange={e => setResponsable(e.target.value)} placeholder="Encargado de obra" /></Field>
-                <Field label="Dirección" ok={validDireccion} showErrors={showErrors}><input className={inp(validDireccion)} value={direccion} onChange={e => setDireccion(e.target.value)} placeholder="Dónde está la obra" /></Field>
-                <Field label="Teléfono de la obra" ok={validObraTelefono} showErrors={showErrors}><input type="tel" inputMode="numeric" maxLength={10} className={inp(validObraTelefono)} value={obraTelefono} onChange={e => setObraTelefono(e.target.value.replace(/\D+/g, '').slice(0, 10))} placeholder="10 dígitos" /></Field>
-                <Field label="Email de la obra" ok={validObraEmail} showErrors={showErrors}><input type="email" className={inp(validObraEmail)} value={obraEmail} onChange={e => setObraEmail(e.target.value)} placeholder="correo@ejemplo.com" /></Field>
               </div>
-              {user && (
-                <button type="button" onClick={guardarObra}
-                  className="mt-2.5 text-xs font-semibold text-gold transition-opacity hover:opacity-80">
-                  + Guardar esta obra en mi cuenta
+
+              <div className="border-t border-edge pt-4 flex items-baseline justify-between gap-3">
+                <span className="text-[15px] font-bold">Total</span>
+                <span className="text-[30px] font-extrabold tracking-tight text-price">{money(totalConIVA)}</span>
+              </div>
+
+              <div className="flex flex-col gap-2.5">
+                <button onClick={handleSend} disabled={sending}
+                  className="h-[52px] rounded-[13px] bg-gold text-black text-[15.5px] font-extrabold btn-acento disabled:opacity-50 flex items-center justify-center gap-2">
+                  {sending && <span className="w-4 h-4 border-2 border-black/30 border-t-black rounded-full animate-spin" />}
+                  Enviar a REMALI
                 </button>
-              )}
+                <div className="grid grid-cols-2 gap-2.5">
+                  <button onClick={handleDownload} className="h-[44px] rounded-xl border border-edge text-[13.5px] font-semibold text-ink hover:bg-surface-2 transition-colors">↓ PDF</button>
+                  <button onClick={copiarLiga} title={sentLiga ? 'Copiar liga pública' : 'Se genera al enviar tu solicitud'}
+                    className={`h-[44px] rounded-xl border text-[13.5px] font-semibold transition-colors ${ligaCopiada ? 'border-emerald-500/50 text-emerald-600' : 'border-edge text-ink hover:bg-surface-2'}`}>
+                    {ligaCopiada ? '✓ Copiada' : '⧉ Copiar liga'}
+                  </button>
+                </div>
+                {waLink(cfg.whatsapp_principal, `Hola REMALI, quiero cotizar: ${state.items.map(i => `${i.qty}x ${i.title}`).join(', ')}. Total estimado ${money(totalConIVA)}.`) && state.items.length > 0 && (
+                  <a href={waLink(cfg.whatsapp_principal, `Hola REMALI, quiero cotizar: ${state.items.map(i => `${i.qty}x ${i.title}`).join(', ')}. Total estimado ${money(totalConIVA)}.`)} target="_blank" rel="noopener noreferrer"
+                    className="h-[46px] rounded-xl bg-emerald-500/12 text-emerald-500 text-sm font-bold grid place-items-center hover:bg-emerald-500/20 transition-colors">
+                    Mandar por WhatsApp
+                  </a>
+                )}
+              </div>
             </div>
 
-            {/* Resumen — venta ya incluye IVA; renta lo suma solo con factura */}
-            <div className="pt-4 border-t border-edge space-y-1.5 text-sm">
-              {subRenta > 0 && <div className="flex justify-between"><span className="text-mute">Subtotal renta</span><span className="text-ink font-semibold">{money(rentaNeta)}</span></div>}
-              {subVenta > 0 && <div className="flex justify-between"><span className="text-mute">Subtotal venta <span className="text-[11px]">(IVA incluido)</span></span><span className="text-ink font-semibold">{money(ventaNeta)}</span></div>}
-              {state.coupon && <div className="flex justify-between"><span className="text-mute">Descuento ({(state.coupon.discount * 100).toFixed(0)}%)</span><span className="text-red-500 font-semibold">− {money(discountAmt)}</span></div>}
-              {factura && (
-                <>
-                  <div className="flex justify-between"><span className="text-mute">Base (sin IVA)</span><span className="text-ink font-semibold">{money(baseSinIVA)}</span></div>
-                  <div className="flex justify-between"><span className="text-mute">IVA (16%)</span><span className="text-ink font-semibold">{money(ivaAmt)}</span></div>
-                </>
-              )}
-              <label className="flex items-center gap-3 py-2 cursor-pointer">
-                <button type="button" role="switch" aria-checked={factura} onClick={() => setFactura(f => !f)} className={`relative w-10 h-[22px] rounded-full flex-none transition-colors ${factura ? 'bg-gold' : 'bg-ink/15'}`}>
-                  <span className={`absolute top-[2px] w-[18px] h-[18px] rounded-full bg-white shadow transition-all ${factura ? 'left-[20px]' : 'left-[2px]'}`} />
-                </button>
-                <span className="text-[13px] text-ink">¿Deseas factura?{subRenta > 0 ? ' (la renta suma IVA 16%)' : ' (el precio ya lo incluye)'}</span>
-              </label>
-              <div className="flex justify-between pt-2.5 mt-1 border-t border-edge text-[17px] font-extrabold"><span className="text-ink">Total</span><span className="text-price">{money(totalConIVA)}</span></div>
+            {/* Cómo sigue */}
+            <div className="rounded-[20px] border border-edge bg-surface px-6 py-5">
+              <p className={`${monoLabel} mb-3`}>Cómo sigue</p>
+              <div className="flex flex-col gap-3">
+                {[
+                  'Envías tu solicitud y te llega el folio.',
+                  'Te contactamos para confirmar disponibilidad y condiciones.',
+                  'Autorizas y agendamos la entrega en tu obra.',
+                ].map((t, i) => (
+                  <div key={i} className="flex gap-3 items-start">
+                    <span className="text-[11px] font-mono text-gold mt-0.5">{String(i + 1).padStart(2, '0')}</span>
+                    <p className="text-[13.5px] text-mute leading-relaxed">{t}</p>
+                  </div>
+                ))}
+              </div>
             </div>
-
-            <div className="space-y-2.5">
-              <button onClick={handleSend} disabled={sending} className="w-full py-3.5 rounded-full bg-gold text-black font-bold text-[14.5px] hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center justify-center gap-2">
-                {sending ? <span className="w-4 h-4 border-2 border-black/30 border-t-black rounded-full animate-spin" /> : <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.9}><path strokeLinecap="round" strokeLinejoin="round" d="M5 12h14M13 6l6 6-6 6" /></svg>}
-                Enviar solicitud
-              </button>
-              <button onClick={handleDownload} className="w-full py-3 rounded-full border border-edge text-ink font-bold text-[13.5px] hover:bg-surface-2 transition-colors flex items-center justify-center gap-2">
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.7}><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
-                Descargar PDF (para tu jefe)
-              </button>
-            </div>
-            <p className="text-[11px] text-mute text-center -mt-1">Envíanos la solicitud y te contactamos, o descarga el PDF para autorizarla internamente.</p>
-          </div>
+          </aside>
         </div>
       </div>
     </div>
