@@ -438,6 +438,20 @@ def convertir_cotizacion(request, pk: int):
         if abs(suma - cot.total) > Decimal('0.01'):
             return Response({'detalle': f'Los pagos suman {suma} y el total es {cot.total}.'}, status=400)
         metodo = max(pagos, key=lambda p: Decimal(p['monto']))['metodo']
+    # Unidades físicas que se entregan (número de identificación): se marcan
+    # vendidas en el mismo acto, así el inventario y el catálogo público
+    # (que se calculan de las unidades) quedan cuadrados sin pasos manuales.
+    from inventario.models import Inventario as _Inv
+    unidades = []
+    for uid in (request.data.get('unidad_ids') or []):
+        try:
+            u = _Inv.objects.get(id=int(uid))
+        except (ValueError, _Inv.DoesNotExist):
+            return Response({'detalle': f'Unidad {uid} no existe.'}, status=400)
+        if u.estado != 'disponible':
+            return Response({'detalle': f'La unidad {u.codigo} no está disponible (está {u.estado}).'}, status=400)
+        unidades.append(u)
+
     partidas_venta = [i for i in cot.items.all() if i.modalidad == 'venta']
     if not partidas_venta:
         return Response(
@@ -459,8 +473,11 @@ def convertir_cotizacion(request, pk: int):
             precio_maquina=cot.subtotal_venta,  # solo lo que se vende (sin IVA)
             metodo_pago=metodo,
             pagos=pagos,
+            inventario=unidades[0] if unidades else None,
             cotizacion=cot,                    # IVA: lo fuerza el modelo Venta (toda venta con IVA)
         )
+        for u in unidades:
+            u.marcar_vendido()
         if cot.estado != 'aceptada':
             cot.estado = 'aceptada'
             cot.save(update_fields=['estado', 'actualizada'])

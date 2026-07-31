@@ -5799,7 +5799,7 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
       .then(r => { apply(r.data); notify('Partida quitada') })
       .catch(err => notify(err?.response?.data?.detalle || 'No se pudo quitar', 'err'))
   }
-  function convertir() {
+  async function convertir() {
     if (c.convertida && c.venta_id) { onConvertida(c.venta_id); return }
     if (!clienteNombre.trim() && !empresaSel) { notify('Agrega el nombre del cliente antes de convertir', 'err'); return }
     if (c.items.length === 0) { notify('Agrega al menos una partida antes de convertir', 'err'); return }
@@ -5824,7 +5824,25 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
       if (!METODOS_PAGO.includes(met2) || met2 === met) { notify('Método del resto no válido', 'err'); return }
       pagos = [{ metodo: met, monto }, { metodo: met2, monto: resto }]
     }
-    api.post(`/cotizaciones/${c.id}/convertir/`, { metodo_pago: met, pagos })
+    // Unidades físicas que se entregan: se marcan vendidas en la conversión,
+    // y el inventario y el catálogo público quedan cuadrados solos.
+    const unidadIds: number[] = []
+    try {
+      const ru = await api.get<{ id: number; codigo: string; numero_serie?: string; estado: string; equipo_info?: { modelo?: string } }[]>('/unidades/')
+      const disp = (ru.data || []).filter(u => u.estado === 'disponible')
+      if (disp.length) {
+        const menu = disp.map(u => `${u.codigo} — ${u.equipo_info?.modelo || 'Equipo'}${u.numero_serie ? ` (S/N ${u.numero_serie})` : ''}`).join('\n')
+        const resp = (window.prompt(`¿Qué unidad(es) se entregan? Código(s) separados por coma (vacío = asignar después):\n\n${menu}`, '') || '').trim()
+        if (resp) {
+          for (const cod of resp.split(',').map(x => x.trim().toLowerCase()).filter(Boolean)) {
+            const u = disp.find(x => x.codigo.toLowerCase() === cod)
+            if (!u) { notify(`Código no disponible: ${cod}`, 'err'); return }
+            unidadIds.push(u.id)
+          }
+        }
+      }
+    } catch { /* sin lista: se convierte y la unidad se marca después */ }
+    api.post(`/cotizaciones/${c.id}/convertir/`, { metodo_pago: met, pagos, unidad_ids: unidadIds })
       .then(r => { notify(r.data?.detalle || 'Convertida a venta'); onConvertida(r.data.venta_id) })
       .catch(err => notify(err?.response?.data?.detalle || 'No se pudo convertir', 'err'))
       .finally(() => setBusy(false))
