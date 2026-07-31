@@ -550,9 +550,6 @@ def reenviar_verificacion(request):
     return Response({'detail': 'Te reenviamos el correo de verificación.'})
 
 
-@api_view(['POST'])
-@permission_classes([permissions.AllowAny])  # público: alta de cliente desde la tienda
-@throttle_classes([RegistroThrottle])
 def _adoptar_cotizaciones(user):
     """Cotizaciones hechas sin cuenta (o capturadas por el admin) cuyo correo
     coincide con el del nuevo usuario: se le cuelgan a su cuenta para que las
@@ -567,6 +564,9 @@ def _adoptar_cotizaciones(user):
         pass
 
 
+@api_view(['POST'])
+@permission_classes([permissions.AllowAny])  # público: alta de cliente desde la tienda
+@throttle_classes([RegistroThrottle])
 def registro(request):
     """Alta de cuenta de cliente desde la tienda.
 
