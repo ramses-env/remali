@@ -162,6 +162,8 @@ type Cotizacion = {
   cliente_display: string; vigencia_hasta?: string | null; vencida?: boolean; creada: string
   token_publico?: string
   convertida?: boolean; venta_id?: number | null
+  usuario_nombre?: string | null
+  usuario_email?: string | null
   origen?: 'admin' | 'cliente'
   datos_solicitud?: { empresa?: string; obra?: { responsable?: string; direccion?: string; telefono?: string; email?: string } }
   atendida_en?: string | null; atendida_por_nombre?: string | null; escalada_en?: string | null
@@ -5990,12 +5992,26 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
               capturado sin tener que rehacer la cotización. */}
           <div>
             <p className={labelCot}>Cliente</p>
+            {c.usuario_nombre && (
+              /* Vino de una cuenta de la tienda: la identidad es del cliente,
+                 no se recaptura. Los campos de abajo quedan para ajustes de
+                 contacto; el nombre de la cuenta manda. */
+              <div className="mb-3 flex items-center gap-3 rounded-xl border border-gold/40 bg-gold-soft/40 px-4 py-3">
+                <span className="w-9 h-9 rounded-full bg-gold text-black grid place-items-center font-extrabold text-[13px]">
+                  {c.usuario_nombre.split(' ').map(p => p[0]).slice(0, 2).join('').toUpperCase()}
+                </span>
+                <div className="min-w-0">
+                  <p className="text-[13.5px] font-bold text-ink truncate">Cliente de la tienda: {c.usuario_nombre}</p>
+                  <p className="text-[12px] text-mute truncate">{c.usuario_email || 'sin correo'} · sus datos vienen de su perfil</p>
+                </div>
+              </div>
+            )}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <select disabled={bloqueada} value={empresaSel} onChange={e => cambiarEmpresa(e.target.value)} className={`${input} sm:col-span-2 disabled:opacity-60`}>
                 <option value="">— Cliente particular —</option>
                 {empresasActivas(empresas).map(e => <option key={e.id} value={e.id}>{e.nombre}</option>)}
               </select>
-              <input disabled={bloqueada || !!empresaSel} value={clienteNombre} onChange={e => setClienteNombre(e.target.value)}
+              <input disabled={bloqueada || !!empresaSel || !!c.usuario_nombre} value={clienteNombre} onChange={e => setClienteNombre(e.target.value)}
                 title={empresaSel ? 'El nombre lo define la empresa seleccionada' : undefined}
                 className={`${input} disabled:opacity-60`} placeholder="Nombre del cliente" />
               <div>

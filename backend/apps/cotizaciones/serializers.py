@@ -48,6 +48,8 @@ class CotizacionSerializer(serializers.ModelSerializer):
     convertida = serializers.SerializerMethodField()
     venta_id = serializers.SerializerMethodField()
     atendida_por_nombre = serializers.SerializerMethodField()
+    usuario_nombre = serializers.SerializerMethodField()
+    usuario_email = serializers.SerializerMethodField()
 
     class Meta:
         model = Cotizacion
@@ -57,7 +59,7 @@ class CotizacionSerializer(serializers.ModelSerializer):
             'vigencia_dias', 'aplica_iva', 'notas',
             'items', 'fotos', 'subtotal', 'subtotal_venta', 'subtotal_renta', 'base', 'iva', 'total',
             'cliente_display', 'vigencia_hasta', 'vencida', 'token_publico',
-            'convertida', 'venta_id', 'atendida_en', 'atendida_por_nombre', 'entrega_prometida', 'escalada_en',
+            'convertida', 'venta_id', 'atendida_en', 'atendida_por_nombre', 'usuario_nombre', 'usuario_email', 'entrega_prometida', 'escalada_en',
             'creada', 'actualizada',
         ]
         read_only_fields = ['folio', 'origen', 'datos_solicitud', 'atendida_en', 'escalada_en', 'creada', 'actualizada']
@@ -73,6 +75,14 @@ class CotizacionSerializer(serializers.ModelSerializer):
 
     def get_atendida_por_nombre(self, obj):
         return obj.atendida_por.get_username() if obj.atendida_por_id else None
+
+    def get_usuario_nombre(self, obj):
+        if not obj.usuario_id or not obj.usuario:
+            return None
+        return obj.usuario.get_full_name() or obj.usuario.get_username()
+
+    def get_usuario_email(self, obj):
+        return obj.usuario.email if (obj.usuario_id and obj.usuario) else None
 
     def get_subtotal(self, obj):
         return str(obj.subtotal)
