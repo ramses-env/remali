@@ -5,11 +5,12 @@ import { usePriceUnit } from '../store/priceUnit'
 import { useToast } from '../store/toast'
 import resolveMediaUrl from '../lib/resolveMediaUrl'
 
-type Tag = { label: string; tone: 'new' | 'used' | 'rent' | 'sale' }
+type Tag = { label: string; tone: 'new' | 'used' | 'rent' | 'sale' | 'promo' }
 type Props = {
   id: number
   title: string
   price: number | string
+  priceOriginal?: number
   image: string
   subtitle?: string
   meta?: string
@@ -23,9 +24,10 @@ const tagStyle: Record<Tag['tone'], string> = {
   used: 'bg-blue-500/90 text-white',
   rent: 'bg-black/60 text-white backdrop-blur-sm',
   sale: 'bg-gold text-black',
+  promo: 'bg-red-600 text-white',
 }
 
-export default function ProductCard({ id, title, price, image, subtitle, meta, linkTo, tags = [], modo }: Props) {
+export default function ProductCard({ id, title, price, priceOriginal, image, subtitle, meta, linkTo, tags = [], modo }: Props) {
   const { state, dispatch } = useCart()
   // Si el tipo choca, el reducer NO agrega (abre el modal global): no avisar "añadido".
   const chocaTipo = () => { const t = tipoCotizacion(state.items); return !!t && t !== (esVenta(cartUnit) ? 'venta' : 'renta') }
@@ -123,7 +125,7 @@ export default function ProductCard({ id, title, price, image, subtitle, meta, l
             : <span />}
           <div className="text-right shrink-0">
             {/* Etiqueta chica sobre el precio: renta = "desde /modalidad"; venta = "Precio venta". */}
-            <p className="text-[10px] text-mute font-mono uppercase">{modo === 'venta' ? 'Precio venta' : `desde /${unit}`}</p>
+            <p className="text-[10px] text-mute font-mono uppercase">{modo === 'venta' ? 'Precio venta' : `desde /${unit}`}{priceOriginal ? <span className="ml-1.5 normal-case line-through text-[10.5px]">${priceOriginal.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span> : null}</p>
             <p className="text-base font-black text-gold leading-none">
               ${displayPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </p>

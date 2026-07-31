@@ -25,6 +25,7 @@ type Equipo = {
   precio_venta?: number | string | null
   condicion?: string
   modo?: 'venta' | 'renta'
+  promo_pct?: number
   estado?: string
   tipo?: { id: number; nombre: string }
   categoria?: { id: number; nombre: string }
@@ -156,11 +157,16 @@ export default function EquiposList() {
       unit === 'semana' ? (s ?? (d ? d * 7 : null) ?? m ?? 0) :
       (m ?? (d ? d * 30 : null) ?? (s ? s * 4 : null) ?? 0)
     // Venta muestra su precio de venta; renta, el de la modalidad elegida.
-    const price = modo === 'venta' ? (toNumber(e.precio_venta) ?? 0) : rentaPrice
+    const bruto = modo === 'venta' ? (toNumber(e.precio_venta) ?? 0) : rentaPrice
+    // Promo del equipo (admin): la card muestra el precio ya con descuento.
+    const promo = Math.max(0, Math.min(90, e.promo_pct || 0))
+    const price = promo ? Math.round(bruto * (1 - promo / 100) * 100) / 100 : bruto
     return {
       id: e.id,
       title: e.modelo,
       price,
+      priceOriginal: promo ? bruto : undefined,
+      promo,
       modo,
       // Precios crudos por modalidad: los usa el PDF para ofrecer "los tres precios".
       precioDia: d,
@@ -555,9 +561,11 @@ export default function EquiposList() {
                   subtitle={p.description}
                   meta={[p.category, p.brand].filter(Boolean).join(' · ')}
                   linkTo={`/equipo/${p.id}`}
-                  tags={p.modo === 'venta'
-                    ? [{ label: 'Venta', tone: 'sale' as const }]
-                    : [{ label: 'Renta', tone: 'rent' as const }]}
+                  priceOriginal={p.priceOriginal}
+                  tags={[
+                    ...(p.promo ? [{ label: `PROMO −${p.promo}%`, tone: 'promo' as const }] : []),
+                    p.modo === 'venta' ? { label: 'Venta', tone: 'sale' as const } : { label: 'Renta', tone: 'rent' as const },
+                  ]}
                 />
               </div>
             ))}
