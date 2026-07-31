@@ -32,19 +32,29 @@ function restante(ahora: number) {
 const dos = (n: number) => String(n).padStart(2, '0')
 
 /** Portada de cuenta regresiva a pantalla completa (estreno del lunes).
- *  `alTerminar` la desmonta sin recargar cuando el reloj llega a cero. */
-export default function CuentaRegresiva({ alTerminar }: { alTerminar: () => void }) {
+ *
+ *  En producción NUNCA destapa el sitio por sí sola: el sitio nuevo se libera
+ *  con el deploy del lunes. Si el reloj llega a cero antes de ese deploy,
+ *  muestra "estamos abriendo" y recarga sola cada minuto — en cuanto la
+ *  versión nueva esté arriba, el visitante la recibe sin tocar nada. */
+export default function CuentaRegresiva() {
   const cfg = useConfigPublica()
   const [t, setT] = useState(() => restante(Date.now()))
+  const llego = t.ms <= 0
 
   useEffect(() => {
-    const id = window.setInterval(() => {
-      const r = restante(Date.now())
-      setT(r)
-      if (r.ms <= 0) { window.clearInterval(id); alTerminar() }
-    }, 1000)
+    const id = window.setInterval(() => setT(restante(Date.now())), 1000)
     return () => window.clearInterval(id)
-  }, [alTerminar])
+  }, [])
+
+  useEffect(() => {
+    if (!llego) return
+    // Ya es la hora: recarga a los 75 s. Tras la recarga, si el deploy nuevo
+    // aún no está, este componente vuelve a montarse y reintenta — un ciclo
+    // de recargas espaciadas hasta que el sitio nuevo responda.
+    const id = window.setTimeout(() => window.location.reload(), 75_000)
+    return () => window.clearTimeout(id)
+  }, [llego])
 
   const bloques = useMemo(() => ([
     { v: dos(t.dias), l: 'DÍAS' },
@@ -87,22 +97,32 @@ export default function CuentaRegresiva({ alTerminar }: { alTerminar: () => void
         </h1>
 
         <p className="text-white/60 text-sm sm:text-base mb-10 sm:mb-12 animate-[fadeUp_0.8s_ease-out_0.2s_both]">
-          Estrenamos el <strong className="text-white">lunes 3 de agosto</strong> · 12:00 AM
+          {llego
+            ? <>¡Hoy es el día! <strong className="text-white">Estamos abriendo las puertas…</strong></>
+            : <>Estrenamos el <strong className="text-white">lunes 3 de agosto</strong> · 12:00 AM</>}
         </p>
 
-        {/* Contador */}
-        <div className="flex items-stretch gap-2.5 sm:gap-4 animate-[fadeUp_0.8s_ease-out_0.3s_both]" role="timer" aria-live="polite"
-          aria-label={`Faltan ${t.dias} días, ${t.horas} horas, ${t.min} minutos y ${t.seg} segundos`}>
-          {bloques.map((b, i) => (
-            <div key={b.l} className="flex items-center gap-2.5 sm:gap-4">
-              {i > 0 && <span className="text-white/25 text-2xl sm:text-4xl font-black self-center pb-5 select-none">:</span>}
-              <div className="w-[72px] sm:w-[104px] rounded-2xl border border-white/10 bg-white/[0.04] backdrop-blur-sm px-2 py-4 sm:py-6">
-                <div className="font-mono font-black text-3xl sm:text-5xl tabular-nums leading-none text-white">{b.v}</div>
-                <div className="mt-2.5 text-[9px] sm:text-[10px] font-bold tracking-[0.25em] text-[#f2b736]">{b.l}</div>
+        {/* Contador — al llegar a cero se vuelve "abriendo" (la página se
+            recarga sola hasta que el sitio nuevo esté desplegado). */}
+        {llego ? (
+          <div className="flex flex-col items-center gap-4 animate-[fadeUp_0.8s_ease-out_0.3s_both]" role="status" aria-live="polite">
+            <span className="w-9 h-9 rounded-full border-2 border-[#f2b736] border-t-transparent animate-spin" />
+            <span className="text-white/50 text-sm">Un momento, por favor — esta página se actualizará sola.</span>
+          </div>
+        ) : (
+          <div className="flex items-stretch gap-2.5 sm:gap-4 animate-[fadeUp_0.8s_ease-out_0.3s_both]" role="timer" aria-live="polite"
+            aria-label={`Faltan ${t.dias} días, ${t.horas} horas, ${t.min} minutos y ${t.seg} segundos`}>
+            {bloques.map((b, i) => (
+              <div key={b.l} className="flex items-center gap-2.5 sm:gap-4">
+                {i > 0 && <span className="text-white/25 text-2xl sm:text-4xl font-black self-center pb-5 select-none">:</span>}
+                <div className="w-[72px] sm:w-[104px] rounded-2xl border border-white/10 bg-white/[0.04] backdrop-blur-sm px-2 py-4 sm:py-6">
+                  <div className="font-mono font-black text-3xl sm:text-5xl tabular-nums leading-none text-white">{b.v}</div>
+                  <div className="mt-2.5 text-[9px] sm:text-[10px] font-bold tracking-[0.25em] text-[#f2b736]">{b.l}</div>
+                </div>
               </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
 
         {/* Contacto mientras tanto */}
         {tel && (
