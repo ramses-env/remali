@@ -246,7 +246,12 @@ def cotizaciones_mias(request):
                 (c.atendida_por.get_full_name() or c.atendida_por.username)
                 if c.atendida_por_id and c.atendida_por else None
             ),
-            'pdf': request.build_absolute_uri(f'/api/cotizaciones/publica/{c.token_publico}/pdf/') if c.token_publico else None,
+            # Ruta RELATIVA a propósito: este link lo abre la SPA como <a href>,
+            # y debe resolverse contra el origen desde el que se ve la app (dev,
+            # túnel de pruebas o producción). Con build_absolute_uri + proxy
+            # (changeOrigin) salía como http://localhost:8000/... y no cargaba
+            # desde fuera de la máquina (p. ej. por un túnel).
+            'pdf': f'/api/cotizaciones/publica/{c.token_publico}/pdf/' if c.token_publico else None,
         })
     return Response({'cotizaciones': data})
 

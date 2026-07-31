@@ -2305,7 +2305,7 @@ function RentModal({ unit, equipo, onClose, onDone, notify }: {
   const [obraId, setObraId] = useState('')
   const [requiereFactura, setRequiereFactura] = useState(false)
   const [factura, setFactura] = useState<FacturaData>(FACTURA_VACIA)
-  const [clientes, setClientes] = useState<{ id: number; nombre: string; email: string }[]>([])
+  const [clientes, setClientes] = useState<{ id: number; nombre: string; empresa?: string }[]>([])
   const [usuarioId, setUsuarioId] = useState('')
   const [busy, setBusy] = useState(false)
   const [ticketUrl, setTicketUrl] = useState<string | null>(null)
@@ -2313,7 +2313,7 @@ function RentModal({ unit, equipo, onClose, onDone, notify }: {
   useEffect(() => {
     api.get('/empresas/').then(r => setEmpresas(Array.isArray(r.data) ? r.data : (r.data?.results || []))).catch(() => {})
     // Cuentas de cliente, para vincular la renta a su panel ("Tus rentas").
-    api.get<{ clientes: { id: number; nombre: string; email: string }[] }>('/clientes-lookup/').then(r => setClientes(r.data.clientes || [])).catch(() => {})
+    api.get<{ clientes: { id: number; nombre: string; empresa?: string }[] }>('/clientes-lookup/').then(r => setClientes(r.data.clientes || [])).catch(() => {})
   }, [])
   useEffect(() => {
     if (!empresaId) { setObras([]); setObraId(''); return }
@@ -2401,7 +2401,7 @@ function RentModal({ unit, equipo, onClose, onDone, notify }: {
               <label className={label}>Cuenta del cliente <span className="text-mute font-normal normal-case">(opcional — para que la vea en "Tus rentas")</span></label>
               <select className={input} value={usuarioId} onChange={e => setUsuarioId(e.target.value)}>
                 <option value="" className="bg-surface">— Sin vincular —</option>
-                {clientes.map(c => <option key={c.id} value={c.id} className="bg-surface">{c.nombre}{c.email ? ` · ${c.email}` : ''}</option>)}
+                {clientes.map(c => <option key={c.id} value={c.id} className="bg-surface">{c.nombre}{c.empresa ? ` — ${c.empresa}` : ''}</option>)}
               </select>
             </div>
           )}
@@ -2857,6 +2857,7 @@ type MovimientoRenta = { entregada?: boolean; recogida?: boolean; en?: string | 
 
 type RentaFull = RentaActiva & {
   entrega?: MovimientoRenta; recoleccion?: MovimientoRenta
+  cuenta?: string | null
   estado?: string; modalidad: string; duracion?: number
   fecha_inicio?: string; fecha_devolucion_real?: string | null
   total?: string; subtotal?: string; precio_unitario?: string; descuento?: string; deposito?: string; recargo?: string
@@ -3097,6 +3098,24 @@ function EvidenciasRenta({ rentaId }: { rentaId: number }) {
 
 function RentaDetalleModal({ renta: r, onClose, onTicket }: { renta: RentaFull; onClose: () => void; onTicket: () => void }) {
   const money = formatMoney
+  // Cuenta de cliente vinculada; se puede asignar o cambiar aquí mismo,
+  // para las rentas que se registraron sin elegirla.
+  const [cuenta, setCuenta] = useState<string | null>(r.cuenta ?? null)
+  async function vincularCuenta() {
+    try {
+      const rc = await api.get<{ clientes: { id: number; nombre: string; empresa?: string }[] }>('/clientes-lookup/')
+      const lista = rc.data.clientes || []
+      if (!lista.length) { await confirmar({ titulo: 'Sin cuentas', mensaje: 'Aún no hay cuentas de cliente registradas en el sistema.', aceptar: 'Entendido' }); return }
+      const sel = await elegir({
+        titulo: 'Vincular a una cuenta',
+        mensaje: 'La renta aparecerá en "Tus rentas" del cliente que elijas.',
+        opciones: lista.map(c => ({ valor: String(c.id), label: c.nombre, detalle: c.empresa || undefined })),
+      })
+      if (!sel || !sel[0]) return
+      const res = await api.post<{ cuenta: string | null }>(`/rentas/${r.id}/vincular/`, { usuario_id: Number(sel[0]) })
+      setCuenta(res.data?.cuenta || null)
+    } catch { /* el interceptor ya avisa el error */ }
+  }
   const esObra = !!r.obra
   const encargado = esObra ? (r.obra?.responsable || r.cliente) : undefined
   const cliente = !esObra ? (r.cliente || r.cliente_nombre) : undefined
@@ -3156,6 +3175,15 @@ function RentaDetalleModal({ renta: r, onClose, onTicket }: { renta: RentaFull; 
               {cliente && <Field label="Cliente" value={cliente} />}
               {telefono && <Field label="Teléfono" value={telefono} />}
               <Field label="Ubicación / entrega" value={r.obra?.ubicacion || r.direccion} full />
+              <div className="col-span-2 flex items-center justify-between gap-3 pt-2 border-t border-edge">
+                <div className="min-w-0">
+                  <p className="text-[12px] text-mute">Cuenta en el sistema</p>
+                  <p className={`text-[13.5px] font-bold mt-0.5 truncate ${cuenta ? 'text-ink' : 'text-mute'}`}>{cuenta || 'Sin vincular'}</p>
+                </div>
+                <button onClick={vincularCuenta} className="shrink-0 px-3.5 py-2 rounded-[9px] border border-edge text-[12px] font-bold text-ink hover:border-gold/50 hover:text-gold transition-colors">
+                  {cuenta ? 'Cambiar' : 'Vincular cuenta'}
+                </button>
+              </div>
             </div>
           </div>
 

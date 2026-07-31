@@ -10,6 +10,7 @@ urlpatterns = [
     path('rentas/<int:pk>/cancelar/', views.cancelar_renta, name='cancelar_renta'),
     path('rentas/<int:pk>/comprobante/', views.comprobante_renta, name='comprobante_renta'),
     path('rentas/<int:pk>/ticket/', views.ticket_renta, name='ticket_renta'),
+    path('rentas/<int:pk>/vincular/', views.vincular_cuenta, name='vincular_cuenta'),
     path('rentas/alertas/', views.alertas_renta, name='alertas_renta'),
     path('rentas/tareas/', views.mis_tareas, name='mis_tareas'),
     path('rentas/<int:pk>/evidencias/', views.evidencias_renta, name='evidencias_renta'),

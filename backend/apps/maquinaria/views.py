@@ -812,9 +812,12 @@ def clientes_lookup(request):
     from django.contrib.auth import get_user_model
     User = get_user_model()
     qs = (User.objects.filter(is_active=True, groups__name='Cliente')
+          .select_related('perfil')
           .order_by('first_name', 'username')[:500])
+    # La empresa (declarada en su perfil) distingue homónimos sin exhibir correos.
     data = [{'id': u.id,
              'nombre': (f'{u.first_name} {u.last_name}'.strip() or u.username),
+             'empresa': getattr(getattr(u, 'perfil', None), 'empresa', '') or '',
              'email': u.email} for u in qs]
     return Response({'clientes': data})
 

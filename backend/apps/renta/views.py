@@ -57,6 +57,9 @@ def _serialize_renta(r: Renta, ver_dinero: bool = True):
     """
     datos = {
         'id': r.id,
+        # Cuenta de cliente vinculada (para "Tus rentas"); None = sin vincular.
+        'cuenta': ((f'{r.usuario.first_name} {r.usuario.last_name}'.strip()
+                    or r.usuario.get_username()) if r.usuario_id else None),
         'inventario': {
             'id': r.inventario.id,
             'codigo': r.inventario.codigo,
@@ -140,12 +143,36 @@ def _parse_date(value):
 def listar_rentas(request):
     estado = request.query_params.get('estado') or 'activa'
     qs = Renta.objects.all().select_related(
-        'inventario', 'inventario__equipo', 'empresa', 'obra'
+        'inventario', 'inventario__equipo', 'empresa', 'obra', 'usuario'
     ).prefetch_related('evidencias')   # sin esto, contar las fotos sería 1 query por renta
     if estado in ('reservada', 'activa', 'finalizada', 'cancelada'):
         qs = qs.filter(estado=estado)
     data = [_serialize_renta(r) for r in qs.order_by('-creado_en')]
     return Response({'rentas': data})
+
+
+@api_view(['POST'])
+@permission_classes([EsOperador])
+def vincular_cuenta(request, pk):
+    """Vincula (o cambia) la cuenta de cliente de una renta ya registrada.
+
+    Al crearla es opcional; este endpoint permite hacerlo después, para que
+    la renta aparezca en el panel "Tus rentas" del cliente correcto."""
+    r = Renta.objects.filter(pk=pk).first()
+    if not r:
+        return Response({'detalle': 'Renta no encontrada'}, status=404)
+    uid = request.data.get('usuario_id')
+    if not uid:
+        r.usuario = None
+        r.save(update_fields=['usuario'])
+        return Response({'cuenta': None})
+    from django.contrib.auth import get_user_model
+    u = get_user_model().objects.filter(pk=uid, is_active=True, groups__name='Cliente').first()
+    if not u:
+        return Response({'detalle': 'Cuenta de cliente no encontrada'}, status=404)
+    r.usuario = u
+    r.save(update_fields=['usuario'])
+    return Response({'cuenta': f'{u.first_name} {u.last_name}'.strip() or u.username})
 
 
 @api_view(['GET'])
@@ -154,7 +181,7 @@ def alertas_renta(request):
     hoy = timezone.localdate()
     qs = Renta.objects.filter(
         estado='activa', fecha_fin__lt=hoy
-    ).select_related('inventario', 'inventario__equipo', 'empresa', 'obra').prefetch_related('evidencias')
+    ).select_related('inventario', 'inventario__equipo', 'empresa', 'obra', 'usuario').prefetch_related('evidencias')
     data = [_serialize_renta(r) for r in qs]
     return Response({'alertas': data, 'total': len(data)})
 
@@ -282,7 +309,7 @@ def crear_renta(request):
 @permission_classes([EsOperador])
 def devolver_renta(request, pk: int):
     try:
-        r = Renta.objects.select_related('inventario', 'inventario__equipo', 'empresa', 'obra').get(pk=pk)
+        r = Renta.objects.select_related('inventario', 'inventario__equipo', 'empresa', 'obra', 'usuario').get(pk=pk)
     except Renta.DoesNotExist:
         return Response({'detalle': 'Renta no encontrada'}, status=404)
     # Operadores ven todas; un cliente solo la suya.
@@ -310,7 +337,7 @@ def devolver_renta(request, pk: int):
 @permission_classes([IsAdminGroupOrStaff])
 def cancelar_renta(request, pk: int):
     try:
-        r = Renta.objects.select_related('inventario', 'inventario__equipo', 'empresa', 'obra').get(pk=pk)
+        r = Renta.objects.select_related('inventario', 'inventario__equipo', 'empresa', 'obra', 'usuario').get(pk=pk)
     except Renta.DoesNotExist:
         return Response({'detalle': 'Renta no encontrada'}, status=404)
     if r.estado in ('finalizada', 'cancelada'):
@@ -323,7 +350,7 @@ def cancelar_renta(request, pk: int):
 
 def _get_renta_full(pk):
     return Renta.objects.select_related(
-        'inventario', 'inventario__equipo', 'empresa', 'obra'
+        'inventario', 'inventario__equipo', 'empresa', 'obra', 'usuario'
     ).get(pk=pk)
 
 
@@ -527,7 +554,7 @@ def mis_tareas(request):
 
     rentas = (Renta.objects
               .filter(estado__in=['activa', 'reservada'])
-              .select_related('inventario', 'inventario__equipo', 'empresa', 'obra')
+              .select_related('inventario', 'inventario__equipo', 'empresa', 'obra', 'usuario')
               .prefetch_related('evidencias'))
 
     for r in rentas:
