@@ -452,7 +452,7 @@ export default function Dashboard() {
     api.get<{ usuarios: UsuarioPanel[] }>('/usuarios/').then(r => setUsuarios(r.data?.usuarios || [])).catch(() => {})
   }, [])
   const loadMetrics = useCallback(() => {
-    api.get<DashMetrics>('/dashboard/metricas/').then(r => { setMetrics(r.data || null); marcarCarga('métricas', true) }).catch(() => marcarCarga('métricas', false))
+    api.get<DashMetrics>('/dashboard/metricas/').then(r => { setMetrics(r.data || null); marcarCarga('métricas', true) }).catch(err => { const st = err?.response?.status; if (st !== 401 && st !== 403) marcarCarga('métricas', false) })
   }, [marcarCarga])
   const loadEquipos = useCallback(() => {
     api.get<Equipo[]>('/equipos/').then(r => setEquipos(r.data || [])).catch(() => {})
@@ -466,7 +466,7 @@ export default function Dashboard() {
     api.get<Coupon[]>('/cupones/').then(r => setCoupons(r.data || [])).catch(() => {})
   }, [])
   const loadRentas = useCallback(() => {
-    api.get<{ rentas: RentaActiva[] }>('/rentas/?estado=activa').then(r => { setRentas(r.data?.rentas || []); marcarCarga('rentas activas', true) }).catch(() => marcarCarga('rentas activas', false))
+    api.get<{ rentas: RentaActiva[] }>('/rentas/?estado=activa').then(r => { setRentas(r.data?.rentas || []); marcarCarga('rentas activas', true) }).catch(err => { const st = err?.response?.status; if (st !== 401 && st !== 403) marcarCarga('rentas activas', false) })
   }, [marcarCarga])
   const loadUnidades = useCallback(() => {
     api.get<Unidad[]>('/unidades/').then(r => setUnidades(r.data || [])).catch(() => {})
@@ -478,15 +478,15 @@ export default function Dashboard() {
     api.get<OrdenReparacion[]>('/reparaciones/').then(r => setOrdenes(r.data || [])).catch(() => {})
   }, [])
   const loadFacturacion = useCallback(() => {
-    api.get<SolicitudFactura[]>('/facturacion/solicitudes/').then(r => { setSolicitudes(r.data || []); marcarCarga('facturación', true) }).catch(() => marcarCarga('facturación', false))
+    api.get<SolicitudFactura[]>('/facturacion/solicitudes/').then(r => { setSolicitudes(r.data || []); marcarCarga('facturación', true) }).catch(err => { const st = err?.response?.status; if (st !== 401 && st !== 403) marcarCarga('facturación', false) })
   }, [marcarCarga])
   // Solo el conteo de "abiertas" para el badge del menú: la lista completa la
   // pagina el propio módulo de cotizaciones, no el padre.
   const loadCotizaciones = useCallback(() => {
-    api.get<{ abiertas: number }>('/cotizaciones/stats/').then(r => { setCotAbiertas(r.data?.abiertas || 0); marcarCarga('cotizaciones', true) }).catch(() => marcarCarga('cotizaciones', false))
+    api.get<{ abiertas: number }>('/cotizaciones/stats/').then(r => { setCotAbiertas(r.data?.abiertas || 0); marcarCarga('cotizaciones', true) }).catch(err => { const st = err?.response?.status; if (st !== 401 && st !== 403) marcarCarga('cotizaciones', false) })
   }, [marcarCarga])
   const loadVentas = useCallback(() => {
-    api.get<{ ventas: Venta[] }>('/ventas/lista/').then(r => { setVentas(r.data?.ventas || []); marcarCarga('ventas', true) }).catch(() => marcarCarga('ventas', false))
+    api.get<{ ventas: Venta[] }>('/ventas/lista/').then(r => { setVentas(r.data?.ventas || []); marcarCarga('ventas', true) }).catch(err => { const st = err?.response?.status; if (st !== 401 && st !== 403) marcarCarga('ventas', false) })
   }, [marcarCarga])
   const loadEmpresas = useCallback(() => {
     api.get<Empresa[]>('/empresas/').then(r => setEmpresas(r.data || [])).catch(() => {})
