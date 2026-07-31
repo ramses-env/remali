@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { CalendarClock, Loader2, PackageOpen } from 'lucide-react'
 
 import api from '../lib/api'
+import Migas from '../components/Migas'
 import { descargarBlob } from '../lib/descargar'
 import { formatMoney } from '../lib/utils'
 import { useAuth } from '../store/auth'
@@ -82,6 +83,7 @@ export default function MisRentas() {
   return (
     <div className="mx-auto max-w-4xl px-6 pt-28 pb-16">
       <header className="mb-8">
+        <div className="mb-3"><Migas items={[{ label: 'Inicio', to: '/' }, { label: 'Tus rentas' }]} /></div>
         <h1 className="text-2xl font-black tracking-tight text-ink sm:text-3xl">Tus rentas</h1>
         <p className="mt-1 text-sm text-mute">Desde cuándo rentas cada equipo y su monto.</p>
       </header>

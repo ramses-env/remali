@@ -6,6 +6,7 @@ import * as z from 'zod'
 import { BadgePercent, CalendarClock, Check, Copy, Eye, EyeOff, FileText, Loader2, Lock, Mail, ShieldCheck, TriangleAlert, User } from 'lucide-react'
 
 import api from '../lib/api'
+import Migas from '../components/Migas'
 import { useAuth } from '../store/auth'
 import { useProfile } from '../store/profile'
 import { AvatarInicial } from '@/components/ui/avatar-inicial'
@@ -105,6 +106,7 @@ export default function Perfil() {
         <AvatarInicial nombre={perfil?.first_name} correo={perfil?.email} tamano="lg" />
 
         <div className="min-w-0">
+          <div className="mb-3"><Migas items={[{ label: 'Inicio', to: '/' }, { label: 'Mi perfil' }]} /></div>
           <h1 className="truncate text-2xl font-black tracking-tight text-ink sm:text-3xl">
             {perfil?.first_name?.trim() || 'Tu cuenta'}
           </h1>

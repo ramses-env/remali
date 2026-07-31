@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import api from '../lib/api'
+import Migas from '../components/Migas'
 import { formatMoney } from '../lib/utils'
 import { useConfigPublica } from '../lib/configPublica'
 import { waLink } from '../lib/whatsapp'
@@ -89,7 +90,7 @@ export default function MisCotizacionEstado() {
   return (
     <div className="bg-app min-h-screen text-ink">
       <div className="max-w-[1100px] mx-auto px-4 sm:px-8 pt-24 pb-16 flex flex-col gap-5">
-        <Link to="/mis-cotizaciones" className="text-[13.5px] text-mute hover:text-ink transition-colors">← Mis cotizaciones</Link>
+        <Migas items={[{ label: 'Inicio', to: '/' }, { label: 'Mis cotizaciones', to: '/mis-cotizaciones' }, { label: cot.folio }]} />
 
         <div className="rounded-[20px] border border-edge bg-surface px-6 sm:px-8 py-7 flex flex-col min-[800px]:flex-row min-[800px]:items-center gap-5 justify-between">
           <div className="flex items-start gap-4">

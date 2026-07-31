@@ -6,6 +6,7 @@ import type { downloadCotizacionPdf } from '../lib/pdf'
 import { Link } from 'react-router-dom'
 import { useToast } from '../store/toast'
 import api from '../lib/api'
+import Migas from '../components/Migas'
 import { waLink } from '../lib/whatsapp'
 import { useConfigPublica } from '../lib/configPublica'
 import { useProfile } from '../store/profile'
@@ -317,7 +318,7 @@ export default function Cotizacion() {
 
         {/* Encabezado */}
         <div className="mb-8">
-          <Link to="/equipos" className="inline-flex items-center gap-2 text-[13.5px] text-mute hover:text-ink transition-colors mb-4">← Volver al catálogo</Link>
+          <div className="mb-4"><Migas items={[{ label: 'Inicio', to: '/' }, { label: 'Equipos', to: '/equipos' }, { label: 'Tu cotización' }]} /></div>
           <h1 className="text-[34px] sm:text-[44px] font-extrabold tracking-tight leading-none">Arma tu cotización</h1>
           <p className="text-mute text-[15px] mt-2.5 max-w-[560px]">Ajusta cantidades, llena los datos de tu obra y envíala — te contactamos para confirmar disponibilidad.</p>
         </div>

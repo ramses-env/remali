@@ -4,6 +4,7 @@ import { gsap } from 'gsap'
 import { ScrollTrigger } from 'gsap/ScrollTrigger'
 import ProductCard from '../components/ProductCard'
 import api from '../lib/api'
+import Migas from '../components/Migas'
 import resolveMediaUrl from '../lib/resolveMediaUrl'
 import PriceUnitToggle from '../components/PriceUnitToggle'
 import FloatingFilters from '../components/FloatingFilters'
@@ -259,6 +260,7 @@ export default function EquiposList() {
           <div className="absolute -top-20 right-[8%] w-[420px] h-[420px] rounded-full bg-gold/10 blur-[130px]" />
         </div>
 
+        <div className="mb-4"><Migas items={[{ label: 'Inicio', to: '/' }, { label: 'Equipos' }]} /></div>
         <p className="catalog-header-title text-[11px] font-mono text-gold uppercase tracking-[0.3em] mb-4">
           — Maquinaria ligera · Renta y venta
         </p>

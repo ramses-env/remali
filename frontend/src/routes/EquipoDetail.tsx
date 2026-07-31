@@ -202,6 +202,8 @@ export default function EquipoDetail() {
       <div className="max-w-[1320px] mx-auto px-4 sm:px-8 pt-24">
         {/* Breadcrumb */}
         <div className="pb-4 text-[13.5px] text-mute flex items-center gap-2 flex-wrap">
+          <Link to="/" className="hover:text-ink transition-colors">Inicio</Link>
+          <span>/</span>
           <Link to="/equipos" className="hover:text-ink transition-colors">Equipos</Link>
           {e.categoria?.nombre && <><span>/</span><Link to="/equipos" className="hover:text-ink transition-colors">{e.categoria.nombre}</Link></>}
           <span>/</span><span className="text-ink font-semibold">{e.modelo}</span>

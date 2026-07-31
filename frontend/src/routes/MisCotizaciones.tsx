@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { Loader2, PackageOpen } from 'lucide-react'
 import api from '../lib/api'
+import Migas from '../components/Migas'
 import { formatMoney } from '../lib/utils'
 import { useAuth } from '../store/auth'
 import { useCart, type Modalidad } from '../store/cart'
@@ -102,6 +103,7 @@ export default function MisCotizaciones() {
 
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
+            <div className="mb-3"><Migas items={[{ label: 'Inicio', to: '/' }, { label: 'Mis cotizaciones' }]} /></div>
             <h1 className="text-[34px] sm:text-[44px] font-extrabold tracking-tight leading-none">Mis cotizaciones</h1>
             <p className="text-mute text-[15px] mt-2.5">Da seguimiento, descarga el PDF o vuelve a cotizar lo mismo en un clic.</p>
           </div>
