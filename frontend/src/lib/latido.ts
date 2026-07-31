@@ -37,3 +37,37 @@ export function useLatido(url: string, ms: number, alCambiar: () => void) {
     return () => { vivo = false; window.clearInterval(id); document.removeEventListener('visibilitychange', alVolver) }
   }, [url, ms])
 }
+
+/**
+ * Variante por temas para el panel: el endpoint devuelve {tema: sello} y
+ * aquí se invalida SOLO lo que se movió — editar un producto en otra PC
+ * refresca productos, no el panel entero.
+ */
+export function useLatidoPanel(url: string, ms: number, alCambiar: (temas: string[]) => void) {
+  const cb = useRef(alCambiar)
+  cb.current = alCambiar
+
+  useEffect(() => {
+    let vivo = true
+    let sellos: Record<string, string> | null = null
+    const latir = async () => {
+      if (document.visibilityState !== 'visible') return
+      try {
+        const r = await api.get<Record<string, string>>(url, { fondo: true } as never)
+        if (!vivo) return
+        const datos = r.data || {}
+        if (sellos !== null) {
+          const previos = sellos
+          const cambiados = Object.keys(datos).filter(k => datos[k] !== previos[k])
+          if (cambiados.length) cb.current(cambiados)
+        }
+        sellos = datos
+      } catch { /* sin red o sin sesión: el siguiente latido reintenta */ }
+    }
+    latir()
+    const id = window.setInterval(latir, ms)
+    const alVolver = () => { if (document.visibilityState === 'visible') latir() }
+    document.addEventListener('visibilitychange', alVolver)
+    return () => { vivo = false; window.clearInterval(id); document.removeEventListener('visibilitychange', alVolver) }
+  }, [url, ms])
+}

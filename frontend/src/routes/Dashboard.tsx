@@ -18,8 +18,8 @@ import { REGIMEN_FISCAL, USO_CFDI, RFC_PUBLICO_GENERAL } from '../lib/sat'
 import { usePrintSettings, charsPerLine } from '../lib/printSettings'
 import { invalidarConfigPublica } from '../lib/configPublica'
 import { motion } from 'framer-motion'
-import { useRecurso, invalidar } from '../lib/realtime'
-import { useLatido } from '../lib/latido'
+import { useRecurso, invalidar, type Tema } from '../lib/realtime'
+import { useLatidoPanel } from '../lib/latido'
 import { CLAVE_NIVEL, recordarAcceso, ProveedorPermisos, usePuede, type Capacidades } from '../lib/acceso'
 import { buildTestTicket } from '../lib/escpos'
 import { METODOS, metodoSoportado, imprimirTermico, vincularMetodo, metodoVinculado, infoMetodo } from '../lib/printer'
@@ -552,8 +552,9 @@ export default function Dashboard() {
   useRecurso(['facturacion'], loadFacturacion)
   useRecurso(['cotizaciones'], loadCotizaciones)
   // Latido del panel: lo que capturan OTROS (un cliente envía su cotización,
-  // otro admin registra una renta o venta) llega solo, sin refrescar a mano.
-  useLatido('/cotizaciones/latido/?todas=1', 4_000, () => invalidar('cotizaciones', 'rentas', 'ventas', 'metricas'))
+  // otro admin edita un producto o registra una renta) llega solo en ~2 s,
+  // y solo se recarga el tema que de verdad cambió.
+  useLatidoPanel('/latido/', 2_000, temas => invalidar(...(temas as Tema[])))
   useRecurso(['ventas'], loadVentas)
   useRecurso(['empresas'], loadEmpresas)
 

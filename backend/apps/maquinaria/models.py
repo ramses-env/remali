@@ -539,3 +539,15 @@ class MensajeSoporte(models.Model):
 
     def __str__(self):
         return f'{self.conversacion_id} - {self.autor_tipo} - {self.creada}'
+
+
+class SelloTema(models.Model):
+    """Última modificación por tema del panel (ver latido.py).
+
+    Una fila por tema; las señales la avanzan en cada save/delete y
+    /latido/ la sirve completa en una sola consulta barata."""
+    tema = models.CharField(max_length=30, unique=True)
+    marca = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f'{self.tema} @ {self.marca:%H:%M:%S}'

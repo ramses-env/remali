@@ -45,6 +45,7 @@ urlpatterns = [
     path('obras-cliente/<int:pk>/', views.ObraClienteDetail.as_view()),
     # Búsqueda de cuentas de cliente (para vincular una renta a su panel)
     path('clientes-lookup/', views.clientes_lookup),
+    path('latido/', views.latido_panel),
     path('usuarios/', views_usuarios.usuarios),
     path('usuarios/roles/', views_usuarios.roles_disponibles),
     path('usuarios/<int:pk>/', views_usuarios.usuario_detalle),

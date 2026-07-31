@@ -826,6 +826,18 @@ def clientes_lookup(request):
 #  MÉTRICAS / NOTIFICACIONES
 # ─────────────────────────────────────────────
 @api_view(['GET'])
+@permission_classes([EsOperador])
+def latido_panel(request):
+    """Sellos por tema para el tiempo real del panel (ver latido.py).
+
+    El panel lo consulta cada 2 s y solo invalida los temas cuyo sello se
+    movió: dos admins en PCs distintas se ven los cambios entre sí casi al
+    instante, al costo de UNA consulta de ~20 filas por tick."""
+    from .models import SelloTema
+    return Response({s.tema: s.marca.isoformat() for s in SelloTema.objects.all()})
+
+
+@api_view(['GET'])
 @permission_classes([IsAdminGroupOrStaff])  # dinero del negocio: no lo ve el almacén
 def dashboard_metrics(request):
     from datetime import timedelta, date
