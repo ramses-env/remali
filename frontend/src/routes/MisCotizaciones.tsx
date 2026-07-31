@@ -57,11 +57,16 @@ export default function MisCotizaciones() {
   useEffect(() => {
     if (!token) { nav('/login?next=/mis-cotizaciones'); return }
     let vivo = true
-    Promise.all([
-      api.get<{ cotizaciones: CotMia[] }>('/cotizaciones/mias/').then(r => r.data?.cotizaciones || []).catch(() => [] as CotMia[]),
-      api.get<{ rentas: RentaMia[] }>('/rentas/mias/').then(r => r.data?.rentas || []).catch(() => [] as RentaMia[]),
+    const cargar = (fondo = false) => Promise.all([
+      api.get<{ cotizaciones: CotMia[] }>('/cotizaciones/mias/', { fondo } as never).then(r => r.data?.cotizaciones || []).catch(() => [] as CotMia[]),
+      api.get<{ rentas: RentaMia[] }>('/rentas/mias/', { fondo } as never).then(r => r.data?.rentas || []).catch(() => [] as RentaMia[]),
     ]).then(([c, r]) => { if (vivo) { setCots(c); setRentas(r) } }).finally(() => vivo && setCargando(false))
-    return () => { vivo = false }
+    cargar()
+    // Tiempo real: estados y próximas entregas se actualizan solos.
+    const id = window.setInterval(() => cargar(true), 25_000)
+    const alVolver = () => { if (document.visibilityState === 'visible') cargar(true) }
+    document.addEventListener('visibilitychange', alVolver)
+    return () => { vivo = false; window.clearInterval(id); document.removeEventListener('visibilitychange', alVolver) }
   }, [token, nav])
 
   // Próximas entregas / recolecciones desde las rentas reales del cliente.

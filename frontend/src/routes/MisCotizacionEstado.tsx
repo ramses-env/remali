@@ -27,10 +27,21 @@ export default function MisCotizacionEstado() {
   const [fotos, setFotos] = useState<Record<number, string>>({})
 
   useEffect(() => {
-    api.get<{ cotizaciones: Cot[] }>('/cotizaciones/mias/')
-      .then(r => setCot((r.data?.cotizaciones || []).find(c => c.folio === folio) || null))
-      .catch(() => setCot(null))
-      .finally(() => setCargando(false))
+    let vivo = true
+    const cargar = (fondo = false) => {
+      // fondo:true = sin loader global; el estado cambia bajo los pies sin parpadeo.
+      api.get<{ cotizaciones: Cot[] }>('/cotizaciones/mias/', { fondo } as never)
+        .then(r => { if (vivo) setCot((r.data?.cotizaciones || []).find(c => c.folio === folio) || null) })
+        .catch(() => { if (vivo && !fondo) setCot(null) })
+        .finally(() => { if (vivo) setCargando(false) })
+    }
+    cargar()
+    /* Tiempo real para el cliente: el admin acepta / pone fecha / convierte y
+       el stepper avanza solo — sin que nadie refresque. */
+    const id = window.setInterval(() => cargar(true), 15_000)
+    const alVolver = () => { if (document.visibilityState === 'visible') cargar(true) }
+    document.addEventListener('visibilitychange', alVolver)
+    return () => { vivo = false; window.clearInterval(id); document.removeEventListener('visibilitychange', alVolver) }
   }, [folio])
 
   useEffect(() => {
