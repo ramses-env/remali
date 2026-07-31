@@ -1876,14 +1876,25 @@ function EquiposAdmin({ equipos, categorias, tipos, marcas, reload, notify }: {
                 </div>
               </div>
 
-              {/* Promo por equipo: % de descuento (0 = sin promo) */}
-              <div className="rounded-2xl border border-edge p-4 flex items-center justify-between gap-4">
-                <div>
-                  <label className={`${label} !mb-0`}>Promoción (%)</label>
-                  <p className="text-[11px] text-mute mt-0.5">0 = sin promo · el precio se muestra ya con descuento y el original tachado</p>
+              {/* Promo por equipo: porcentaje de descuento (0 = sin promo) */}
+              <div className="rounded-2xl border border-edge p-4">
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <label className={`${label} !mb-0`}>Descuento de promoción</label>
+                    <p className="text-[11px] text-mute mt-0.5">Porcentaje que se descuenta del precio. Deja 0 si no hay promoción.</p>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <input type="number" min={0} max={90} className={`${input} !w-20 text-center`} value={form.promo_pct ?? 0}
+                      onChange={e => setForm(f => ({ ...f, promo_pct: Number(e.target.value) }))} />
+                    <span className="text-lg font-bold text-mute">%</span>
+                  </div>
                 </div>
-                <input type="number" min={0} max={90} className={`${input} !w-24 text-center`} value={form.promo_pct ?? 0}
-                  onChange={e => setForm(f => ({ ...f, promo_pct: Number(e.target.value) }))} />
+                {Number(form.promo_pct) > 0 && (
+                  <p className="text-[12px] text-gold mt-2.5">
+                    El cliente verá la etiqueta roja «PROMO −{Math.min(90, Math.max(0, Number(form.promo_pct) || 0))}%», el precio ya
+                    rebajado y el precio original tachado. Ej.: $1,000 queda en ${(1000 * (1 - Math.min(90, Math.max(0, Number(form.promo_pct) || 0)) / 100)).toLocaleString('en-US', { minimumFractionDigits: 2 })}.
+                  </p>
+                )}
               </div>
 
               {/* Qué incluye: lista que se muestra en la pestaña del detalle público */}
