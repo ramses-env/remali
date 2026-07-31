@@ -8,6 +8,7 @@ urlpatterns = [
     path('cotizaciones/', views.CotizacionListCreate.as_view()),
     path('cotizaciones/stats/', views.cotizacion_stats),
     # Cliente autenticado: sus propias solicitudes ("Mis cotizaciones").
+    path('cotizaciones/latido/', views.latido_cotizaciones),
     path('cotizaciones/mias/', views.cotizaciones_mias),
     # Público (sin login): el cliente abre su cotización por el token compartido.
     path('cotizaciones/publica/<str:token>/pdf/', views.cotizacion_publica_pdf),

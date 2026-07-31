@@ -17,7 +17,8 @@ import { formatAddress, addressToFields, type AddressResult } from '../lib/geoco
 import { REGIMEN_FISCAL, USO_CFDI, RFC_PUBLICO_GENERAL } from '../lib/sat'
 import { usePrintSettings, charsPerLine } from '../lib/printSettings'
 import { invalidarConfigPublica } from '../lib/configPublica'
-import { useRecurso } from '../lib/realtime'
+import { useRecurso, invalidar } from '../lib/realtime'
+import { useLatido } from '../lib/latido'
 import { CLAVE_NIVEL, recordarAcceso, ProveedorPermisos, usePuede, type Capacidades } from '../lib/acceso'
 import { buildTestTicket } from '../lib/escpos'
 import { METODOS, metodoSoportado, imprimirTermico, vincularMetodo, metodoVinculado, infoMetodo } from '../lib/printer'
@@ -549,6 +550,9 @@ export default function Dashboard() {
   useRecurso(['reparaciones'], loadOrdenes)
   useRecurso(['facturacion'], loadFacturacion)
   useRecurso(['cotizaciones'], loadCotizaciones)
+  // Latido del panel: lo que capturan OTROS (un cliente envía su cotización,
+  // otro admin registra una renta o venta) llega solo, sin refrescar a mano.
+  useLatido('/cotizaciones/latido/?todas=1', 4_000, () => invalidar('cotizaciones', 'rentas', 'ventas', 'metricas'))
   useRecurso(['ventas'], loadVentas)
   useRecurso(['empresas'], loadEmpresas)
 

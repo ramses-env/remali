@@ -262,6 +262,9 @@ def crear_renta(request):
                 if cot:
                     r.cotizacion = cot
                     r.save(update_fields=['cotizacion'])
+                    # Toca la cotización: su sello de versión avanza y el
+                    # cliente ve el paso "completada" en su siguiente latido.
+                    _Cot.objects.filter(pk=cot.pk).update(actualizada=timezone.now())
             except Exception:
                 pass  # valida traslape, calcula montos y ocupa la unidad si es 'activa'
         except ValidationError as e:

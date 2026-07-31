@@ -209,6 +209,37 @@ def crear_cotizacion_publica(request):
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
+def latido_cotizaciones(request):
+    """Sello de versión para tiempo real por sondeo barato.
+
+    Cambia cuando algo de las cotizaciones o rentas del usuario cambió; el
+    navegador lo consulta cada pocos segundos y SOLO recarga la lista
+    completa si el sello se movió. Latencia de 1-2 s al costo de un par de
+    consultas agregadas — sin websockets que mantener en el hosting.
+    Con ?todas=1 (operadores) el sello cubre todo el negocio, para que el
+    panel vea llegar lo que capturan otros."""
+    from django.db.models import Count
+    from maquinaria.permissions import nivel_de
+    from renta.models import Renta
+    todas = bool(request.query_params.get('todas')) and nivel_de(request.user) >= 1
+    qc = Cotizacion.objects.all() if todas else Cotizacion.objects.filter(usuario=request.user)
+    qr = Renta.objects.all() if todas else Renta.objects.filter(usuario=request.user)
+    c = qc.aggregate(n=Count('id'), m=Max('actualizada'))
+    r = qr.aggregate(
+        n=Count('id'),
+        act=Count('id', filter=Q(estado='activa')),
+        fin=Count('id', filter=Q(estado='finalizada')),
+        can=Count('id', filter=Q(estado='cancelada')),
+    )
+    v = f"c{c['n']}-{c['m'].isoformat() if c['m'] else 0}-r{r['n']}.{r['act']}.{r['fin']}.{r['can']}"
+    if todas:
+        from ventas.models import Venta
+        v += f"-v{Venta.objects.count()}"
+    return Response({'v': v})
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
 def cotizaciones_mias(request):
     """Las cotizaciones que el propio cliente ha solicitado, para su cuenta.
 

@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { useLatido } from '../lib/latido'
 import { Link, useNavigate } from 'react-router-dom'
 import { Loader2, PackageOpen } from 'lucide-react'
 import api from '../lib/api'
@@ -54,6 +55,10 @@ export default function MisCotizaciones() {
   const [filtro, setFiltro] = useState<'todas' | 'enviada' | 'aceptada' | 'vencida'>('todas')
   const [q, setQ] = useState('')
 
+  // Tiempo real: el sello de versión cubre cotizaciones Y rentas del usuario.
+  const recargar = useRef(() => {})
+  useLatido('/cotizaciones/latido/', 2_500, () => recargar.current())
+
   useEffect(() => {
     if (!token) { nav('/login?next=/mis-cotizaciones'); return }
     let vivo = true
@@ -62,11 +67,8 @@ export default function MisCotizaciones() {
       api.get<{ rentas: RentaMia[] }>('/rentas/mias/', { fondo } as never).then(r => r.data?.rentas || []).catch(() => [] as RentaMia[]),
     ]).then(([c, r]) => { if (vivo) { setCots(c); setRentas(r) } }).finally(() => vivo && setCargando(false))
     cargar()
-    // Tiempo real: estados y próximas entregas se actualizan solos.
-    const id = window.setInterval(() => cargar(true), 25_000)
-    const alVolver = () => { if (document.visibilityState === 'visible') cargar(true) }
-    document.addEventListener('visibilitychange', alVolver)
-    return () => { vivo = false; window.clearInterval(id); document.removeEventListener('visibilitychange', alVolver) }
+    recargar.current = () => cargar(true)
+    return () => { vivo = false }
   }, [token, nav])
 
   // Próximas entregas / recolecciones desde las rentas reales del cliente.

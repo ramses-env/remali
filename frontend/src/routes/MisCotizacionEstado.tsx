@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { useLatido } from '../lib/latido'
 import { Link, useParams } from 'react-router-dom'
 import api from '../lib/api'
 import Migas from '../components/Migas'
@@ -26,6 +27,11 @@ export default function MisCotizacionEstado() {
   const [copiada, setCopiada] = useState(false)
   const [fotos, setFotos] = useState<Record<number, string>>({})
 
+  /* Tiempo real: latido de 2 s que compara un sello de versión; solo cuando
+     el admin cambió algo se recarga la cotización. El cliente ve aceptada,
+     fecha de entrega o conversión prácticamente al instante. */
+  const recargar = useRef(() => {})
+  useLatido('/cotizaciones/latido/', 2_000, () => recargar.current())
   useEffect(() => {
     let vivo = true
     const cargar = (fondo = false) => {
@@ -36,15 +42,8 @@ export default function MisCotizacionEstado() {
         .finally(() => { if (vivo) setCargando(false) })
     }
     cargar()
-    /* Tiempo real para el cliente: el admin acepta / pone fecha / convierte y
-       el stepper avanza solo. 4 s con la pestaña visible = se siente
-       instantáneo; oculta no gasta (el navegador la estrangula y el
-       visibilitychange refresca al volver). Es UNA consulta chica por
-       cliente mirando SU cotización: carga despreciable. */
-    const id = window.setInterval(() => { if (document.visibilityState === 'visible') cargar(true) }, 4_000)
-    const alVolver = () => { if (document.visibilityState === 'visible') cargar(true) }
-    document.addEventListener('visibilitychange', alVolver)
-    return () => { vivo = false; window.clearInterval(id); document.removeEventListener('visibilitychange', alVolver) }
+    recargar.current = () => cargar(true)
+    return () => { vivo = false }
   }, [folio])
 
   useEffect(() => {

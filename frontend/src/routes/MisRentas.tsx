@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { useLatido } from '../lib/latido'
 import { Link, useNavigate } from 'react-router-dom'
 import { CalendarClock, Loader2, PackageOpen } from 'lucide-react'
 
@@ -64,16 +65,22 @@ export default function MisRentas() {
   const [cargando, setCargando] = useState(true)
   const [rentas, setRentas] = useState<RentaMia[]>([])
 
+  // Tiempo real: si en el negocio le registran o cierran una renta, la ve llegar.
+  const recargar = useRef<() => void>(() => {})
+  useLatido('/cotizaciones/latido/', 3_000, () => recargar.current())
+
   useEffect(() => {
     if (!token) {
       nav('/login?next=/mis-rentas', { replace: true })
       return
     }
     let vivo = true
-    api.get<{ rentas: RentaMia[] }>('/rentas/mias/')
-      .then(r => vivo && setRentas(r.data.rentas || []))
+    const cargar = () => api.get<{ rentas: RentaMia[] }>('/rentas/mias/', { fondo: true } as never)
+      .then(r => { if (vivo) setRentas(r.data.rentas || []) })
       .catch(() => {})
-      .finally(() => vivo && setCargando(false))
+      .finally(() => { if (vivo) setCargando(false) })
+    cargar()
+    recargar.current = cargar
     return () => { vivo = false }
   }, [token, nav])
 
