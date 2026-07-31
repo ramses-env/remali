@@ -159,7 +159,7 @@ export default function TicketModal({ url, onClose }: { url: string; onClose: ()
           <div className="flex gap-2">
             {puedeTermica ? (
               <button onClick={imprimirTermica} disabled={!data || imprimiendo} className="flex-1 py-2.5 rounded-full bg-gold text-black text-sm font-bold hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center justify-center gap-2">
-                {imprimiendo ? <span className="w-4 h-4 border-2 border-black/30 border-t-black rounded-full animate-spin" /> : '🖨'}
+                {imprimiendo ? <span className="w-4 h-4 border-2 border-black/30 border-t-black rounded-full animate-spin" /> : null}
                 {imprimiendo ? 'Imprimiendo…' : 'Imprimir (sin driver)'}
               </button>
             ) : (
@@ -177,7 +177,7 @@ export default function TicketModal({ url, onClose }: { url: string; onClose: ()
             }}
             disabled={animando}
             className="py-2.5 rounded-full border border-gold/50 text-gold text-sm font-bold hover:bg-gold-soft transition-colors disabled:opacity-50">
-            📄 Orden carta (PDF) — para el cliente
+            Orden carta (PDF) — para el cliente
           </button>
           <button onClick={onClose} className="py-2 rounded-full text-mute text-sm font-medium hover:text-ink transition-colors">Cerrar</button>
         </div>

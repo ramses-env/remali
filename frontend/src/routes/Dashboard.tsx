@@ -4335,7 +4335,7 @@ function EmpresasAdmin({ empresas, reload, notify }: {
                     <div className="col-span-3"><label className={lblErr('entidad')}>Estado *</label><input className={inpErr('entidad')} value={form.entidad || ''} onChange={e => setCampo('entidad', e.target.value)} /><Requerido k="entidad" /></div>
                     <div className="col-span-3"><label className={label}>País</label><input className={input} value={form.pais || 'México'} onChange={e => setCampo('pais', e.target.value)} /></div>
                   </div>
-                  {form.latitud && form.longitud && <p className="text-[11px] text-mute">📍 {Number(form.latitud).toFixed(5)}, {Number(form.longitud).toFixed(5)}</p>}
+                  {form.latitud && form.longitud && <p className="text-[11px] text-mute">{Number(form.latitud).toFixed(5)}, {Number(form.longitud).toFixed(5)}</p>}
                 </div>
               </div>
 
@@ -4679,7 +4679,7 @@ function RefaccionesAdmin({ refacciones, reload, notify }: {
                 <tr key={r.id} className="hover:bg-surface-2 transition-colors">
                   <td className="px-5 py-3">
                     <p className="text-sm font-semibold text-ink">{r.nombre}</p>
-                    {r.ubicacion && <p className="text-[11px] text-mute">📍 {r.ubicacion}</p>}
+                    {r.ubicacion && <p className="text-[11px] text-mute">{r.ubicacion}</p>}
                   </td>
                   <td className="px-3 py-3 font-mono text-[13px] text-mute whitespace-nowrap">{r.codigo_barras}</td>
                   <td className="px-3 py-3 text-sm font-bold text-price whitespace-nowrap">${num(r.precio_venta).toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
