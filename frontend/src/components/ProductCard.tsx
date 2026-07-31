@@ -39,7 +39,7 @@ export default function ProductCard({ id, title, price, image, subtitle, meta, l
   const resolvedImage = resolveMediaUrl(image)
 
   return (
-    <div className="group bg-surface border border-edge rounded-2xl overflow-hidden flex flex-col transition-all duration-300 hover:border-gold/30 hover:-translate-y-1 hover:shadow-[0_12px_40px_rgba(0,0,0,0.5)]">
+    <div className="group h-full bg-surface border border-edge rounded-2xl overflow-hidden flex flex-col transition-all duration-300 hover:border-gold/30 hover:-translate-y-1 hover:shadow-[0_12px_40px_rgba(0,0,0,0.5)]">
 
       {/* Imagen */}
       <div className="relative overflow-hidden aspect-[4/3]">
@@ -112,9 +112,11 @@ export default function ProductCard({ id, title, price, image, subtitle, meta, l
         <h3 className="font-bold text-ink text-sm uppercase tracking-wide leading-snug mb-1 group-hover:text-gold transition-colors">
           {title}
         </h3>
-        {subtitle && (
-          <p className="text-xs text-mute mb-3 line-clamp-2">{subtitle}</p>
-        )}
+        {/* Descripción SIEMPRE presente con altura de 2 líneas reservada:
+            así el título, la línea y el precio quedan a la misma altura en
+            todas las cards, tengan descripción o no. Si es larga, el clamp
+            la corta con "…" y el detalle del equipo cuenta el resto. */}
+        <p className="text-xs text-mute mb-3 line-clamp-2 min-h-[2rem]">{subtitle || ''}</p>
         <div className="mt-auto flex items-end justify-between gap-3 pt-3 border-t border-edge">
           {meta
             ? <span className="text-[11px] text-mute truncate leading-tight pb-0.5">{meta}</span>

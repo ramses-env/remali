@@ -543,14 +543,16 @@ export default function EquiposList() {
 
             {/* Cards */}
             {!loading && shown.map((p, i) => (
-              <div key={p.id} className="equipo-card" ref={i === 0 ? firstCardRef : undefined}>
+              /* h-full: la card llena su celda del grid; sin esto, una card sin
+                 descripción queda más corta que su vecina y el precio flota. */
+              <div key={p.id} className="equipo-card h-full" ref={i === 0 ? firstCardRef : undefined}>
                 <ProductCard
                   id={p.id}
                   title={p.title}
                   price={p.price}
                   modo={p.modo}
                   image={p.image || ''}
-                  subtitle={p.description?.slice(0, 48)}
+                  subtitle={p.description}
                   meta={[p.category, p.brand].filter(Boolean).join(' · ')}
                   linkTo={`/equipo/${p.id}`}
                   tags={p.modo === 'venta'
