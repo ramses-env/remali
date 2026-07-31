@@ -6326,6 +6326,18 @@ function UbicacionesAdmin({ notify }: { notify: (m: string, t?: 'ok' | 'err') =>
   }, [])
   useRecurso(['rentas', 'reparaciones'], cargar)
 
+  /* Tiempo real ENTRE usuarios: el bus solo avisa dentro del mismo navegador,
+     así que la renta que el admin crea en su máquina no llegaría sola al
+     teléfono del técnico. Sondeo silencioso cada 20 s (rentas/tareas/ está en
+     SIN_INDICADOR: no enciende el loader global) y al volver a la pestaña. */
+  useEffect(() => {
+    const id = window.setInterval(cargar, 20_000)
+    const alVolver = () => { if (document.visibilityState === 'visible') cargar() }
+    document.addEventListener('visibilitychange', alVolver)
+    return () => { window.clearInterval(id); document.removeEventListener('visibilitychange', alVolver) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   // Las "próximas" (entregas a futuro) se separan: son planeación, no lo de hoy.
   const pendientes = tareas.filter(t => t.urgencia !== 'proxima')
   const proximas = tareas.filter(t => t.urgencia === 'proxima')
