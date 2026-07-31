@@ -85,7 +85,7 @@ def venta_mostrador(request):
 def listar_ventas(request):
     """Lista de ventas (incluye ventas de maquinaria con su unidad)."""
     qs = Venta.objects.all().select_related(
-        'inventario', 'inventario__equipo', 'usuario', 'empresa'
+        'inventario', 'inventario__equipo', 'usuario', 'empresa', 'cotizacion'
     ).order_by('-fecha')
 
     solo_maquinaria = (request.query_params.get('maquinaria') or '') in ('1', 'true', 'True')
@@ -111,6 +111,13 @@ def listar_ventas(request):
             'metodo_pago': v.metodo_pago,
             'fecha': v.fecha,
             'vendedor': getattr(v.usuario, 'username', None),
+            # Sin unidad amarrada (venta desde cotización): que la columna diga
+            # de qué equipo(s) fue y de qué folio nació, no un guion.
+            'origen': (
+                {'folio': v.cotizacion.folio,
+                 'resumen': ', '.join(i.descripcion for i in v.cotizacion.items.all()[:2])}
+                if (not inv and v.cotizacion_id and v.cotizacion) else None
+            ),
             'unidad': None if not inv else {
                 'id': inv.id,
                 'codigo': inv.codigo,

@@ -89,6 +89,7 @@ type Venta = {
   fecha: string
   vendedor?: string | null
   unidad?: { id: number; codigo: string; numero_serie?: string | null; equipo?: string | null } | null
+  origen?: { folio: string; resumen: string } | null
 }
 type RentaActiva = {
   id: number
@@ -3298,6 +3299,8 @@ function VentasAdmin({ ventas, reload, notify }: { ventas: Venta[]; reload: () =
                   <td className="px-3 py-3">
                     {v.unidad ? (
                       <><p className="text-sm text-ink truncate">{v.unidad.equipo}</p><p className="font-mono text-[11px] text-mute">{v.unidad.codigo}</p></>
+                    ) : v.origen ? (
+                      <><p className="text-sm text-ink truncate">{v.origen.resumen || 'Venta desde cotización'}</p><p className="font-mono text-[11px] text-mute">{v.origen.folio} · sin unidad asignada</p></>
                     ) : <span className="text-xs text-mute">—</span>}
                   </td>
                   <td className="px-3 py-3 whitespace-nowrap text-xs text-mute">{new Date(v.fecha).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' })}</td>
