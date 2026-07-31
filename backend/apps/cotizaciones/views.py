@@ -224,7 +224,7 @@ def cotizaciones_mias(request):
     hoy = timezone.now().date()
     qs = (Cotizacion.objects
           .filter(usuario=request.user)
-          .prefetch_related('items')
+          .prefetch_related('items', 'conversiones')
           .order_by('-creada')[:100])
     data = []
     for c in qs:
@@ -240,6 +240,8 @@ def cotizaciones_mias(request):
             'vence_el': c.vence_el,
             'items': [{'descripcion': i.descripcion, 'cantidad': i.cantidad} for i in c.items.all()],
             'carrito': (c.datos_solicitud or {}).get('carrito') or [],   # para "volver a cotizar"
+            'atendida': bool(c.atendida_en or c.atendida_por_id),
+            'convertida': bool(len(c.conversiones.all())),
             'atendida_por': (
                 (c.atendida_por.get_full_name() or c.atendida_por.username)
                 if c.atendida_por_id and c.atendida_por else None

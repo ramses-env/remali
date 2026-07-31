@@ -8,7 +8,7 @@ import resolveMediaUrl from '../lib/resolveMediaUrl'
 
 type Cot = {
   folio: string; estado: string; estado_label: string; tipo: string; total: string
-  creada?: string; vence_el?: string | null; pdf?: string | null; atendida_por?: string | null
+  creada?: string; vence_el?: string | null; pdf?: string | null; atendida_por?: string | null; atendida?: boolean; convertida?: boolean
   items: { descripcion: string; cantidad: number }[]
   carrito?: { id: number; title: string; qty: number; unit?: string; image?: string }[]
 }
@@ -56,7 +56,10 @@ export default function MisCotizacionEstado() {
   const rech = cot.estado === 'rechazada'
   const venc = cot.estado === 'vencida'
   const acep = cot.estado === 'aceptada'
-  const activo = acep ? 3 : 1   // enviada/borrador → revisión; aceptada → entrega
+  const compl = !!cot.convertida            // ya es venta/renta: flujo terminado
+  // Señales reales: atendida (un admin ya la revisó) empuja a autorización;
+  // aceptada empuja a entrega; convertida completa todo.
+  const activo = compl ? 4 : acep ? 3 : cot.atendida ? 2 : 1
   const pasos = [
     { t: 'Cotización recibida', d: `Folio ${cot.folio} generado.` },
     { t: 'Revisión de disponibilidad', d: 'Confirmamos existencias y fechas de entrega.' },
@@ -65,7 +68,9 @@ export default function MisCotizacionEstado() {
   ]
   const chip = rech ? { txt: 'No procedió', cls: 'text-red-500 border-red-500/40' }
     : venc ? { txt: 'Vencida — vuelve a cotizar', cls: 'text-mute border-edge' }
+    : compl ? { txt: 'Completada · equipo entregado', cls: 'text-emerald-500 border-emerald-500/40' }
     : acep ? { txt: 'Paso 4 de 4 · aceptada, agendando entrega', cls: 'text-emerald-500 border-emerald-500/40' }
+    : cot.atendida ? { txt: 'Paso 3 de 4 · esperando autorización', cls: 'text-gold border-gold/40' }
     : { txt: 'Paso 2 de 4 · en revisión ahora', cls: 'text-gold border-gold/40' }
 
   const wa = waLink(cfg.whatsapp_principal, `Hola REMALI, quiero seguimiento de mi cotización ${cot.folio}.`)
