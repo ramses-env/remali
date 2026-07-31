@@ -192,14 +192,6 @@ export default function EquipoDetail() {
   const hayTabs = disponibles.length > 0
   const tabActiva = disponibles.includes(tab) ? tab : disponibles[0]
 
-  // Confianza: las mismas promesas reales del sitio (sección "La diferencia REMALI").
-  const confianza = [
-    { t: 'Experiencia', s: 'Proyectos exigentes en toda la región' },
-    { t: 'Procesos claros', s: 'Renta y venta sin letra pequeña' },
-    { t: 'Soporte 24/7', s: 'Técnicos para emergencias en obra' },
-    { t: 'Garantía', s: 'Equipos revisados y certificados' },
-  ]
-
   const waMsg = `Hola REMALI, me interesa ${esRenta ? 'rentar' : 'comprar'}: ${e.modelo}`
   const telWa = cfg.whatsapp_principal || cfg.negocio_telefono
 
@@ -278,16 +270,6 @@ export default function EquipoDetail() {
               </div>
             )}
             {isAdmin && <button onClick={() => fileInputRef.current?.click()} className="md:hidden mt-3 text-sm font-semibold text-gold hover:opacity-80">+ Subir fotos</button>}
-
-            {/* Confianza */}
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mt-5">
-              {confianza.map(c => (
-                <div key={c.t} className="border border-edge rounded-xl bg-surface px-4 py-3.5">
-                  <div className="text-[13.5px] font-bold">{c.t}</div>
-                  <div className="text-[12.5px] text-mute mt-0.5 leading-snug">{c.s}</div>
-                </div>
-              ))}
-            </div>
 
             {/* Tabs: especificaciones / condiciones de renta */}
             {hayTabs && (
