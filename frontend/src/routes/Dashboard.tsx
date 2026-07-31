@@ -45,6 +45,7 @@ type Equipo = {
   imagen?: string | null
   ficha_tecnica?: string | null
   especificaciones?: { etiqueta: string; valor: string }[]
+  que_incluye?: string[]
   categoria?: Option | null
   tipo?: Option | null
   marca?: Option | null
@@ -1506,7 +1507,7 @@ function EquiposAdmin({ equipos, categorias, tipos, marcas, reload, notify }: {
   equipos: Equipo[]; categorias: Option[]; tipos: Option[]; marcas: Option[]
   reload: () => void; notify: (m: string, t?: 'ok' | 'err') => void
 }) {
-  const empty: Equipo = { modelo: '', descripcion: '', precio_dia: '', precio_semana: '', precio_mes: '', precio_venta: '', especificaciones: [] }
+  const empty: Equipo = { modelo: '', descripcion: '', precio_dia: '', precio_semana: '', precio_mes: '', precio_venta: '', especificaciones: [], que_incluye: [] }
   const [form, setForm] = useState<Equipo>(empty)
   // Helpers del editor de especificaciones técnicas (etiqueta → valor)
   const specs = form.especificaciones || []
@@ -1571,6 +1572,8 @@ function EquiposAdmin({ equipos, categorias, tipos, marcas, reload, notify }: {
     fd.append('especificaciones', JSON.stringify(
       (form.especificaciones || []).filter(s => s.etiqueta.trim() && s.valor.trim())
     ))
+    // "Qué incluye": una línea por punto (formato libre "Título: detalle")
+    fd.append('que_incluye', JSON.stringify((form.que_incluye || []).map(l => l.trim()).filter(Boolean)))
 
     try {
       const method = editing ? 'patch' : 'post'
@@ -1869,6 +1872,17 @@ function EquiposAdmin({ equipos, categorias, tipos, marcas, reload, notify }: {
                     </button>
                   )}
                 </div>
+              </div>
+
+              {/* Qué incluye: lista que se muestra en la pestaña del detalle público */}
+              <div className="rounded-2xl border border-edge p-4">
+                <div className="flex items-center justify-between mb-1">
+                  <label className={`${label} !mb-0`}>Qué incluye</label>
+                  <span className="text-[11px] text-mute">Una línea por punto · "Título: detalle"</span>
+                </div>
+                <textarea rows={4} className={`${input} mt-2 resize-y`} value={(form.que_incluye || []).join('\n')}
+                  onChange={e => setForm(f => ({ ...f, que_incluye: e.target.value.split('\n') }))}
+                  placeholder={'Punta y cincel plano: encastre hex 1-1/8\"\nMaletín metálico: con espacio para accesorios'} />
               </div>
 
             </div>

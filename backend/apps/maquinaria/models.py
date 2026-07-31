@@ -186,6 +186,9 @@ class Equipo(models.Model):
     # Especificaciones técnicas: lista ordenada de {etiqueta, valor}
     # (ej. {"etiqueta": "Frecuencia", "valor": "60 Hz"}). Flexible por producto.
     especificaciones = models.JSONField(default=list, blank=True)
+    # Lista de textos "Título: detalle" que se muestran en la pestaña
+    # "Qué incluye" del detalle público del equipo.
+    que_incluye = models.JSONField(default=list, blank=True)
 
     categoria = models.ForeignKey(
         'Categoria',

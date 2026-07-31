@@ -222,7 +222,7 @@ class EquipoSerializer(serializers.ModelSerializer):
         # arma la ficha que ve el cliente. Renta no las exige.
         condicion = attrs.get('condicion') or getattr(self.instance, 'condicion', 'nueva')
         if condicion == 'nueva':
-            especs = attrs.get('especificaciones')
+            especs = attrs.get('especificaciones', 'que_incluye')
             if especs is None:
                 especs = getattr(self.instance, 'especificaciones', None) or []
             if not especs:

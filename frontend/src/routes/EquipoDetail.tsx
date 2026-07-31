@@ -19,7 +19,8 @@ type Equipo = {
   imagenes?: string[]
   ficha_tecnica?: string | null
   especificaciones?: { etiqueta: string; valor: string }[]
-  condiciones?: string[]
+  condiciones?: string[]          // ojo: es el set nueva/seminueva de unidades, NO términos
+  que_incluye?: string[]
   precio_venta?: number | string | null
   precio_dia?: number | string | null
   precio_semana?: number | string | null
@@ -51,7 +52,7 @@ export default function EquipoDetail() {
   const [notFound, setNotFound] = useState(false)
   const [fichaOpen, setFichaOpen] = useState(false)
   const [qty, setQty] = useState(1)
-  const [tab, setTab] = useState<'specs' | 'cond'>('specs')
+  const [tab, setTab] = useState<'specs' | 'incluye' | 'cond'>('specs')
   const [uploadedImages, setUploadedImages] = useState<string[]>([])
   const images = useMemo(() => {
     const base = e?.imagen ? [e.imagen] : []
@@ -71,10 +72,17 @@ export default function EquipoDetail() {
 
   // Relacionados: misma categoría, sin el equipo actual.
   useEffect(() => {
-    if (!e?.categoria?.nombre) { setRelacionados([]); return }
+    if (!e) { setRelacionados([]); return }
     let vivo = true
-    api.get<Equipo[]>(`/equipos/?category=${encodeURIComponent(e.categoria.nombre)}`)
-      .then(r => { if (vivo) setRelacionados((r.data || []).filter(x => x.id !== e.id).slice(0, 4)) })
+    // Misma categoría primero; si no alcanza, rellena con el resto del catálogo.
+    api.get<Equipo[]>('/equipos/')
+      .then(r => {
+        if (!vivo) return
+        const otros = (r.data || []).filter(x => x.id !== e.id)
+        const mismaCat = otros.filter(x => x.categoria?.id && x.categoria.id === e.categoria?.id)
+        const resto = otros.filter(x => !mismaCat.includes(x))
+        setRelacionados([...mismaCat, ...resto].slice(0, 4))
+      })
       .catch(() => {})
     return () => { vivo = false }
   }, [e])
@@ -169,10 +177,19 @@ export default function EquipoDetail() {
   }
 
   const idxActiva = Math.max(0, images.indexOf(activeImage || ''))
-  const condLista = (e.condiciones || []).filter(Boolean)
+  // Términos de renta REALES: los de Configuración › Negocio (una línea por punto).
+  const condLista = seRenta
+    ? (cfg.cotizacion_condiciones_renta || '').split('\n').map(l => l.trim()).filter(Boolean)
+    : []
+  const incluyeLista = (e.que_incluye || []).filter(Boolean)
   const specs = e.especificaciones || []
-  const hayTabs = specs.length > 0 || condLista.length > 0
-  const tabActiva: 'specs' | 'cond' = tab === 'cond' && condLista.length ? 'cond' : specs.length ? 'specs' : 'cond'
+  const disponibles = ([
+    specs.length ? 'specs' : null,
+    incluyeLista.length ? 'incluye' : null,
+    condLista.length ? 'cond' : null,
+  ].filter(Boolean)) as Array<'specs' | 'incluye' | 'cond'>
+  const hayTabs = disponibles.length > 0
+  const tabActiva = disponibles.includes(tab) ? tab : disponibles[0]
 
   // Confianza: las mismas promesas reales del sitio (sección "La diferencia REMALI").
   const confianza = [
@@ -271,19 +288,13 @@ export default function EquipoDetail() {
             {/* Tabs: especificaciones / condiciones de renta */}
             {hayTabs && (
               <>
-                <div className="flex gap-7 border-b border-edge mt-11">
-                  {specs.length > 0 && (
-                    <button onClick={() => setTab('specs')}
-                      className={`pb-3.5 text-[15px] font-bold -mb-px border-b-2 transition-colors ${tabActiva === 'specs' ? 'text-ink border-gold' : 'text-mute border-transparent hover:text-ink'}`}>
-                      Especificaciones
+                <div className="flex gap-7 border-b border-edge mt-11 overflow-x-auto">
+                  {disponibles.map(t => (
+                    <button key={t} onClick={() => setTab(t)}
+                      className={`pb-3.5 text-[15px] font-bold -mb-px border-b-2 whitespace-nowrap transition-colors ${tabActiva === t ? 'text-ink border-gold' : 'text-mute border-transparent hover:text-ink'}`}>
+                      {t === 'specs' ? 'Especificaciones' : t === 'incluye' ? 'Qué incluye' : 'Condiciones de renta'}
                     </button>
-                  )}
-                  {condLista.length > 0 && (
-                    <button onClick={() => setTab('cond')}
-                      className={`pb-3.5 text-[15px] font-bold -mb-px border-b-2 transition-colors ${tabActiva === 'cond' ? 'text-ink border-gold' : 'text-mute border-transparent hover:text-ink'}`}>
-                      Condiciones de renta
-                    </button>
-                  )}
+                  ))}
                 </div>
 
                 {tabActiva === 'specs' && (
@@ -294,6 +305,23 @@ export default function EquipoDetail() {
                         <span className="text-[14.5px] font-semibold text-right">{s.valor}</span>
                       </div>
                     ))}
+                  </div>
+                )}
+                {tabActiva === 'incluye' && (
+                  <div className="grid sm:grid-cols-2 gap-x-14 gap-y-4 pt-6">
+                    {incluyeLista.map((l, i) => {
+                      const [titulo, ...resto] = l.split(':')
+                      const detalle = resto.join(':').trim()
+                      return (
+                        <div key={i} className="flex gap-3 items-start">
+                          <span className="w-[7px] h-[7px] rounded-[2px] bg-gold mt-2 flex-none" />
+                          <div>
+                            <div className="text-[15px] font-semibold">{titulo.trim()}</div>
+                            {detalle && <div className="text-[13.5px] text-mute leading-relaxed mt-0.5">{detalle}</div>}
+                          </div>
+                        </div>
+                      )
+                    })}
                   </div>
                 )}
                 {tabActiva === 'cond' && (
