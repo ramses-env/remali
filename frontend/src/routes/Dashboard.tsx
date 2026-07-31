@@ -6007,7 +6007,7 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
               </div>
             )}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <select disabled={bloqueada} value={empresaSel} onChange={e => cambiarEmpresa(e.target.value)} className={`${input} sm:col-span-2 disabled:opacity-60`}>
+              <select disabled={bloqueada || !!c.usuario_nombre} title={c.usuario_nombre ? 'Vino de una cuenta de la tienda: la identidad no se cambia por una empresa' : undefined} value={empresaSel} onChange={e => cambiarEmpresa(e.target.value)} className={`${input} sm:col-span-2 disabled:opacity-60`}>
                 <option value="">— Cliente particular —</option>
                 {empresasActivas(empresas).map(e => <option key={e.id} value={e.id}>{e.nombre}</option>)}
               </select>
