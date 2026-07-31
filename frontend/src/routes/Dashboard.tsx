@@ -827,6 +827,10 @@ export default function Dashboard() {
           <button onClick={() => setSidebarOpen(true)} className={`${puede?.nivel === 1 ? 'hidden md:flex' : 'flex'} lg:hidden w-9 h-9 rounded-lg items-center justify-center hover:bg-surface-2 text-ink shrink-0`} aria-label="Abrir menú">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" d="M4 6h16M4 12h16M4 18h16" /></svg>
           </button>
+          {/* Colapsar/expandir el menú a solo-iconos (desktop), al lado del logo. */}
+          <button onClick={toggleColapsado} className="hidden lg:flex w-9 h-9 rounded-lg items-center justify-center text-mute hover:text-ink hover:bg-surface-2 transition-colors shrink-0" aria-label={colapsado ? 'Expandir menú' : 'Colapsar menú'} title={colapsado ? 'Expandir menú' : 'Colapsar menú'}>
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round"><path d="M4 6h16M4 12h16M4 18h16" /></svg>
+          </button>
           <Link to="/" className="flex items-center gap-2 shrink-0">
             <LogoRemali className="w-8 h-8 text-ink" />
             <span className="font-extrabold tracking-tight text-[15px] hidden sm:block">REMALI</span>
@@ -983,10 +987,6 @@ export default function Dashboard() {
           <div className="h-full bg-surface border border-edge rounded-[20px] shadow-[0_1px_3px_rgba(33,29,22,0.04)] flex flex-col p-3.5 overflow-hidden">
             <button onClick={() => setSidebarOpen(false)} className="lg:hidden self-end text-mute hover:text-ink p-1 mb-1" aria-label="Cerrar menú">
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" d="M6 6l12 12M18 6L6 18" /></svg>
-            </button>
-            {/* Hamburguesa: colapsa/expande el menú a solo-iconos (solo desktop). */}
-            <button onClick={toggleColapsado} className={`hidden lg:flex items-center ${colapsado ? 'justify-center' : ''} w-9 h-9 rounded-lg text-mute hover:text-ink hover:bg-surface-2 transition-colors mb-2`} aria-label={colapsado ? 'Expandir menú' : 'Colapsar menú'} title={colapsado ? 'Expandir menú' : 'Colapsar menú'}>
-              <svg className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round"><path d="M4 6h16M4 12h16M4 18h16" /></svg>
             </button>
             <nav className="flex-1 overflow-y-auto flex flex-col gap-3">
               {navGroups.map((g, gi) => (
