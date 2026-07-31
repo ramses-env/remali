@@ -178,9 +178,10 @@ export default function EquipoDetail() {
 
   const idxActiva = Math.max(0, images.indexOf(activeImage || ''))
   // Términos de renta REALES: los de Configuración › Negocio (una línea por punto).
-  const condLista = seRenta
-    ? (cfg.cotizacion_condiciones_renta || '').split('\n').map(l => l.trim()).filter(Boolean)
-    : []
+  // Renta → términos de renta; venta → términos de venta. Ambos los edita el
+  // admin en Configuración › Negocio (una línea por punto).
+  const condLista = (seRenta ? (cfg.cotizacion_condiciones_renta || '') : (cfg.cotizacion_condiciones || ''))
+    .split('\n').map(l => l.trim()).filter(Boolean)
   const incluyeLista = (e.que_incluye || []).filter(Boolean)
   const specs = e.especificaciones || []
   const disponibles = ([
@@ -292,7 +293,7 @@ export default function EquipoDetail() {
                   {disponibles.map(t => (
                     <button key={t} onClick={() => setTab(t)}
                       className={`pb-3.5 text-[15px] font-bold -mb-px border-b-2 whitespace-nowrap transition-colors ${tabActiva === t ? 'text-ink border-gold' : 'text-mute border-transparent hover:text-ink'}`}>
-                      {t === 'specs' ? 'Especificaciones' : t === 'incluye' ? 'Qué incluye' : 'Condiciones de renta'}
+                      {t === 'specs' ? 'Especificaciones' : t === 'incluye' ? 'Qué incluye' : seRenta ? 'Condiciones de renta' : 'Condiciones de venta'}
                     </button>
                   ))}
                 </div>
