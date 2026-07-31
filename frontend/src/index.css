@@ -58,7 +58,11 @@
 /* Tokens expuestos como utilidades de Tailwind (cascada con .dark) */
 @theme inline {
   --font-sans:  'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
-  --font-mono:  'IBM Plex Mono', ui-monospace, 'SF Mono', monospace;
+  /* Sistema tipográfico de UNA familia: Plus Jakarta Sans para todo.
+     Los micro-labels que antes eran monoespaciados usan la misma sans
+     (los tracking-* de cada uso siguen aplicando); tabular-nums mantiene
+     los números alineados en contadores y precios sin fuente extra. */
+  --font-mono:  'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
   --color-app:        var(--c-bg);
   --color-surface:    var(--c-surface);
   --color-surface-2:  var(--c-surface-2);
@@ -767,3 +771,6 @@
     font-size: 0.875rem;
   }
 }
+
+/* Los ex-mono: peso semibold y números tabulares para que no bailen. */
+.font-mono { font-variant-numeric: tabular-nums; font-weight: 600; }
