@@ -52,8 +52,12 @@ const CSS = (pw: number, ph: number, name: string) => `
 .ficha .feat .ck { color:${GOLD}; font-weight:900; }
 .ficha .foto { width:100%; height:100%; object-fit:contain; }
 .ficha .footer { background:${TINTA}; color:#fff; padding:10px 14mm; display:flex; justify-content:space-between;
-  align-items:center; gap:16px; font-size:8.5pt; margin-top:auto; }
+  align-items:center; gap:16px; font-size:8pt; margin-top:auto; }
 .ficha .footer .sep { opacity:.45; margin:0 6px; }
+/* Cada dato (tel, correo, dirección) es una unidad: si no cabe, baja completo,
+   nunca se parte a media palabra ni a medio teléfono. */
+.ficha .footer .u { white-space:nowrap; }
+.ficha .footer .izq { display:inline-flex; flex-wrap:wrap; align-items:center; row-gap:2px; }
 @media print {
   body > #root { display:none !important; }
   .oc-overlay { position:static !important; inset:auto !important; background:#fff !important; backdrop-filter:none !important; padding:0 !important; display:block !important; }
@@ -91,7 +95,6 @@ export default function FichaTecnicaModal({ equipo, onClose }: { equipo: Equipo;
     neg.telefono ? `Tel: ${neg.telefono}` : '',
     neg.email || '',
   ].filter(Boolean)
-  const pieDerecha = [neg.web || '', neg.direccion || ''].filter(Boolean)
 
   return createPortal(
     <div className="oc-overlay fixed inset-0 z-[95] bg-black/70 backdrop-blur-sm flex items-start justify-center p-4 overflow-y-auto" onClick={onClose}>
@@ -165,13 +168,11 @@ export default function FichaTecnicaModal({ equipo, onClose }: { equipo: Equipo;
 
             {/* Pie con los datos completos del negocio */}
             <div className="footer">
-              <span>
-                <b>{neg.nombre || 'REMALI'}</b>
-                {pieContacto.map((p, i) => <span key={i}><span className="sep">·</span>{p}</span>)}
+              <span className="izq">
+                <b className="u">{neg.nombre || 'REMALI'}</b>
+                {pieContacto.map((p, i) => <span key={i} className="u"><span className="sep">·</span>{p}</span>)}
               </span>
-              <span style={{ textAlign: 'right' }}>
-                {pieDerecha.map((p, i) => <span key={i}>{i > 0 && <span className="sep">·</span>}{p}</span>)}
-              </span>
+              {neg.direccion && <span className="u" style={{ textAlign: 'right' }}>{neg.direccion}</span>}
             </div>
           </div>
         </div>
