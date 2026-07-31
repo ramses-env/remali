@@ -189,6 +189,8 @@ class Equipo(models.Model):
     # Lista de textos "Título: detalle" que se muestran en la pestaña
     # "Qué incluye" del detalle público del equipo.
     que_incluye = models.JSONField(default=list, blank=True)
+    # Promoción por equipo: % de descuento sobre el precio mostrado (0 = sin promo).
+    promo_pct = models.PositiveSmallIntegerField(default=0, blank=True)
 
     categoria = models.ForeignKey(
         'Categoria',

@@ -21,6 +21,7 @@ type Equipo = {
   especificaciones?: { etiqueta: string; valor: string }[]
   condiciones?: string[]          // ojo: es el set nueva/seminueva de unidades, NO términos
   que_incluye?: string[]
+  promo_pct?: number
   precio_venta?: number | string | null
   precio_dia?: number | string | null
   precio_semana?: number | string | null
@@ -115,7 +116,10 @@ export default function EquipoDetail() {
     m === 'dia' ? (precioDia ?? precioSemana ?? precioMes ?? 0) :
     m === 'semana' ? (precioSemana ?? (precioDia ? precioDia * 7 : null) ?? precioMes ?? 0) :
     (precioMes ?? (precioDia ? precioDia * 30 : null) ?? (precioSemana ? precioSemana * 4 : null) ?? 0)
-  const displayPrice = precioDe(modalidad)
+  const promo = Math.max(0, Math.min(90, e?.promo_pct || 0))
+  const precioLista = precioDe(modalidad)
+  // El precio que ve (y cotiza) el cliente ya trae la promo aplicada.
+  const displayPrice = promo ? Math.round(precioLista * (1 - promo / 100) * 100) / 100 : precioLista
 
   function elegirModalidad(m: Modalidad) {
     setModalidad(m)
@@ -255,6 +259,9 @@ export default function EquipoDetail() {
                 {activeSrc
                   ? <img src={activeSrc} alt={e.modelo} onClick={() => setFullImage(true)} className="max-w-full max-h-full object-contain cursor-zoom-in p-6" crossOrigin="anonymous" referrerPolicy="no-referrer" onError={ev => { const t = ev.currentTarget; if (t.dataset.fb === '1') return; t.dataset.fb = '1'; t.src = '/vite.svg' }} />
                   : <span className="text-mute text-sm">Sin imagen</span>}
+                {promo > 0 && (
+                  <span className="absolute top-3.5 left-3.5 bg-red-600 text-white text-[12px] font-extrabold tracking-wide px-3 py-1.5 rounded-lg">PROMO −{promo}%</span>
+                )}
                 {images.length > 1 && (
                   <span className={`${mono} absolute bottom-3.5 right-3.5 px-2.5 py-1.5 rounded-lg bg-app/70 border border-edge backdrop-blur text-mute`}>
                     {idxActiva + 1} / {images.length}
@@ -355,7 +362,10 @@ export default function EquipoDetail() {
 
             {/* Precio */}
             <div>
-              <div className="text-[38px] font-extrabold tracking-tight text-price leading-none">${formatCurrency(displayPrice)}</div>
+              <div className="flex items-baseline gap-3 flex-wrap">
+                <span className="text-[38px] font-extrabold tracking-tight text-price leading-none">${formatCurrency(displayPrice)}</span>
+                {promo > 0 && <span className="text-[16px] text-mute line-through">${formatCurrency(precioLista)}</span>}
+              </div>
               <div className="text-[13px] text-mute mt-2">
                 {esRenta
                   ? `Renta por ${UNIT_LABEL[modalidad as PriceUnit]} · sin IVA · con factura se suma 16%`

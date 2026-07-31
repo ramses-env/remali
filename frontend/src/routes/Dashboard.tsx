@@ -46,6 +46,7 @@ type Equipo = {
   ficha_tecnica?: string | null
   especificaciones?: { etiqueta: string; valor: string }[]
   que_incluye?: string[]
+  promo_pct?: number
   categoria?: Option | null
   tipo?: Option | null
   marca?: Option | null
@@ -1507,7 +1508,7 @@ function EquiposAdmin({ equipos, categorias, tipos, marcas, reload, notify }: {
   equipos: Equipo[]; categorias: Option[]; tipos: Option[]; marcas: Option[]
   reload: () => void; notify: (m: string, t?: 'ok' | 'err') => void
 }) {
-  const empty: Equipo = { modelo: '', descripcion: '', precio_dia: '', precio_semana: '', precio_mes: '', precio_venta: '', especificaciones: [], que_incluye: [] }
+  const empty: Equipo = { modelo: '', descripcion: '', precio_dia: '', precio_semana: '', precio_mes: '', precio_venta: '', especificaciones: [], que_incluye: [], promo_pct: 0 }
   const [form, setForm] = useState<Equipo>(empty)
   // Helpers del editor de especificaciones técnicas (etiqueta → valor)
   const specs = form.especificaciones || []
@@ -1574,6 +1575,7 @@ function EquiposAdmin({ equipos, categorias, tipos, marcas, reload, notify }: {
     ))
     // "Qué incluye": una línea por punto (formato libre "Título: detalle")
     fd.append('que_incluye', JSON.stringify((form.que_incluye || []).map(l => l.trim()).filter(Boolean)))
+    fd.append('promo_pct', String(Math.max(0, Math.min(90, Number(form.promo_pct) || 0))))
 
     try {
       const method = editing ? 'patch' : 'post'
@@ -1872,6 +1874,16 @@ function EquiposAdmin({ equipos, categorias, tipos, marcas, reload, notify }: {
                     </button>
                   )}
                 </div>
+              </div>
+
+              {/* Promo por equipo: % de descuento (0 = sin promo) */}
+              <div className="rounded-2xl border border-edge p-4 flex items-center justify-between gap-4">
+                <div>
+                  <label className={`${label} !mb-0`}>Promoción (%)</label>
+                  <p className="text-[11px] text-mute mt-0.5">0 = sin promo · el precio se muestra ya con descuento y el original tachado</p>
+                </div>
+                <input type="number" min={0} max={90} className={`${input} !w-24 text-center`} value={form.promo_pct ?? 0}
+                  onChange={e => setForm(f => ({ ...f, promo_pct: Number(e.target.value) }))} />
               </div>
 
               {/* Qué incluye: lista que se muestra en la pestaña del detalle público */}
