@@ -130,7 +130,6 @@ def crear_cotizacion_publica(request):
         # de la cotización sale ya con el descuento aplicado.
         promo = min(90, max(0, getattr(eq, 'promo_pct', 0) or 0))
         if precio and promo:
-            from decimal import Decimal
             precio = (Decimal(precio) * (Decimal('100') - promo) / Decimal('100')).quantize(Decimal('0.01'))
             etiqueta = f'{etiqueta} (promo −{promo}%)'
         partidas.append((etiqueta, cant, Decimal(str(precio or 0)), modalidad))
