@@ -285,6 +285,9 @@ def devolver_renta(request, pk: int):
         r = Renta.objects.select_related('inventario', 'inventario__equipo', 'empresa', 'obra').get(pk=pk)
     except Renta.DoesNotExist:
         return Response({'detalle': 'Renta no encontrada'}, status=404)
+    # Operadores ven todas; un cliente solo la suya.
+    if nivel_de(request.user) < 1 and r.usuario_id != request.user.id:
+        return Response({'detalle': 'Sin permiso para esta renta.'}, status=403)
     if r.estado != 'activa':
         return Response({'detalle': f'La renta no está activa (estado: {r.estado})'}, status=400)
 
@@ -337,7 +340,7 @@ def comprobante_renta(request, pk: int):
 
 
 @api_view(['GET'])
-@permission_classes([EsOperador])
+@permission_classes([permissions.IsAuthenticated])
 def ticket_renta(request, pk: int):
     """Comprobante de renta en PDF (descarga/impresión alterna)."""
     try:
@@ -345,8 +348,9 @@ def ticket_renta(request, pk: int):
     except Renta.DoesNotExist:
         return Response({'detalle': 'Renta no encontrada'}, status=404)
     from .comprobante import datos_comprobante_renta
-    from server.ticketing import render_comprobante_pdf
-    pdf = render_comprobante_pdf(datos_comprobante_renta(r))
+    # Carta presentable (el térmico queda solo para refacciones en mostrador).
+    from server.orden_carta import render_orden_carta_pdf
+    pdf = render_orden_carta_pdf(datos_comprobante_renta(r))
     resp = HttpResponse(pdf, content_type='application/pdf')
     resp['Content-Disposition'] = f'inline; filename="ticket_renta_{r.id}.pdf"'
     return resp

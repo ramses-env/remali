@@ -5806,10 +5806,23 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
       : '¿Convertir esta cotización en venta? Se creará la venta con estas partidas y su ticket.'
     if (!confirm(aviso)) return
     setBusy(true)
-    const met = (window.prompt('Método de pago: efectivo / tarjeta / transferencia', 'efectivo') || '').trim().toLowerCase()
+    const METODOS_PAGO = ['efectivo', 'tarjeta', 'transferencia']
+    const met = (window.prompt('Método de pago principal: efectivo / tarjeta / transferencia', 'efectivo') || '').trim().toLowerCase()
     if (!met) return
-    if (!['efectivo', 'tarjeta', 'transferencia'].includes(met)) { notify('Método no válido: efectivo, tarjeta o transferencia', 'err'); return }
-    api.post(`/cotizaciones/${c.id}/convertir/`, { metodo_pago: met })
+    if (!METODOS_PAGO.includes(met)) { notify('Método no válido: efectivo, tarjeta o transferencia', 'err'); return }
+    // Pago combinado: monto parcial del método principal; el resto con otro método.
+    let pagos: { metodo: string; monto: number }[] = []
+    const totalNum = Math.round(Number(c.total) * 100) / 100
+    const parcial = (window.prompt(`¿Pago combinado? Monto pagado con ${met} (vacío = todo: $${totalNum})`, '') || '').trim()
+    if (parcial) {
+      const monto = Math.round(Number(parcial.replace(/[^0-9.]/g, '')) * 100) / 100
+      const resto = Math.round((totalNum - monto) * 100) / 100
+      if (!(monto > 0) || resto <= 0) { notify('Monto parcial no válido (debe ser mayor a 0 y menor al total)', 'err'); return }
+      const met2 = (window.prompt(`Método del resto ($${resto}): efectivo / tarjeta / transferencia`, met === 'efectivo' ? 'transferencia' : 'efectivo') || '').trim().toLowerCase()
+      if (!METODOS_PAGO.includes(met2) || met2 === met) { notify('Método del resto no válido', 'err'); return }
+      pagos = [{ metodo: met, monto }, { metodo: met2, monto: resto }]
+    }
+    api.post(`/cotizaciones/${c.id}/convertir/`, { metodo_pago: met, pagos })
       .then(r => { notify(r.data?.detalle || 'Convertida a venta'); onConvertida(r.data.venta_id) })
       .catch(err => notify(err?.response?.data?.detalle || 'No se pudo convertir', 'err'))
       .finally(() => setBusy(false))

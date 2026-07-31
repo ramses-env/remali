@@ -177,8 +177,9 @@ def ticket_venta(request, pk: int):
     except Venta.DoesNotExist:
         return Response({'detalle': 'Venta no encontrada'}, status=404)
     from .comprobante import datos_comprobante_venta
-    from server.ticketing import render_comprobante_pdf
-    pdf = render_comprobante_pdf(datos_comprobante_venta(v))
+    # Carta presentable (el térmico queda solo para refacciones en mostrador).
+    from server.orden_carta import render_orden_carta_pdf
+    pdf = render_orden_carta_pdf(datos_comprobante_venta(v))
     resp = HttpResponse(pdf, content_type='application/pdf')
     resp['Content-Disposition'] = f'inline; filename="ticket_venta_{v.id}.pdf"'
     return resp

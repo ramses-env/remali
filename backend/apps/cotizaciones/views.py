@@ -418,10 +418,27 @@ def convertir_cotizacion(request, pk: int):
     # Se convierten SOLO las partidas de venta. Las de renta se concretan
     # creando la renta (eligiendo unidad y fechas), así que una cotización mixta
     # genera la venta y deja sus partidas de renta pendientes.
+    from decimal import Decimal, InvalidOperation
     from ventas.models import Venta as _V
     metodo = (request.data.get('metodo_pago') or 'efectivo').strip().lower()
     if metodo not in dict(_V.METODO_PAGO):
         metodo = 'efectivo'
+    # Pago combinado opcional: [{'metodo', 'monto'}]; debe cuadrar con el total.
+    pagos = []
+    for p in (request.data.get('pagos') or []):
+        m = (p.get('metodo') or '').strip().lower()
+        try:
+            monto = Decimal(str(p.get('monto') or '0'))
+        except InvalidOperation:
+            return Response({'detalle': 'Monto de pago no válido.'}, status=400)
+        if m not in dict(_V.METODO_PAGO) or monto <= 0:
+            return Response({'detalle': 'Pago combinado no válido (método o monto).'}, status=400)
+        pagos.append({'metodo': m, 'monto': str(monto.quantize(Decimal('0.01')))})
+    if pagos:
+        suma = sum(Decimal(p['monto']) for p in pagos)
+        if abs(suma - cot.total) > Decimal('0.01'):
+            return Response({'detalle': f'Los pagos suman {suma} y el total es {cot.total}.'}, status=400)
+        metodo = max(pagos, key=lambda p: Decimal(p['monto']))['metodo']
     partidas_venta = [i for i in cot.items.all() if i.modalidad == 'venta']
     if not partidas_venta:
         return Response(
@@ -442,6 +459,7 @@ def convertir_cotizacion(request, pk: int):
             empresa_id=cot.empresa_id,
             precio_maquina=cot.subtotal_venta,  # solo lo que se vende (sin IVA)
             metodo_pago=metodo,
+            pagos=pagos,
             cotizacion=cot,                    # IVA: lo fuerza el modelo Venta (toda venta con IVA)
         )
         if cot.estado != 'aceptada':

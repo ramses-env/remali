@@ -47,7 +47,12 @@ def datos_comprobante_venta(v) -> dict:
             {'label': 'TOTAL', 'value': f'{v.total}', 'fuerte': True},
         ]
 
-    pie = [f'Pago: {v.get_metodo_pago_display()}']
+    if getattr(v, 'pagos', None):
+        etiqueta = dict(v.METODO_PAGO)
+        partes = ' · '.join(f"{etiqueta.get(p.get('metodo'), p.get('metodo'))} ${p.get('monto')}" for p in v.pagos)
+        pie = [f'Pago combinado: {partes}']
+    else:
+        pie = [f'Pago: {v.get_metodo_pago_display()}']
     if v.estado == 'cancelada':
         pie.append('** VENTA CANCELADA **')
     pie.append('¡Gracias por su compra!')

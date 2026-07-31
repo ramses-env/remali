@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { CalendarClock, Loader2, PackageOpen } from 'lucide-react'
 
 import api from '../lib/api'
+import { descargarBlob } from '../lib/descargar'
 import { formatMoney } from '../lib/utils'
 import { useAuth } from '../store/auth'
 
@@ -42,6 +43,14 @@ function Tarjeta({ r, i }: { r: RentaMia; i: number }) {
       <div className="mt-2.5 flex items-center gap-2 text-[13px] text-mute">
         <CalendarClock className="h-4 w-4 shrink-0" />
         <span>Del {fecha(r.fecha_inicio)} al {fecha(r.fecha_fin)}</span>
+        <button
+          onClick={async () => {
+            try {
+              const res = await api.get(`/rentas/${r.id}/ticket/`, { responseType: 'blob' })
+              descargarBlob(res.data as Blob, `orden-renta-${r.id}.pdf`)
+            } catch { /* sin permiso o red: el interceptor avisa */ }
+          }}
+          className="text-gold font-semibold hover:opacity-80 transition-opacity">↓ Orden (PDF)</button>
       </div>
       {r.direccion && <p className="mt-1.5 text-[12.5px] text-mute leading-relaxed">{r.direccion}</p>}
     </div>

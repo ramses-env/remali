@@ -30,6 +30,9 @@ class Venta(models.Model):
     )
 
     metodo_pago = models.CharField(max_length=20, choices=METODO_PAGO, default='efectivo')
+    # Pago combinado: lista [{'metodo': 'efectivo|tarjeta|transferencia', 'monto': '1234.50'}].
+    # metodo_pago se conserva como principal (el de mayor monto) para compatibilidad.
+    pagos = models.JSONField(default=list, blank=True)
     estado = models.CharField(max_length=12, choices=ESTADOS, default='activa')
 
     fecha = models.DateTimeField(auto_now_add=True)
