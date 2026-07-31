@@ -57,6 +57,7 @@ export default function Cotizacion() {
   const [sentPdfArgs, setSentPdfArgs] = useState<Parameters<typeof downloadCotizacionPdf>[0] | null>(null)
   // Liga pública (PDF con token) que regresa el backend al crear la solicitud.
   const [sentLiga, setSentLiga] = useState<string | null>(null)
+  const [sentResumen, setSentResumen] = useState<{ items: typeof state.items; total: number; obra: string } | null>(null)
   const [ligaCopiada, setLigaCopiada] = useState(false)
 
   // Autorrelleno desde el perfil: le ahorra al cliente volver a escribir sus
@@ -154,6 +155,7 @@ export default function Cotizacion() {
       const resumen = state.items.map(i => `${i.qty}x ${i.title}`).join(', ')
       setSentWaMsg(`Hola, soy ${nombre}. Envié la solicitud de cotización ${r.data.folio}${resumen ? ` (${resumen})` : ''}. Quisiera continuar por aquí.`)
       setSentPdfArgs(pdfArgs())   // conserva los datos para descargar el PDF tras limpiar
+      setSentResumen({ items: state.items, total: totalConIVA, obra: direccion.trim() || empresa.trim() })
       setSentLiga(r.data.liga || null)
       setSentFolio(r.data.folio)
       dispatch({ type: 'clear' })
@@ -195,34 +197,114 @@ export default function Cotizacion() {
   const monoLabel = 'text-[10.5px] font-mono tracking-[0.14em] text-mute uppercase'
 
   if (sentFolio) {
+    const wa = waLink(cfg.whatsapp_principal, sentWaMsg)
+    const pasos = [
+      { t: 'Cotización recibida', d: `Folio ${sentFolio} generado.`, e: 'HOY', estado: 'ok' },
+      { t: 'Revisión de disponibilidad', d: 'Confirmamos existencias y fechas de entrega.', e: 'EN CURSO', estado: 'activo' },
+      { t: 'Autorización', d: 'Quien autoriza aprueba desde la liga o por WhatsApp.', e: 'PENDIENTE', estado: 'pendiente' },
+      { t: 'Entrega en obra', d: 'Agendamos día y hora; llevamos el equipo probado.', e: 'AL CONFIRMAR', estado: 'pendiente' },
+    ]
     return (
-      <div className="bg-app min-h-screen text-ink flex flex-col items-center justify-center px-6 text-center py-32">
-        <div className="w-16 h-16 rounded-full bg-emerald-500/12 flex items-center justify-center mb-5">
-          <svg className="w-9 h-9 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
+      <div className="bg-app min-h-screen text-ink">
+        <div className="max-w-[1320px] mx-auto px-4 sm:px-8 pt-24 pb-16 flex flex-col gap-5">
+
+          {/* Encabezado */}
+          <div className="rounded-[20px] border border-edge bg-surface px-6 sm:px-8 py-7 flex flex-col min-[900px]:flex-row min-[900px]:items-center gap-6 justify-between">
+            <div className="flex items-start gap-4">
+              <div className="w-12 h-12 rounded-full bg-emerald-500/12 grid place-items-center shrink-0">
+                <svg className="w-6 h-6 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.2"><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
+              </div>
+              <div>
+                <h1 className="text-[28px] sm:text-[34px] font-extrabold tracking-tight leading-none">Cotización enviada</h1>
+                <p className="text-mute text-[15px] mt-2">Te contestamos con disponibilidad y precio en firme hoy mismo.</p>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2.5">
+              {wa && <a href={wa} target="_blank" rel="noopener noreferrer" className="h-[48px] px-6 rounded-xl bg-[#25D366] text-white text-[15px] font-bold grid place-items-center hover:opacity-90 transition-opacity">Continuar por WhatsApp</a>}
+              {sentLiga && (
+                <button onClick={copiarLiga} className={`h-[48px] px-5 rounded-xl border text-[14.5px] font-semibold transition-colors ${ligaCopiada ? 'border-emerald-500/50 text-emerald-600' : 'border-edge text-ink hover:bg-surface-2'}`}>
+                  {ligaCopiada ? '✓ Copiada' : '⧉ Copiar liga'}
+                </button>
+              )}
+              {sentPdfArgs && <button onClick={() => pedirPdf(sentPdfArgs)} className="h-[48px] px-5 rounded-xl border border-edge text-[14.5px] font-semibold text-ink hover:bg-surface-2 transition-colors">↓ PDF</button>}
+            </div>
+          </div>
+
+          {/* Qué sigue */}
+          <div className="rounded-[20px] border border-edge bg-surface px-6 sm:px-8 py-7">
+            <div className="flex items-center justify-between gap-4 flex-wrap mb-6">
+              <h2 className="text-[18px] font-extrabold">Qué sigue</h2>
+              <span className="text-[12.5px] font-semibold text-gold border border-gold/40 rounded-full px-3.5 py-1.5">Paso 2 de 4 · en revisión ahora</span>
+            </div>
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-x-6 gap-y-6">
+              {pasos.map((p, i) => (
+                <div key={i}>
+                  <div className="flex items-center gap-2 mb-3">
+                    <span className={`w-6 h-6 rounded-full grid place-items-center border-2 shrink-0 ${p.estado === 'ok' ? 'border-emerald-500 bg-emerald-500/12' : p.estado === 'activo' ? 'border-gold' : 'border-edge'}`}>
+                      {p.estado === 'ok' && <svg className="w-3.5 h-3.5 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.6"><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>}
+                    </span>
+                    {i < pasos.length - 1 && <span className={`hidden lg:block flex-1 h-px ${p.estado === 'ok' ? 'bg-emerald-500/40' : p.estado === 'activo' ? 'bg-gold/40' : 'bg-edge'}`} />}
+                  </div>
+                  <p className={`text-[15px] font-bold ${p.estado === 'activo' ? 'text-gold' : ''}`}>{p.t}</p>
+                  <p className="text-[13px] text-mute mt-1 leading-snug">{p.d}</p>
+                  <p className={`${monoLabel} mt-2`}>{p.e}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="grid min-[980px]:grid-cols-[minmax(0,1fr)_380px] gap-5 items-start">
+            {/* Resumen de lo enviado */}
+            <div className="rounded-[20px] border border-edge bg-surface overflow-hidden">
+              <div className="px-6 sm:px-8 py-6 flex flex-wrap items-end gap-x-10 gap-y-4 justify-between border-b border-edge">
+                <div className="flex flex-wrap gap-x-10 gap-y-4">
+                  <div><p className={monoLabel}>Folio</p><p className="font-mono text-[15px] font-bold mt-1">{sentFolio}</p></div>
+                  {sentResumen?.obra && <div><p className={monoLabel}>Obra</p><p className="text-[15px] font-bold mt-1 max-w-[260px] truncate">{sentResumen.obra}</p></div>}
+                  <div><p className={monoLabel}>Total</p><p className="text-[15px] font-extrabold text-price mt-1">{money(sentResumen?.total ?? 0)}</p></div>
+                </div>
+                {sentLiga && <a href={sentLiga} target="_blank" rel="noopener noreferrer" className="text-[14px] font-semibold text-gold hover:opacity-80">Ver completa →</a>}
+              </div>
+              {(sentResumen?.items || []).map(it => (
+                <div key={it.lineId} className="px-6 sm:px-8 py-4 border-b border-edge/60 flex items-center gap-4 justify-between">
+                  <div className="min-w-0">
+                    <p className="text-[15px] font-bold leading-snug line-clamp-1">{it.title}</p>
+                    <p className="text-[13px] text-mute mt-0.5 capitalize">{MODALIDAD_LABEL[it.unit || 'venta']} · {it.qty} equipo{it.qty === 1 ? '' : 's'}</p>
+                  </div>
+                  <span className="text-[15.5px] font-extrabold shrink-0">{money(it.price * it.qty)}</span>
+                </div>
+              ))}
+              <p className="px-6 sm:px-8 py-4 text-[12.5px] text-mute">El total definitivo lo confirma REMALI con la disponibilidad — la liga siempre muestra la versión vigente.</p>
+            </div>
+
+            {/* Lateral: contacto + guardar obra */}
+            <div className="flex flex-col gap-5">
+              <div className="rounded-[20px] border border-edge bg-surface p-6">
+                <p className={`${monoLabel} mb-4`}>Tu contacto en REMALI</p>
+                <div className="flex items-center gap-3.5 mb-4">
+                  <div className="w-11 h-11 rounded-full bg-gold-soft text-gold grid place-items-center font-extrabold">R</div>
+                  <div>
+                    <p className="text-[15px] font-bold">{cfg.negocio_representante || cfg.negocio_nombre || 'REMALI'}</p>
+                    <p className="text-[12.5px] text-mute">Acapulco, Gro.</p>
+                  </div>
+                </div>
+                {(cfg.negocio_telefono || cfg.whatsapp_principal) && (
+                  <div className="flex justify-between text-[13.5px] py-1.5"><span className="text-mute">Teléfono</span><span className="font-semibold">{cfg.negocio_telefono || cfg.whatsapp_principal}</span></div>
+                )}
+                {cfg.negocio_email && <div className="flex justify-between text-[13.5px] py-1.5 gap-3"><span className="text-mute">Correo</span><span className="font-semibold truncate">{cfg.negocio_email}</span></div>}
+              </div>
+
+              {user && direccion.trim() && (
+                <div className="rounded-[20px] border border-gold/40 bg-gold-soft/40 p-6">
+                  <p className="text-[15px] font-extrabold">Guarda esta obra y ahorra tiempo</p>
+                  <p className="text-[13px] text-mute mt-1.5 leading-snug">La próxima cotización se llena sola con los datos de esta obra.</p>
+                  <button onClick={guardarObra} className="mt-4 h-[44px] px-6 rounded-xl bg-gold text-black text-[14px] font-bold btn-acento">Guardar obra</button>
+                </div>
+              )}
+
+              <Link to="/equipos" className="text-center text-[14px] font-semibold text-mute hover:text-ink transition-colors">Seguir viendo equipos →</Link>
+            </div>
+          </div>
         </div>
-        <h1 className="text-2xl font-extrabold text-ink">¡Solicitud enviada!</h1>
-        <p className="text-mute text-sm mt-2 max-w-sm">Recibimos tu solicitud <b className="text-ink font-mono">{sentFolio}</b>. Para agilizar, escríbenos por WhatsApp y continuamos por ahí.</p>
-        <div className="flex flex-col sm:flex-row flex-wrap justify-center gap-3 mt-6">
-          {waLink(cfg.whatsapp_principal, sentWaMsg) && (
-            <a href={waLink(cfg.whatsapp_principal, sentWaMsg)} target="_blank" rel="noopener noreferrer" className="px-5 py-2.5 rounded-full bg-[#25D366] text-white text-sm font-bold hover:opacity-90 transition-opacity flex items-center justify-center gap-2">
-              Continuar por WhatsApp
-            </a>
-          )}
-          {sentLiga && (
-            <button onClick={copiarLiga}
-              className={`px-5 py-2.5 rounded-full border text-sm font-bold transition-colors flex items-center justify-center gap-2 active:scale-[0.98] ${ligaCopiada ? 'border-emerald-500/50 text-emerald-600' : 'border-edge text-ink hover:bg-surface-2'}`}>
-              {ligaCopiada ? '✓ Liga copiada' : '⧉ Copiar liga de la cotización'}
-            </button>
-          )}
-          {sentPdfArgs && (
-            <button onClick={() => pedirPdf(sentPdfArgs)}
-              className="px-5 py-2.5 rounded-full border border-edge text-ink text-sm font-bold hover:bg-surface-2 transition-colors flex items-center justify-center gap-2 active:scale-[0.98]">
-              Descargar PDF
-            </button>
-          )}
-          <Link to="/equipos" className="px-5 py-2.5 rounded-full border border-edge text-ink text-sm font-bold hover:bg-surface-2 transition-colors flex items-center justify-center">Seguir viendo equipos</Link>
-        </div>
-        {sentLiga && <p className="text-[11.5px] text-mute mt-4 max-w-sm">La liga abre el PDF oficial de tu cotización — compártela con quien autoriza.</p>}
       </div>
     )
   }
