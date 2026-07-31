@@ -126,6 +126,13 @@ def crear_cotizacion_publica(request):
             cant = 1
         unit = (it.get('unit') or '').lower()
         etiqueta, precio, modalidad = _resolver_partida(eq, unit)
+        # Promo del equipo (la controla el admin en el panel): el precio oficial
+        # de la cotización sale ya con el descuento aplicado.
+        promo = min(90, max(0, getattr(eq, 'promo_pct', 0) or 0))
+        if precio and promo:
+            from decimal import Decimal
+            precio = (Decimal(precio) * (Decimal('100') - promo) / Decimal('100')).quantize(Decimal('0.01'))
+            etiqueta = f'{etiqueta} (promo −{promo}%)'
         partidas.append((etiqueta, cant, Decimal(str(precio or 0)), modalidad))
         carrito.append({'id': eq.id, 'title': etiqueta, 'price': float(precio or 0),
                         'qty': cant, 'unit': unit or 'venta'})
