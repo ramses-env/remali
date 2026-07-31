@@ -155,6 +155,7 @@ type CotizacionFoto = { id: number; imagen: string; orden: number }
 type Cotizacion = {
   id: number; folio: string; tipo: 'venta' | 'renta' | 'mixta'
   estado: 'borrador' | 'enviada' | 'aceptada' | 'rechazada'
+  entrega_prometida?: string | null
   cliente_nombre: string; cliente_telefono: string; cliente_email?: string; empresa?: number | null; empresa_nombre?: string
   vigencia_dias: number; aplica_iva: boolean; notas: string
   items: CotizacionItem[]; fotos?: CotizacionFoto[]; subtotal: string; subtotal_venta: string; subtotal_renta: string; base: string; iva: string; total: string
@@ -5756,19 +5757,16 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
     if ((estado === 'enviada' || estado === 'aceptada') && (!(clienteNombre.trim() || empresaSel) || c.items.length === 0)) {
       notify('Agrega el nombre del cliente y al menos un concepto primero', 'err'); return
     }
-    const data: Record<string, unknown> = { estado }
-    if (estado === 'aceptada') {
-      // Fecha/hora prometida de entrega: el cliente la ve en su vista de estado.
-      const v = window.prompt('Fecha y hora prometida de entrega (opcional)\nFormato: 2026-08-03 08:00', '')
-      if (v && v.trim()) {
-        const d = new Date(v.trim().replace(' ', 'T'))
-        if (!isNaN(d.getTime())) data.entrega_prometida = d.toISOString()
-        else notify('Fecha no válida; se aceptó sin fecha de entrega', 'err')
-      }
-    }
-    api.patch<Cotizacion>(`/cotizaciones/${c.id}/`, data)
+    api.patch<Cotizacion>(`/cotizaciones/${c.id}/`, { estado })
       .then(r => { apply(r.data); notify(`Estado: ${cotEstadoMeta(estado).label}`) })
       .catch(() => notify('No se pudo cambiar el estado', 'err'))
+  }
+  // Entrega prometida: editable en cualquier momento; el cliente la ve al recargar.
+  function guardarEntrega(v: string) {
+    const iso = v ? new Date(v).toISOString() : null
+    api.patch<Cotizacion>(`/cotizaciones/${c.id}/`, { entrega_prometida: iso })
+      .then(r => { apply(r.data); notify(iso ? 'Entrega prometida guardada' : 'Entrega prometida quitada') })
+      .catch(() => notify('No se pudo guardar la entrega', 'err'))
   }
   function atender() {
     api.post<{ cotizacion: Cotizacion }>(`/cotizaciones/${c.id}/atender/`, {})
@@ -5951,6 +5949,13 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
                 disabled={bloqueada}
                 className="sm:max-w-[460px]"
               />
+            </div>
+            <div className="sm:w-[230px] shrink-0">
+              <p className={labelCot}>Entrega prometida</p>
+              <input type="datetime-local" disabled={bloqueada}
+                value={c.entrega_prometida ? (() => { const d = new Date(c.entrega_prometida); const p = (n: number) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}` })() : ''}
+                onChange={e => guardarEntrega(e.target.value)}
+                className="w-full h-[38px] px-3 rounded-xl border border-edge bg-surface-2 text-[13.5px] text-ink focus:outline-none focus:border-gold/60 transition-colors disabled:opacity-50" />
             </div>
             <div className="sm:w-[260px] shrink-0">
               <p className={labelCot}>Tipo</p>
