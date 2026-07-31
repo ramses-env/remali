@@ -5903,8 +5903,8 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
   const labelCot = 'block text-[10.5px] font-bold uppercase tracking-[0.09em] text-mute mb-2'
   return (
     <div className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm flex items-start justify-center p-0 sm:p-6 overflow-y-auto" onClick={cerrar}>
-      <div onClick={(e: React.MouseEvent) => e.stopPropagation()} className="w-full sm:max-w-5xl my-0 sm:my-auto bg-surface border border-edge rounded-none sm:rounded-2xl shadow-[0_20px_50px_rgba(33,29,22,0.18)] min-h-screen sm:min-h-0">
-        <div className="px-5 sm:px-7 py-4 sm:py-5 border-b border-edge flex items-start justify-between gap-4 sticky top-0 bg-surface z-10 sm:rounded-t-2xl">
+      <div onClick={(e: React.MouseEvent) => e.stopPropagation()} className="w-full sm:max-w-5xl my-0 sm:my-auto bg-surface border border-edge rounded-none sm:rounded-2xl shadow-[0_20px_50px_rgba(33,29,22,0.18)] min-h-screen sm:min-h-0 sm:max-h-[92vh] flex flex-col sm:overflow-hidden">
+        <div className="px-5 sm:px-7 py-4 sm:py-5 border-b border-edge flex items-start justify-between gap-4 bg-surface shrink-0">
           <div className="min-w-0">
             <div className="flex items-center gap-2.5 flex-wrap">
               <span className="font-mono font-bold text-ink text-lg tracking-tight">{c.folio}</span>
@@ -5921,7 +5921,7 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
           </div>
         </div>
 
-        <div className="px-5 sm:px-7 py-6 space-y-7 bg-surface">
+        <div className="px-5 sm:px-7 py-6 space-y-7 bg-surface flex-1 sm:overflow-y-auto">
           {bloqueada && (
             <div className="flex items-start gap-2.5 rounded-xl border border-emerald-500/25 bg-emerald-500/5 px-4 py-3">
               <svg className="w-4 h-4 mt-0.5 shrink-0 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.9"><path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zM16 11V7a4 4 0 00-8 0v4" /></svg>
@@ -6202,7 +6202,7 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
 
         </div>
 
-        <div className="px-5 sm:px-7 py-3.5 border-t border-edge flex flex-col sm:flex-row sm:items-center gap-2.5 sticky bottom-0 bg-surface sm:rounded-b-2xl">
+        <div className="px-5 sm:px-7 py-3.5 border-t border-edge flex flex-col sm:flex-row sm:items-center gap-2.5 bg-surface shrink-0">
           {/* Documentos del cliente (izquierda) */}
           <div className="grid grid-cols-2 sm:flex gap-2 sm:mr-auto">
             <button onClick={() => onPrint({ ...c, notas, vigencia_dias: Number(vigencia) || 15, aplica_iva: aplicaIva, base: String(baseMonto), iva: String(ivaMonto), total: String(totalMonto) })} disabled={!completa} title={!completa ? 'Agrega cliente y al menos un concepto' : undefined} className="py-2.5 sm:px-4 rounded-full border border-edge text-ink text-sm font-semibold hover:bg-surface-2 transition active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100 flex items-center justify-center gap-2">
