@@ -97,9 +97,12 @@ export default function MisCotizacionEstado() {
               const act = !venc && !rech && i === activo
               return (
                 <div key={i} className={venc || (rech && i > 1) ? 'opacity-50' : ''}>
-                  <span className={`w-6 h-6 rounded-full grid place-items-center border-2 mb-3 ${ok ? 'border-emerald-500 bg-emerald-500/12' : act ? 'border-gold' : 'border-edge'}`}>
-                    {ok && <svg className="w-3.5 h-3.5 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.6"><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>}
-                  </span>
+                  <div className="flex items-center gap-2.5 mb-3">
+                    <span className={`w-6 h-6 rounded-full grid place-items-center border-2 shrink-0 ${ok ? 'border-emerald-500 bg-emerald-500/12' : act ? 'border-gold' : 'border-edge'}`}>
+                      {ok && <svg className="w-3.5 h-3.5 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.6"><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>}
+                    </span>
+                    {i < pasos.length - 1 && <span className={`flex-1 h-px ${ok ? 'bg-emerald-500/40' : act ? 'bg-gold/40' : 'bg-edge'}`} />}
+                  </div>
                   <p className={`text-[15px] font-bold ${act ? 'text-gold' : ''}`}>{p.t}</p>
                   <p className="text-[13px] text-mute mt-1 leading-snug">{p.d}</p>
                 </div>
