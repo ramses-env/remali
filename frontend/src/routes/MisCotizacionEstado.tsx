@@ -8,7 +8,7 @@ import resolveMediaUrl from '../lib/resolveMediaUrl'
 
 type Cot = {
   folio: string; estado: string; estado_label: string; tipo: string; total: string
-  creada?: string; vence_el?: string | null; pdf?: string | null
+  creada?: string; vence_el?: string | null; pdf?: string | null; atendida_por?: string | null
   items: { descripcion: string; cantidad: number }[]
   carrito?: { id: number; title: string; qty: number; unit?: string; image?: string }[]
 }
@@ -164,10 +164,10 @@ export default function MisCotizacionEstado() {
               <p className={`${monoLabel} mb-4`}>Te está atendiendo</p>
               <div className="flex items-center gap-3.5 mb-4">
                 <div className="w-11 h-11 rounded-full bg-gold-soft text-gold grid place-items-center font-extrabold text-[15px]">
-                  {(cfg.negocio_representante || 'R').split(' ').map(p => p[0]).slice(0, 2).join('').toUpperCase()}
+                  {(cot.atendida_por || cfg.negocio_representante || 'R').split(' ').map(p => p[0]).slice(0, 2).join('').toUpperCase()}
                 </div>
                 <div>
-                  <p className="text-[15px] font-bold">{cfg.negocio_representante || cfg.negocio_nombre || 'REMALI'}</p>
+                  <p className="text-[15px] font-bold">{cot.atendida_por || cfg.negocio_representante || cfg.negocio_nombre || 'REMALI'}</p>
                   <p className="text-[12.5px] text-mute">REMALI · Acapulco, Gro.</p>
                 </div>
               </div>

@@ -240,6 +240,10 @@ def cotizaciones_mias(request):
             'vence_el': c.vence_el,
             'items': [{'descripcion': i.descripcion, 'cantidad': i.cantidad} for i in c.items.all()],
             'carrito': (c.datos_solicitud or {}).get('carrito') or [],   # para "volver a cotizar"
+            'atendida_por': (
+                (c.atendida_por.get_full_name() or c.atendida_por.username)
+                if c.atendida_por_id and c.atendida_por else None
+            ),
             'pdf': request.build_absolute_uri(f'/api/cotizaciones/publica/{c.token_publico}/pdf/') if c.token_publico else None,
         })
     return Response({'cotizaciones': data})
@@ -265,6 +269,15 @@ class CotizacionListCreate(generics.ListCreateAPIView):
 
 
 class CotizacionDetail(generics.RetrieveUpdateDestroyAPIView):
+    def perform_update(self, serializer):
+        # Quien la trabaja desde el panel queda como su asesor asignado.
+        obj = serializer.save()
+        if not obj.atendida_por_id and self.request.user.is_authenticated:
+            from django.utils import timezone as tz
+            obj.atendida_por = self.request.user
+            obj.atendida_en = tz.now()
+            obj.save(update_fields=['atendida_por', 'atendida_en'])
+
     serializer_class = CotizacionSerializer
     permission_classes = [IsAdminGroupOrStaff]
     queryset = Cotizacion.objects.all().select_related('empresa').prefetch_related('items', 'fotos', 'conversiones')
