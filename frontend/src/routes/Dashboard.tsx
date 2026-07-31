@@ -4,6 +4,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import QRCode from 'qrcode'
 import api from '../lib/api'
 import { formatMoney } from '../lib/utils'
+import DialogoHost, { confirmar, pedir, elegir } from '../components/Dialogo'
 
 import TicketModal from '../components/TicketModal'
 import EtiquetaModal from '../components/EtiquetaModal'
@@ -1171,6 +1172,8 @@ export default function Dashboard() {
           }))}
         />
       )}
+
+      <DialogoHost />
 
       {/* ─── TOAST ─── */}
       {toast && (
@@ -5809,22 +5812,40 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
     const aviso = c.tipo === 'mixta'
       ? `¿Crear la venta con las partidas de venta (${orMoney(c.subtotal_venta)})?\n\nLas partidas de renta NO se incluyen: esas se concretan desde Rentas eligiendo unidad y fechas.`
       : '¿Convertir esta cotización en venta? Se creará la venta con estas partidas y su ticket.'
-    if (!confirm(aviso)) return
+    if (!(await confirmar({ titulo: 'Convertir en venta', mensaje: aviso, aceptar: 'Convertir' }))) return
     setBusy(true)
-    const METODOS_PAGO = ['efectivo', 'tarjeta', 'transferencia']
-    const met = (window.prompt('Método de pago principal: efectivo / tarjeta / transferencia', 'efectivo') || '').trim().toLowerCase()
-    if (!met) return
-    if (!METODOS_PAGO.includes(met)) { notify('Método no válido: efectivo, tarjeta o transferencia', 'err'); return }
+    const rMet = await elegir({
+      titulo: 'Método de pago principal',
+      opciones: [
+        { valor: 'efectivo', label: 'Efectivo' },
+        { valor: 'tarjeta', label: 'Tarjeta' },
+        { valor: 'transferencia', label: 'Transferencia' },
+      ],
+    })
+    if (!rMet || !rMet[0]) return
+    const met = rMet[0]
     // Pago combinado: monto parcial del método principal; el resto con otro método.
     let pagos: { metodo: string; monto: number }[] = []
     const totalNum = Math.round(Number(c.total) * 100) / 100
-    const parcial = (window.prompt(`¿Pago combinado? Monto pagado con ${met} (vacío = todo: $${totalNum})`, '') || '').trim()
+    const parcial = ((await pedir({
+      titulo: '¿Pago combinado?',
+      mensaje: `Monto pagado con ${met}. Vacío = todo el total ($${totalNum}) con ${met}.`,
+      placeholder: 'Ej. 10000', inputMode: 'decimal',
+    })) || '').trim()
     if (parcial) {
       const monto = Math.round(Number(parcial.replace(/[^0-9.]/g, '')) * 100) / 100
       const resto = Math.round((totalNum - monto) * 100) / 100
       if (!(monto > 0) || resto <= 0) { notify('Monto parcial no válido (debe ser mayor a 0 y menor al total)', 'err'); return }
-      const met2 = (window.prompt(`Método del resto ($${resto}): efectivo / tarjeta / transferencia`, met === 'efectivo' ? 'transferencia' : 'efectivo') || '').trim().toLowerCase()
-      if (!METODOS_PAGO.includes(met2) || met2 === met) { notify('Método del resto no válido', 'err'); return }
+      const rMet2 = await elegir({
+        titulo: `Método del resto ($${resto})`,
+        opciones: [
+          { valor: 'efectivo', label: 'Efectivo' },
+          { valor: 'tarjeta', label: 'Tarjeta' },
+          { valor: 'transferencia', label: 'Transferencia' },
+        ].filter(o => o.valor !== met),
+      })
+      if (!rMet2 || !rMet2[0]) return
+      const met2 = rMet2[0]
       pagos = [{ metodo: met, monto }, { metodo: met2, monto: resto }]
     }
     // Unidades físicas que se entregan: se marcan vendidas en la conversión,
@@ -5834,15 +5855,18 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
       const ru = await api.get<{ id: number; codigo: string; numero_serie?: string; estado: string; equipo_info?: { modelo?: string } }[]>('/unidades/')
       const disp = (ru.data || []).filter(u => u.estado === 'disponible')
       if (disp.length) {
-        const menu = disp.map(u => `${u.codigo} — ${u.equipo_info?.modelo || 'Equipo'}${u.numero_serie ? ` (S/N ${u.numero_serie})` : ''}`).join('\n')
-        const resp = (window.prompt(`¿Qué unidad(es) se entregan? Código(s) separados por coma (vacío = asignar después):\n\n${menu}`, '') || '').trim()
-        if (resp) {
-          for (const cod of resp.split(',').map(x => x.trim().toLowerCase()).filter(Boolean)) {
-            const u = disp.find(x => x.codigo.toLowerCase() === cod)
-            if (!u) { notify(`Código no disponible: ${cod}`, 'err'); return }
-            unidadIds.push(u.id)
-          }
-        }
+        const sel = await elegir({
+          titulo: '¿Qué unidad(es) se entregan?',
+          mensaje: 'Se marcan vendidas y el catálogo se actualiza solo.',
+          multiple: true, vacioLabel: 'Asignar después',
+          opciones: disp.map(u => ({
+            valor: String(u.id),
+            label: `${u.codigo} — ${u.equipo_info?.modelo || 'Equipo'}`,
+            detalle: u.numero_serie ? `S/N ${u.numero_serie}` : undefined,
+          })),
+        })
+        if (sel === null) return
+        unidadIds.push(...sel.map(Number))
       }
     } catch { /* sin lista: se convierte y la unidad se marca después */ }
     api.post(`/cotizaciones/${c.id}/convertir/`, { metodo_pago: met, pagos, unidad_ids: unidadIds })
