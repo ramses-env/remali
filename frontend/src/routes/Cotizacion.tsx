@@ -96,6 +96,11 @@ export default function Cotizacion() {
   async function guardarObra() {
     if (!direccion.trim() && !responsable.trim()) { notify('Llena la obra antes de guardarla', 'x'); return }
     const nombre = direccion.trim().slice(0, 60) || `Obra ${obras.length + 1}`
+    // Sin duplicados: si ya existe una obra igual, no se crea otra.
+    const norm = (v: string) => v.trim().toLowerCase()
+    if (obras.some(o => norm(o.direccion || o.nombre) === norm(direccion || nombre))) {
+      notify('Esa obra ya está guardada en tu cuenta', 'x'); return
+    }
     try {
       const r = await api.post<ObraCli>('/obras-cliente/', { nombre, responsable, direccion, telefono: obraTelefono, email: obraEmail })
       setObras(prev => [...prev.filter(o => o.id !== r.data.id), r.data])
@@ -390,11 +395,21 @@ export default function Cotizacion() {
                   <p className={`${monoLabel} mb-2.5`}>Mis obras guardadas</p>
                   <div className="flex gap-2 flex-wrap">
                     {obras.map(o => (
-                      <button key={o.id} type="button" onClick={() => usarObra(o)}
-                        className="flex flex-col items-start gap-0.5 px-4 py-2.5 rounded-xl border border-edge bg-app text-left hover:border-gold/60 transition-colors active:scale-[0.98]">
-                        <span className="text-[13.5px] font-bold text-ink max-w-[160px] truncate">{o.nombre}</span>
-                        {o.responsable && <span className="text-[12px] text-mute max-w-[160px] truncate">{o.responsable}</span>}
-                      </button>
+                      <div key={o.id} className="relative group/obra">
+                        <button type="button" onClick={() => usarObra(o)}
+                          className="flex flex-col items-start gap-0.5 pl-4 pr-8 py-2.5 rounded-xl border border-edge bg-app text-left hover:border-gold/60 transition-colors active:scale-[0.98]">
+                          <span className="text-[13.5px] font-bold text-ink max-w-[160px] truncate">{o.nombre}</span>
+                          {o.responsable && <span className="text-[12px] text-mute max-w-[160px] truncate">{o.responsable}</span>}
+                        </button>
+                        <button type="button" aria-label={`Borrar ${o.nombre}`}
+                          onClick={async () => {
+                            try { await api.delete(`/obras-cliente/${o.id}/`); setObras(prev => prev.filter(x => x.id !== o.id)); notify('Obra borrada') }
+                            catch { notify('No se pudo borrar la obra', 'x') }
+                          }}
+                          className="absolute top-1.5 right-1.5 w-5 h-5 grid place-items-center rounded-full text-mute hover:text-red-500 hover:bg-red-500/10 transition-colors">
+                          <svg viewBox="0 0 24 24" className="w-3 h-3 stroke-current fill-none" strokeWidth="2.2" strokeLinecap="round"><path d="M6 6l12 12M18 6L6 18" /></svg>
+                        </button>
+                      </div>
                     ))}
                     {user && (
                       <button type="button" onClick={guardarObra}
@@ -440,16 +455,20 @@ export default function Cotizacion() {
                 )}
               </div>
 
-              <div className="flex items-start gap-3 border-t border-edge pt-4">
-                <button type="button" role="switch" aria-checked={factura} onClick={() => setFactura(f => !f)}
-                  className={`w-[46px] h-[26px] rounded-full flex-none p-[3px] flex transition-colors ${factura ? 'bg-gold justify-end' : 'bg-ink/15 justify-start'}`}>
-                  <span className="w-5 h-5 rounded-full bg-white shadow block" />
-                </button>
-                <div>
-                  <p className="text-sm font-semibold">Necesito factura</p>
-                  <p className="text-[12.5px] text-mute mt-0.5 leading-snug">{subRenta > 0 ? 'La renta suma IVA 16%; la venta ya lo incluye.' : 'El precio de venta ya incluye IVA — solo se desglosa.'}</p>
+              {subRenta > 0 ? (
+                <div className="flex items-start gap-3 border-t border-edge pt-4">
+                  <button type="button" role="switch" aria-checked={factura} onClick={() => setFactura(f => !f)}
+                    className={`w-[46px] h-[26px] rounded-full flex-none p-[3px] flex transition-colors ${factura ? 'bg-gold justify-end' : 'bg-ink/15 justify-start'}`}>
+                    <span className="w-5 h-5 rounded-full bg-white shadow block" />
+                  </button>
+                  <div>
+                    <p className="text-sm font-semibold">Necesito factura</p>
+                    <p className="text-[12.5px] text-mute mt-0.5 leading-snug">Con factura, la renta suma IVA 16%.</p>
+                  </div>
                 </div>
-              </div>
+              ) : (
+                <p className="border-t border-edge pt-4 text-[12.5px] text-mute leading-snug">El precio de venta ya incluye IVA · factura disponible al confirmar.</p>
+              )}
 
               <div className="border-t border-edge pt-4 flex items-baseline justify-between gap-3">
                 <span className="text-[15px] font-bold">Total</span>
