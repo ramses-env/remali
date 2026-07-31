@@ -17,6 +17,7 @@ import { formatAddress, addressToFields, type AddressResult } from '../lib/geoco
 import { REGIMEN_FISCAL, USO_CFDI, RFC_PUBLICO_GENERAL } from '../lib/sat'
 import { usePrintSettings, charsPerLine } from '../lib/printSettings'
 import { invalidarConfigPublica } from '../lib/configPublica'
+import { motion } from 'framer-motion'
 import { useRecurso, invalidar } from '../lib/realtime'
 import { useLatido } from '../lib/latido'
 import { CLAVE_NIVEL, recordarAcceso, ProveedorPermisos, usePuede, type Capacidades } from '../lib/acceso'
@@ -1805,17 +1806,22 @@ function EquiposAdmin({ equipos, categorias, tipos, marcas, reload, notify }: {
         </div>
       </Card>
 
-      {/* Modal de formulario (crear/editar) */}
+      {/* Panel lateral de formulario (crear/editar): se desliza desde la derecha
+          y deja visible la lista detrás — el contexto no se pierde. */}
       {formOpen && (
-        <div className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm flex items-start justify-center p-0 sm:p-6 overflow-y-auto" onClick={() => setFormOpen(false)}>
-          <div onClick={(e: React.MouseEvent) => e.stopPropagation()} className="w-full sm:max-w-[880px] my-0 sm:my-auto bg-surface border border-edge rounded-none sm:rounded-2xl min-h-screen sm:min-h-0 shadow-[0_20px_50px_rgba(33,29,22,0.18)]">
-            <div className="px-6 py-4 border-b border-edge flex items-center justify-between sticky top-0 bg-surface z-10 sm:rounded-t-2xl">
+        <div className="fixed inset-0 z-[60] bg-black/40 backdrop-blur-[2px]" onClick={() => setFormOpen(false)}>
+          <motion.div
+            initial={{ x: '100%' }} animate={{ x: 0 }} transition={{ duration: 0.3, ease: [0.23, 1, 0.32, 1] }}
+            onClick={(e: React.MouseEvent) => e.stopPropagation()}
+            className="fixed inset-y-0 right-0 w-full sm:max-w-[600px] bg-surface border-l border-edge shadow-[-24px_0_60px_rgba(33,29,22,0.22)] flex flex-col"
+          >
+            <div className="px-6 py-4 border-b border-edge flex items-center justify-between shrink-0">
               <h2 className="font-bold text-ink">{editing ? 'Editar producto' : 'Nuevo producto'}</h2>
               <button onClick={() => setFormOpen(false)} className="text-mute hover:text-ink p-1" aria-label="Cerrar">
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" d="M6 6l12 12M18 6L6 18" /></svg>
               </button>
             </div>
-            <div className="p-6 space-y-4">
+            <div className="p-6 space-y-4 flex-1 overflow-y-auto">
               <div>
                 <label className={label}>Modelo *</label>
                 <input className={input} value={form.modelo} onChange={e => setForm({ ...form, modelo: e.target.value })} placeholder="Ej. Mezcladora 9ft³" autoFocus />
@@ -1960,14 +1966,14 @@ function EquiposAdmin({ equipos, categorias, tipos, marcas, reload, notify }: {
               </div>
 
             </div>
-            <div className="px-6 py-4 border-t border-edge flex gap-3 sticky bottom-0 bg-surface sm:rounded-b-2xl">
-              <button onClick={() => setFormOpen(false)} className="flex-1 py-2.5 rounded-full border border-edge text-ink text-sm font-semibold hover:bg-surface-2 transition-colors">Cancelar</button>
-              <button onClick={save} disabled={saving} className="flex-1 py-2.5 rounded-full bg-gold text-black font-bold text-sm hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center justify-center gap-2">
+            <div className="px-6 py-4 border-t border-edge flex justify-end gap-3 shrink-0 bg-surface">
+              <button onClick={() => setFormOpen(false)} className="px-6 py-2.5 rounded-full border border-edge text-ink text-sm font-semibold hover:bg-surface-2 transition-colors">Cancelar</button>
+              <button onClick={save} disabled={saving} className="px-7 py-2.5 rounded-full bg-gold text-black font-bold text-sm hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center justify-center gap-2">
                 {saving ? <span className="w-4 h-4 border-2 border-black/30 border-t-black rounded-full animate-spin" /> : null}
                 {editing ? 'Guardar' : 'Crear producto'}
               </button>
             </div>
-          </div>
+          </motion.div>
         </div>
       )}
 
