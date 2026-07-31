@@ -18,9 +18,9 @@ type Equipo = {
 }
 
 /* Colores FIJOS de impresión: la ficha se ve igual en pantalla, PDF y papel,
-   sin depender del token del tema. El acento es el AZUL de venta de la casa
-   (mismo de la orden carta): la ficha técnica es un documento de venta. */
-const AZUL = '#2B5FAD'
+   sin depender del token del tema. El acento es el azul MARINO de la marca
+   (el mismo del logo y del pie): banda, guiones y palomitas a juego. */
+const MARINO = '#111827'
 const TINTA = '#111827'
 
 const CSS = (pw: number, ph: number, name: string) => `
@@ -28,7 +28,7 @@ const CSS = (pw: number, ph: number, name: string) => `
   font-family:'Plus Jakarta Sans',system-ui,sans-serif; padding:0; overflow:hidden;
   display:flex; flex-direction:column; }
 .ficha .pad { padding:0 14mm; }
-.ficha .band { background:${AZUL}; color:#fff; display:inline-flex; align-items:center;
+.ficha .band { background:${MARINO}; color:#fff; display:inline-flex; align-items:center;
   padding:7px 22px 7px 16px; font-weight:800; letter-spacing:1px; font-size:11pt; text-transform:uppercase;
   clip-path:polygon(0 0, 100% 0, calc(100% - 14px) 100%, 0 100%); }
 .ficha .brand { font-size:15pt; font-weight:800; color:${TINTA}; letter-spacing:.5px; line-height:1; }
@@ -44,12 +44,12 @@ const CSS = (pw: number, ph: number, name: string) => `
 .ficha .clasif .v { font-size:10.5pt; font-weight:700; color:${TINTA}; margin-top:1px; }
 .ficha .titulo-sec { display:flex; align-items:center; gap:8px; font-size:9pt; font-weight:800; color:${TINTA};
   text-transform:uppercase; letter-spacing:1px; margin:0 0 4px; }
-.ficha .titulo-sec::before { content:''; width:22px; height:3px; background:${AZUL}; display:block; }
+.ficha .titulo-sec::before { content:''; width:22px; height:3px; background:${MARINO}; display:block; }
 .ficha .spec { break-inside:avoid; padding:7px 0; border-bottom:1px solid #F3F4F6; }
 .ficha .spec .k { font-size:8.5pt; font-weight:800; color:#6B7280; text-transform:uppercase; letter-spacing:.4px; }
 .ficha .spec .v { font-size:11pt; font-weight:700; color:${TINTA}; }
 .ficha .feat { display:flex; gap:8px; align-items:flex-start; font-size:9.5pt; color:#374151; margin-bottom:5px; }
-.ficha .feat .ck { color:${AZUL}; font-weight:900; }
+.ficha .feat .ck { color:${MARINO}; font-weight:900; }
 .ficha .foto { width:100%; height:100%; object-fit:contain; }
 .ficha .footer { background:${TINTA}; color:#fff; padding:10px 14mm; display:flex; justify-content:space-between;
   align-items:center; gap:16px; font-size:8pt; margin-top:auto; }
