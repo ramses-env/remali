@@ -288,9 +288,13 @@ class CotizacionDetail(generics.RetrieveUpdateDestroyAPIView):
     def update(self, request, *args, **kwargs):
         # Una vez convertida en venta, la cotización queda de solo lectura: es el
         # comprobante de esa venta y editarla la desincronizaría.
-        bloqueo = _bloqueada_si_convertida(self.get_object())
-        if bloqueo:
-            return bloqueo
+        # Excepción: la logística sigue viva. Cambiar SOLO la entrega prometida
+        # no toca montos ni partidas, así que se permite aun convertida.
+        solo_logistica = set(request.data.keys()) <= {'entrega_prometida'}
+        if not solo_logistica:
+            bloqueo = _bloqueada_si_convertida(self.get_object())
+            if bloqueo:
+                return bloqueo
         return super().update(request, *args, **kwargs)
 
     def destroy(self, request, *args, **kwargs):
@@ -414,6 +418,10 @@ def convertir_cotizacion(request, pk: int):
     # Se convierten SOLO las partidas de venta. Las de renta se concretan
     # creando la renta (eligiendo unidad y fechas), así que una cotización mixta
     # genera la venta y deja sus partidas de renta pendientes.
+    from ventas.models import Venta as _V
+    metodo = (request.data.get('metodo_pago') or 'efectivo').strip().lower()
+    if metodo not in dict(_V.METODO_PAGO):
+        metodo = 'efectivo'
     partidas_venta = [i for i in cot.items.all() if i.modalidad == 'venta']
     if not partidas_venta:
         return Response(
@@ -433,6 +441,7 @@ def convertir_cotizacion(request, pk: int):
             telefono_cliente=cot.cliente_telefono,
             empresa_id=cot.empresa_id,
             precio_maquina=cot.subtotal_venta,  # solo lo que se vende (sin IVA)
+            metodo_pago=metodo,
             cotizacion=cot,                    # IVA: lo fuerza el modelo Venta (toda venta con IVA)
         )
         if cot.estado != 'aceptada':
