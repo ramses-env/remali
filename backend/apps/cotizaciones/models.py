@@ -65,6 +65,8 @@ class Cotizacion(models.Model):
     # Fecha/hora prometida de entrega (se captura al aceptar; el cliente la ve
     # en su vista de estado antes de que exista la renta/venta formal).
     entrega_prometida = models.DateTimeField(null=True, blank=True)
+    # Cuándo se le mandó el recordatorio de vigencia (para no repetirlo).
+    recordatorio_vigencia = models.DateTimeField(null=True, blank=True)
     escalada_en = models.DateTimeField(null=True, blank=True, help_text='Cuándo se avisó a los respaldos por falta de atención')
 
     creada = models.DateTimeField(auto_now_add=True)

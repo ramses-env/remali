@@ -553,6 +553,20 @@ def reenviar_verificacion(request):
 @api_view(['POST'])
 @permission_classes([permissions.AllowAny])  # público: alta de cliente desde la tienda
 @throttle_classes([RegistroThrottle])
+def _adoptar_cotizaciones(user):
+    """Cotizaciones hechas sin cuenta (o capturadas por el admin) cuyo correo
+    coincide con el del nuevo usuario: se le cuelgan a su cuenta para que las
+    vea en "Mis cotizaciones". Nunca roba las que ya tienen dueño."""
+    try:
+        from cotizaciones.models import Cotizacion
+        if user.email:
+            Cotizacion.objects.filter(
+                usuario__isnull=True, cliente_email__iexact=user.email.strip()
+            ).update(usuario=user)
+    except Exception:
+        pass
+
+
 def registro(request):
     """Alta de cuenta de cliente desde la tienda.
 
@@ -590,6 +604,7 @@ def registro(request):
 
     try:
         user = User.objects.create_user(username=email, email=email, password=password)
+        _adoptar_cotizaciones(user)
     except IntegrityError:
         # Dos altas simultáneas con el mismo correo: la segunda choca con el índice.
         return Response({'detail': 'Ya existe una cuenta con ese correo.'}, status=400)
@@ -668,6 +683,7 @@ def google_login(request):
         # Alta implícita: mismo criterio que el registro público, solo cliente.
         # El rol jamás sale del token de Google.
         user = User.objects.create_user(username=email, email=email)
+        _adoptar_cotizaciones(user)
         user.set_unusable_password()   # entra por Google, no tiene contraseña
         user.first_name = (info.get('given_name') or '')[:150]
         user.last_name = (info.get('family_name') or '')[:150]
