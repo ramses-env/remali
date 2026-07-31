@@ -1,20 +1,32 @@
 import logging
+import uuid
 from decimal import Decimal
 
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Max, Q
 from django.utils import timezone
 from rest_framework import generics, status
 from rest_framework.decorators import api_view, permission_classes, throttle_classes
-from rest_framework.permissions import AllowAny
+from rest_framework.pagination import PageNumberPagination
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
+
+class CotizacionPagination(PageNumberPagination):
+    """Pagina la lista para que no crezca sin límite con los años."""
+    page_size = 25
+    page_size_query_param = 'page_size'
+    max_page_size = 100
+
 from maquinaria.permissions import IsAdminGroupOrStaff
-from maquinaria.throttling import SolicitudPublicaThrottle
-from .models import Cotizacion, CotizacionItem
-from .serializers import CotizacionSerializer
+from maquinaria.throttling import SolicitudPublicaThrottle, SubidaEvidenciaThrottle
+from .models import Cotizacion, CotizacionItem, CotizacionFoto
+from .serializers import CotizacionSerializer, CotizacionFotoSerializer
 
 logger = logging.getLogger(__name__)
+
+# Tope de fotos por cotización: es apoyo visual para la carta, no un álbum.
+MAX_FOTOS = 10
 
 # Unidades de renta válidas que puede mandar la tienda.
 _UNIDADES_RENTA = {'dia': 'día', 'semana': 'semana', 'mes': 'mes'}
@@ -102,6 +114,7 @@ def crear_cotizacion_publica(request):
 
     # Resolver equipos y precios en el servidor.
     partidas = []
+    carrito = []   # snapshot {id,title,price,qty,unit} para "volver a cotizar"
     for it in items:
         try:
             eq = Equipo.objects.get(pk=it.get('equipo_id') or it.get('id'))
@@ -114,6 +127,8 @@ def crear_cotizacion_publica(request):
         unit = (it.get('unit') or '').lower()
         etiqueta, precio, modalidad = _resolver_partida(eq, unit)
         partidas.append((etiqueta, cant, Decimal(str(precio or 0)), modalidad))
+        carrito.append({'id': eq.id, 'title': etiqueta, 'price': float(precio or 0),
+                        'qty': cant, 'unit': unit or 'venta'})
 
     if not partidas:
         return Response({'detalle': 'No pudimos identificar los equipos de tu solicitud.'}, status=400)
@@ -124,6 +139,8 @@ def crear_cotizacion_publica(request):
             tipo='venta',          # provisional: lo define recalcular_tipo() con las partidas
             origen='cliente',
             estado='enviada',
+            # Si la mandó con sesión, queda ligada a su cuenta para "Mis cotizaciones".
+            usuario=request.user if request.user.is_authenticated else None,
             cliente_nombre=nombre,
             cliente_telefono=(cliente.get('telefono') or '').strip(),
             cliente_email=(cliente.get('email') or '').strip(),
@@ -136,6 +153,7 @@ def crear_cotizacion_publica(request):
                     'telefono': (obra.get('telefono') or '').strip(),
                     'email': (obra.get('email') or '').strip(),
                 },
+                'carrito': carrito,
             },
         )
         for etiqueta, cant, precio, modalidad in partidas:
@@ -181,15 +199,55 @@ def crear_cotizacion_publica(request):
     return Response({'detalle': 'Solicitud recibida', 'folio': cot.folio, 'id': cot.id}, status=201)
 
 
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def cotizaciones_mias(request):
+    """Las cotizaciones que el propio cliente ha solicitado, para su cuenta.
+
+    Solo las ligadas a SU usuario (las que mandó con sesión). El estado se
+    traduce a algo entendible para el cliente; el PDF va por el link con token,
+    que no necesita login.
+    """
+    # Etiquetas de cara al cliente: 'enviada' significa "ya la recibimos y la
+    # estamos revisando", no un estado interno del panel.
+    LABEL = {'borrador': 'En revisión', 'enviada': 'En revisión',
+             'aceptada': 'Aceptada', 'rechazada': 'No disponible'}
+    hoy = timezone.now().date()
+    qs = (Cotizacion.objects
+          .filter(usuario=request.user)
+          .prefetch_related('items')
+          .order_by('-creada')[:100])
+    data = []
+    for c in qs:
+        vencida = c.estado in ('borrador', 'enviada') and c.vence_el and c.vence_el < hoy
+        data.append({
+            'folio': c.folio,
+            'estado': 'vencida' if vencida else c.estado,
+            'estado_label': 'Vencida' if vencida else LABEL.get(c.estado, c.estado),
+            'tipo': c.tipo,
+            'total': str(c.total),
+            'aplica_iva': c.aplica_iva,
+            'creada': c.creada,
+            'vence_el': c.vence_el,
+            'items': [{'descripcion': i.descripcion, 'cantidad': i.cantidad} for i in c.items.all()],
+            'carrito': (c.datos_solicitud or {}).get('carrito') or [],   # para "volver a cotizar"
+            'pdf': request.build_absolute_uri(f'/api/cotizaciones/publica/{c.token_publico}/pdf/') if c.token_publico else None,
+        })
+    return Response({'cotizaciones': data})
+
+
 class CotizacionListCreate(generics.ListCreateAPIView):
     serializer_class = CotizacionSerializer
     permission_classes = [IsAdminGroupOrStaff]
+    pagination_class = CotizacionPagination
 
     def get_queryset(self):
-        qs = Cotizacion.objects.all().select_related('empresa').prefetch_related('items', 'conversiones')
+        qs = Cotizacion.objects.all().select_related('empresa').prefetch_related('items', 'fotos', 'conversiones')
         p = self.request.query_params
         estado = (p.get('estado') or '').strip().lower()
-        if estado in ('borrador', 'enviada', 'aceptada', 'rechazada'):
+        if estado == 'vencida':
+            qs = qs.filter(estado__in=['borrador', 'enviada'], vence_el__lt=timezone.now().date())
+        elif estado in ('borrador', 'enviada', 'aceptada', 'rechazada'):
             qs = qs.filter(estado=estado)
         q = (p.get('q') or '').strip()
         if q:
@@ -200,7 +258,15 @@ class CotizacionListCreate(generics.ListCreateAPIView):
 class CotizacionDetail(generics.RetrieveUpdateDestroyAPIView):
     serializer_class = CotizacionSerializer
     permission_classes = [IsAdminGroupOrStaff]
-    queryset = Cotizacion.objects.all().select_related('empresa').prefetch_related('items', 'conversiones')
+    queryset = Cotizacion.objects.all().select_related('empresa').prefetch_related('items', 'fotos', 'conversiones')
+
+    def update(self, request, *args, **kwargs):
+        # Una vez convertida en venta, la cotización queda de solo lectura: es el
+        # comprobante de esa venta y editarla la desincronizaría.
+        bloqueo = _bloqueada_si_convertida(self.get_object())
+        if bloqueo:
+            return bloqueo
+        return super().update(request, *args, **kwargs)
 
     def destroy(self, request, *args, **kwargs):
         cot = self.get_object()
@@ -212,6 +278,35 @@ class CotizacionDetail(generics.RetrieveUpdateDestroyAPIView):
                 status=status.HTTP_409_CONFLICT,
             )
         return super().destroy(request, *args, **kwargs)
+
+
+@api_view(['GET'])
+@permission_classes([IsAdminGroupOrStaff])
+def cotizacion_stats(request):
+    """Conteos para los KPIs y las pestañas, calculados en la BD (no en el cliente).
+
+    Con la lista paginada, el navegador ya no tiene todas las filas para contar;
+    esto las cuenta de una sola pasada.
+    """
+    from django.db.models import Count
+    hoy = timezone.now().date()
+    base = Cotizacion.objects.all()
+    por_estado = dict(base.values_list('estado').annotate(n=Count('id')))
+    vencidas = base.filter(estado__in=['borrador', 'enviada'], vence_el__lt=hoy).count()
+    abiertas = max(0, por_estado.get('borrador', 0) + por_estado.get('enviada', 0) - vencidas)
+    # `total` es propiedad (suma de partidas), no columna: se itera solo el
+    # subconjunto de aceptadas (con prefetch), que es una fracción del total.
+    monto = sum((c.total for c in base.filter(estado='aceptada').prefetch_related('items')), Decimal('0.00'))
+    return Response({
+        'total': base.count(),
+        'borrador': por_estado.get('borrador', 0),
+        'enviada': por_estado.get('enviada', 0),
+        'aceptada': por_estado.get('aceptada', 0),
+        'rechazada': por_estado.get('rechazada', 0),
+        'vencida': vencidas,
+        'abiertas': abiertas,
+        'monto_aceptado': str(monto),
+    })
 
 
 def _bloqueada_si_convertida(cot):
@@ -345,9 +440,13 @@ def atender_cotizacion(request, pk: int):
     return Response({'detalle': 'La estás atendiendo', 'cotizacion': CotizacionSerializer(cot).data})
 
 
-@api_view(['DELETE'])
+@api_view(['PATCH', 'DELETE'])
 @permission_classes([IsAdminGroupOrStaff])
-def cotizacion_eliminar_item(request, pk: int, item_id: int):
+def cotizacion_item(request, pk: int, item_id: int):
+    """Edita (PATCH: descripción/cantidad/precio) o elimina (DELETE) una partida.
+
+    La edición en línea manda solo el campo que cambió; se aplica lo que venga.
+    """
     try:
         item = CotizacionItem.objects.select_related('cotizacion').get(pk=item_id, cotizacion_id=pk)
     except CotizacionItem.DoesNotExist:
@@ -355,8 +454,214 @@ def cotizacion_eliminar_item(request, pk: int, item_id: int):
     bloqueo = _bloqueada_si_convertida(item.cotizacion)
     if bloqueo:
         return bloqueo
+
+    if request.method == 'DELETE':
+        with transaction.atomic():
+            item.delete()
+            Cotizacion.objects.get(pk=pk).recalcular_tipo()
+        return Response(CotizacionSerializer(Cotizacion.objects.get(pk=pk)).data)
+
+    d = request.data or {}
+    if 'descripcion' in d:
+        desc = (d.get('descripcion') or '').strip()
+        if not desc:
+            return Response({'detalle': 'La descripción no puede quedar vacía'}, status=400)
+        item.descripcion = desc[:255]
+    if 'cantidad' in d:
+        try:
+            item.cantidad = max(1, int(d.get('cantidad') or 1))
+        except (ValueError, TypeError):
+            return Response({'detalle': 'Cantidad inválida'}, status=400)
+    if 'precio_unitario' in d:
+        try:
+            item.precio_unitario = Decimal(str(d.get('precio_unitario') or 0))
+        except Exception:
+            return Response({'detalle': 'Precio inválido'}, status=400)
     with transaction.atomic():
-        item.delete()
-        cot = Cotizacion.objects.get(pk=pk)
-        cot.recalcular_tipo()
+        item.save()
+        item.cotizacion.recalcular_tipo()
     return Response(CotizacionSerializer(Cotizacion.objects.get(pk=pk)).data)
+
+
+def _nombre_foto(cot_id: int, formato: str) -> str:
+    """Nombre generado por nosotros: el del cliente puede traer rutas o repetirse."""
+    from renta.evidencia import EXTENSION
+    marca = timezone.now().strftime('%Y%m%d-%H%M%S')
+    return f'cot{cot_id}-{marca}-{uuid.uuid4().hex[:8]}.{EXTENSION[formato]}'
+
+
+@api_view(['GET', 'POST'])
+@permission_classes([IsAdminGroupOrStaff])
+@throttle_classes([SubidaEvidenciaThrottle])
+def cotizacion_fotos(request, pk: int):
+    """GET: fotos de la cotización. POST: sube una o varias.
+
+    La validación de que sea una imagen real (Pillow, tamaño, formato) es la
+    misma que la de la evidencia de rentas: se reutiliza para no tener dos
+    verificaciones de seguridad que puedan desincronizarse.
+    """
+    try:
+        cot = Cotizacion.objects.get(pk=pk)
+    except Cotizacion.DoesNotExist:
+        return Response({'detalle': 'Cotización no encontrada'}, status=404)
+
+    if request.method == 'GET':
+        return Response({'fotos': CotizacionFotoSerializer(
+            cot.fotos.all(), many=True, context={'request': request}).data})
+
+    bloqueo = _bloqueada_si_convertida(cot)   # convertida en venta → sin cambios
+    if bloqueo:
+        return bloqueo
+
+    archivos = request.FILES.getlist('imagenes') or request.FILES.getlist('images') or []
+    if not archivos:
+        return Response({'detalle': 'Adjunta al menos una foto.'}, status=400)
+
+    ya_hay = cot.fotos.count()
+    if ya_hay + len(archivos) > MAX_FOTOS:
+        return Response(
+            {'detalle': f'Máximo {MAX_FOTOS} fotos por cotización; ya hay {ya_hay}.'},
+            status=400,
+        )
+
+    from renta import evidencia as ev
+    # Se validan TODAS antes de guardar ninguna: dejar la mitad subida sería peor.
+    validados = []
+    for f in archivos:
+        try:
+            validados.append((f, ev.validar_imagen(f)))
+        except ev.EvidenciaInvalida as e:
+            return Response({'detalle': str(e)}, status=400)
+
+    base = cot.fotos.aggregate(m=Max('orden'))['m'] or 0
+    creadas = []
+    with transaction.atomic():
+        for i, (f, formato) in enumerate(validados, start=1):
+            f.name = _nombre_foto(cot.id, formato)   # no confiamos en el nombre del cliente
+            creadas.append(CotizacionFoto.objects.create(cotizacion=cot, imagen=f, orden=base + i))
+    return Response(
+        {'fotos': CotizacionFotoSerializer(creadas, many=True, context={'request': request}).data},
+        status=201,
+    )
+
+
+@api_view(['GET'])
+@permission_classes([IsAdminGroupOrStaff])
+def cotizacion_pdf(request, pk: int):
+    """Descarga la cotización en PDF.
+
+    Es el MISMO documento que se adjunta al correo del cliente (mismo generador
+    de reportlab, con las fotos embebidas): no una recreación del HTML, para que
+    lo que descarga el admin y lo que recibe el cliente sean idénticos.
+    """
+    from django.http import HttpResponse
+    try:
+        cot = Cotizacion.objects.prefetch_related('items', 'fotos').get(pk=pk)
+    except Cotizacion.DoesNotExist:
+        return Response({'detalle': 'Cotización no encontrada'}, status=404)
+    from .pdf import render_cotizacion_pdf
+    resp = HttpResponse(render_cotizacion_pdf(cot), content_type='application/pdf')
+    resp['Content-Disposition'] = f'attachment; filename="{cot.folio or "cotizacion"}.pdf"'
+    return resp
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])  # link público: el cliente lo abre sin cuenta
+def cotizacion_publica_pdf(request, token):
+    """Sirve el PDF por su token público (para compartir por WhatsApp/correo).
+
+    El token no es adivinable y solo revela ESA cotización, que es justo la que
+    se le está mandando al cliente.
+    """
+    from django.http import Http404, HttpResponse
+    try:
+        cot = Cotizacion.objects.prefetch_related('items', 'fotos').get(token_publico=token)
+    except Cotizacion.DoesNotExist:
+        raise Http404
+    from .pdf import render_cotizacion_pdf
+    resp = HttpResponse(render_cotizacion_pdf(cot), content_type='application/pdf')
+    resp['Content-Disposition'] = f'inline; filename="{cot.folio or "cotizacion"}.pdf"'   # abre en el navegador
+    return resp
+
+
+@api_view(['POST'])
+@permission_classes([IsAdminGroupOrStaff])
+def cotizacion_enviar(request, pk: int):
+    """Envía la cotización al correo del cliente con el PDF adjunto y el link.
+
+    Enviarla la marca como 'enviada' si estaba en borrador.
+    """
+    try:
+        cot = Cotizacion.objects.prefetch_related('items').get(pk=pk)
+    except Cotizacion.DoesNotExist:
+        return Response({'detalle': 'Cotización no encontrada'}, status=404)
+    correo = (cot.cliente_email or '').strip()
+    if not correo:
+        return Response({'detalle': 'Agrega el correo del cliente para poder enviarla.'}, status=400)
+    if not cot.items.exists():
+        return Response({'detalle': 'La cotización no tiene conceptos.'}, status=400)
+
+    import os
+
+    from maquinaria.correo import enviar_async, enviar_plantilla_brevo
+    from maquinaria.models import ConfiguracionSitio
+    from .pdf import render_cotizacion_pdf
+    cfg = ConfiguracionSitio.get_solo()
+    negocio = cfg.negocio_nombre or 'REMALI'
+    contacto = cfg.negocio_telefono or cfg.whatsapp_principal or ''
+    link = request.build_absolute_uri(f'/api/cotizaciones/publica/{cot.token_publico}/pdf/')
+    vigencia = cot.vigencia_hasta.strftime('%d/%m/%Y') if cot.vigencia_hasta else '—'
+    nota_iva = '' if cot.aplica_iva else ' (más IVA al facturar)'
+
+    adjuntos = []
+    try:
+        adjuntos.append((f'{cot.folio}.pdf', render_cotizacion_pdf(cot), 'application/pdf'))
+    except Exception:
+        logger.exception('No se pudo adjuntar el PDF de %s; se manda sin adjunto', cot.folio)
+
+    # Si hay plantilla de Brevo, el diseño lo controla la empresa desde Brevo y el
+    # PDF va adjunto igual. Si no, el correo de texto de siempre por SMTP.
+    tpl = os.environ.get('BREVO_COT_TEMPLATE_ID', '').strip()
+    enviada = enviar_plantilla_brevo(tpl, correo, cot.cliente_nombre, {
+        'nombre': cot.cliente_nombre or '',
+        'folio': cot.folio,
+        'total': f'${cot.total:,.2f}',
+        'iva': nota_iva.strip(),
+        'vigencia': vigencia,
+        'link': link,
+        'negocio': negocio,
+        'contacto': contacto,
+    }, adjuntos)
+    if not enviada:
+        cuerpo = (
+            f'Hola {cot.cliente_nombre or ""},\n\n'
+            f'Le compartimos su cotización {cot.folio} por ${cot.total}{nota_iva}.\n'
+            f'Válida hasta: {vigencia}.\n\n'
+            f'Puede verla o descargarla aquí: {link}\n'
+            f'(también va adjunta en PDF).\n\n'
+            f'{f"Cualquier duda, escríbanos al {contacto}." if contacto else ""}\n\n'
+            f'— {negocio}\n'
+        )
+        enviar_async(f'Su cotización {cot.folio} · {negocio}', cuerpo, [correo], adjuntos)
+
+    if cot.estado == 'borrador':
+        cot.estado = 'enviada'
+        cot.save(update_fields=['estado', 'actualizada'])
+    cot.refresh_from_db()
+    return Response({'detalle': f'Cotización enviada a {correo}',
+                     'cotizacion': CotizacionSerializer(cot, context={'request': request}).data})
+
+
+@api_view(['DELETE'])
+@permission_classes([IsAdminGroupOrStaff])
+def cotizacion_foto_eliminar(request, pk: int, foto_id: int):
+    try:
+        foto = CotizacionFoto.objects.select_related('cotizacion').get(pk=foto_id, cotizacion_id=pk)
+    except CotizacionFoto.DoesNotExist:
+        return Response({'detalle': 'Foto no encontrada'}, status=404)
+    bloqueo = _bloqueada_si_convertida(foto.cotizacion)   # convertida en venta → sin cambios
+    if bloqueo:
+        return bloqueo
+    foto.imagen.delete(save=False)   # no dejar el archivo huérfano en el almacenamiento
+    foto.delete()
+    return Response(status=204)

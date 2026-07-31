@@ -1,6 +1,7 @@
 import { createPortal } from 'react-dom'
 import { usePrintSettings } from '../lib/printSettings'
 import resolveMediaUrl from '../lib/resolveMediaUrl'
+import LogoRemali from './ui/logo-remali'
 
 type Spec = { etiqueta: string; valor: string }
 type Equipo = {
@@ -71,7 +72,10 @@ export default function FichaTecnicaModal({ equipo, onClose }: { equipo: Equipo;
             {/* Encabezado */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10mm 14mm 0' }}>
               <div className="band">{equipo.categoria?.nombre || 'Equipo'}</div>
-              <div className="brand" style={{ textAlign: 'right' }}>{neg.nombre || 'REMALI'}<small>Renta · Venta · Servicio</small></div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#111827' }}>
+                <LogoRemali className="h-9 w-9" title="REMALI" />
+                <div className="brand" style={{ textAlign: 'right' }}>{neg.nombre || 'REMALI'}<small>Renta · Venta · Servicio</small></div>
+              </div>
             </div>
 
             <div className="pad" style={{ paddingTop: '8mm' }}>

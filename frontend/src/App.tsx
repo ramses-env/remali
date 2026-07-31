@@ -1,4 +1,6 @@
+import { lazy, Suspense, useEffect, useState } from 'react'
 import { Route, Routes, useLocation } from 'react-router-dom'
+import CuentaRegresiva, { LANZAMIENTO, bypassEstreno } from './components/CuentaRegresiva'
 import Navbar from './components/Navbar'
 import Home from './routes/Home'
 import EquiposList from './routes/EquiposList'
@@ -7,10 +9,12 @@ import Cotizacion from './routes/Cotizacion'
 import Login from './routes/Login'
 import Registro from './routes/Registro'
 import Perfil from './routes/Perfil'
+import MisCotizaciones from './routes/MisCotizaciones'
+import MisRentas from './routes/MisRentas'
 import RecordatorioPerfil from './components/RecordatorioPerfil'
+import CambioTipoCotizacion from './components/CambioTipoCotizacion'
 import DockTienda from './components/DockTienda'
 import { AuthSplitScreen } from '@/components/ui/auth-split-screen'
-import Dashboard from './routes/Dashboard'
 import Footer from './components/Footer'
 import ErrorBoundary from './components/ErrorBoundary'
 import RequireAdmin from './components/RequireAdmin'
@@ -18,13 +22,26 @@ import CargaGlobal from './components/CargaGlobal'
 import { PriceUnitProvider } from './store/priceUnit'
 import { I18nProvider } from './lib/i18n'
 
+// El panel admin pesa más que toda la tienda junta; se descarga solo cuando
+// alguien entra a /dashboard, no en la primera visita de cada cliente.
+const Dashboard = lazy(() => import('./routes/Dashboard'))
+
 function App() {
   const location = useLocation()
+  // Al cambiar de ruta, vuelve al inicio del scroll. Sin esto la SPA conserva la
+  // posición de la página anterior y la nueva abre "a media página".
+  useEffect(() => { window.scrollTo(0, 0) }, [location.pathname])
   // Rutas que NO usan el chrome público (navbar + footer)
   const bare =
     location.pathname.startsWith('/dashboard') ||
     location.pathname === '/login' ||
     location.pathname === '/registro'
+
+  /* Estreno (lunes 3 de agosto, 12:00 AM): hasta entonces la tienda pública
+     muestra la cuenta regresiva. Login/registro/dashboard quedan libres para
+     el equipo, y /?acceso=remali deja previsualizar la tienda completa.
+     Al llegar a cero se libera sola, sin recargar. */
+  const [espera, setEspera] = useState(() => Date.now() < LANZAMIENTO && !bypassEstreno())
 
   return (
     <I18nProvider>
@@ -39,9 +56,22 @@ function App() {
               <Route path="/login" element={<Login />} />
               <Route path="/registro" element={<Registro />} />
             </Route>
-            <Route path="/dashboard" element={<RequireAdmin><Dashboard /></RequireAdmin>} />
+            {/* /dashboard/* : cualquier subruta (bookmark viejo, refresh) cae al
+                panel en vez de renderizar una página en blanco. */}
+            <Route
+              path="/dashboard/*"
+              element={
+                <RequireAdmin>
+                  <Suspense fallback={<div className="min-h-screen grid place-items-center bg-app"><div className="w-8 h-8 rounded-full border-2 border-gold border-t-transparent animate-spin" aria-label="Cargando panel" /></div>}>
+                    <Dashboard />
+                  </Suspense>
+                </RequireAdmin>
+              }
+            />
           </Routes>
         </ErrorBoundary>
+      ) : espera ? (
+        <CuentaRegresiva alTerminar={() => setEspera(false)} />
       ) : (
         <PriceUnitProvider>
           {/* La tienda pública usa el amarillo brillante del sistema (no el dorado del admin).
@@ -63,6 +93,8 @@ function App() {
                   {/* El perfil del cliente vive en la tienda, con su navbar y su
                       footer: es su casa, no una sección del panel de operación. */}
                   <Route path="/perfil" element={<Perfil />} />
+                  <Route path="/mis-cotizaciones" element={<MisCotizaciones />} />
+                  <Route path="/mis-rentas" element={<MisRentas />} />
                   <Route path="*" element={<Home />} />
                 </Routes>
               </ErrorBoundary>
@@ -71,6 +103,8 @@ function App() {
             {/* Recordatorio flotante para clientes con el perfil a medias. Vive
                 aquí, no en cada página, para aparecer en toda la tienda. */}
             <RecordatorioPerfil />
+            {/* Pregunta al intentar mezclar venta y renta en una cotización. */}
+            <CambioTipoCotizacion />
             {/* Dock inferior (solo móvil): navegación al alcance del pulgar. */}
             <DockTienda />
           </div>

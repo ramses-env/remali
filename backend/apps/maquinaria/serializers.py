@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from .models import (
     Equipo, Cupon, Categoria, Tipo, Marca, PerfilUsuario, Notificacion,
-    ConversacionSoporte, MensajeSoporte, ConfiguracionSitio, CorreoAviso,
+    ConversacionSoporte, MensajeSoporte, ConfiguracionSitio, CorreoAviso, ObraCliente,
 )
 
 
@@ -75,6 +75,13 @@ class ConversacionSoporteDetailSerializer(serializers.ModelSerializer):
         return qs.count()
 
 
+class ObraClienteSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ObraCliente
+        fields = ['id', 'nombre', 'responsable', 'direccion', 'telefono', 'email', 'creada']
+        read_only_fields = ['creada']
+
+
 class PerfilUsuarioSerializer(serializers.ModelSerializer):
     # Campos del User asociados (editables)
     id = serializers.IntegerField(source='usuario.id', read_only=True)   # el panel lo usa para saber "cuál soy yo"
@@ -94,6 +101,12 @@ class PerfilUsuarioSerializer(serializers.ModelSerializer):
     # Quien entró con Google no tiene contraseña: la pantalla de seguridad usa
     # esto para pedir "la actual" solo a quien realmente tiene una.
     tiene_password = serializers.SerializerMethodField()
+    # Verificación de correo + estado "perfil verificado" (correo + datos), y el
+    # cupón de 5% que se desbloquea al completarlo. Todo read-only: lo decide el
+    # servidor, el cliente no puede marcarse verificado ni darse un cupón.
+    email_verificado = serializers.BooleanField(read_only=True)
+    perfil_verificado = serializers.BooleanField(read_only=True)
+    cupon = serializers.SerializerMethodField()
 
     class Meta:
         model = PerfilUsuario
@@ -101,10 +114,23 @@ class PerfilUsuarioSerializer(serializers.ModelSerializer):
             'id', 'username', 'email', 'first_name', 'last_name', 'is_staff', 'is_superuser', 'puede', 'groups',
             'telefono', 'puesto', 'bio', 'avatar', 'avatar_url',
             'empresa', 'obra_direccion', 'obra_responsable', 'datos_completos', 'tiene_password',
+            'email_verificado', 'perfil_verificado', 'cupon',
         ]
 
     def get_tiene_password(self, obj):
         return obj.usuario.has_usable_password()
+
+    def get_cupon(self, obj):
+        """El cupón personal de 5% por completar el perfil (o None)."""
+        c = obj.usuario.cupones.filter(motivo='perfil', activo=True).order_by('-id').first()
+        return {'codigo': c.codigo, 'descuento': float(c.descuento)} if c else None
+
+    def validate_telefono(self, value):
+        """Se guarda como lo escriban, pero si viene, debe traer 10 dígitos."""
+        v = (value or '').strip()
+        if v and len(''.join(c for c in v if c.isdigit())) != 10:
+            raise serializers.ValidationError('El teléfono debe tener 10 dígitos.')
+        return v
 
     def get_groups(self, obj):
         return list(obj.usuario.groups.values_list('name', flat=True))
@@ -153,6 +179,20 @@ class EquipoSerializer(serializers.ModelSerializer):
     stock_disponible = serializers.SerializerMethodField()
     unidades_total = serializers.SerializerMethodField()
     unidades_rentadas = serializers.SerializerMethodField()
+    # 'venta' (nueva) o 'renta' (seminueva). Lo decide la condición del equipo.
+    modo = serializers.CharField(read_only=True)
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        # El precio de venta de un equipo de RENTA es interno (referencia del
+        # admin): no se expone al público ni a los clientes, solo a administración.
+        if instance.modo == 'renta':
+            from .permissions import puede_de
+            u = getattr(self.context.get('request'), 'user', None)
+            es_admin = bool(u and u.is_authenticated and puede_de(u).get('nivel', 0) > 0)
+            if not es_admin:
+                data.pop('precio_venta', None)
+        return data
 
     def validate_especificaciones(self, value):
         """Normaliza la lista de specs. Vía multipart llega como string JSON;
@@ -176,6 +216,19 @@ class EquipoSerializer(serializers.ModelSerializer):
             if etiqueta and valor:
                 limpio.append({'etiqueta': etiqueta[:60], 'valor': valor[:120]})
         return limpio
+
+    def validate(self, attrs):
+        # Los equipos de VENTA (nueva) deben traer características: con ellas se
+        # arma la ficha que ve el cliente. Renta no las exige.
+        condicion = attrs.get('condicion') or getattr(self.instance, 'condicion', 'nueva')
+        if condicion == 'nueva':
+            especs = attrs.get('especificaciones')
+            if especs is None:
+                especs = getattr(self.instance, 'especificaciones', None) or []
+            if not especs:
+                raise serializers.ValidationError(
+                    {'especificaciones': 'Los equipos de venta deben tener al menos una característica.'})
+        return attrs
 
     class Meta:
         model = Equipo
@@ -257,7 +310,9 @@ class ConfiguracionSitioSerializer(serializers.ModelSerializer):
         model = ConfiguracionSitio
         fields = [
             'whatsapp_principal', 'whatsapp_respaldos',
-            'negocio_nombre', 'negocio_telefono', 'negocio_direccion', 'negocio_rfc', 'negocio_footer',
+            'negocio_nombre', 'negocio_telefono', 'negocio_direccion', 'negocio_email', 'negocio_web',
+            'negocio_rfc', 'negocio_representante', 'negocio_footer',
+            'cotizacion_condiciones', 'cotizacion_condiciones_renta', 'datos_bancarios', 'cotizacion_cierre',
             'actualizada',
         ]
         read_only_fields = ['actualizada']

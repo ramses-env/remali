@@ -53,4 +53,3 @@ backups/
 
 # Config local de herramientas (Claude Code, etc.)
 .claude/
-test.txt

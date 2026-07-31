@@ -6,6 +6,8 @@ import { TextPlugin } from 'gsap/TextPlugin'
 import { ContainerScroll } from '../components/ui/container-scroll-animation'
 
 gsap.registerPlugin(ScrollTrigger, TextPlugin)
+// Solo en dev: poder inspeccionar los triggers desde la consola.
+if (import.meta.env.DEV) (window as any).__ST = ScrollTrigger
 
 const machines = [
   {
@@ -256,34 +258,26 @@ export default function Home() {
         )
       })
 
-      gsap.from('.stat-item', {
-        y: 60,
-        opacity: 0,
-        duration: 0.9,
-        ease: 'expo.out',
-        stagger: 0.12,
-        scrollTrigger: {
-          trigger: '.stats-section',
-          start: 'top 80%',
-          toggleActions: 'play none none none',
-        },
-      })
+      /* fromTo y no from: con from() el "final" se lee del estado del DOM al
+         crear el tween, y si el montaje doble de StrictMode dejó un opacity: 0
+         inline, la sección termina la animación… invisible. Con el fin
+         explícito eso no puede pasar. `once` además libera el trigger. */
+      gsap.fromTo('.stat-item',
+        { y: 60, opacity: 0 },
+        {
+          y: 0, opacity: 1, duration: 0.9, ease: 'expo.out', stagger: 0.12,
+          scrollTrigger: { trigger: '.stats-section', start: 'top 80%', once: true },
+        })
 
       /* ──────────────────────────────────────
          7. FEATURES — entrada escalonada con línea que crece
       ────────────────────────────────────── */
-      gsap.from('.feature-card', {
-        y: 80,
-        opacity: 0,
-        duration: 0.9,
-        ease: 'expo.out',
-        stagger: 0.1,
-        scrollTrigger: {
-          trigger: '.features-section',
-          start: 'top 75%',
-          toggleActions: 'play none none none',
-        },
-      })
+      gsap.fromTo('.feature-card',
+        { y: 80, opacity: 0 },
+        {
+          y: 0, opacity: 1, duration: 0.9, ease: 'expo.out', stagger: 0.1,
+          scrollTrigger: { trigger: '.features-section', start: 'top 75%', once: true },
+        })
 
       gsap.fromTo('.features-divider',
         { scaleX: 0, transformOrigin: 'left center' },
@@ -291,11 +285,7 @@ export default function Home() {
           scaleX: 1,
           duration: 1.4,
           ease: 'expo.out',
-          scrollTrigger: {
-            trigger: '.features-section',
-            start: 'top 70%',
-            toggleActions: 'play none none none',
-          },
+          scrollTrigger: { trigger: '.features-section', start: 'top 70%', once: true },
         }
       )
 
@@ -319,26 +309,16 @@ export default function Home() {
           y: 0,
           duration: 1.4,
           ease: 'expo.out',
-          scrollTrigger: {
-            trigger: '.cta-box',
-            start: 'top 85%',
-            toggleActions: 'play none none none',
-          },
+          scrollTrigger: { trigger: '.cta-box', start: 'top 85%', once: true },
         }
       )
 
-      gsap.from('.cta-btn', {
-        y: 30,
-        opacity: 0,
-        duration: 0.9,
-        ease: 'power3.out',
-        stagger: 0.15,
-        scrollTrigger: {
-          trigger: '.cta-box',
-          start: 'top 75%',
-          toggleActions: 'play none none none',
-        },
-      })
+      gsap.fromTo('.cta-btn',
+        { y: 30, opacity: 0 },
+        {
+          y: 0, opacity: 1, duration: 0.9, ease: 'power3.out', stagger: 0.15,
+          scrollTrigger: { trigger: '.cta-box', start: 'top 75%', once: true },
+        })
 
       /* ──────────────────────────────────────
          10. SCROLL PROGRESS BAR
@@ -354,7 +334,26 @@ export default function Home() {
 
     }, rootRef)
 
-    return () => ctx.revert()
+    /* Las imágenes (y los datos) llegan después del montaje y recorren el
+       layout. ScrollTrigger midió posiciones viejas: hay secciones que se
+       quedan invisibles porque su trigger nunca se cruza. Cada imagen que
+       carga refresca las mediciones (con debounce para no recalcular 10 veces
+       seguidas). El listener va en fase de captura porque `load` no burbujea. */
+    let t: number | undefined
+    const refrescar = () => {
+      window.clearTimeout(t)
+      t = window.setTimeout(() => ScrollTrigger.refresh(), 150)
+    }
+    const raiz = rootRef.current
+    raiz?.addEventListener('load', refrescar, true)
+    window.addEventListener('load', refrescar)
+
+    return () => {
+      window.clearTimeout(t)
+      raiz?.removeEventListener('load', refrescar, true)
+      window.removeEventListener('load', refrescar)
+      ctx.revert()
+    }
   }, [])
 
   return (
@@ -401,7 +400,9 @@ export default function Home() {
         <div className="relative z-10 mb-1 overflow-hidden">
           <h1
             className="text-[clamp(4rem,11vw,9rem)] font-black leading-[0.9] tracking-tighter text-transparent"
-            style={{ WebkitTextStroke: '2px var(--c-stroke)' }}
+            /* El borde del token (--c-stroke) casi no se ve sobre el fondo claro;
+               un % de la tinta del tema contrasta bien en claro Y en oscuro. */
+            style={{ WebkitTextStroke: '2px color-mix(in srgb, var(--c-ink) 30%, transparent)' }}
           >
             {'QUE MUEVE'.split('').map((c, i) => (
               <span key={i} className="char inline-block">{c === ' ' ? ' ' : c}</span>

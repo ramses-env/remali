@@ -38,6 +38,13 @@ urlpatterns = [
     path('auth/me/', views.me),
     path('auth/perfil/', views.PerfilDetail.as_view()),
     path('auth/password/', views.cambiar_password),
+    path('auth/verificar-correo/<str:token>/', views.verificar_correo_usuario),  # público (link del correo)
+    path('auth/reenviar-verificacion/', views.reenviar_verificacion),
+    # Obras guardadas del cliente (para reusar al cotizar)
+    path('obras-cliente/', views.ObrasClienteList.as_view()),
+    path('obras-cliente/<int:pk>/', views.ObraClienteDetail.as_view()),
+    # Búsqueda de cuentas de cliente (para vincular una renta a su panel)
+    path('clientes-lookup/', views.clientes_lookup),
     path('usuarios/', views_usuarios.usuarios),
     path('usuarios/roles/', views_usuarios.roles_disponibles),
     path('usuarios/<int:pk>/', views_usuarios.usuario_detalle),

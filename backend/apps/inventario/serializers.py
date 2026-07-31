@@ -38,6 +38,8 @@ class InventarioSerializer(serializers.ModelSerializer):
             'precio_semana': str(e.precio_semana) if e.precio_semana is not None else None,
             'precio_mes': str(e.precio_mes) if e.precio_mes is not None else None,
             'precio_venta': str(e.precio_venta) if e.precio_venta is not None else None,
+            'condicion': e.condicion,
+            'modo': e.modo,   # 'venta' (nueva) o 'renta' (seminueva)
         }
 
     def get_renta_activa(self, obj):

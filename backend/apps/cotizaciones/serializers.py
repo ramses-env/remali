@@ -1,6 +1,23 @@
 from rest_framework import serializers
 
-from .models import Cotizacion, CotizacionItem
+from .models import Cotizacion, CotizacionItem, CotizacionFoto
+
+
+class CotizacionFotoSerializer(serializers.ModelSerializer):
+    imagen = serializers.SerializerMethodField()
+
+    class Meta:
+        model = CotizacionFoto
+        fields = ['id', 'imagen', 'orden']
+
+    def get_imagen(self, obj):
+        if not obj.imagen:
+            return None
+        url = obj.imagen.url
+        # Absoluta si hay request (el detalle la usa): la carta y el visor cargan
+        # la imagen desde el origen de Django, no del de la SPA en dev.
+        request = self.context.get('request')
+        return request.build_absolute_uri(url) if request else url
 
 
 class CotizacionItemSerializer(serializers.ModelSerializer):
@@ -17,13 +34,16 @@ class CotizacionItemSerializer(serializers.ModelSerializer):
 
 class CotizacionSerializer(serializers.ModelSerializer):
     items = CotizacionItemSerializer(many=True, read_only=True)
+    fotos = CotizacionFotoSerializer(many=True, read_only=True)
     subtotal = serializers.SerializerMethodField()
     subtotal_venta = serializers.SerializerMethodField()
     subtotal_renta = serializers.SerializerMethodField()
     iva = serializers.SerializerMethodField()
     total = serializers.SerializerMethodField()
+    base = serializers.SerializerMethodField()
     cliente_display = serializers.CharField(read_only=True)
     vigencia_hasta = serializers.DateField(read_only=True)
+    vencida = serializers.BooleanField(read_only=True)
     empresa_nombre = serializers.CharField(source='empresa.nombre', read_only=True)
     convertida = serializers.SerializerMethodField()
     venta_id = serializers.SerializerMethodField()
@@ -35,8 +55,8 @@ class CotizacionSerializer(serializers.ModelSerializer):
             'id', 'folio', 'tipo', 'estado', 'origen', 'datos_solicitud',
             'cliente_nombre', 'cliente_telefono', 'cliente_email', 'empresa', 'empresa_nombre',
             'vigencia_dias', 'aplica_iva', 'notas',
-            'items', 'subtotal', 'subtotal_venta', 'subtotal_renta', 'iva', 'total',
-            'cliente_display', 'vigencia_hasta',
+            'items', 'fotos', 'subtotal', 'subtotal_venta', 'subtotal_renta', 'base', 'iva', 'total',
+            'cliente_display', 'vigencia_hasta', 'vencida', 'token_publico',
             'convertida', 'venta_id', 'atendida_en', 'atendida_por_nombre', 'escalada_en',
             'creada', 'actualizada',
         ]
@@ -68,3 +88,6 @@ class CotizacionSerializer(serializers.ModelSerializer):
 
     def get_total(self, obj):
         return str(obj.total)
+
+    def get_base(self, obj):
+        return str(obj.base)

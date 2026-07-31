@@ -23,7 +23,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         { url: '/auth/token/', payload: { email: usuario, password } },
         { url: '/auth/token/', payload: { username: usuario, password } },
         { url: '/auth/login/', payload: { email: usuario, password } },
-        { url: '/auth/jwt/create/', payload: { email: usuario, password } },
       ]
       for (const a of attempts) {
         try {

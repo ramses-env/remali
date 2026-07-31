@@ -3,7 +3,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import * as z from 'zod'
-import { Check, Eye, EyeOff, Loader2, Lock, ShieldCheck, TriangleAlert, User } from 'lucide-react'
+import { BadgePercent, CalendarClock, Check, Copy, Eye, EyeOff, FileText, Loader2, Lock, Mail, ShieldCheck, TriangleAlert, User } from 'lucide-react'
 
 import api from '../lib/api'
 import { useAuth } from '../store/auth'
@@ -17,7 +17,11 @@ import { Input } from '@/components/ui/input'
    datos a alguien que solo quiere cotizar. */
 const esquemaPerfil = z.object({
   first_name: z.string().trim().max(150).optional(),
-  telefono: z.string().trim().min(10, { message: 'Escribe los 10 dígitos.' }).max(30),
+  telefono: z
+    .string()
+    .trim()
+    .max(30)
+    .refine(v => v.replace(/\D/g, '').length === 10, { message: 'Escribe los 10 dígitos.' }),
   empresa: z.string().trim().min(2, { message: 'Escribe el nombre de la empresa.' }),
   obra_direccion: z.string().trim().min(5, { message: 'Escribe dónde se entrega.' }),
   obra_responsable: z.string().trim().min(2, { message: '¿Quién recibe en la obra?' }),
@@ -42,6 +46,9 @@ type Perfil = ValoresPerfil & {
   datos_completos?: boolean
   tiene_password?: boolean
   puede?: { rol?: string }
+  email_verificado?: boolean
+  perfil_verificado?: boolean
+  cupon?: { codigo: string; descuento: number } | null
 }
 
 const CAMPO = 'h-11 rounded-xl bg-surface-2 border-edge text-ink placeholder:text-mute focus-visible:ring-gold/30'
@@ -137,6 +144,21 @@ export default function Perfil() {
               </button>
             )
           })}
+          {/* Ruta aparte (no una sección de esta página): sus solicitudes. */}
+          <Link
+            to="/mis-cotizaciones"
+            className="inline-flex shrink-0 items-center gap-2.5 rounded-xl px-3.5 py-2.5 text-sm font-semibold text-mute transition-colors hover:text-ink"
+          >
+            <FileText className="h-4 w-4" />
+            Mis cotizaciones
+          </Link>
+          <Link
+            to="/mis-rentas"
+            className="inline-flex shrink-0 items-center gap-2.5 rounded-xl px-3.5 py-2.5 text-sm font-semibold text-mute transition-colors hover:text-ink"
+          >
+            <CalendarClock className="h-4 w-4" />
+            Tus rentas
+          </Link>
         </nav>
 
         <div className="rounded-2xl border border-edge bg-surface p-6 sm:p-8">
@@ -152,6 +174,109 @@ export default function Perfil() {
 }
 
 /* ───────────────────────── Perfil ───────────────────────── */
+
+/* Un solo lugar que muestra en qué punto va el cliente hacia el 5%:
+   1) correo sin confirmar → botón para reenviar; 2) confirmado pero sin datos →
+   invita con el premio; 3) todo listo → enseña el cupón para copiar. */
+function EstadoVerificacion({ perfil }: { perfil: Perfil | null }) {
+  const [reenviando, setReenviando] = useState(false)
+  const [aviso, setAviso] = useState<string | undefined>(undefined)
+  const [copiado, setCopiado] = useState(false)
+
+  const verificado = perfil?.email_verificado
+  const completo = Boolean(perfil?.datos_completos)
+  const cupon = perfil?.cupon
+
+  async function reenviar() {
+    setReenviando(true)
+    setAviso(undefined)
+    try {
+      const r = await api.post('/auth/reenviar-verificacion/')
+      setAviso(r.data?.detail || 'Te reenviamos el correo.')
+    } catch {
+      setAviso('No se pudo reenviar. Intenta más tarde.')
+    } finally {
+      setReenviando(false)
+    }
+  }
+
+  function copiar() {
+    if (!cupon?.codigo) return
+    navigator.clipboard?.writeText(cupon.codigo).then(() => {
+      setCopiado(true)
+      window.setTimeout(() => setCopiado(false), 1600)
+    }).catch(() => {})
+  }
+
+  // 1) Premio desbloqueado: correo confirmado + datos completos + cupón.
+  if (verificado && completo && cupon) {
+    return (
+      <div className="stagger-item mb-7 rounded-2xl border border-gold/40 bg-gold-soft px-5 py-5">
+        <div className="flex items-center gap-2 text-ink">
+          <BadgePercent className="h-5 w-5 text-gold" />
+          <p className="text-sm font-bold">¡Ganaste {Math.round(cupon.descuento * 100)}% por completar tu perfil!</p>
+        </div>
+        <p className="mt-1 text-sm text-mute">Usa este código en tu próxima cotización:</p>
+        <div className="mt-3 flex items-center gap-2">
+          <code className="rounded-lg border border-gold/40 bg-surface px-3 py-2 font-mono text-base font-bold tracking-wider text-ink">
+            {cupon.codigo}
+          </code>
+          <button
+            type="button"
+            onClick={copiar}
+            className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-edge px-3 text-sm text-mute transition-[color,transform] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] hover:text-ink active:scale-[0.97]"
+          >
+            {copiado ? <Check className="h-4 w-4 text-libre" /> : <Copy className="h-4 w-4" />}
+            {copiado ? 'Copiado' : 'Copiar'}
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  // 2) Correo sin confirmar: es lo primero que hace falta para el 5%.
+  if (!verificado) {
+    return (
+      <div className="stagger-item mb-7 rounded-2xl border border-gold/30 bg-gold-soft px-5 py-4">
+        <div className="flex items-center gap-2 text-ink">
+          <Mail className="h-5 w-5 text-gold" />
+          <p className="text-sm font-semibold">Confirma tu correo</p>
+        </div>
+        <p className="mt-1 text-sm leading-relaxed text-mute">
+          Te enviamos un enlace a <span className="font-medium text-ink">{perfil?.email}</span>.
+          Confírmalo y, al completar tu perfil, obtienes un 5% de descuento.
+        </p>
+        <div className="mt-3 flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={reenviar}
+            disabled={reenviando}
+            className="inline-flex h-9 items-center gap-1.5 rounded-full border border-gold/40 px-4 text-sm font-semibold text-ink transition-[color,background-color,transform] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] hover:bg-gold/10 active:scale-[0.97] disabled:opacity-50 disabled:active:scale-100"
+          >
+            {reenviando && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+            {reenviando ? 'Enviando…' : 'Reenviar correo'}
+          </button>
+          {aviso && <span className="text-sm text-mute">{aviso}</span>}
+        </div>
+      </div>
+    )
+  }
+
+  // 3) Correo confirmado pero faltan datos: invita con el premio.
+  if (!completo) {
+    return (
+      <div className="stagger-item mb-7 rounded-2xl border border-gold/30 bg-gold-soft px-5 py-4">
+        <p className="text-sm font-semibold text-ink">Completa tu perfil y obtén 5%</p>
+        <p className="mt-1 text-sm leading-relaxed text-mute">
+          Con tu teléfono, tu empresa y los datos de la obra desbloqueas un 5% de
+          descuento en tus cotizaciones (y te cotizamos y entregamos más rápido).
+        </p>
+      </div>
+    )
+  }
+
+  return null
+}
 
 function PanelPerfil({
   perfil,
@@ -175,7 +300,6 @@ function PanelPerfil({
     },
   })
   const enviando = form.formState.isSubmitting
-  const completo = Boolean(perfil?.datos_completos)
 
   async function onSubmit(datos: ValoresPerfil) {
     setError(undefined)
@@ -195,17 +319,7 @@ function PanelPerfil({
 
   return (
     <>
-      {/* La invitación explica qué gana el cliente. "Completa tu perfil" a secas
-          es una tarea; esto es una razón. */}
-      {!completo && (
-        <div className="mb-7 rounded-2xl border border-gold/30 bg-gold-soft px-5 py-4">
-          <p className="text-sm font-semibold text-ink">Termina de completar tu cuenta</p>
-          <p className="text-sm text-mute mt-1 leading-relaxed">
-            Con tu teléfono, tu empresa y los datos de la obra podemos cotizarte y
-            entregarte sin llamarte para preguntar lo mismo cada vez.
-          </p>
-        </div>
-      )}
+      <EstadoVerificacion perfil={perfil} />
 
       {error && (
         <div className="mb-6 rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-600 dark:text-red-400">
@@ -219,7 +333,7 @@ function PanelPerfil({
             <h2 className="text-xs font-semibold uppercase tracking-[0.14em] text-mute">Tus datos</h2>
             <div className="grid gap-5 sm:grid-cols-2">
               <Campo form={form} name="first_name" label="Nombre" placeholder="Juan Pérez" autoComplete="name" disabled={enviando} />
-              <Campo form={form} name="telefono" label="Teléfono" placeholder="744 123 4567" autoComplete="tel" disabled={enviando} type="tel" />
+              <Campo form={form} name="telefono" label="Teléfono" placeholder="744 123 4567" autoComplete="tel" disabled={enviando} type="tel" inputMode="numeric" />
             </div>
             <Campo form={form} name="empresa" label="Empresa donde trabajas" placeholder="Constructora del Pacífico" autoComplete="organization" disabled={enviando} />
           </section>

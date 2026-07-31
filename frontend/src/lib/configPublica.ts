@@ -6,13 +6,22 @@ export type ConfigPublica = {
   negocio_nombre: string
   negocio_telefono: string
   negocio_direccion: string
+  negocio_email: string
+  negocio_web: string
   negocio_rfc: string
+  negocio_representante: string
   negocio_footer: string
+  cotizacion_condiciones: string
+  cotizacion_condiciones_renta: string
+  datos_bancarios: string
+  cotizacion_cierre: string
 }
 
 const VACIA: ConfigPublica = {
   whatsapp_principal: '', negocio_nombre: 'REMALI', negocio_telefono: '',
-  negocio_direccion: '', negocio_rfc: '', negocio_footer: '',
+  negocio_direccion: '', negocio_email: '', negocio_web: '', negocio_rfc: '',
+  negocio_representante: '', negocio_footer: '',
+  cotizacion_condiciones: '', cotizacion_condiciones_renta: '', datos_bancarios: '', cotizacion_cierre: '',
 }
 
 // Cache a nivel módulo: la config pública se pide UNA vez por sesión de página.

@@ -1,17 +1,20 @@
 import { Link } from 'react-router-dom'
+import LogoRemali from '@/components/ui/logo-remali'
+import { useConfigPublica } from '../lib/configPublica'
 
 export default function Footer() {
+  // Datos reales del negocio (Configuración › Negocio); nada de placeholders.
+  const cfg = useConfigPublica()
+  const email = cfg.negocio_email || ''
+  const tel = cfg.negocio_telefono || cfg.whatsapp_principal || ''
+  const telHref = tel.replace(/\D+/g, '')
   return (
     <footer className="border-t border-edge bg-surface text-mute">
       <div className="mx-auto max-w-7xl px-6 lg:px-12 py-16">
         <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-10 mb-12">
           <div className="lg:col-span-2">
             <div className="flex items-center gap-3 mb-4">
-              <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-amber-400 to-orange-500 p-[2px]">
-                <div className="w-full h-full bg-surface rounded-[10px] flex items-center justify-center">
-                  <span className="text-lg font-black text-transparent bg-clip-text bg-gradient-to-tr from-amber-400 to-orange-500">R</span>
-                </div>
-              </div>
+              <LogoRemali className="w-9 h-9 text-ink" />
               <span className="text-ink text-xl font-bold tracking-tight">REMALI</span>
             </div>
             <p className="text-sm leading-relaxed max-w-xs">
@@ -27,13 +30,15 @@ export default function Footer() {
             </ul>
           </div>
 
-          <div>
-            <p className="font-semibold text-ink mb-4">Contáctanos</p>
-            <ul className="space-y-2 text-sm">
-              <li><a href="mailto:contacto@remali.mx" className="hover:text-ink transition-colors">contacto@remali.mx</a></li>
-              <li><a href="tel:+521234567890" className="hover:text-ink transition-colors">+52 123 456 7890</a></li>
-            </ul>
-          </div>
+          {(email || tel) && (
+            <div>
+              <p className="font-semibold text-ink mb-4">Contáctanos</p>
+              <ul className="space-y-2 text-sm">
+                {email && <li><a href={`mailto:${email}`} className="hover:text-ink transition-colors">{email}</a></li>}
+                {tel && <li><a href={`tel:${telHref}`} className="hover:text-ink transition-colors">{tel}</a></li>}
+              </ul>
+            </div>
+          )}
         </div>
 
         <div className="pt-8 border-t border-edge flex flex-col sm:flex-row items-center justify-between gap-4">

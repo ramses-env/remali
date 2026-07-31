@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom'
 import { useState } from 'react'
-import { useCart } from '../store/cart'
+import { useCart, esVenta, tipoCotizacion } from '../store/cart'
 import { usePriceUnit } from '../store/priceUnit'
 import { useToast } from '../store/toast'
 import resolveMediaUrl from '../lib/resolveMediaUrl'
@@ -15,6 +15,7 @@ type Props = {
   meta?: string
   linkTo?: string
   tags?: Tag[]
+  modo?: 'venta' | 'renta'
 }
 
 const tagStyle: Record<Tag['tone'], string> = {
@@ -24,12 +25,16 @@ const tagStyle: Record<Tag['tone'], string> = {
   sale: 'bg-gold text-black',
 }
 
-export default function ProductCard({ id, title, price, image, subtitle, meta, linkTo, tags = [] }: Props) {
-  const { dispatch } = useCart()
+export default function ProductCard({ id, title, price, image, subtitle, meta, linkTo, tags = [], modo }: Props) {
+  const { state, dispatch } = useCart()
+  // Si el tipo choca, el reducer NO agrega (abre el modal global): no avisar "añadido".
+  const chocaTipo = () => { const t = tipoCotizacion(state.items); return !!t && t !== (esVenta(cartUnit) ? 'venta' : 'renta') }
   const { notify } = useToast()
   const { unit } = usePriceUnit()
   const priceNum = typeof price === 'string' ? parseFloat(price) : price
   const displayPrice = Number.isFinite(priceNum) ? priceNum : 0
+  // Un equipo de venta entra al carrito como 'venta'; uno de renta, con la modalidad elegida.
+  const cartUnit = modo === 'venta' ? ('venta' as const) : unit
   const [fav, setFav] = useState(false)
   const resolvedImage = resolveMediaUrl(image)
 
@@ -37,9 +42,15 @@ export default function ProductCard({ id, title, price, image, subtitle, meta, l
     <div className="group bg-surface border border-edge rounded-2xl overflow-hidden flex flex-col transition-all duration-300 hover:border-gold/30 hover:-translate-y-1 hover:shadow-[0_12px_40px_rgba(0,0,0,0.5)]">
 
       {/* Imagen */}
-      <Link to={linkTo || `/equipo/${id}`} className="block relative overflow-hidden aspect-[4/3]">
+      <div className="relative overflow-hidden aspect-[4/3]">
+        {/* Enlace que cubre toda la imagen (patrón "stretched link"): sin anclas ni botones anidados dentro */}
+        <Link
+          to={linkTo || `/equipo/${id}`}
+          aria-label={`Ver detalle de ${title}`}
+          className="absolute inset-0 z-10"
+        />
         {tags.length > 0 && (
-          <div className="absolute top-3 left-3 z-10 flex flex-wrap gap-1.5 max-w-[80%]">
+          <div className="absolute top-3 left-3 z-30 flex flex-wrap gap-1.5 max-w-[80%] pointer-events-none">
             {tags.map(t => (
               <span key={t.label} className={`px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wide ${tagStyle[t.tone]}`}>
                 {t.label}
@@ -69,41 +80,32 @@ export default function ProductCard({ id, title, price, image, subtitle, meta, l
             </svg>
           </div>
         )}
-        {/* Overlay al hover */}
-        <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center gap-3">
+        {/* Overlay al hover: transparente a los clics salvo en los botones, para que el enlace de la imagen siga activo */}
+        <div className="absolute inset-0 z-20 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center gap-3 pointer-events-none">
           <button
             aria-label="Agregar al carrito"
-            onClick={e => {
-              e.preventDefault()
-              dispatch({ type: 'add', item: { lineId: Date.now() + Math.floor(Math.random() * 1000), id, title, price: displayPrice, qty: 1, image: resolvedImage, unit } })
-              notify('Equipo añadido al carrito')
+            onClick={() => {
+              const choca = chocaTipo()
+              dispatch({ type: 'add', item: { lineId: Date.now() + Math.floor(Math.random() * 1000), id, title, price: displayPrice, qty: 1, image: resolvedImage, unit: cartUnit } })
+              if (!choca) notify('Equipo añadido a tu cotización')
             }}
-            className="w-11 h-11 rounded-full bg-gold text-black flex items-center justify-center hover:opacity-90 transition-colors"
+            className="w-11 h-11 rounded-full bg-gold text-black flex items-center justify-center hover:opacity-90 transition-colors pointer-events-none group-hover:pointer-events-auto"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5">
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
             </svg>
           </button>
-          <Link
-            to={linkTo || `/equipo/${id}`}
-            aria-label="Ver detalle"
-            className="w-11 h-11 rounded-full bg-white/10 backdrop-blur-sm border border-white/20 text-white flex items-center justify-center hover:bg-white/20 transition-colors"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M5 12h14m-7-7l7 7-7 7" />
-            </svg>
-          </Link>
           <button
             aria-label="Favorito"
-            onClick={e => { e.preventDefault(); setFav(v => !v); notify(fav ? 'Eliminado de favoritos' : 'Añadido a favoritos') }}
-            className={`w-11 h-11 rounded-full border flex items-center justify-center transition-colors ${fav ? 'bg-gold/20 border-gold/40 text-gold' : 'bg-white/10 border-white/20 text-white hover:bg-white/20'}`}
+            onClick={() => { setFav(v => !v); notify(fav ? 'Eliminado de favoritos' : 'Añadido a favoritos') }}
+            className={`w-11 h-11 rounded-full border flex items-center justify-center transition-colors pointer-events-none group-hover:pointer-events-auto ${fav ? 'bg-gold/20 border-gold/40 text-gold' : 'bg-white/10 border-white/20 text-white hover:bg-white/20'}`}
           >
             <svg className="w-5 h-5" fill={fav ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.8">
               <path strokeLinecap="round" strokeLinejoin="round" d="M11.995 20.5s-7-4.5-7-10.5a4 4 0 017-2.5 4 4 0 017 2.5c0 6-7 10.5-7 10.5z" />
             </svg>
           </button>
         </div>
-      </Link>
+      </div>
 
       {/* Info */}
       <div className="p-5 flex flex-col flex-1">
@@ -118,7 +120,8 @@ export default function ProductCard({ id, title, price, image, subtitle, meta, l
             ? <span className="text-[11px] text-mute truncate leading-tight pb-0.5">{meta}</span>
             : <span />}
           <div className="text-right shrink-0">
-            <p className="text-[10px] text-mute font-mono uppercase">desde /{unit}</p>
+            {/* Etiqueta chica sobre el precio: renta = "desde /modalidad"; venta = "Precio venta". */}
+            <p className="text-[10px] text-mute font-mono uppercase">{modo === 'venta' ? 'Precio venta' : `desde /${unit}`}</p>
             <p className="text-base font-black text-gold leading-none">
               ${displayPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </p>
@@ -129,7 +132,7 @@ export default function ProductCard({ id, title, price, image, subtitle, meta, l
       {/* Botones móvil */}
       <div className="md:hidden flex gap-2 px-5 pb-4">
         <button
-          onClick={() => { dispatch({ type: 'add', item: { lineId: Date.now() + Math.floor(Math.random() * 1000), id, title, price: displayPrice, qty: 1, image: resolvedImage, unit } }); notify('Equipo añadido al carrito') }}
+          onClick={() => { const choca = chocaTipo(); dispatch({ type: 'add', item: { lineId: Date.now() + Math.floor(Math.random() * 1000), id, title, price: displayPrice, qty: 1, image: resolvedImage, unit: cartUnit } }); if (!choca) notify('Equipo añadido a tu cotización') }}
           className="flex-1 py-2.5 rounded-full bg-gold text-black text-xs font-bold hover:opacity-90 transition-colors"
         >
           Agregar

@@ -1,3 +1,4 @@
 {
-    "python.pythonPath": "/Users/ramses/Developer/Remali/backend/venv/bin/python"
+  "python.pythonPath": "/Users/ramses/Developer/Remali/backend/venv/bin/python",
+  "claudeCode.useTerminal": true
 }

@@ -12,3 +12,17 @@ import { twMerge } from 'tailwind-merge'
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
+
+/** '1200', 1200 o null → número o null. La API manda los decimales como string. */
+export function toNumber(v: unknown): number | null {
+  const n = typeof v === 'string' ? parseFloat(v) : typeof v === 'number' ? v : null
+  if (n === null || Number.isNaN(n)) return null
+  return n
+}
+
+/** Moneda con SIEMPRE dos decimales — mismo formato en pantalla, carta y PDF.
+ *  (Sin maximumFractionDigits un total con 3+ decimales imprimía distinto.) */
+export function formatMoney(n: number | string | null | undefined): string {
+  const v = toNumber(n) ?? 0
+  return '$' + v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}

@@ -3,6 +3,8 @@ import { createPortal } from 'react-dom'
 import { Link, useNavigate } from 'react-router-dom'
 import QRCode from 'qrcode'
 import api from '../lib/api'
+import { formatMoney } from '../lib/utils'
+
 import TicketModal from '../components/TicketModal'
 import EtiquetaModal from '../components/EtiquetaModal'
 import OrdenCartaModal from '../components/OrdenCartaModal'
@@ -22,8 +24,13 @@ import { useAuth } from '../store/auth'
 import ThemeToggle from '../components/ThemeToggle'
 import { KpiGrid } from '../components/ui/kpi-grid'
 import resolveMediaUrl from '../lib/resolveMediaUrl'
+import { descargarBlob } from '../lib/descargar'
+import LogoRemali from '../components/ui/logo-remali'
 import { waLink } from '../lib/whatsapp'
 import { useLang } from '../lib/i18n'
+
+/** Number laxo para métricas: null/''/basura → 0. */
+const num = (v: any) => Number(v) || 0
 
 /* ─────────── Tipos ─────────── */
 type Option = { id: number; nombre: string }
@@ -142,13 +149,15 @@ const MODALIDADES: { key: Modalidad; label: string; corto: string }[] = [
 const TIPO_COT_LABEL: Record<string, string> = { venta: 'Venta', renta: 'Renta', mixta: 'Venta y renta' }
 
 type CotizacionItem = { id: number; descripcion: string; cantidad: number; precio_unitario: string; subtotal: string; modalidad: Modalidad; modalidad_label: string }
+type CotizacionFoto = { id: number; imagen: string; orden: number }
 type Cotizacion = {
   id: number; folio: string; tipo: 'venta' | 'renta' | 'mixta'
   estado: 'borrador' | 'enviada' | 'aceptada' | 'rechazada'
   cliente_nombre: string; cliente_telefono: string; cliente_email?: string; empresa?: number | null; empresa_nombre?: string
   vigencia_dias: number; aplica_iva: boolean; notas: string
-  items: CotizacionItem[]; subtotal: string; subtotal_venta: string; subtotal_renta: string; iva: string; total: string
-  cliente_display: string; vigencia_hasta?: string | null; creada: string
+  items: CotizacionItem[]; fotos?: CotizacionFoto[]; subtotal: string; subtotal_venta: string; subtotal_renta: string; base: string; iva: string; total: string
+  cliente_display: string; vigencia_hasta?: string | null; vencida?: boolean; creada: string
+  token_publico?: string
   convertida?: boolean; venta_id?: number | null
   origen?: 'admin' | 'cliente'
   datos_solicitud?: { empresa?: string; obra?: { responsable?: string; direccion?: string; telefono?: string; email?: string } }
@@ -355,6 +364,9 @@ export default function Dashboard() {
   // Resumen (que no puede consultar) hasta que respondiera la API.
   const [section, setSection] = useState<Section>(seccionInicial)
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  // Menú colapsado a solo-iconos (riel), solo en desktop. Se recuerda entre visitas.
+  const [colapsado, setColapsado] = useState(() => { try { return localStorage.getItem('admin_sidebar_colapsado') === '1' } catch { return false } })
+  const toggleColapsado = () => setColapsado(v => { const n = !v; try { localStorage.setItem('admin_sidebar_colapsado', n ? '1' : '0') } catch { /* modo privado */ } return n })
   const [me, setMe] = useState<{
     id?: number; username?: string; email?: string; avatar_url?: string | null
     is_superuser?: boolean
@@ -374,7 +386,7 @@ export default function Dashboard() {
   const [ordenes, setOrdenes] = useState<OrdenReparacion[]>([])
   const [ordenAbrir, setOrdenAbrir] = useState<number | null>(null)
   const [solicitudes, setSolicitudes] = useState<SolicitudFactura[]>([])
-  const [cotizaciones, setCotizaciones] = useState<Cotizacion[]>([])
+  const [cotAbiertas, setCotAbiertas] = useState(0)
   const [ventas, setVentas] = useState<Venta[]>([])
   const [notifs, setNotifs] = useState<Notif[]>([])
   const [noLeidas, setNoLeidas] = useState(0)
@@ -417,12 +429,26 @@ export default function Dashboard() {
     setTimeout(() => setToast(null), 2600)
   }
 
+  /* Cargas de DINERO que fallaron. Sin esto, un 500 o un token vencido se ve
+     idéntico a "no hay ventas": el admin lee $0 y lo cree. El banner de arriba
+     lo hace visible y deja reintentar. Solo aplica a los loaders de dinero;
+     los demás (catálogos, notifs) fallan sin consecuencias que engañen. */
+  const [cargasFallidas, setCargasFallidas] = useState<string[]>([])
+  const marcarCarga = useCallback((k: string, ok: boolean) => {
+    setCargasFallidas(prev => {
+      const tiene = prev.includes(k)
+      if (ok && tiene) return prev.filter(x => x !== k)
+      if (!ok && !tiene) return [...prev, k]
+      return prev
+    })
+  }, [])
+
   const loadUsuarios = useCallback(() => {
     api.get<{ usuarios: UsuarioPanel[] }>('/usuarios/').then(r => setUsuarios(r.data?.usuarios || [])).catch(() => {})
   }, [])
   const loadMetrics = useCallback(() => {
-    api.get<DashMetrics>('/dashboard/metricas/').then(r => setMetrics(r.data || null)).catch(() => {})
-  }, [])
+    api.get<DashMetrics>('/dashboard/metricas/').then(r => { setMetrics(r.data || null); marcarCarga('métricas', true) }).catch(() => marcarCarga('métricas', false))
+  }, [marcarCarga])
   const loadEquipos = useCallback(() => {
     api.get<Equipo[]>('/equipos/').then(r => setEquipos(r.data || [])).catch(() => {})
   }, [])
@@ -435,8 +461,8 @@ export default function Dashboard() {
     api.get<Coupon[]>('/cupones/').then(r => setCoupons(r.data || [])).catch(() => {})
   }, [])
   const loadRentas = useCallback(() => {
-    api.get<{ rentas: RentaActiva[] }>('/rentas/?estado=activa').then(r => setRentas(r.data?.rentas || [])).catch(() => {})
-  }, [])
+    api.get<{ rentas: RentaActiva[] }>('/rentas/?estado=activa').then(r => { setRentas(r.data?.rentas || []); marcarCarga('rentas activas', true) }).catch(() => marcarCarga('rentas activas', false))
+  }, [marcarCarga])
   const loadUnidades = useCallback(() => {
     api.get<Unidad[]>('/unidades/').then(r => setUnidades(r.data || [])).catch(() => {})
   }, [])
@@ -447,14 +473,16 @@ export default function Dashboard() {
     api.get<OrdenReparacion[]>('/reparaciones/').then(r => setOrdenes(r.data || [])).catch(() => {})
   }, [])
   const loadFacturacion = useCallback(() => {
-    api.get<SolicitudFactura[]>('/facturacion/solicitudes/').then(r => setSolicitudes(r.data || [])).catch(() => {})
-  }, [])
+    api.get<SolicitudFactura[]>('/facturacion/solicitudes/').then(r => { setSolicitudes(r.data || []); marcarCarga('facturación', true) }).catch(() => marcarCarga('facturación', false))
+  }, [marcarCarga])
+  // Solo el conteo de "abiertas" para el badge del menú: la lista completa la
+  // pagina el propio módulo de cotizaciones, no el padre.
   const loadCotizaciones = useCallback(() => {
-    api.get<Cotizacion[]>('/cotizaciones/').then(r => setCotizaciones(r.data || [])).catch(() => {})
-  }, [])
+    api.get<{ abiertas: number }>('/cotizaciones/stats/').then(r => { setCotAbiertas(r.data?.abiertas || 0); marcarCarga('cotizaciones', true) }).catch(() => marcarCarga('cotizaciones', false))
+  }, [marcarCarga])
   const loadVentas = useCallback(() => {
-    api.get<{ ventas: Venta[] }>('/ventas/lista/').then(r => setVentas(r.data?.ventas || [])).catch(() => {})
-  }, [])
+    api.get<{ ventas: Venta[] }>('/ventas/lista/').then(r => { setVentas(r.data?.ventas || []); marcarCarga('ventas', true) }).catch(() => marcarCarga('ventas', false))
+  }, [marcarCarga])
   const loadEmpresas = useCallback(() => {
     api.get<Empresa[]>('/empresas/').then(r => setEmpresas(r.data || [])).catch(() => {})
   }, [])
@@ -617,7 +645,7 @@ export default function Dashboard() {
   }
   const ordenesAbiertas = ordenes.filter(o => o.estado !== 'entregada').length
   const facturasPendientes = solicitudes.filter(s => s.estado === 'pendiente').length
-  const cotizacionesAbiertas = cotizaciones.filter(c => c.estado === 'borrador' || c.estado === 'enviada').length
+  const cotizacionesAbiertas = cotAbiertas
   const navGroupsTodos: { title?: string; items: { key: Section; label: string; badge?: number; icon: React.ReactNode }[] }[] = [
     {
       items: [
@@ -794,7 +822,7 @@ export default function Dashboard() {
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" d="M4 6h16M4 12h16M4 18h16" /></svg>
           </button>
           <Link to="/" className="flex items-center gap-2 shrink-0">
-            <div className="w-8 h-8 rounded-[9px] bg-gold flex items-center justify-center text-white font-extrabold text-sm">R</div>
+            <LogoRemali className="w-8 h-8 text-ink" />
             <span className="font-extrabold tracking-tight text-[15px] hidden sm:block">REMALI</span>
           </Link>
           <div className="flex-1 min-w-0" />
@@ -945,16 +973,20 @@ export default function Dashboard() {
       <div className="flex-1 flex overflow-hidden">
 
         {/* SIDEBAR */}
-        <aside className={`w-64 flex-none p-2 fixed lg:static inset-y-0 left-0 z-50 transition-transform duration-300 lg:translate-x-0 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+        <aside className={`w-64 ${colapsado ? 'lg:w-[72px]' : 'lg:w-64'} flex-none p-2 fixed lg:static inset-y-0 left-0 z-50 transition-[transform,width] duration-300 ease-[cubic-bezier(0.23,1,0.32,1)] lg:translate-x-0 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
           <div className="h-full bg-surface border border-edge rounded-[20px] shadow-[0_1px_3px_rgba(33,29,22,0.04)] flex flex-col p-3.5 overflow-hidden">
             <button onClick={() => setSidebarOpen(false)} className="lg:hidden self-end text-mute hover:text-ink p-1 mb-1" aria-label="Cerrar menú">
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" d="M6 6l12 12M18 6L6 18" /></svg>
+            </button>
+            {/* Hamburguesa: colapsa/expande el menú a solo-iconos (solo desktop). */}
+            <button onClick={toggleColapsado} className={`hidden lg:flex items-center ${colapsado ? 'justify-center' : ''} w-9 h-9 rounded-lg text-mute hover:text-ink hover:bg-surface-2 transition-colors mb-2`} aria-label={colapsado ? 'Expandir menú' : 'Colapsar menú'} title={colapsado ? 'Expandir menú' : 'Colapsar menú'}>
+              <svg className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round"><path d="M4 6h16M4 12h16M4 18h16" /></svg>
             </button>
             <nav className="flex-1 overflow-y-auto flex flex-col gap-3">
               {navGroups.map((g, gi) => (
                 <div key={gi}>
                   {g.title && (
-                    <p className="px-2.5 pb-2 text-[11px] font-bold uppercase tracking-wider text-mute">{t(g.title)}</p>
+                    <p className={`px-2.5 pb-2 text-[11px] font-bold uppercase tracking-wider text-mute ${colapsado ? 'lg:hidden' : ''}`}>{t(g.title)}</p>
                   )}
                   <div className="flex flex-col gap-0.5">
                     {g.items.map(it => {
@@ -964,19 +996,22 @@ export default function Dashboard() {
                         <button
                           key={it.key}
                           onClick={() => go(it.key)}
-                          className={`group w-full flex items-center gap-2.5 px-3 py-2.5 rounded-[10px] text-sm transition-colors ${
+                          title={t(`sec.${it.key}.title`)}
+                          className={`group relative w-full flex items-center gap-2.5 px-3 py-2.5 rounded-[10px] text-sm transition-colors ${colapsado ? 'lg:justify-center lg:px-2' : ''} ${
                             active ? 'bg-gold-soft text-gold font-medium' : 'text-ink hover:bg-surface-2 font-normal'
                           }`}
                         >
                           <svg className={`w-[19px] h-[19px] shrink-0 transition-colors ${active ? 'text-gold' : 'text-mute group-hover:text-ink'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
                             {it.icon}
                           </svg>
-                          <span className="flex-1 text-left">{t(`sec.${it.key}.title`)}</span>
-                          {showBadge && (it.key === 'notificaciones' || it.key === 'mensajeria') && (
-                            <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[11px] font-bold flex items-center justify-center">
+                          <span className={`flex-1 text-left ${colapsado ? 'lg:hidden' : ''}`}>{t(`sec.${it.key}.title`)}</span>
+                          {showBadge && (it.key === 'notificaciones' || it.key === 'mensajeria') && (<>
+                            <span className={`min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[11px] font-bold flex items-center justify-center ${colapsado ? 'lg:hidden' : ''}`}>
                               {it.badge! > 9 ? '9+' : it.badge}
                             </span>
-                          )}
+                            {/* Colapsado: puntito rojo sobre el icono en lugar del número. */}
+                            <span className={`absolute top-1.5 right-2 w-2.5 h-2.5 rounded-full bg-red-500 ring-2 ring-surface hidden ${colapsado ? 'lg:block' : ''}`} />
+                          </>)}
                         </button>
                       )
                     })}
@@ -985,16 +1020,16 @@ export default function Dashboard() {
               ))}
             </nav>
             <div className="border-t border-edge pt-3.5 mt-2">
-              <div className="flex items-center gap-2 px-1 mb-1.5">
-                <img alt="profile-user" src={resolveMediaUrl(me?.avatar_url) || '/assets/user.png'} className="w-8 h-8 rounded-full object-cover bg-surface-2" />
-                <div className="min-w-0">
+              <div className={`flex items-center gap-2 px-1 mb-1.5 ${colapsado ? 'lg:justify-center' : ''}`}>
+                <img alt="profile-user" src={resolveMediaUrl(me?.avatar_url) || '/assets/user.png'} className="w-8 h-8 rounded-full object-cover bg-surface-2 shrink-0" />
+                <div className={`min-w-0 ${colapsado ? 'lg:hidden' : ''}`}>
                   <p className="text-[13px] font-bold text-ink truncate">{me?.username || 'admin'}</p>
                   <p className="text-[11px] text-mute truncate">{me?.email}</p>
                 </div>
               </div>
-              <button onClick={() => { logout(); nav('/login') }} className="w-full flex items-center gap-2 px-2 py-2 rounded-lg text-[13px] font-semibold text-mute hover:text-red-500 hover:bg-red-500/5 transition-colors">
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.7"><path strokeLinecap="round" strokeLinejoin="round" d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4m7 14l5-5m0 0l-5-5m5 5H9" /></svg>
-                Cerrar sesión
+              <button onClick={() => { logout(); nav('/login') }} title="Cerrar sesión" className={`w-full flex items-center gap-2 px-2 py-2 rounded-lg text-[13px] font-semibold text-mute hover:text-red-500 hover:bg-red-500/5 transition-colors ${colapsado ? 'lg:justify-center' : ''}`}>
+                <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.7"><path strokeLinecap="round" strokeLinejoin="round" d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4m7 14l5-5m0 0l-5-5m5 5H9" /></svg>
+                <span className={colapsado ? 'lg:hidden' : ''}>Cerrar sesión</span>
               </button>
             </div>
           </div>
@@ -1017,6 +1052,22 @@ export default function Dashboard() {
             <h1 className="text-[26px] sm:text-[28px] font-extrabold tracking-tight text-ink leading-tight">{t(`sec.${section}.title`)}</h1>
             <p className="text-[15px] text-mute mt-1.5">{t(`sec.${section}.sub`)}</p>
           </div>
+
+          {/* Cargas de dinero que fallaron: sin este aviso, los totales en $0
+              parecen reales. Reintentar relanza solo los loaders afectados. */}
+          {cargasFallidas.length > 0 && (
+            <div className="mb-5 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-[13.5px]">
+              <svg className="w-[18px] h-[18px] text-amber-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v4m0 4h.01M10.3 4.3L2.6 18a2 2 0 001.7 3h15.4a2 2 0 001.7-3L13.7 4.3a2 2 0 00-3.4 0z" /></svg>
+              <span className="text-ink font-semibold">No se pudo cargar: {cargasFallidas.join(', ')}.</span>
+              <span className="text-mute">Los totales pueden verse en $0 sin serlo.</span>
+              <button
+                onClick={() => { loadMetrics(); loadVentas(); loadRentas(); loadFacturacion(); loadCotizaciones() }}
+                className="ml-auto px-3.5 py-1.5 rounded-lg bg-amber-500/20 text-amber-700 dark:text-amber-400 font-bold hover:bg-amber-500/30 transition-colors"
+              >
+                Reintentar
+              </button>
+            </div>
+          )}
           {section === 'resumen' && (
             <Resumen
               equipos={equipos} categorias={categorias}
@@ -1051,7 +1102,7 @@ export default function Dashboard() {
             <FacturacionAdmin solicitudes={solicitudes} reload={loadFacturacion} notify={notify} />
           )}
           {section === 'cotizaciones' && (
-            <CotizacionesAdmin cotizaciones={cotizaciones} empresas={empresas} reload={loadCotizaciones} notify={notify} />
+            <CotizacionesAdmin empresas={empresas} notify={notify} />
           )}
           {section === 'catalogos' && (
             <CatalogosAdmin
@@ -1148,7 +1199,6 @@ function Resumen({ equipos, rentas, unidades, ventas, me, go, metrics }: {
   me: { username?: string; email?: string } | null; go: (s: Section) => void
   metrics: DashMetrics | null
 }) {
-  const num = (v: any) => Number(v) || 0
   const money0 = (n: number) => '$' + Math.round(n).toLocaleString('en-US')
 
   // Reloj en vivo
@@ -1477,7 +1527,6 @@ function EquiposAdmin({ equipos, categorias, tipos, marcas, reload, notify }: {
   const [cantidad, setCantidad] = useState('1')
   const editing = Boolean(form.id)
 
-  const num = (v: any) => Number(v) || 0
   const filtrados = equipos.filter(e => {
     if (!q.trim()) return true
     const t = `${e.modelo} ${e.categoria?.nombre || ''} ${e.marca?.nombre || ''} ${e.tipo?.nombre || ''}`.toLowerCase()
@@ -1490,17 +1539,22 @@ function EquiposAdmin({ equipos, categorias, tipos, marcas, reload, notify }: {
   const puedeEditar = puede('editar_catalogo')   // el técnico consulta el catálogo, no lo cambia
 
   function openNew() { setForm(empty); setImageFile(null); setFichaFile(null); setCond('seminueva'); setCantidad('1'); setFormOpen(true) }
-  function openEdit(e: Equipo) { setForm({ ...e }); setImageFile(null); setFichaFile(null); setFormOpen(true) }
+  function openEdit(e: Equipo) { setForm({ ...e }); setCond(((e as any).condicion as 'nueva' | 'seminueva') || 'nueva'); setImageFile(null); setFichaFile(null); setFormOpen(true) }
 
   async function save() {
     if (!form.modelo.trim()) { notify('El modelo es obligatorio', 'err'); return }
+    // Venta exige al menos una característica (con ella se arma la ficha del cliente).
+    if (cond === 'nueva' && !(form.especificaciones || []).some(s => s.etiqueta.trim() && s.valor.trim())) {
+      notify('Un equipo de venta necesita al menos una característica', 'err'); return
+    }
     setSaving(true)
     const fd = new FormData()
     fd.append('modelo', form.modelo)
     if (form.descripcion) fd.append('descripcion', form.descripcion)
-    // Un producto que se da de alta como NUEVO solo se vende: no se mandan
-    // precios de renta aunque hayan quedado escritos antes de cambiar la condición.
-    const soloVenta = !editing && cond === 'nueva'
+    // La condición define el modo del equipo: nueva = venta, seminueva = renta.
+    fd.append('condicion', cond)
+    // Nueva solo se vende: no se mandan precios de renta aunque hayan quedado escritos.
+    const soloVenta = cond === 'nueva'
     const camposPrecio = soloVenta
       ? (['precio_venta'] as const)
       : (['precio_dia', 'precio_semana', 'precio_mes', 'precio_venta'] as const)
@@ -1715,40 +1769,40 @@ function EquiposAdmin({ equipos, categorias, tipos, marcas, reload, notify }: {
                 <textarea className={`${input} resize-none`} rows={2} value={form.descripcion || ''} onChange={e => setForm({ ...form, descripcion: e.target.value })} placeholder="Características del equipo" />
               </div>
               {/* Al crear: la condición define qué precios aplican (nueva = solo venta) */}
-              {!editing && (
-                <div className="rounded-2xl border border-gold/20 bg-gold-soft/50 p-4">
-                  <p className="text-[11px] font-semibold uppercase tracking-wide text-gold mb-1">Inventario inicial</p>
-                  <p className="text-xs text-mute mb-3">Se generarán unidades con su código y QR. Las <b>seminuevas</b> se rentan y venden; las <b>nuevas</b> solo se venden.</p>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className={label}>Condición</label>
-                      <select className={input} value={cond} onChange={e => setCond(e.target.value as any)}>
-                        <option value="seminueva" className="bg-surface">Seminueva (renta + venta)</option>
-                        <option value="nueva" className="bg-surface">Nueva (solo venta)</option>
-                      </select>
-                    </div>
+              <div className="rounded-2xl border border-gold/20 bg-gold-soft/50 p-4">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-gold mb-1">Condición</p>
+                <p className="text-xs text-mute mb-3"><b>Nueva</b> → se vende. <b>Seminueva</b> → se renta. Define en qué sección del catálogo aparece.</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className={label}>Condición</label>
+                    <select className={input} value={cond} onChange={e => setCond(e.target.value as any)}>
+                      <option value="seminueva" className="bg-surface">Seminueva (renta)</option>
+                      <option value="nueva" className="bg-surface">Nueva (venta)</option>
+                    </select>
+                  </div>
+                  {!editing && (
                     <div>
                       <label className={label}>Cantidad de unidades</label>
                       <input type="number" min={1} max={100} className={input} value={cantidad} onChange={e => setCantidad(e.target.value)} />
                     </div>
-                  </div>
+                  )}
                 </div>
-              )}
+              </div>
 
-              {/* Precios: los de renta solo aplican si el equipo se renta (seminueva).
-                  Al editar se muestran todos, porque el producto puede tener unidades mixtas. */}
+              {/* Renta → precios de renta; venta → solo su precio de venta. El precio
+                  de venta de un equipo de RENTA es interno (el público no lo ve). */}
               <div className="grid grid-cols-2 gap-3">
-                {(editing || cond === 'seminueva') && (<>
+                {cond === 'seminueva' && (<>
                   <div><label className={label}>Precio / día</label><input type="number" className={input} value={form.precio_dia ?? ''} onChange={e => setForm({ ...form, precio_dia: e.target.value })} placeholder="0.00" /></div>
                   <div><label className={label}>Precio / semana</label><input type="number" className={input} value={form.precio_semana ?? ''} onChange={e => setForm({ ...form, precio_semana: e.target.value })} placeholder="0.00" /></div>
                   <div><label className={label}>Precio / mes</label><input type="number" className={input} value={form.precio_mes ?? ''} onChange={e => setForm({ ...form, precio_mes: e.target.value })} placeholder="0.00" /></div>
                 </>)}
-                <div className={editing || cond === 'seminueva' ? '' : 'col-span-2'}>
-                  <label className={label}>Precio venta</label>
+                <div className={cond === 'seminueva' ? '' : 'col-span-2'}>
+                  <label className={label}>Precio venta{cond === 'seminueva' ? ' (interno)' : ''}</label>
                   <input type="number" className={input} value={form.precio_venta ?? ''} onChange={e => setForm({ ...form, precio_venta: e.target.value })} placeholder="0.00" />
                 </div>
-                {!editing && cond === 'nueva' && (
-                  <p className="col-span-2 text-[11px] text-mute -mt-1">Las unidades <b>nuevas</b> solo se venden, por eso no se piden precios de renta.</p>
+                {cond === 'nueva' && (
+                  <p className="col-span-2 text-[11px] text-mute -mt-1">Las <b>nuevas</b> solo se venden, por eso no se piden precios de renta.</p>
                 )}
               </div>
               <div className="grid grid-cols-1 gap-3">
@@ -1766,6 +1820,8 @@ function EquiposAdmin({ equipos, categorias, tipos, marcas, reload, notify }: {
                   <img src={resolveMediaUrl(form.imagen)} alt="" className="mt-3 w-20 h-20 object-cover rounded-lg" />
                 )}
               </div>
+              {/* La ficha técnica (PDF) es solo para equipos de VENTA. */}
+              {cond === 'nueva' && (
               <div>
                 <label className={label}>Ficha técnica <span className="text-mute font-normal normal-case">(PDF — la que descarga el cliente)</span></label>
                 <input type="file" accept="application/pdf,.pdf" onChange={e => setFichaFile(e.target.files?.[0] || null)}
@@ -1779,12 +1835,13 @@ function EquiposAdmin({ equipos, categorias, tipos, marcas, reload, notify }: {
                     </a>
                   ))}
               </div>
+              )}
 
               {/* Especificaciones técnicas: se muestran en la página del producto */}
               <div className="rounded-2xl border border-edge p-4">
                 <div className="flex items-center justify-between mb-1">
-                  <label className={`${label} !mb-0`}>Especificaciones técnicas</label>
-                  <span className="text-[11px] text-mute">Se muestran en la ficha del producto</span>
+                  <label className={`${label} !mb-0`}>Especificaciones técnicas{cond === 'nueva' && <span className="text-red-400"> *</span>}</label>
+                  <span className="text-[11px] text-mute">{cond === 'nueva' ? 'Obligatorias para venta' : 'Se muestran en la ficha del producto'}</span>
                 </div>
                 {specs.length > 0 && (
                   <div className="space-y-2 mt-3">
@@ -1854,6 +1911,7 @@ type Unidad = {
   equipo_info?: {
     id: number; modelo: string; imagen: string | null
     precio_dia: string | null; precio_semana: string | null; precio_mes: string | null; precio_venta: string | null
+    condicion?: 'nueva' | 'seminueva'; modo?: 'venta' | 'renta'
   } | null
   renta_activa: null | {
     id: number; cliente: string; telefono_cliente: string; direccion: string
@@ -2198,11 +2256,15 @@ function RentModal({ unit, equipo, onClose, onDone, notify }: {
   const [obraId, setObraId] = useState('')
   const [requiereFactura, setRequiereFactura] = useState(false)
   const [factura, setFactura] = useState<FacturaData>(FACTURA_VACIA)
+  const [clientes, setClientes] = useState<{ id: number; nombre: string; email: string }[]>([])
+  const [usuarioId, setUsuarioId] = useState('')
   const [busy, setBusy] = useState(false)
   const [ticketUrl, setTicketUrl] = useState<string | null>(null)
 
   useEffect(() => {
     api.get('/empresas/').then(r => setEmpresas(Array.isArray(r.data) ? r.data : (r.data?.results || []))).catch(() => {})
+    // Cuentas de cliente, para vincular la renta a su panel ("Tus rentas").
+    api.get<{ clientes: { id: number; nombre: string; email: string }[] }>('/clientes-lookup/').then(r => setClientes(r.data.clientes || [])).catch(() => {})
   }, [])
   useEffect(() => {
     if (!empresaId) { setObras([]); setObraId(''); return }
@@ -2245,7 +2307,7 @@ function RentModal({ unit, equipo, onClose, onDone, notify }: {
       inventario_id: unit.id, modalidad, duracion: Number(duracion) || 1,
       cliente: cliente.trim(), telefono_cliente: telefono.trim(), direccion: direccion.trim(),
       fecha_inicio: fechaInicio || undefined,
-      empresa_id: empresaId || undefined, obra_id: obraId || undefined,
+      empresa_id: empresaId || undefined, obra_id: obraId || undefined, usuario_id: usuarioId || undefined,
       descuento: Number(descuento) || 0, deposito: Number(deposito) || 0,
       requiere_factura: requiereFactura, factura,
     })
@@ -2282,6 +2344,15 @@ function RentModal({ unit, equipo, onClose, onDone, notify }: {
               <select className={input} value={obraId} onChange={e => elegirObra(e.target.value)}>
                 <option value="" className="bg-surface">— Sin obra —</option>
                 {obras.map(o => <option key={o.id} value={o.id} className="bg-surface">{o.nombre}</option>)}
+              </select>
+            </div>
+          )}
+          {clientes.length > 0 && (
+            <div>
+              <label className={label}>Cuenta del cliente <span className="text-mute font-normal normal-case">(opcional — para que la vea en "Tus rentas")</span></label>
+              <select className={input} value={usuarioId} onChange={e => setUsuarioId(e.target.value)}>
+                <option value="" className="bg-surface">— Sin vincular —</option>
+                {clientes.map(c => <option key={c.id} value={c.id} className="bg-surface">{c.nombre}{c.email ? ` · ${c.email}` : ''}</option>)}
               </select>
             </div>
           )}
@@ -2976,7 +3047,7 @@ function EvidenciasRenta({ rentaId }: { rentaId: number }) {
 }
 
 function RentaDetalleModal({ renta: r, onClose, onTicket }: { renta: RentaFull; onClose: () => void; onTicket: () => void }) {
-  const money = (v?: string | number) => `$${Number(v || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}`
+  const money = formatMoney
   const esObra = !!r.obra
   const encargado = esObra ? (r.obra?.responsable || r.cliente) : undefined
   const cliente = !esObra ? (r.cliente || r.cliente_nombre) : undefined
@@ -4469,7 +4540,6 @@ function VenderRefaccionModal({ refaccion, notify, onClose, onSold }: {
 function RefaccionesAdmin({ refacciones, reload, notify }: {
   refacciones: Refaccion[]; reload: () => void; notify: (m: string, t?: 'ok' | 'err') => void
 }) {
-  const num = (v: any) => Number(v) || 0
   const empty = { nombre: '', descripcion: '', precio_venta: '', stock: '0', stock_minimo: '0', para_venta: false, ubicacion: '', codigo_barras: '' }
   const [q, setQ] = useState('')
   const [formOpen, setFormOpen] = useState(false)
@@ -4658,7 +4728,13 @@ const OR_ESTADOS: { key: OrdenReparacion['estado']; label: string; cls: string; 
   { key: 'entregada', label: 'Entregada', cls: 'bg-surface-2 text-mute', dot: '#6B7280' },
 ]
 const orEstadoMeta = (e: string) => OR_ESTADOS.find(x => x.key === e) || OR_ESTADOS[0]
-const orMoney = (v: any) => '$' + (Number(v) || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })
+const orMoney = formatMoney
+// Una MÁQUINA PROPIA no se "recibe" ni se "entrega": sus estados son internos y su
+// total es un COSTO (no un cobro). Estas ayudas diferencian el flujo por tipo.
+const OR_LABEL_INTERNA: Record<string, string> = { recibida: 'Abierta', proceso: 'En reparación', terminada: 'Terminada', entregada: 'Terminada' }
+const orLabel = (e: string, tipo?: string) => tipo === 'interna' ? (OR_LABEL_INTERNA[e] || e) : (OR_ESTADOS.find(x => x.key === e)?.label || e)
+const orPasos = (tipo?: string) => tipo === 'interna' ? OR_ESTADOS.filter(x => x.key !== 'entregada') : OR_ESTADOS
+const esFinal = (o: { tipo: string; estado: string }) => o.tipo === 'interna' ? o.estado === 'terminada' : o.estado === 'entregada'
 
 function ReparacionesAdmin({ ordenes, refacciones, unidades, empresas, reload, notify, abrirId, onAbierto }: {
   ordenes: OrdenReparacion[]; refacciones: Refaccion[]; unidades: Unidad[]; empresas: Empresa[]
@@ -4679,9 +4755,10 @@ function ReparacionesAdmin({ ordenes, refacciones, unidades, empresas, reload, n
     else { api.get<OrdenReparacion>(`/reparaciones/${abrirId}/`).then(r => setDetalle(r.data)).catch(() => {}).finally(() => onAbierto?.()) }
   }, [abrirId, ordenes, onAbierto])
 
-  const abiertas = ordenes.filter(o => o.estado !== 'entregada').length
-  const terminadas = ordenes.filter(o => o.estado === 'terminada').length
-  const facturado = ordenes.filter(o => o.estado === 'entregada').reduce((a, o) => a + (Number(o.total) || 0), 0)
+  const abiertas = ordenes.filter(o => !esFinal(o)).length
+  // Facturado = solo lo que se cobra a CLIENTES; las internas son costo, no ingreso.
+  const facturado = ordenes.filter(o => o.tipo !== 'interna' && o.estado === 'entregada').reduce((a, o) => a + (Number(o.total) || 0), 0)
+  const costoInterno = ordenes.filter(o => o.tipo === 'interna' && o.estado === 'terminada').reduce((a, o) => a + (Number(o.total) || 0), 0)
 
   const filtradas = ordenes.filter(o => {
     if (filtro !== 'todas' && o.estado !== filtro) return false
@@ -4699,8 +4776,8 @@ function ReparacionesAdmin({ ordenes, refacciones, unidades, empresas, reload, n
         items={[
           { label: 'Órdenes totales', value: String(ordenes.length), tone: 'default' },
           { label: 'Abiertas', value: String(abiertas), tone: 'gold', emphasis: abiertas > 0 },
-          { label: 'Terminadas', value: String(terminadas), tone: 'default' },
-          { label: 'Facturado (entregadas)', value: orMoney(facturado), tone: 'default' },
+          { label: 'Facturado (clientes)', value: orMoney(facturado), tone: 'default' },
+          { label: 'Costo interno', value: orMoney(costoInterno), tone: 'default' },
         ]}
       />
 
@@ -4747,11 +4824,15 @@ function ReparacionesAdmin({ ordenes, refacciones, unidades, empresas, reload, n
                   <tr key={o.id} className="hover:bg-surface-2 transition-colors cursor-pointer" onClick={() => setDetalle(o)}>
                     <td className="px-5 py-3 font-mono text-[13px] font-bold text-ink whitespace-nowrap">{o.folio}</td>
                     <td className="px-3 py-3">
-                      <p className="text-sm font-semibold text-ink">{o.cliente_display}</p>
-                      {o.cliente_telefono && <p className="text-[11px] text-mute">{o.cliente_telefono}</p>}
+                      {o.tipo === 'interna'
+                        ? <p className="text-sm font-medium text-mute italic">Máquina propia</p>
+                        : <>
+                          <p className="text-sm font-semibold text-ink">{o.cliente_display}</p>
+                          {o.cliente_telefono && <p className="text-[11px] text-mute">{o.cliente_telefono}</p>}
+                        </>}
                     </td>
                     <td className="px-3 py-3 text-sm text-ink max-w-[220px] truncate">{o.equipo_display}</td>
-                    <td className="px-3 py-3"><span className={`inline-flex items-center gap-1.5 text-[11px] font-bold px-2 py-0.5 rounded-full ${m.cls}`}><span className="w-1.5 h-1.5 rounded-full" style={{ background: m.dot }} />{m.label}</span></td>
+                    <td className="px-3 py-3"><span className={`inline-flex items-center gap-1.5 text-[11px] font-bold px-2 py-0.5 rounded-full ${m.cls}`}><span className="w-1.5 h-1.5 rounded-full" style={{ background: m.dot }} />{orLabel(o.estado, o.tipo)}</span></td>
                     <td className="px-3 py-3 text-sm font-bold text-price text-right whitespace-nowrap">{orMoney(o.total)}</td>
                     <td className="px-3 py-3 text-[13px] text-mute whitespace-nowrap">{fechaCorta(o.fecha_recibida)}</td>
                     <td className="px-5 py-3 text-right" onClick={e => e.stopPropagation()}>
@@ -4856,9 +4937,10 @@ function NuevaOrdenModal({ empresas, unidades, notify, onClose, onCreated }: {
               <label className={label}>Unidad propia *</label>
               <select className={input} value={form.unidad} onChange={e => setForm({ ...form, unidad: e.target.value })} autoFocus>
                 <option value="">— Selecciona una unidad —</option>
-                {unidades.map(u => <option key={u.id} value={u.id}>{u.codigo} · {u.equipo_modelo || u.equipo_info?.modelo || ''}</option>)}
+                {/* Solo máquinas de RENTA (seminuevas). Las nuevas se venden, no se reparan aquí. */}
+                {unidades.filter(u => (u.equipo_info?.modo ?? (u.condicion === 'seminueva' ? 'renta' : 'venta')) === 'renta').map(u => <option key={u.id} value={u.id}>{u.codigo} · {u.equipo_modelo || u.equipo_info?.modelo || ''}</option>)}
               </select>
-              <p className="text-[11px] text-mute mt-1.5">Reparación interna de una máquina del negocio. No requiere datos de cliente.</p>
+              <p className="text-[11px] text-mute mt-1.5">Solo máquinas de <b>renta</b> (las nuevas se venden, no se reparan aquí). No requiere datos de cliente.</p>
             </div>
           )}
 
@@ -4911,7 +4993,7 @@ function OrdenDetalleModal({ orden, refacciones, notify, onClose, onChanged, onP
 
   function cambiarEstado(estado: OrdenReparacion['estado']) {
     api.patch<OrdenReparacion>(`/reparaciones/${o.id}/`, { estado })
-      .then(r => { apply(r.data); notify(`Estado: ${orEstadoMeta(estado).label}`) })
+      .then(r => { apply(r.data); notify(`Estado: ${orLabel(estado, o.tipo)}`) })
       .catch(() => notify('No se pudo cambiar el estado', 'err'))
   }
 
@@ -4936,7 +5018,8 @@ function OrdenDetalleModal({ orden, refacciones, notify, onClose, onChanged, onP
       .catch(() => notify('No se pudo quitar', 'err'))
   }
 
-  const curIdx = OR_ESTADOS.findIndex(e => e.key === o.estado)
+  const pasos = orPasos(o.tipo)
+  const curIdx = pasos.findIndex(e => e.key === o.estado)
   const totalOrden = (Number(o.total_refacciones) || 0) + (Number(mano) || 0)
   const inp = 'w-full border border-edge rounded-[9px] px-[13px] py-[11px] text-[13px] bg-surface-2 text-ink placeholder-mute focus:outline-none focus:border-gold focus:bg-surface transition-colors'
   const inpSide = 'w-full border border-edge rounded-[9px] px-[13px] py-[11px] text-[13.5px] bg-surface text-ink placeholder-mute focus:outline-none focus:border-gold transition-colors'
@@ -4956,15 +5039,15 @@ function OrdenDetalleModal({ orden, refacciones, notify, onClose, onChanged, onP
 
         {/* Stepper */}
         <div className="px-7 pb-5 border-b border-edge flex items-center overflow-x-auto shrink-0">
-          {OR_ESTADOS.map((e, i) => {
+          {pasos.map((e, i) => {
             const done = i <= curIdx
             return (
-              <div key={e.key} className={`flex items-center flex-none ${i === OR_ESTADOS.length - 1 ? '' : ''}`}>
+              <div key={e.key} className="flex items-center flex-none">
                 <button onClick={() => cambiarEstado(e.key)} className="flex items-center gap-2 flex-none group">
                   <span className={`w-[22px] h-[22px] rounded-full border-[1.5px] text-[11px] font-extrabold flex items-center justify-center transition-colors ${done ? 'bg-ink border-ink text-surface' : 'bg-surface border-edge text-mute group-hover:border-ink'}`}>{i + 1}</span>
-                  <span className={`text-[12.5px] font-bold whitespace-nowrap transition-colors ${done ? 'text-ink' : 'text-mute group-hover:text-ink'}`}>{e.label}</span>
+                  <span className={`text-[12.5px] font-bold whitespace-nowrap transition-colors ${done ? 'text-ink' : 'text-mute group-hover:text-ink'}`}>{orLabel(e.key, o.tipo)}</span>
                 </button>
-                {i < OR_ESTADOS.length - 1 && <div className={`h-[1.5px] w-[60px] mx-2.5 shrink-0 ${i < curIdx ? 'bg-ink' : 'bg-edge'}`} />}
+                {i < pasos.length - 1 && <div className={`h-[1.5px] w-[60px] mx-2.5 shrink-0 ${i < curIdx ? 'bg-ink' : 'bg-edge'}`} />}
               </div>
             )
           })}
@@ -5038,7 +5121,7 @@ function OrdenDetalleModal({ orden, refacciones, notify, onClose, onChanged, onP
             <div className={`${capLabel} mb-2.5`}>RESUMEN</div>
             <div className="flex justify-between text-[12.5px] text-mute mb-1.5"><span>Refacciones</span><span>{orMoney(o.total_refacciones)}</span></div>
             <div className="flex justify-between text-[12.5px] text-mute mb-3.5"><span>Mano de obra</span><span>{orMoney(mano)}</span></div>
-            <div className="border-t border-edge pt-3 flex justify-between text-[17px] font-extrabold text-ink mb-[18px]"><span>Total</span><span className="text-price">{orMoney(totalOrden)}</span></div>
+            <div className="border-t border-edge pt-3 flex justify-between text-[17px] font-extrabold text-ink mb-[18px]"><span>{o.tipo === 'interna' ? 'Costo interno' : 'Total'}</span><span className="text-price">{orMoney(totalOrden)}</span></div>
 
             <div className="flex flex-col gap-2">
               <button onClick={guardarInfo} disabled={savingInfo} className="py-[11px] rounded-[9px] bg-gold text-white font-bold text-[13.5px] hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center justify-center gap-2">
@@ -5325,59 +5408,102 @@ const COT_ESTADOS: { key: Cotizacion['estado']; label: string; cls: string; dot:
 ]
 const cotEstadoMeta = (e: string) => COT_ESTADOS.find(x => x.key === e) || COT_ESTADOS[0]
 
-function CotizacionesAdmin({ cotizaciones, empresas, reload, notify }: {
-  cotizaciones: Cotizacion[]; empresas: Empresa[]; reload: () => void; notify: (m: string, t?: 'ok' | 'err') => void
+type CotStats = { total: number; borrador: number; enviada: number; aceptada: number; rechazada: number; vencida: number; abiertas: number; monto_aceptado: string }
+type PaginaCot = { count: number; next: string | null; previous: string | null; results: Cotizacion[] }
+const COT_PAGE_SIZE = 25
+
+/** Lista de cotizaciones: paginada y filtrada EN EL SERVIDOR, para que aguante
+ *  miles sin cargar todo al navegador. Los conteos vienen del endpoint de stats. */
+function CotizacionesAdmin({ empresas, notify }: {
+  empresas: Empresa[]; notify: (m: string, t?: 'ok' | 'err') => void
 }) {
   const [q, setQ] = useState('')
-  const [filtro, setFiltro] = useState<'todas' | Cotizacion['estado']>('todas')
-  const [nuevaOpen, setNuevaOpen] = useState(false)
+  const [qDebounced, setQDebounced] = useState('')
+  const [filtro, setFiltro] = useState<'todas' | 'vencida' | Cotizacion['estado']>('todas')
+  const [page, setPage] = useState(1)
+  const [data, setData] = useState<PaginaCot>({ count: 0, next: null, previous: null, results: [] })
+  const [stats, setStats] = useState<CotStats | null>(null)
+  const [cargando, setCargando] = useState(false)
   const [detalle, setDetalle] = useState<Cotizacion | null>(null)
+  const [recienCreada, setRecienCreada] = useState(false)
+  const [creando, setCreando] = useState(false)
   const [carta, setCarta] = useState<Cotizacion | null>(null)
   const [ticketVentaId, setTicketVentaId] = useState<number | null>(null)
 
-  const abiertas = cotizaciones.filter(c => c.estado === 'borrador' || c.estado === 'enviada').length
-  const aceptadas = cotizaciones.filter(c => c.estado === 'aceptada')
-  const montoAceptado = aceptadas.reduce((a, c) => a + (Number(c.total) || 0), 0)
+  const cargarStats = useCallback(() => {
+    api.get<CotStats>('/cotizaciones/stats/').then(r => setStats(r.data)).catch(() => {})
+  }, [])
+  const cargarLista = useCallback(() => {
+    setCargando(true)
+    const params = new URLSearchParams({ page: String(page) })
+    if (qDebounced.trim()) params.set('q', qDebounced.trim())
+    if (filtro !== 'todas') params.set('estado', filtro)
+    api.get<PaginaCot>(`/cotizaciones/?${params.toString()}`)
+      .then(r => setData(r.data)).catch(() => {}).finally(() => setCargando(false))
+  }, [page, qDebounced, filtro])
+  const recargar = useCallback(() => { cargarLista(); cargarStats() }, [cargarLista, cargarStats])
 
-  const filtradas = cotizaciones.filter(c => {
-    if (filtro !== 'todas' && c.estado !== filtro) return false
-    const t = q.trim().toLowerCase()
-    if (!t) return true
-    return `${c.folio} ${c.cliente_display} ${c.empresa_nombre || ''}`.toLowerCase().includes(t)
-  })
+  // Búsqueda con debounce: al teclear se espera un poco y se vuelve a la página 1.
+  useEffect(() => {
+    const t = setTimeout(() => { setQDebounced(q); setPage(1) }, 350)
+    return () => clearTimeout(t)
+  }, [q])
+  useEffect(() => { setPage(1) }, [filtro])           // cambiar de pestaña → página 1
+  useEffect(() => { cargarLista() }, [cargarLista])   // montaje + cambios de página/búsqueda/filtro
+  useEffect(() => { cargarStats() }, [cargarStats])   // conteos al montar
+
+  function crearNueva() {
+    setCreando(true)
+    api.post<Cotizacion>('/cotizaciones/', { tipo: 'venta', aplica_iva: true, vigencia_dias: 15 })
+      .then(r => { setRecienCreada(true); setDetalle(r.data) })
+      .catch(err => notify(err?.response?.data?.detalle || 'No se pudo crear', 'err'))
+      .finally(() => setCreando(false))
+  }
+
   const fechaCorta = (v?: string | null) => (v ? new Date(v).toLocaleDateString('es-MX', { day: '2-digit', month: 'short' }) : '—')
+  const totalPaginas = Math.max(1, Math.ceil(data.count / COT_PAGE_SIZE))
+  const cuenta = (k: string): number | undefined => (stats ? (stats as any)[k] : undefined)
+  const pestanas: { key: string; label: string; n?: number }[] = [
+    { key: 'todas', label: 'Todas', n: stats?.total },
+    ...COT_ESTADOS.map(e => ({ key: e.key, label: e.label, n: cuenta(e.key) })),
+    { key: 'vencida', label: 'Vencidas', n: stats?.vencida },
+  ]
 
   return (
     <div className="space-y-4">
       <KpiGrid
         gridClassName="grid-cols-2 lg:grid-cols-4"
         items={[
-          { label: 'Cotizaciones', value: String(cotizaciones.length), tone: 'default' },
-          { label: 'Abiertas', value: String(abiertas), tone: 'gold', emphasis: abiertas > 0 },
-          { label: 'Aceptadas', value: String(aceptadas.length), tone: 'default' },
-          { label: 'Monto aceptado', value: orMoney(montoAceptado), tone: 'default' },
+          { label: 'Cotizaciones', value: stats ? String(stats.total) : '—', tone: 'default' },
+          { label: 'Abiertas', value: stats ? String(stats.abiertas) : '—', tone: 'gold', emphasis: (stats?.abiertas ?? 0) > 0 },
+          { label: 'Aceptadas', value: stats ? String(stats.aceptada) : '—', tone: 'default' },
+          { label: 'Monto aceptado', value: orMoney(stats?.monto_aceptado ?? 0), tone: 'default' },
         ]}
       />
 
       <Card className="overflow-hidden">
         <div className="flex items-center gap-3 p-4 border-b border-edge flex-wrap">
-          <h3 className="font-bold text-ink shrink-0">Cotizaciones <span className="text-mute font-normal">({filtradas.length})</span></h3>
+          <h3 className="font-bold text-ink shrink-0">Cotizaciones <span className="text-mute font-normal">({data.count})</span></h3>
           <div className="flex-1" />
           <div className="relative w-full sm:w-56">
             <svg className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-mute pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><circle cx="9" cy="9" r="6" /><path d="M15 15l3 3" strokeLinecap="round" /></svg>
             <input value={q} onChange={e => setQ(e.target.value)} placeholder="Buscar folio o cliente…" className="w-full bg-surface-2 border border-edge rounded-full pl-9 pr-3 py-2 text-sm text-ink placeholder-mute focus:outline-none focus:border-gold/50 transition-colors" />
           </div>
-          <button onClick={() => setNuevaOpen(true)} className="shrink-0 inline-flex items-center gap-2 px-4 py-2 rounded-full bg-gold text-black text-sm font-bold hover:opacity-90 transition-opacity">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.2"><path strokeLinecap="round" d="M12 5v14M5 12h14" /></svg>
+          <button onClick={crearNueva} disabled={creando} className="shrink-0 inline-flex items-center gap-2 px-4 py-2 rounded-full bg-gold text-black text-sm font-bold hover:opacity-90 transition active:scale-[0.98] disabled:opacity-60">
+            {creando
+              ? <span className="w-4 h-4 border-2 border-black/30 border-t-black rounded-full animate-spin" />
+              : <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.2"><path strokeLinecap="round" d="M12 5v14M5 12h14" /></svg>}
             <span className="hidden sm:inline">Nueva cotización</span>
           </button>
         </div>
 
         <div className="flex items-center gap-2 px-4 py-3 border-b border-edge flex-wrap">
-          {([['todas', 'Todas'], ...COT_ESTADOS.map(e => [e.key, e.label] as const)] as const).map(([k, lbl]) => (
-            <button key={k} onClick={() => setFiltro(k as any)}
-              className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-colors ${filtro === k ? 'bg-ink text-surface' : 'bg-surface-2 text-mute hover:text-ink'}`}>
-              {lbl}{k !== 'todas' && <span className="ml-1.5 opacity-70">{cotizaciones.filter(c => c.estado === k).length}</span>}
+          {pestanas.map(p => (
+            <button key={p.key} onClick={() => setFiltro(p.key as any)}
+              className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-colors ${filtro === p.key
+                ? (p.key === 'vencida' ? 'bg-red-600 text-white' : 'bg-ink text-surface')
+                : 'bg-surface-2 text-mute hover:text-ink'}`}>
+              {p.label}{p.n !== undefined && <span className="ml-1.5 opacity-70">{p.n}</span>}
             </button>
           ))}
         </div>
@@ -5396,7 +5522,7 @@ function CotizacionesAdmin({ cotizaciones, empresas, reload, notify }: {
               </tr>
             </thead>
             <tbody className="divide-y divide-edge">
-              {filtradas.map(c => {
+              {data.results.map(c => {
                 const m = cotEstadoMeta(c.estado)
                 return (
                   <tr key={c.id} className="hover:bg-surface-2 transition-colors cursor-pointer" onClick={() => setDetalle(c)}>
@@ -5410,8 +5536,13 @@ function CotizacionesAdmin({ cotizaciones, empresas, reload, notify }: {
                     </td>
                     <td className="px-3 py-3 text-[13px] text-mute">{TIPO_COT_LABEL[c.tipo] || c.tipo}</td>
                     <td className="px-3 py-3 text-sm font-bold text-price text-right whitespace-nowrap">{orMoney(c.total)}</td>
-                    <td className="px-3 py-3 text-[13px] text-mute whitespace-nowrap">{fechaCorta(c.vigencia_hasta)}</td>
-                    <td className="px-3 py-3"><span className={`inline-flex items-center gap-1.5 text-[11px] font-bold px-2 py-0.5 rounded-full ${m.cls}`}><span className="w-1.5 h-1.5 rounded-full" style={{ background: m.dot }} />{m.label}</span></td>
+                    <td className={`px-3 py-3 text-[13px] whitespace-nowrap ${c.vencida ? 'text-red-600 dark:text-red-500 font-semibold' : 'text-mute'}`}>{fechaCorta(c.vigencia_hasta)}</td>
+                    <td className="px-3 py-3">
+                      <div className="flex items-center gap-1.5">
+                        <span className={`inline-flex items-center gap-1.5 text-[11px] font-bold px-2 py-0.5 rounded-full ${m.cls}`}><span className="w-1.5 h-1.5 rounded-full" style={{ background: m.dot }} />{m.label}</span>
+                        {c.vencida && <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-red-500/10 text-red-600 dark:text-red-500">Vencida</span>}
+                      </div>
+                    </td>
                     <td className="px-5 py-3 text-right" onClick={e => e.stopPropagation()}>
                       <div className="flex items-center justify-end gap-2">
                         <button onClick={() => setDetalle(c)} className="h-8 px-3 rounded-lg border border-edge text-mute text-xs font-semibold hover:text-ink hover:border-gold/40 transition-colors">Abrir</button>
@@ -5425,122 +5556,164 @@ function CotizacionesAdmin({ cotizaciones, empresas, reload, notify }: {
               })}
             </tbody>
           </table>
-          {filtradas.length === 0 && <p className="text-sm text-mute py-14 text-center">{q || filtro !== 'todas' ? 'Sin cotizaciones con ese criterio.' : 'Aún no hay cotizaciones. Crea la primera con “Nueva cotización”.'}</p>}
+          {data.results.length === 0 && <p className="text-sm text-mute py-14 text-center">{cargando ? 'Cargando…' : (qDebounced || filtro !== 'todas' ? 'Sin cotizaciones con ese criterio.' : 'Aún no hay cotizaciones. Crea la primera con “Nueva cotización”.')}</p>}
         </div>
+
+        {data.count > COT_PAGE_SIZE && (
+          <div className="flex items-center justify-between gap-3 px-4 py-3 border-t border-edge">
+            <span className="text-[12px] text-mute">Página {page} de {totalPaginas} · {data.count} en total</span>
+            <div className="flex gap-2">
+              <button disabled={!data.previous || cargando} onClick={() => setPage(p => Math.max(1, p - 1))} className="px-3 py-1.5 rounded-lg border border-edge text-xs font-semibold text-ink hover:bg-surface-2 transition active:scale-[0.98] disabled:opacity-40">Anterior</button>
+              <button disabled={!data.next || cargando} onClick={() => setPage(p => p + 1)} className="px-3 py-1.5 rounded-lg border border-edge text-xs font-semibold text-ink hover:bg-surface-2 transition active:scale-[0.98] disabled:opacity-40">Siguiente</button>
+            </div>
+          </div>
+        )}
       </Card>
 
-      {nuevaOpen && <NuevaCotizacionModal empresas={empresas} notify={notify} onClose={() => setNuevaOpen(false)} onCreated={(c) => { setNuevaOpen(false); reload(); setDetalle(c) }} />}
-      {detalle && <CotizacionDetalleModal cotizacion={detalle} notify={notify} onClose={() => setDetalle(null)} onChanged={reload} onPrint={(c) => setCarta(c)} onConvertida={(id) => { setDetalle(null); reload(); setTicketVentaId(id) }} />}
+      {detalle && <CotizacionDetalleModal cotizacion={detalle} empresas={empresas} recienCreada={recienCreada} notify={notify} onClose={() => { setDetalle(null); setRecienCreada(false); recargar() }} onChanged={recargar} onPrint={(c) => setCarta(c)} onConvertida={(id) => { setDetalle(null); setRecienCreada(false); recargar(); setTicketVentaId(id) }} />}
       {carta && <CotizacionCartaModal cotizacion={carta} onClose={() => setCarta(null)} />}
       {ticketVentaId && <TicketModal url={`/ventas/${ticketVentaId}/comprobante/`} onClose={() => setTicketVentaId(null)} />}
     </div>
   )
 }
 
-function NuevaCotizacionModal({ empresas, notify, onClose, onCreated }: {
-  empresas: Empresa[]; notify: (m: string, t?: 'ok' | 'err') => void; onClose: () => void; onCreated: (c: Cotizacion) => void
+/** Control segmentado con indicador deslizante (estilo iOS). Columnas iguales
+ *  para posicionar el indicador por índice sin medir el DOM; anima al cambiar. */
+function Segmentado({ opciones, valor, onChange, disabled, className = '' }: {
+  opciones: { key: string; label: string }[]
+  valor: string; onChange: (k: string) => void; disabled?: boolean; className?: string
 }) {
-  const [form, setForm] = useState({ tipo: 'venta' as 'venta' | 'renta', cliente_nombre: '', cliente_telefono: '', cliente_email: '', empresa: '', vigencia_dias: '15', aplica_iva: true, notas: '' })
-  const [saving, setSaving] = useState(false)
-
-  // Al elegir empresa, precargar su correo (si tiene) como destino sugerido.
-  function elegirEmpresa(id: string) {
-    const em = empresas.find(x => String(x.id) === id)
-    setForm(f => ({ ...f, empresa: id, cliente_email: f.cliente_email || em?.email || '' }))
-  }
-
-  function crear() {
-    if (!form.cliente_nombre.trim() && !form.empresa) { notify('Indica el cliente o la empresa', 'err'); return }
-    setSaving(true)
-    const payload: any = {
-      tipo: form.tipo, cliente_nombre: form.cliente_nombre.trim(), cliente_telefono: form.cliente_telefono.trim(),
-      cliente_email: form.cliente_email.trim(),
-      vigencia_dias: Number(form.vigencia_dias) || 15, aplica_iva: form.aplica_iva, notas: form.notas.trim(),
-    }
-    if (form.empresa) payload.empresa = Number(form.empresa)
-    api.post<Cotizacion>('/cotizaciones/', payload)
-      .then(r => { notify(`Cotización ${r.data.folio} creada`); onCreated(r.data) })
-      .catch(err => notify(err?.response?.data?.detalle || 'No se pudo crear', 'err'))
-      .finally(() => setSaving(false))
-  }
-
+  const idx = opciones.findIndex(o => o.key === valor)
   return (
-    <div className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm flex items-start justify-center p-4 sm:p-6 overflow-y-auto" onClick={onClose}>
-      <div onClick={(e: React.MouseEvent) => e.stopPropagation()} className="w-full sm:max-w-[820px] bg-surface border border-edge rounded-2xl overflow-hidden sm:my-auto max-h-[92vh] flex flex-col shadow-[0_20px_50px_rgba(33,29,22,0.18)]">
-        <div className="px-6 py-4 border-b border-edge flex items-center justify-between shrink-0">
-          <h2 className="font-bold text-ink">Nueva cotización</h2>
-          <button onClick={onClose} className="text-mute hover:text-ink p-1" aria-label="Cerrar"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" d="M6 6l12 12M18 6L6 18" /></svg></button>
-        </div>
-        <div className="flex-1 overflow-y-auto p-6 space-y-4">
-          <div className="grid grid-cols-2 gap-2">
-            <button onClick={() => setForm({ ...form, tipo: 'venta' })} className={`px-3 py-2.5 rounded-xl border text-sm font-semibold transition-colors ${form.tipo === 'venta' ? 'border-gold bg-gold-soft text-gold' : 'border-edge text-mute hover:text-ink'}`}>Venta</button>
-            <button onClick={() => setForm({ ...form, tipo: 'renta' })} className={`px-3 py-2.5 rounded-xl border text-sm font-semibold transition-colors ${form.tipo === 'renta' ? 'border-gold bg-gold-soft text-gold' : 'border-edge text-mute hover:text-ink'}`}>Renta</button>
-          </div>
-          <div>
-            <label className={label}>Empresa (opcional)</label>
-            <select className={input} value={form.empresa} onChange={e => elegirEmpresa(e.target.value)}>
-              <option value="">— Cliente particular —</option>
-              {empresasActivas(empresas).map(e => <option key={e.id} value={e.id}>{e.nombre}</option>)}
-            </select>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div><label className={label}>Cliente</label><input className={input} value={form.cliente_nombre} onChange={e => setForm({ ...form, cliente_nombre: e.target.value })} placeholder="Nombre" autoFocus /></div>
-            <div><label className={label}>Teléfono</label><input className={input} value={form.cliente_telefono} onChange={e => setForm({ ...form, cliente_telefono: e.target.value })} placeholder="Opcional" /></div>
-          </div>
-          {/* Correo destino para el envío (el envío se conectará más adelante) */}
-          <div>
-            <label className={label}>Correo para enviar la cotización</label>
-            <input type="email" className={input} value={form.cliente_email} onChange={e => setForm({ ...form, cliente_email: e.target.value })} placeholder="cliente@correo.com" />
-            <p className="text-[11px] text-mute mt-1">Se guarda para poder enviarla por correo (envío disponible próximamente).</p>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div><label className={label}>Vigencia (días)</label><input type="number" min={1} className={input} value={form.vigencia_dias} onChange={e => setForm({ ...form, vigencia_dias: e.target.value })} /></div>
-            <label className="flex items-end gap-2 pb-2 cursor-pointer">
-              <input type="checkbox" checked={form.aplica_iva} onChange={e => setForm({ ...form, aplica_iva: e.target.checked })} className="w-4 h-4 accent-[#B8872E]" />
-              <span className="text-sm text-ink">Sumar IVA (16%)</span>
-            </label>
-          </div>
-          <div><label className={label}>Notas</label><textarea className={`${input} resize-none`} rows={2} value={form.notas} onChange={e => setForm({ ...form, notas: e.target.value })} placeholder="Condiciones, entrega, etc." /></div>
-        </div>
-        <div className="px-6 py-4 border-t border-edge flex gap-3 shrink-0">
-          <button onClick={onClose} className="flex-1 py-2.5 rounded-full border border-edge text-ink text-sm font-semibold hover:bg-surface-2 transition-colors">Cancelar</button>
-          <button onClick={crear} disabled={saving} className="flex-1 py-2.5 rounded-full bg-gold text-black font-bold text-sm hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center justify-center gap-2">
-            {saving ? <span className="w-4 h-4 border-2 border-black/30 border-t-black rounded-full animate-spin" /> : null}
-            Crear cotización
-          </button>
-        </div>
-      </div>
+    <div className={`relative grid w-full rounded-xl border border-edge bg-surface-2 p-1 ${disabled ? 'opacity-60' : ''} ${className}`}
+      style={{ gridTemplateColumns: `repeat(${opciones.length}, minmax(0, 1fr))` }}>
+      {idx >= 0 && (
+        <span aria-hidden className="absolute top-1 bottom-1 rounded-lg bg-ink shadow-sm"
+          style={{ left: 4, width: `calc((100% - 8px) / ${opciones.length})`, transform: `translateX(${idx * 100}%)`, transition: 'transform 180ms cubic-bezier(0.23, 1, 0.32, 1)' }} />
+      )}
+      {opciones.map(o => (
+        <button key={o.key} type="button" disabled={disabled} onClick={() => onChange(o.key)}
+          className={`relative z-10 px-4 py-1.5 rounded-lg text-[13px] font-semibold transition-colors active:scale-[0.98] disabled:active:scale-100 ${valor === o.key ? 'text-surface' : 'text-mute hover:text-ink'}`}>
+          {o.label}
+        </button>
+      ))}
     </div>
   )
 }
 
-function CotizacionDetalleModal({ cotizacion, notify, onClose, onChanged, onPrint, onConvertida }: {
-  cotizacion: Cotizacion; notify: (m: string, t?: 'ok' | 'err') => void
+/** Switch (toggle) con el mismo estilo que el resto del sistema: pista azul y
+ *  perilla que desliza. Mejor objetivo de toque en móvil que un checkbox. */
+function Switch({ checked, onChange, disabled, label }: {
+  checked: boolean; onChange: (v: boolean) => void; disabled?: boolean; label?: string
+}) {
+  return (
+    <button type="button" role="switch" aria-checked={checked} aria-label={label} disabled={disabled}
+      onClick={() => onChange(!checked)}
+      className={`relative w-10 h-[22px] rounded-full flex-none transition-colors active:scale-95 disabled:opacity-50 ${checked ? 'bg-[#2B6CF6]' : 'bg-ink/15'}`}>
+      <span className={`absolute top-[2px] w-[18px] h-[18px] rounded-full bg-white shadow-[0_1px_2px_rgba(0,0,0,0.2)] transition-all ${checked ? 'left-[20px]' : 'left-[2px]'}`} />
+    </button>
+  )
+}
+
+function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, onClose, onChanged, onPrint, onConvertida }: {
+  cotizacion: Cotizacion; empresas: Empresa[]; recienCreada?: boolean; notify: (m: string, t?: 'ok' | 'err') => void
   onClose: () => void; onChanged: () => void; onPrint: (c: Cotizacion) => void; onConvertida: (ventaId: number) => void
 }) {
   const [c, setC] = useState<Cotizacion>(cotizacion)
   const [notas, setNotas] = useState(cotizacion.notas || '')
   const [email, setEmail] = useState(cotizacion.cliente_email || '')
+  const [clienteNombre, setClienteNombre] = useState(cotizacion.cliente_nombre || '')
+  const [clienteTel, setClienteTel] = useState(cotizacion.cliente_telefono || '')
+  const [empresaSel, setEmpresaSel] = useState(String(cotizacion.empresa || ''))
   const [vigencia, setVigencia] = useState(String(cotizacion.vigencia_dias || 15))
   const [aplicaIva, setAplicaIva] = useState(cotizacion.aplica_iva)
   const [savingInfo, setSavingInfo] = useState(false)
   const [busy, setBusy] = useState(false)
-  const [desc, setDesc] = useState('')
-  const [cant, setCant] = useState('1')
-  const [precio, setPrecio] = useState('')
-  // Preselección de la nueva partida según de qué es la cotización.
-  const [modalidad, setModalidad] = useState<Modalidad>(cotizacion.tipo === 'renta' ? 'dia' : 'venta')
+  const [fotos, setFotos] = useState<CotizacionFoto[]>(cotizacion.fotos || [])
+  const [subiendoFotos, setSubiendoFotos] = useState(false)
+  const [zoomFoto, setZoomFoto] = useState<CotizacionFoto | null>(null)
+  const [descargando, setDescargando] = useState(false)
+  const [enviando, setEnviando] = useState(false)
+  const fotoInput = useRef<HTMLInputElement>(null)
 
   function apply(nuevo: Cotizacion) { setC(nuevo); onChanged() }
 
+  // Cierre: si es un borrador recién creado y quedó vacío (sin partidas, sin
+  // cliente ni fotos), se descarta para no dejar cotizaciones huérfanas.
+  function cerrar() {
+    // Una cotización sin cliente o sin conceptos no tiene sentido: un borrador
+    // recién creado así NO se conserva. Con datos parciales se pregunta antes de
+    // descartar; totalmente vacío se descarta en silencio.
+    if (recienCreada) {
+      const sinCliente = !clienteNombre.trim() && !empresaSel
+      const sinConceptos = c.items.length === 0
+      if (sinCliente || sinConceptos) {
+        const algo = clienteNombre.trim() || empresaSel || c.items.length > 0 || fotos.length > 0
+        const faltan = [sinCliente && 'el nombre del cliente', sinConceptos && 'al menos un concepto'].filter(Boolean).join(' y ')
+        if (algo && !confirm(`No se puede guardar la cotización sin ${faltan}. ¿Descartarla?`)) return
+        api.delete(`/cotizaciones/${c.id}/`).then(() => onChanged()).catch(() => {})
+        onClose()
+        return
+      }
+    }
+    if (!bloqueada) {
+      // Guardar en silencio los datos del cliente/notas/vigencia si cambiaron,
+      // para no perderlos al cerrar sin haber pulsado "Guardar".
+      const dirty = notas !== (c.notas || '') || email.trim() !== (c.cliente_email || '')
+        || clienteNombre.trim() !== (c.cliente_nombre || '') || clienteTel.trim() !== (c.cliente_telefono || '')
+        || (Number(vigencia) || 15) !== c.vigencia_dias || aplicaIva !== c.aplica_iva
+      if (dirty) {
+        api.patch(`/cotizaciones/${c.id}/`, {
+          notas, cliente_email: email.trim(), cliente_nombre: clienteNombre.trim(), cliente_telefono: clienteTel.trim(),
+          vigencia_dias: Number(vigencia) || 15, aplica_iva: aplicaIva,
+        }).then(() => onChanged()).catch(() => {})
+      }
+    }
+    onClose()
+  }
+  // Tipo de la cotización: solo se elige mientras está vacía; con partidas se
+  // deriva de sus modalidades (venta/renta/mixta).
+  function cambiarTipo(tipo: string) {
+    api.patch<Cotizacion>(`/cotizaciones/${c.id}/`, { tipo })
+      .then(r => apply(r.data))
+      .catch(err => notify(errorMsg(err, 'No se pudo cambiar el tipo'), 'err'))
+  }
+  function cambiarEmpresa(id: string) {
+    setEmpresaSel(id)
+    const em = empresas.find(x => String(x.id) === id)
+    const payload: any = { empresa: id ? Number(id) : null }
+    // Al elegir una empresa, el cliente ES la empresa: se rellenan sus datos y el
+    // nombre queda bloqueado (no se captura otro). El teléfono va solo a dígitos.
+    if (em) {
+      const tel = (em.telefono || '').replace(/\D/g, '').slice(0, 10)
+      setClienteNombre(em.nombre || ''); payload.cliente_nombre = em.nombre || ''
+      setClienteTel(tel); payload.cliente_telefono = tel
+      if (em.email) { setEmail(em.email); payload.cliente_email = em.email }
+    }
+    api.patch<Cotizacion>(`/cotizaciones/${c.id}/`, payload)
+      .then(r => apply(r.data))
+      .catch(err => notify(errorMsg(err, 'No se pudo asignar la empresa'), 'err'))
+  }
+
   function guardarInfo() {
+    // Un borrador nuevo no se guarda incompleto (sin cliente o sin conceptos).
+    if (recienCreada && (!(clienteNombre.trim() || empresaSel) || c.items.length === 0)) {
+      notify('Agrega el nombre del cliente y al menos un concepto', 'err'); return
+    }
     setSavingInfo(true)
-    api.patch<Cotizacion>(`/cotizaciones/${c.id}/`, { notas, cliente_email: email.trim(), vigencia_dias: Number(vigencia) || 15, aplica_iva: aplicaIva })
-      .then(r => { apply(r.data); notify('Cotización actualizada') })
+    api.patch<Cotizacion>(`/cotizaciones/${c.id}/`, {
+      notas, cliente_email: email.trim(), cliente_nombre: clienteNombre.trim(), cliente_telefono: clienteTel.trim(),
+      vigencia_dias: Number(vigencia) || 15, aplica_iva: aplicaIva,
+    })
+      .then(r => { apply(r.data); notify('Cotización guardada'); onClose() })
       .catch(() => notify('No se pudo guardar', 'err'))
       .finally(() => setSavingInfo(false))
   }
   function cambiarEstado(estado: Cotizacion['estado']) {
+    // Para marcarla como Enviada o Aceptada debe tener cliente y conceptos.
+    if ((estado === 'enviada' || estado === 'aceptada') && (!(clienteNombre.trim() || empresaSel) || c.items.length === 0)) {
+      notify('Agrega el nombre del cliente y al menos un concepto primero', 'err'); return
+    }
     api.patch<Cotizacion>(`/cotizaciones/${c.id}/`, { estado })
       .then(r => { apply(r.data); notify(`Estado: ${cotEstadoMeta(estado).label}`) })
       .catch(() => notify('No se pudo cambiar el estado', 'err'))
@@ -5550,13 +5723,19 @@ function CotizacionDetalleModal({ cotizacion, notify, onClose, onChanged, onPrin
       .then(r => { apply(r.data.cotizacion); notify('La estás atendiendo') })
       .catch(err => notify(err?.response?.data?.detalle || 'No se pudo tomar', 'err'))
   }
+  // "+ Agregar partida": crea una fila en blanco que luego se edita en línea.
   function agregarItem() {
-    if (!desc.trim()) { notify('Escribe la descripción', 'err'); return }
     setBusy(true)
-    api.post<Cotizacion>(`/cotizaciones/${c.id}/items/`, { descripcion: desc.trim(), cantidad: Math.max(1, Number(cant) || 1), precio_unitario: Number(precio) || 0, modalidad })
-      .then(r => { apply(r.data); setDesc(''); setCant('1'); setPrecio(''); notify('Partida agregada') })
+    api.post<Cotizacion>(`/cotizaciones/${c.id}/items/`, { descripcion: 'Nueva partida', cantidad: 1, precio_unitario: 0, modalidad: c.tipo === 'renta' ? 'dia' : 'venta' })
+      .then(r => apply(r.data))
       .catch(err => notify(err?.response?.data?.detalle || 'No se pudo agregar', 'err'))
       .finally(() => setBusy(false))
+  }
+  // Edición en línea de una partida: manda solo el campo que cambió.
+  function editarItem(itemId: number, campo: 'descripcion' | 'cantidad' | 'precio_unitario', valor: string | number) {
+    api.patch<Cotizacion>(`/cotizaciones/${c.id}/items/${itemId}/`, { [campo]: valor })
+      .then(r => apply(r.data))
+      .catch(err => notify(errorMsg(err, 'No se pudo actualizar la partida'), 'err'))
   }
   function cambiarModalidad(itemId: number, m: Modalidad) {
     api.patch<Cotizacion>(`/cotizaciones/${c.id}/items/${itemId}/modalidad/`, { modalidad: m })
@@ -5570,6 +5749,7 @@ function CotizacionDetalleModal({ cotizacion, notify, onClose, onChanged, onPrin
   }
   function convertir() {
     if (c.convertida && c.venta_id) { onConvertida(c.venta_id); return }
+    if (!clienteNombre.trim() && !empresaSel) { notify('Agrega el nombre del cliente antes de convertir', 'err'); return }
     if (c.items.length === 0) { notify('Agrega al menos una partida antes de convertir', 'err'); return }
     const aviso = c.tipo === 'mixta'
       ? `¿Crear la venta con las partidas de venta (${orMoney(c.subtotal_venta)})?\n\nLas partidas de renta NO se incluyen: esas se concretan desde Rentas eligiendo unidad y fechas.`
@@ -5582,22 +5762,106 @@ function CotizacionDetalleModal({ cotizacion, notify, onClose, onChanged, onPrin
       .finally(() => setBusy(false))
   }
 
+  // Las fotos van aparte de "Guardar": se suben/quitan al momento (multipart), y
+  // se reflejan en `c` para que la carta y el PDF que se imprimen las lleven.
+  function subirFotos(ev: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(ev.target.files || [])
+    ev.target.value = ''
+    if (!files.length) return
+    const fd = new FormData()
+    files.forEach(f => fd.append('imagenes', f))
+    setSubiendoFotos(true)
+    api.post<{ fotos: CotizacionFoto[] }>(`/cotizaciones/${c.id}/fotos/`, fd, { headers: { 'Content-Type': 'multipart/form-data' } })
+      .then(r => {
+        const nuevas = [...fotos, ...(r.data?.fotos || [])]
+        setFotos(nuevas); setC(p => ({ ...p, fotos: nuevas })); onChanged()
+        notify(`${r.data?.fotos?.length || 0} foto(s) agregada(s)`)
+      })
+      .catch(err => notify(errorMsg(err, 'No se pudieron subir las fotos'), 'err'))
+      .finally(() => setSubiendoFotos(false))
+  }
+  function quitarFoto(id: number) {
+    api.delete(`/cotizaciones/${c.id}/fotos/${id}/`)
+      .then(() => {
+        const nuevas = fotos.filter(f => f.id !== id)
+        setFotos(nuevas); setC(p => ({ ...p, fotos: nuevas })); onChanged()
+      })
+      .catch(err => notify(errorMsg(err, 'No se pudo quitar la foto'), 'err'))
+  }
+  // Descarga el PDF de reportlab (el mismo del correo), no una recreación del
+  // HTML: lo que baja el admin y lo que recibe el cliente son idénticos.
+  function descargarPDF() {
+    if (!(clienteNombre.trim() || empresaSel) || c.items.length === 0) {
+      notify('Agrega el cliente y al menos un concepto para generar el PDF', 'err'); return
+    }
+    setDescargando(true)
+    api.get(`/cotizaciones/${c.id}/pdf/`, { responseType: 'blob' })
+      .then(r => descargarBlob(r.data as Blob, `${c.folio || 'cotizacion'}.pdf`))
+      .catch(() => notify('No se pudo descargar el PDF', 'err'))
+      .finally(() => setDescargando(false))
+  }
+  // Enviar por correo: guarda primero (para que el servidor tenga el correo
+  // actual) y luego manda el PDF adjunto. El envío la marca como "Enviada".
+  function enviarCorreo() {
+    if (!email.trim()) { notify('Agrega el correo del cliente para enviarla', 'err'); return }
+    if (!(clienteNombre.trim() || empresaSel) || c.items.length === 0) { notify('Falta el cliente o los conceptos', 'err'); return }
+    setEnviando(true)
+    api.patch(`/cotizaciones/${c.id}/`, { cliente_email: email.trim(), cliente_nombre: clienteNombre.trim(), cliente_telefono: clienteTel.trim(), notas, vigencia_dias: Number(vigencia) || 15, aplica_iva: aplicaIva })
+      .then(() => api.post<{ detalle: string; cotizacion: Cotizacion }>(`/cotizaciones/${c.id}/enviar/`, {}))
+      .then(r => { apply(r.data.cotizacion); notify(r.data.detalle || 'Cotización enviada') })
+      .catch(err => notify(errorMsg(err, 'No se pudo enviar'), 'err'))
+      .finally(() => setEnviando(false))
+  }
+
   const m = cotEstadoMeta(c.estado)
+  // Ya convertida en venta: queda de solo lectura. Es el respaldo de esa venta,
+  // y editar partidas/precios desincronizaría su total y su ticket.
+  const bloqueada = Boolean(c.convertida)
+  const sub = Number(c.subtotal) || 0
+  // Venta: el precio ya incluye IVA → se desglosa. Renta: IVA solo si hay factura.
+  const esVenta = c.tipo === 'venta'
+  const baseMonto = esVenta ? sub / 1.16 : sub
+  const ivaMonto = esVenta ? sub - sub / 1.16 : (aplicaIva ? sub * 0.16 : 0)
+  const totalMonto = baseMonto + ivaMonto
+  // Debe tener cliente (nombre o empresa) y al menos un concepto para poder
+  // imprimirse o descargarse: un documento sin eso no sirve.
+  const completa = (clienteNombre.trim() !== '' || Boolean(empresaSel)) && c.items.length > 0
+  // Link público del PDF (para compartir por WhatsApp) y el mensaje armado.
+  const linkPdf = c.token_publico ? `${window.location.origin}/api/cotizaciones/publica/${c.token_publico}/pdf/` : ''
+  const msgWa = `Hola ${(clienteNombre.trim() || c.cliente_display || '').trim()}, le comparto su cotización ${c.folio} por ${orMoney(totalMonto)}${linkPdf ? `. Puede verla aquí: ${linkPdf}` : ''}.`
+  const waHref = (completa && clienteTel.trim().length === 10 && linkPdf) ? waLink(clienteTel.trim(), msgWa) : ''
+  // Celda editable en línea: parece texto, muestra fondo/anillo al enfocar.
+  const celda = 'w-full bg-transparent rounded-md px-2 py-1.5 text-sm text-ink placeholder-mute focus:outline-none focus:bg-surface-2 focus:ring-1 focus:ring-gold/40 transition disabled:opacity-60'
+  const labelCot = 'block text-[10.5px] font-bold uppercase tracking-[0.09em] text-mute mb-2'
   return (
-    <div className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm flex items-start justify-center p-0 sm:p-6 overflow-y-auto" onClick={onClose}>
+    <div className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm flex items-start justify-center p-0 sm:p-6 overflow-y-auto" onClick={cerrar}>
       <div onClick={(e: React.MouseEvent) => e.stopPropagation()} className="w-full sm:max-w-5xl my-0 sm:my-auto bg-surface border border-edge rounded-none sm:rounded-2xl shadow-[0_20px_50px_rgba(33,29,22,0.18)] min-h-screen sm:min-h-0">
-        <div className="px-6 py-4 border-b border-edge flex items-center justify-between gap-3 sticky top-0 bg-surface z-10 sm:rounded-t-2xl">
+        <div className="px-5 sm:px-7 py-4 sm:py-5 border-b border-edge flex items-start justify-between gap-4 sticky top-0 bg-surface z-10 sm:rounded-t-2xl">
           <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <span className="font-mono font-bold text-ink">{c.folio}</span>
-              <span className={`inline-flex items-center gap-1.5 text-[11px] font-bold px-2 py-0.5 rounded-full ${m.cls}`}><span className="w-1.5 h-1.5 rounded-full" style={{ background: m.dot }} />{m.label}</span>
+            <div className="flex items-center gap-2.5 flex-wrap">
+              <span className="font-mono font-bold text-ink text-lg tracking-tight">{c.folio}</span>
+              <span className={`inline-flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1 rounded-full ${m.cls}`}><span className="w-1.5 h-1.5 rounded-full" style={{ background: m.dot }} />{m.label}</span>
             </div>
-            <p className="text-[13px] text-mute truncate mt-0.5">{c.cliente_display} · {TIPO_COT_LABEL[c.tipo] || c.tipo}</p>
+            <p className="text-[14px] text-mute truncate mt-1">{c.cliente_display} · {TIPO_COT_LABEL[c.tipo] || c.tipo}</p>
           </div>
-          <button onClick={onClose} className="text-mute hover:text-ink p-1 shrink-0" aria-label="Cerrar"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" d="M6 6l12 12M18 6L6 18" /></svg></button>
+          <div className="flex items-start gap-3 sm:gap-4 shrink-0">
+            <div className="text-right">
+              <p className="text-[10px] font-bold uppercase tracking-[0.1em] text-mute">Total</p>
+              <p className="text-xl sm:text-[27px] font-extrabold text-ink tabular-nums leading-tight">{orMoney(totalMonto)}</p>
+            </div>
+            <button onClick={cerrar} className="text-mute hover:text-ink hover:bg-surface-2 p-1.5 rounded-lg transition active:scale-90 mt-0.5" aria-label="Cerrar"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" d="M6 6l12 12M18 6L6 18" /></svg></button>
+          </div>
         </div>
 
-        <div className="p-6 space-y-5">
+        <div className="px-5 sm:px-7 py-6 space-y-7 bg-surface">
+          {bloqueada && (
+            <div className="flex items-start gap-2.5 rounded-xl border border-emerald-500/25 bg-emerald-500/5 px-4 py-3">
+              <svg className="w-4 h-4 mt-0.5 shrink-0 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.9"><path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zM16 11V7a4 4 0 00-8 0v4" /></svg>
+              <p className="text-[12.5px] text-ink leading-relaxed">
+                Esta cotización ya se convirtió en venta, así que quedó <b>bloqueada</b>. Es el respaldo de esa venta; para cambiar algo, hazlo en la venta.
+              </p>
+            </div>
+          )}
           {c.origen === 'cliente' && (
             <div className="rounded-xl border border-blue-500/20 bg-blue-500/5 p-4">
               <div className="flex items-center justify-between gap-3 mb-2 flex-wrap">
@@ -5624,109 +5888,280 @@ function CotizacionDetalleModal({ cotizacion, notify, onClose, onChanged, onPrin
               </div>
             </div>
           )}
-          <div>
-            <label className={label}>Estado</label>
-            <div className="flex items-center gap-2 flex-wrap">
-              {COT_ESTADOS.map(e => (
-                <button key={e.key} onClick={() => cambiarEstado(e.key)} className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${c.estado === e.key ? 'border-transparent ' + e.cls : 'border-edge text-mute hover:text-ink'}`}>{e.label}</button>
-              ))}
+          {/* Estado (izquierda) + Tipo (derecha) en una fila */}
+          <div className="flex flex-col sm:flex-row sm:items-start gap-4 sm:gap-6">
+            <div className="flex-1 min-w-0">
+              <p className={labelCot}>Estado</p>
+              <Segmentado
+                opciones={COT_ESTADOS.map(e => ({ key: e.key, label: e.label }))}
+                valor={c.estado}
+                onChange={(k) => cambiarEstado(k as Cotizacion['estado'])}
+                disabled={bloqueada}
+                className="sm:max-w-[460px]"
+              />
+            </div>
+            <div className="sm:w-[260px] shrink-0">
+              <p className={labelCot}>Tipo</p>
+              <Segmentado
+                opciones={[{ key: 'venta', label: 'Venta' }, { key: 'renta', label: 'Renta' }]}
+                valor={c.tipo}
+                onChange={cambiarTipo}
+                disabled={bloqueada || c.items.length > 0}
+              />
+              {c.tipo === 'mixta' && <p className="text-[11px] text-mute mt-1.5">Mixta: venta + renta.</p>}
+              {c.items.length > 0 && c.tipo !== 'mixta' && <p className="text-[11px] text-mute mt-1.5">Se define por las partidas.</p>}
             </div>
           </div>
 
-          {/* Partidas */}
+          {/* Datos del cliente (arriba): para corregir un nombre/teléfono mal
+              capturado sin tener que rehacer la cotización. */}
           <div>
-            <div className="flex items-center justify-between mb-2">
-              <label className={`${label} mb-0`}>Partidas</label>
-              <span className="text-[11px] text-mute">Subtotal: <b className="text-ink">{orMoney(c.subtotal)}</b></span>
+            <p className={labelCot}>Cliente</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <select disabled={bloqueada} value={empresaSel} onChange={e => cambiarEmpresa(e.target.value)} className={`${input} sm:col-span-2 disabled:opacity-60`}>
+                <option value="">— Cliente particular —</option>
+                {empresasActivas(empresas).map(e => <option key={e.id} value={e.id}>{e.nombre}</option>)}
+              </select>
+              <input disabled={bloqueada || !!empresaSel} value={clienteNombre} onChange={e => setClienteNombre(e.target.value)}
+                title={empresaSel ? 'El nombre lo define la empresa seleccionada' : undefined}
+                className={`${input} disabled:opacity-60`} placeholder="Nombre del cliente" />
+              <div>
+                <input type="tel" inputMode="numeric" maxLength={10} disabled={bloqueada} value={clienteTel}
+                  onChange={e => setClienteTel(e.target.value.replace(/\D/g, '').slice(0, 10))}
+                  className={`${input} disabled:opacity-60`} placeholder="Teléfono (10 dígitos)" />
+                {clienteTel.length > 0 && clienteTel.length < 10 && <p className="text-[11px] text-red-600 dark:text-red-500 mt-1">Deben ser 10 dígitos.</p>}
+              </div>
+              <input type="email" disabled={bloqueada} value={email} onChange={e => setEmail(e.target.value)} className={`${input} sm:col-span-2 disabled:opacity-60`} placeholder="Correo (cliente@correo.com)" />
             </div>
-            <div className="border border-edge rounded-xl overflow-hidden">
-              {c.items.length === 0 && <p className="text-[13px] text-mute px-4 py-4 text-center">Sin partidas. Agrega conceptos abajo.</p>}
-              {c.items.map(it => (
-                <div key={it.id} className="flex items-center gap-3 px-4 py-2.5 border-b border-edge last:border-0">
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium text-ink truncate">{it.descripcion}</p>
-                    <p className="text-[11px] text-mute">{it.cantidad} × {orMoney(it.precio_unitario)}</p>
+          </div>
+
+          {/* Partidas: tabla editable en línea */}
+          <div>
+            <div className="flex items-center justify-between mb-2 gap-3">
+              <p className={`${labelCot} mb-0`}>Partidas</p>
+              {!bloqueada && <span className="text-[12px] text-mute">Toca cualquier celda para editar</span>}
+            </div>
+            <div className="rounded-xl border border-edge overflow-hidden">
+              <div className="overflow-x-auto">
+                <div className="min-w-[560px]">
+                  {/* Encabezado de columnas */}
+                  <div className="flex items-center gap-2 px-3 py-2.5 bg-surface-2 border-b border-edge text-[10.5px] font-bold uppercase tracking-[0.06em] text-mute">
+                    <div className="flex-1 min-w-0 pl-2">Concepto</div>
+                    <div className="w-32 shrink-0">Modalidad</div>
+                    <div className="w-16 shrink-0 text-center">Cant</div>
+                    <div className="w-28 shrink-0 text-right pr-2">P. Unit</div>
+                    <div className="w-6 shrink-0" />
                   </div>
-                  {/* La modalidad se corrige aquí: define si la partida se vende o se renta. */}
-                  <select
-                    value={it.modalidad} disabled={c.convertida}
-                    onChange={e => cambiarModalidad(it.id, e.target.value as Modalidad)}
-                    title="¿Esta partida se vende o se renta?"
-                    className={`shrink-0 text-[11px] font-bold rounded-md border px-1.5 py-1 ${it.modalidad === 'venta' ? 'border-emerald-500/30 text-emerald-600 bg-emerald-500/5' : 'border-blue-500/30 text-blue-600 bg-blue-500/5'} disabled:opacity-60`}>
-                    {MODALIDADES.map(m => <option key={m.key} value={m.key} className="bg-surface text-ink">{m.corto}</option>)}
-                  </select>
-                  <span className="text-sm font-bold text-ink whitespace-nowrap">{orMoney(it.subtotal)}</span>
-                  <button onClick={() => quitarItem(it.id)} title="Quitar" className="w-7 h-7 rounded-lg border border-red-500/20 text-red-400 hover:bg-red-500/10 transition-colors flex items-center justify-center shrink-0"><svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" d="M6 6l12 12M18 6L6 18" /></svg></button>
+                  {c.items.length === 0 && <div className="px-5 py-6 text-center text-[13px] text-mute">Sin partidas todavía.</div>}
+                  {c.items.map(it => (
+                    <div key={it.id} className="flex items-center gap-2 px-3 border-b border-edge last:border-0">
+                      <div className="flex-1 min-w-0 py-1">
+                        <input defaultValue={it.descripcion} disabled={bloqueada} placeholder="Concepto"
+                          onBlur={e => { const v = e.target.value.trim(); if (v && v !== it.descripcion) editarItem(it.id, 'descripcion', v) }}
+                          className={celda} />
+                      </div>
+                      <div className="w-32 shrink-0 py-1">
+                        <select value={it.modalidad} disabled={bloqueada} title="¿Se vende o se renta?"
+                          onChange={e => cambiarModalidad(it.id, e.target.value as Modalidad)}
+                          className={`${celda} cursor-pointer font-medium`}>
+                          {MODALIDADES.map(mm => <option key={mm.key} value={mm.key} className="bg-surface text-ink">{mm.corto}</option>)}
+                        </select>
+                      </div>
+                      <div className="w-16 shrink-0 py-1">
+                        <input type="number" min={1} defaultValue={it.cantidad} disabled={bloqueada}
+                          onBlur={e => { const v = Math.max(1, Number(e.target.value) || 1); if (v !== it.cantidad) editarItem(it.id, 'cantidad', v) }}
+                          className={`${celda} text-center`} />
+                      </div>
+                      <div className="w-28 shrink-0 py-1">
+                        <input type="number" min={0} step="0.01" defaultValue={it.precio_unitario} disabled={bloqueada}
+                          onBlur={e => { const v = Number(e.target.value) || 0; if (v !== Number(it.precio_unitario)) editarItem(it.id, 'precio_unitario', v) }}
+                          className={`${celda} text-right font-bold tabular-nums`} />
+                      </div>
+                      <div className="w-6 shrink-0 flex justify-center">
+                        {!bloqueada && (
+                          <button onClick={() => quitarItem(it.id)} title="Quitar" className="text-red-500 hover:bg-red-500/10 rounded p-1 transition active:scale-90">
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" d="M6 6l12 12M18 6L6 18" /></svg>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                  {!bloqueada && (
+                    <button onClick={agregarItem} disabled={busy} className="w-full flex items-center gap-2 px-5 py-3 text-[13px] font-bold text-gold hover:bg-gold-soft/60 transition active:scale-[0.995] disabled:opacity-50 border-t border-edge">
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.2"><path strokeLinecap="round" d="M12 5v14M5 12h14" /></svg>
+                      Agregar partida
+                    </button>
+                  )}
                 </div>
-              ))}
+              </div>
             </div>
+
             {c.tipo === 'mixta' && (
-              <p className="text-[11px] text-mute mt-2">
-                Lleva venta y renta: <b className="text-ink">{orMoney(c.subtotal_venta)}</b> de venta y <b className="text-ink">{orMoney(c.subtotal_renta)}</b> de renta.
-                Al convertir se crea la venta; la renta se concreta desde Rentas.
+              <p className="text-[11px] text-mute mt-2.5 leading-relaxed">
+                Lleva venta y renta: <b className="text-ink tabular-nums">{orMoney(c.subtotal_venta)}</b> de venta y <b className="text-ink tabular-nums">{orMoney(c.subtotal_renta)}</b> de renta. Al convertir se crea la venta; la renta se concreta desde Rentas.
               </p>
             )}
-            <div className="mt-3 p-3 rounded-xl bg-surface-2 border border-edge grid grid-cols-1 sm:grid-cols-[1fr_auto_auto_auto_auto] gap-2">
-              <input className={input} value={desc} onChange={e => setDesc(e.target.value)} placeholder="Descripción del concepto" />
-              <select className={`${input} sm:w-36`} value={modalidad} onChange={e => setModalidad(e.target.value as Modalidad)} title="¿Se vende o se renta?">
-                {MODALIDADES.map(m => <option key={m.key} value={m.key}>{m.label}</option>)}
-              </select>
-              <input type="number" min={1} className={`${input} sm:w-20`} value={cant} onChange={e => setCant(e.target.value)} title="Cantidad" />
-              <input type="number" className={`${input} sm:w-32`} value={precio} onChange={e => setPrecio(e.target.value)} placeholder="P. unit. (s/IVA)" />
-              <button onClick={agregarItem} disabled={busy} className="px-4 rounded-lg bg-ink text-surface text-xs font-bold hover:opacity-90 transition-opacity disabled:opacity-50">Agregar</button>
+
+            {/* Totales (derecha) + enviar al cliente (izquierda, aprovechando el hueco) */}
+            <div className="flex flex-col sm:flex-row sm:items-end gap-5 mt-5">
+              {!bloqueada && (
+                <div className="order-2 sm:order-1">
+                  <p className={labelCot}>Enviar al cliente</p>
+                  <div className="flex flex-wrap gap-2">
+                    <button type="button" onClick={enviarCorreo} disabled={enviando || !completa || !email.trim()}
+                      className="inline-flex items-center gap-2 px-4 py-2.5 rounded-full bg-ink text-surface text-sm font-bold hover:opacity-90 transition active:scale-[0.98] disabled:opacity-50">
+                      {enviando
+                        ? <span className="w-4 h-4 border-2 border-surface/30 border-t-surface rounded-full animate-spin" />
+                        : <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.8"><path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16v12H4z" /><path strokeLinecap="round" strokeLinejoin="round" d="M4 7l8 6 8-6" /></svg>}
+                      Enviar por correo
+                    </button>
+                    {waHref
+                      ? <a href={waHref} target="_blank" rel="noopener noreferrer"
+                          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-full bg-[#25D366] text-white text-sm font-bold hover:opacity-90 transition active:scale-[0.98]">
+                          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M17.5 14.4c-.3-.1-1.7-.8-1.9-.9-.3-.1-.5-.1-.7.1-.2.3-.7.9-.9 1.1-.2.2-.3.2-.6.1-.3-.1-1.2-.5-2.3-1.4-.9-.8-1.4-1.7-1.6-2-.2-.3 0-.5.1-.6.1-.1.3-.3.4-.5.1-.1.2-.3.2-.4.1-.2 0-.3 0-.5-.1-.1-.7-1.6-.9-2.2-.2-.6-.5-.5-.7-.5h-.6c-.2 0-.5.1-.8.4-.3.3-1 1-1 2.5s1.1 2.9 1.2 3.1c.1.2 2.1 3.2 5.1 4.5.7.3 1.3.5 1.7.6.7.2 1.4.2 1.9.1.6-.1 1.7-.7 2-1.4.2-.7.2-1.3.2-1.4-.1-.1-.3-.2-.6-.3zM12 2C6.5 2 2 6.5 2 12c0 1.8.5 3.5 1.3 5L2 22l5.1-1.3c1.4.8 3.1 1.2 4.9 1.2 5.5 0 10-4.5 10-10S17.5 2 12 2z" /></svg>
+                          WhatsApp
+                        </a>
+                      : <span title="Agrega el teléfono (10 dígitos) del cliente" className="inline-flex items-center gap-2 px-4 py-2.5 rounded-full bg-[#25D366]/40 text-white text-sm font-bold opacity-60 cursor-not-allowed">
+                          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M17.5 14.4c-.3-.1-1.7-.8-1.9-.9-.3-.1-.5-.1-.7.1-.2.3-.7.9-.9 1.1-.2.2-.3.2-.6.1-.3-.1-1.2-.5-2.3-1.4-.9-.8-1.4-1.7-1.6-2-.2-.3 0-.5.1-.6.1-.1.3-.3.4-.5.1-.1.2-.3.2-.4.1-.2 0-.3 0-.5-.1-.1-.7-1.6-.9-2.2-.2-.6-.5-.5-.7-.5h-.6c-.2 0-.5.1-.8.4-.3.3-1 1-1 2.5s1.1 2.9 1.2 3.1c.1.2 2.1 3.2 5.1 4.5.7.3 1.3.5 1.7.6.7.2 1.4.2 1.9.1.6-.1 1.7-.7 2-1.4.2-.7.2-1.3.2-1.4-.1-.1-.3-.2-.6-.3zM12 2C6.5 2 2 6.5 2 12c0 1.8.5 3.5 1.3 5L2 22l5.1-1.3c1.4.8 3.1 1.2 4.9 1.2 5.5 0 10-4.5 10-10S17.5 2 12 2z" /></svg>
+                          WhatsApp
+                        </span>}
+                  </div>
+                  <p className="text-[11px] text-mute mt-1.5 max-w-[340px]">Por correo va el PDF adjunto; por WhatsApp, un enlace para verlo. Enviar por correo la marca como “Enviada”.</p>
+                </div>
+              )}
+              <div className="order-1 sm:order-2 w-full sm:max-w-[320px] sm:ml-auto space-y-2.5">
+                <div className="flex items-center justify-between text-[14px]"><span className="text-mute">Subtotal</span><span className="text-ink tabular-nums font-medium">{orMoney(baseMonto)}</span></div>
+                <div className="flex items-center justify-between text-[14px] pb-2.5 border-b border-edge">
+                  {esVenta ? (
+                    /* Venta: el precio ya trae IVA, se desglosa siempre (sin toggle). */
+                    <span className="text-mute">IVA (16%) <span className="text-[11px]">· incluido</span></span>
+                  ) : (
+                    /* Renta: el IVA es opcional según si el cliente pide factura. */
+                    <div className={`flex items-center gap-2.5 ${bloqueada ? 'opacity-60' : ''}`}>
+                      <Switch checked={aplicaIva} disabled={bloqueada} onChange={setAplicaIva} label="¿Factura? (suma IVA)" />
+                      <span className="text-mute">¿Factura? (+IVA)</span>
+                    </div>
+                  )}
+                  <span className="text-ink tabular-nums font-medium">{orMoney(ivaMonto)}</span>
+                </div>
+                <div className="flex items-baseline justify-between">
+                  <span className="text-ink font-bold text-[15px]">Total</span>
+                  <span className="text-[22px] font-extrabold text-price tabular-nums leading-none">{orMoney(totalMonto)}</span>
+                </div>
+                {esVenta && <div className="flex items-center justify-between text-[11.5px] text-mute"><span>Pago de contado (−5%)</span><span className="tabular-nums">{orMoney(totalMonto * 0.95)}</span></div>}
+              </div>
             </div>
           </div>
 
-          {/* Config + totales */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div><label className={label}>Vigencia (días)</label><input type="number" min={1} className={input} value={vigencia} onChange={e => setVigencia(e.target.value)} /></div>
-            <label className="flex items-end gap-2 pb-2.5 cursor-pointer">
-              <input type="checkbox" checked={aplicaIva} onChange={e => setAplicaIva(e.target.checked)} className="w-4 h-4 accent-[#B8872E]" />
-              <span className="text-sm text-ink">Sumar IVA (16%)</span>
-            </label>
-          </div>
+          {/* Vigencia */}
           <div>
-            <label className={label}>Correo para enviar la cotización</label>
-            <input type="email" className={input} value={email} onChange={e => setEmail(e.target.value)} placeholder="cliente@correo.com" />
-            <p className="text-[11px] text-mute mt-1">Se guarda con “Guardar”. El envío por correo se conectará más adelante.</p>
-          </div>
-          <div><label className={label}>Notas</label><textarea className={`${input} resize-none`} rows={2} value={notas} onChange={e => setNotas(e.target.value)} placeholder="Condiciones, entrega, etc." /></div>
-
-          <div className="flex items-center justify-between rounded-xl bg-gold-soft border border-gold/20 px-4 py-3">
-            <div className="text-[13px] text-mute">Subtotal {orMoney(c.subtotal)}{aplicaIva ? ` · IVA ${orMoney(Number(c.subtotal) * 0.16)}` : ''}</div>
-            <div className="text-right">
-              <p className="text-[11px] uppercase tracking-wide text-mute">Total</p>
-              <p className="text-xl font-extrabold text-price leading-none">{orMoney((Number(c.subtotal) || 0) * (aplicaIva ? 1.16 : 1))}</p>
+            <label className={labelCot}>Vigencia</label>
+            <div className="relative sm:max-w-[220px]">
+              <input type="number" min={1} disabled={bloqueada} value={vigencia} onChange={e => setVigencia(e.target.value)} className={`${input} pr-14 disabled:opacity-60`} />
+              <span className="absolute right-3.5 top-1/2 -translate-y-1/2 text-mute text-sm pointer-events-none">días</span>
             </div>
+            <p className="text-[11.5px] text-mute mt-2">Los datos del cliente y la vigencia se guardan con “Guardar”. El envío por correo se conectará más adelante.</p>
           </div>
+
+          {/* Notas */}
+          <div>
+            <label className={labelCot}>Notas</label>
+            <textarea className={`${input} resize-none disabled:opacity-60`} rows={3} disabled={bloqueada} value={notas} onChange={e => setNotas(e.target.value)} placeholder="Condiciones, entrega, etc." />
+          </div>
+
+          {/* Fotos: apoyo visual del equipo. Se guardan al instante y salen en
+              la carta y el PDF del cliente. */}
+          <div>
+            <div className="flex items-center justify-between mb-2 gap-3">
+              <label className={`${labelCot} mb-0`}>Fotos ({fotos.length})</label>
+              {!bloqueada && (
+                <button type="button" onClick={() => fotoInput.current?.click()} disabled={subiendoFotos || fotos.length >= 10}
+                  className="text-[12px] font-bold text-gold hover:opacity-80 transition active:scale-95 disabled:opacity-50">
+                  {subiendoFotos ? 'Subiendo…' : '+ Agregar fotos'}
+                </button>
+              )}
+              <input ref={fotoInput} type="file" accept="image/*" multiple className="hidden" onChange={subirFotos} />
+            </div>
+            {fotos.length === 0 ? (
+              bloqueada ? (
+                <p className="text-[12px] text-mute">Sin fotos.</p>
+              ) : (
+                <button type="button" onClick={() => fotoInput.current?.click()} disabled={subiendoFotos}
+                  className="w-full py-6 rounded-xl border border-dashed border-edge text-[12px] text-mute hover:text-ink hover:border-gold/50 transition-colors disabled:opacity-50">
+                  Agrega imágenes del equipo para que salgan en la cotización.
+                </button>
+              )
+            ) : (
+              <div className="grid grid-cols-4 sm:grid-cols-6 gap-2">
+                {fotos.map(f => (
+                  <div key={f.id} className="relative group aspect-square rounded-[9px] overflow-hidden border border-edge bg-surface-2">
+                    <button type="button" onClick={() => setZoomFoto(f)} className="w-full h-full" title="Ver foto">
+                      <img src={resolveMediaUrl(f.imagen)} alt="Foto de la cotización" className="w-full h-full object-cover" />
+                    </button>
+                    {!bloqueada && (
+                      <button type="button" onClick={() => quitarFoto(f.id)} aria-label="Quitar foto"
+                        className="absolute top-1 right-1 w-5 h-5 rounded-md bg-black/60 text-white opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity flex items-center justify-center">
+                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5"><path strokeLinecap="round" d="M6 6l12 12M18 6L6 18" /></svg>
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+            {!bloqueada && fotos.length > 0 && <p className="text-[11px] text-mute mt-2">Hasta 10 fotos. Aparecen en la carta y el PDF del cliente.</p>}
+          </div>
+
         </div>
 
-        <div className="px-6 py-4 border-t border-edge flex flex-col sm:flex-row gap-2 sticky bottom-0 bg-surface sm:rounded-b-2xl">
+        <div className="px-5 sm:px-7 py-3.5 border-t border-edge flex flex-col sm:flex-row sm:items-center gap-2.5 sticky bottom-0 bg-surface sm:rounded-b-2xl">
+          {/* Documentos del cliente (izquierda) */}
+          <div className="grid grid-cols-2 sm:flex gap-2 sm:mr-auto">
+            <button onClick={() => onPrint({ ...c, notas, vigencia_dias: Number(vigencia) || 15, aplica_iva: aplicaIva, base: String(baseMonto), iva: String(ivaMonto), total: String(totalMonto) })} disabled={!completa} title={!completa ? 'Agrega cliente y al menos un concepto' : undefined} className="py-2.5 sm:px-4 rounded-full border border-edge text-ink text-sm font-semibold hover:bg-surface-2 transition active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100 flex items-center justify-center gap-2">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.7"><path d="M6 9V4h12v5M6 18H4v-6a2 2 0 012-2h12a2 2 0 012 2v6h-2M8 14h8v6H8z" /></svg>
+              Imprimir
+            </button>
+            <button onClick={descargarPDF} disabled={descargando || !completa} title={!completa ? 'Agrega cliente y al menos un concepto' : undefined} className="py-2.5 sm:px-4 rounded-full border border-edge text-ink text-sm font-semibold hover:bg-surface-2 transition active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100 flex items-center justify-center gap-2">
+              {descargando
+                ? <span className="w-4 h-4 border-2 border-ink/30 border-t-ink rounded-full animate-spin" />
+                : <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.8"><path strokeLinecap="round" strokeLinejoin="round" d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" /></svg>}
+              Descargar PDF
+            </button>
+          </div>
+
+          {/* Guardar */}
+          {!bloqueada && (
+            <button onClick={guardarInfo} disabled={savingInfo} className="w-full sm:w-auto sm:min-w-[110px] py-2.5 px-5 rounded-full border border-edge text-ink font-bold text-sm hover:bg-surface-2 transition active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-2">
+              {savingInfo ? <span className="w-4 h-4 border-2 border-ink/30 border-t-ink rounded-full animate-spin" /> : null}
+              Guardar
+            </button>
+          )}
+
+          {/* Acción de negocio */}
           {c.convertida ? (
-            <button onClick={convertir} disabled={busy} className="sm:flex-1 py-2.5 rounded-full text-sm font-bold transition-colors disabled:opacity-50 flex items-center justify-center gap-2 border border-emerald-500/40 text-emerald-600 hover:bg-emerald-500/10">
+            <button onClick={convertir} disabled={busy} className="w-full sm:w-auto py-2.5 px-5 rounded-full text-sm font-bold transition active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-2 border border-emerald-500/40 text-emerald-600 hover:bg-emerald-500/10">
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.9"><path strokeLinecap="round" strokeLinejoin="round" d="M4 12l5 5L20 6" /></svg>
               Ver ticket de venta
             </button>
           ) : c.tipo === 'renta' ? (
-            <div className="sm:flex-1 py-2.5 rounded-full border border-edge text-mute text-[12px] font-medium flex items-center justify-center text-center px-3" title="Las cotizaciones de renta se concretan creando la renta">
-              Concreta esta renta desde Rentas (unidad + fechas)
+            <div className="w-full sm:w-auto py-2.5 px-4 rounded-full border border-edge text-mute text-[12px] font-medium flex items-center justify-center text-center" title="Las cotizaciones de renta se concretan creando la renta">
+              Concreta esta renta desde Rentas
             </div>
           ) : (
-            <button onClick={convertir} disabled={busy} className="sm:flex-1 py-2.5 rounded-full text-sm font-bold transition-colors disabled:opacity-50 flex items-center justify-center gap-2 bg-emerald-600 text-white hover:bg-emerald-700">
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.9"><path strokeLinecap="round" strokeLinejoin="round" d="M4 12l5 5L20 6" /></svg>
+            <button onClick={convertir} disabled={busy} className="w-full sm:w-auto py-2.5 px-5 rounded-full bg-gold text-black text-sm font-bold hover:opacity-90 transition active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-2">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M4 12l5 5L20 6" /></svg>
               {c.tipo === 'mixta' ? `Convertir la venta (${orMoney(c.subtotal_venta)})` : 'Convertir a venta'}
             </button>
           )}
-          <button onClick={() => onPrint({ ...c, notas, vigencia_dias: Number(vigencia) || 15, aplica_iva: aplicaIva, iva: String(aplicaIva ? (Number(c.subtotal) || 0) * 0.16 : 0), total: String((Number(c.subtotal) || 0) * (aplicaIva ? 1.16 : 1)) })} className="sm:flex-1 py-2.5 rounded-full border border-edge text-ink text-sm font-semibold hover:bg-surface-2 transition-colors flex items-center justify-center gap-2">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.7"><path d="M6 9V4h12v5M6 18H4v-6a2 2 0 012-2h12a2 2 0 012 2v6h-2M8 14h8v6H8z" /></svg>
-            Imprimir
-          </button>
-          <button onClick={guardarInfo} disabled={savingInfo} className="sm:flex-1 py-2.5 rounded-full bg-gold text-black font-bold text-sm hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center justify-center gap-2">
-            {savingInfo ? <span className="w-4 h-4 border-2 border-black/30 border-t-black rounded-full animate-spin" /> : null}
-            Guardar
-          </button>
         </div>
       </div>
+
+      {zoomFoto && createPortal(
+        <div className="fixed inset-0 z-[70] bg-black/75 flex items-center justify-center p-4" onClick={() => setZoomFoto(null)}>
+          <img src={resolveMediaUrl(zoomFoto.imagen)} alt="Foto de la cotización" onClick={e => e.stopPropagation()}
+            className="max-w-3xl w-full max-h-[85vh] object-contain rounded-xl" />
+        </div>,
+        document.body,
+      )}
     </div>
   )
 }
@@ -6263,6 +6698,7 @@ type UsuarioPanel = {
   id: number; username: string; nombre: string; first_name: string; last_name: string
   email: string; rol: string | null; es_admin: boolean; es_superusuario: boolean
   activo: boolean; telefono: string; puesto: string
+  email_verificado?: boolean; datos_completos?: boolean; perfil_verificado?: boolean
   ultimo_acceso: string | null; creado: string
 }
 
@@ -6475,6 +6911,18 @@ function UsuariosAdmin({ usuarios, reload, notify, yoId }: {
                             </div>
                             <div className="mt-1 flex items-center gap-2 flex-wrap">
                               <span className={`text-[10px] uppercase font-semibold px-2 py-0.5 rounded-full ${rol.cls}`}>{rol.label}</span>
+                              {/* Estado de verificación del cliente (correo + datos = 5%). Solo
+                                  para clientes: el personal se da de alta a mano, no "verifica". */}
+                              {!u.es_admin && !u.es_superusuario && (
+                                u.perfil_verificado ? (
+                                  <span className="inline-flex items-center gap-1 text-[10px] uppercase font-semibold px-2 py-0.5 rounded-full bg-libre/10 text-libre">
+                                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="3"><path d="M5 13l4 4L19 7" /></svg>
+                                    Verificado
+                                  </span>
+                                ) : (
+                                  <span className="text-[10px] uppercase font-semibold px-2 py-0.5 rounded-full bg-surface-2 text-mute">Sin verificar</span>
+                                )
+                              )}
                               {u.puesto && <span className="text-[12px] text-mute truncate">{u.puesto}</span>}
                             </div>
                             {/* En pantallas chicas las columnas se esconden: el dato baja aquí. */}
@@ -6674,7 +7122,9 @@ type ConfigSitio = {
   whatsapp_principal: string
   whatsapp_respaldos: { label: string; number: string }[]
   negocio_nombre: string; negocio_telefono: string; negocio_direccion: string
-  negocio_rfc: string; negocio_footer: string
+  negocio_email: string; negocio_web: string
+  negocio_rfc: string; negocio_representante: string; negocio_footer: string
+  cotizacion_condiciones: string; cotizacion_condiciones_renta: string; datos_bancarios: string; cotizacion_cierre: string
 }
 type CorreoAviso = { id: number; email: string; etiqueta: string; verificado: boolean; creado: string }
 
@@ -6720,7 +7170,7 @@ const btnSecundario = 'h-11 px-5 rounded-[10px] border border-edge bg-surface-2 
 
 /** Configuración editable del sitio: WhatsApp, datos del negocio y correos de aviso. */
 function NegocioAdmin({ notify }: { notify: (m: string, t?: 'ok' | 'err') => void }) {
-  const vacia: ConfigSitio = { whatsapp_principal: '', whatsapp_respaldos: [], negocio_nombre: '', negocio_telefono: '', negocio_direccion: '', negocio_rfc: '', negocio_footer: '' }
+  const vacia: ConfigSitio = { whatsapp_principal: '', whatsapp_respaldos: [], negocio_nombre: '', negocio_telefono: '', negocio_direccion: '', negocio_email: '', negocio_web: '', negocio_rfc: '', negocio_representante: '', negocio_footer: '', cotizacion_condiciones: '', cotizacion_condiciones_renta: '', datos_bancarios: '', cotizacion_cierre: '' }
   const [cfg, setCfg] = useState<ConfigSitio>(vacia)
   const [guardado, setGuardado] = useState<ConfigSitio>(vacia)   // lo último confirmado por el servidor
   const [correos, setCorreos] = useState<CorreoAviso[]>([])
@@ -6819,14 +7269,46 @@ function NegocioAdmin({ notify }: { notify: (m: string, t?: 'ok' | 'err') => voi
         <Ajuste titulo="Teléfono" desc="El que ve el cliente en la cotización si tiene dudas.">
           <input className={`${campoCfg} sm:w-56`} value={cfg.negocio_telefono} onChange={e => set('negocio_telefono', e.target.value)} placeholder="744 373 7201" />
         </Ajuste>
+        <Ajuste titulo="Correo" desc="Aparece en el encabezado de la cotización.">
+          <input type="email" className={`${campoCfg} sm:w-72`} value={cfg.negocio_email} onChange={e => set('negocio_email', e.target.value)} placeholder="contacto@remali.mx" />
+        </Ajuste>
+        <Ajuste titulo="Página web">
+          <input className={`${campoCfg} sm:w-56`} value={cfg.negocio_web} onChange={e => set('negocio_web', e.target.value)} placeholder="remali.mx" />
+        </Ajuste>
         <Ajuste titulo="Dirección" apilado>
           <input className={campoCfg} value={cfg.negocio_direccion} onChange={e => set('negocio_direccion', e.target.value)} placeholder="Calle, colonia, ciudad" />
         </Ajuste>
         <Ajuste titulo="RFC" desc="Solo si facturas. Se omite del documento cuando está vacío.">
           <input className={`${campoCfg} sm:w-56 font-mono`} value={cfg.negocio_rfc} onChange={e => set('negocio_rfc', e.target.value.toUpperCase())} placeholder="XAXX010101000" />
         </Ajuste>
+        <Ajuste titulo="Representante (firma)" desc="Nombre que firma la cotización al pie. Si lo dejas vacío, no se muestra la firma.">
+          <input className={`${campoCfg} sm:w-72`} value={cfg.negocio_representante} onChange={e => set('negocio_representante', e.target.value)} placeholder="C.P. Nombre Apellido" />
+        </Ajuste>
         <Ajuste titulo="Pie del ticket" desc="La última línea del comprobante.">
           <input className={`${campoCfg} sm:w-72`} value={cfg.negocio_footer} onChange={e => set('negocio_footer', e.target.value)} placeholder="¡Gracias por su preferencia!" />
+        </Ajuste>
+      </Panel>
+
+      <Panel titulo="Cotizaciones · condiciones y pago" desc="Aparecen en la carta y en el PDF que recibe el cliente. Puedes usar varias líneas.">
+        <Ajuste titulo="Condiciones · VENTA" desc="Anticipo, saldo, descuentos. Salen en las cotizaciones de venta." apilado>
+          <textarea className={`${campoCfg} resize-y min-h-[84px]`} rows={3} value={cfg.cotizacion_condiciones}
+            onChange={e => set('cotizacion_condiciones', e.target.value)}
+            placeholder={'Anticipo del 60% para iniciar el pedido; el resto contra entrega.\nPago de contado: 5% de descuento.'} />
+        </Ajuste>
+        <Ajuste titulo="Condiciones · RENTA" desc="Uso, mantenimiento y responsabilidad. Salen en las cotizaciones de renta." apilado>
+          <textarea className={`${campoCfg} resize-y min-h-[120px]`} rows={5} value={cfg.cotizacion_condiciones_renta}
+            onChange={e => set('cotizacion_condiciones_renta', e.target.value)}
+            placeholder={'El equipo se entrega limpio; de lo contrario, cargo de $300 + IVA.\nVerificar aceite a diario. Cambio de aceite cada 25 h…'} />
+        </Ajuste>
+        <Ajuste titulo="Datos bancarios" desc="Banco, titular, cuenta y CLABE. Si lo dejas vacío, no se muestra." apilado>
+          <textarea className={`${campoCfg} resize-y min-h-[84px]`} rows={4} value={cfg.datos_bancarios}
+            onChange={e => set('datos_bancarios', e.target.value)}
+            placeholder={'Titular: Nombre o razón social\nBanco: XYZ\nCuenta: 0000000000\nCLABE: 000000000000000000'} />
+        </Ajuste>
+        <Ajuste titulo="Despedida" desc="Frase de cortesía al final de la cotización. Si la dejas vacía, no se muestra." apilado>
+          <textarea className={`${campoCfg} resize-y min-h-[72px]`} rows={2} value={cfg.cotizacion_cierre}
+            onChange={e => set('cotizacion_cierre', e.target.value)}
+            placeholder={'En espera de que lo anterior merezca su conformidad…'} />
         </Ajuste>
       </Panel>
 
@@ -6908,7 +7390,7 @@ function ConfiguracionAdmin({ notify, lang, onLang }: {
     if (!pw.actual || !pw.nueva) { notify('Completa los campos', 'err'); return }
     if (pw.nueva !== pw.confirma) { notify('Las contraseñas no coinciden', 'err'); return }
     setSavingPw(true)
-    api.post('/auth/cambiar-password/', { actual: pw.actual, nueva: pw.nueva })
+    api.post('/auth/password/', { password_actual: pw.actual, password_nueva: pw.nueva })
       .then(() => { notify('Contraseña actualizada'); setPw({ actual: '', nueva: '', confirma: '' }) })
       .catch(e => notify(e?.response?.data?.detalle || e?.response?.data?.detail || 'No se pudo cambiar la contraseña', 'err'))
       .finally(() => setSavingPw(false))

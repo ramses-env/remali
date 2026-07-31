@@ -1,5 +1,7 @@
 import { createPortal } from 'react-dom'
 import { usePrintSettings } from '../lib/printSettings'
+import { formatMoney } from '../lib/utils'
+import LogoRemali from './ui/logo-remali'
 
 type Item = { id: number; origen: string; nombre: string; cantidad: number; costo_unitario: string; subtotal: string }
 type Orden = {
@@ -40,7 +42,7 @@ export default function OrdenCartaModal({ orden, onClose }: { orden: Orden; onCl
   const [ps, setPs] = usePrintSettings()
   const a4 = ps.docSize === 'a4'
   const pw = a4 ? 210 : 216, ph = a4 ? 297 : 279, pageName = a4 ? 'A4' : 'Letter'
-  const money = (v: any) => '$' + (Number(v) || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })
+  const money = formatMoney
   const fecha = (v?: string | null) => (v ? new Date(v).toLocaleDateString('es-MX', { day: '2-digit', month: 'long', year: 'numeric' }) : '—')
 
   return createPortal(
@@ -51,8 +53,11 @@ export default function OrdenCartaModal({ orden, onClose }: { orden: Orden; onCl
             {/* Encabezado */}
             <div className="row" style={{ alignItems: 'flex-start', borderBottom: '2px solid #111827', paddingBottom: 12 }}>
               <div>
-                <h1>REMALI</h1>
-                <div className="muted" style={{ fontSize: '9.5pt' }}>Renta · Venta · Servicio de maquinaria</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+                  <LogoRemali className="h-10 w-10" title="REMALI" />
+                  <h1>REMALI</h1>
+                </div>
+                <div className="muted" style={{ fontSize: '9.5pt', marginTop: 2 }}>Renta · Venta · Servicio de maquinaria</div>
               </div>
               <div style={{ textAlign: 'right' }}>
                 <div style={{ fontSize: '14pt', fontWeight: 800 }}>ORDEN DE REPARACIÓN</div>

@@ -1,6 +1,8 @@
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import { formatCurrency } from '../store/priceUnit'
+import { toNumber } from './utils'
+import { cargarConfigPublica } from './configPublica'
 import api from './api'
 
 type Unit = 'dia' | 'semana' | 'mes'
@@ -12,38 +14,17 @@ type ProductRow = {
   category?: string
   type?: string
   condition?: string
+  modo?: 'venta' | 'renta'
   price: number | string | null
+  precioDia?: number | null
+  precioSemana?: number | null
+  precioMes?: number | null
 }
 
-type EquipoLike = {
-  id: number
-  modelo: string
-  descripcion?: string
-  estado?: string
-  condicion?: string
-  disponible_venta?: boolean
-  disponible_renta?: boolean
-  categoria?: { id: number; nombre: string }
-  tipo?: { id: number; nombre: string }
-  marca?: { id: number; nombre: string }
-  precio_dia?: number | string | null
-  precio_semana?: number | string | null
-  precio_mes?: number | string | null
-}
-
-function toNumber(v: any): number | null {
-  const n = typeof v === 'string' ? parseFloat(v) : typeof v === 'number' ? v : null
-  if (n === null || Number.isNaN(n)) return null
-  return n
-}
-
-function availabilityText(e: EquipoLike): string {
-  const v = e?.disponible_venta
-  const r = e?.disponible_renta
-  if (v && r) return 'Venta y renta'
-  if (v) return 'Venta'
-  if (r) return 'Renta'
-  return 'No disponible'
+export type EquiposPdfOpts = {
+  venta?: boolean          // incluir equipos en venta
+  renta?: boolean          // incluir equipos en renta
+  rentaTodosPrecios?: boolean  // renta: mostrar día/semana/mes (true) o solo la unidad actual (false)
 }
 
 function summarizeFilters(filters: Record<string, string[]>): string {
@@ -81,154 +62,196 @@ async function toDataUrl(src: string): Promise<string | null> {
   }
 }
 
-export async function downloadEquiposPdf(items: ProductRow[], filters: Record<string, string[]>, unit: Unit) {
+export async function downloadEquiposPdf(
+  items: ProductRow[],
+  filters: Record<string, string[]>,
+  unit: Unit,
+  opts: EquiposPdfOpts = {},
+) {
+  const { venta = true, renta = true, rentaTodosPrecios = true } = opts
+
+  // Datos del negocio + logo para el membrete (mismo formato que la cotización).
+  const cfg = await cargarConfigPublica()
+  const logo = await toDataUrl('/logo-remali.png')
+
   const doc = new jsPDF({ unit: 'pt', format: 'letter' })
   const margin = 40
   const pageWidth = doc.internal.pageSize.getWidth()
   const pageHeight = doc.internal.pageSize.getHeight()
-  const centerX = pageWidth / 2
-  const avail = pageWidth - margin * 2
-  const w0 = Math.floor(avail * 0.30)
-  const w1 = Math.floor(avail * 0.14)
-  const w2 = Math.floor(avail * 0.12)
-  const wType = Math.floor(avail * 0.20)
-  const w3 = Math.floor(avail * 0.10)
-  const w4 = avail - w0 - w1 - w2 - wType - w3
-  const unitLabel = unit === 'mes' ? 'Mes' : unit === 'semana' ? 'Semana' : 'Día'
+  const inner = pageWidth - margin * 2
+  const bottom = pageHeight - 46
+  const unitLabel = unit === 'mes' ? 'mes' : unit === 'semana' ? 'semana' : 'día'
 
-  autoTable(doc, {
-    margin: { top: margin + 70, bottom: margin + 30, left: margin, right: margin },
-    didDrawPage: data => {
-      doc.setFont('helvetica', 'bold')
-      doc.setFontSize(16)
-      doc.text('Catálogo de Equipos', centerX, margin, { align: 'center' })
-      doc.setFont('helvetica', 'normal')
-      doc.setFontSize(10)
-      doc.text(`Remali • Fecha: ${new Date().toLocaleDateString('es-MX')}`, centerX, margin + 16, { align: 'center' })
-      doc.text(`Unidad de precio: ${unit}`, centerX, margin + 30, { align: 'center' })
-      if (data.pageNumber === 1) {
-        doc.setFontSize(10)
-        doc.text(`Filtros: ${summarizeFilters(filters)}`, margin, margin + 48)
-      }
-      doc.setFontSize(10)
-      doc.text(`Página ${data.pageNumber}`, centerX, pageHeight - 18, { align: 'center' })
-    },
-    head: [['Modelo', 'Marca', 'Categoría', 'Tipo', 'Estado', 'Precio']],
-    body: items.map(i => [
-      i.title || '—',
-      (i.brand || '—'),
-      (i.category || '—'),
-      (i.type || '—'),
-      (i.condition || '—'),
-      `por ${unitLabel} $${formatCurrency(Number(i.price) || 0)}`,
-    ]),
-    styles: { fontSize: 10, cellPadding: 6, valign: 'middle', overflow: 'linebreak' },
-    headStyles: { fillColor: [84, 136, 175], textColor: 255 },
-    alternateRowStyles: { fillColor: [245, 248, 251] },
-    columnStyles: {
-      0: { cellWidth: w0 },
-      1: { cellWidth: w1 },
-      2: { cellWidth: w2 },
-      3: { cellWidth: wType },
-      4: { cellWidth: w3 },
-      5: { cellWidth: w4, halign: 'right' },
-    },
-    theme: 'striped',
-  })
+  // Paleta (impresa sobre papel blanco → tinta oscura, acentos de marca).
+  const INK: [number, number, number] = [17, 24, 39]      // #111827
+  const MUTE: [number, number, number] = [122, 128, 138]
+  const LINE: [number, number, number] = [226, 227, 231]
+  const CARD: [number, number, number] = [250, 250, 252]
+  const WHITE: [number, number, number] = [255, 255, 255]
+  const GOLD: [number, number, number] = [184, 135, 46]   // #B8872E marca
+  const AZUL: [number, number, number] = [43, 95, 173]    // venta  #2B5FAD
+  const NARANJA: [number, number, number] = [234, 88, 12] // renta  #EA580C
+
+  const fill = (c: [number, number, number]) => doc.setFillColor(c[0], c[1], c[2])
+  const stroke = (c: [number, number, number]) => doc.setDrawColor(c[0], c[1], c[2])
+  const ink = (c: [number, number, number]) => doc.setTextColor(c[0], c[1], c[2])
+  const money = (n: number | string | null | undefined) => `$${formatCurrency(Number(n) || 0)}`
+
+  // Recorta a una línea con elipsis según la fuente/tamaño activos.
+  const clip = (txt: string, maxW: number) => {
+    if (doc.getTextWidth(txt) <= maxW) return txt
+    let t = txt
+    while (t.length > 1 && doc.getTextWidth(t + '…') > maxW) t = t.slice(0, -1)
+    return t + '…'
+  }
+
+  // Rellena los tres precios de renta derivando los que falten (mismos
+  // multiplicadores que el catálogo: semana = día×7, mes = día×30, mes = semana×4).
+  const triple = (i: ProductRow): Array<number | null> => {
+    const d = i.precioDia ?? null, s = i.precioSemana ?? null, m = i.precioMes ?? null
+    const dia = d ?? (s != null ? Math.round(s / 7) : m != null ? Math.round(m / 30) : null)
+    const sem = s ?? (d != null ? d * 7 : m != null ? Math.round(m / 4) : null)
+    const mes = m ?? (d != null ? d * 30 : s != null ? s * 4 : null)
+    return [dia, sem, mes]
+  }
+
+  const ventas = venta ? items.filter(i => i.modo === 'venta') : []
+  const rentas = renta ? items.filter(i => i.modo !== 'venta') : []
+
+  // Datos para el membrete (mismo formato que el PDF de cotización).
+  const nombre = cfg.negocio_nombre || 'REMALI'
+  const contacto = [
+    cfg.negocio_telefono ? `Tel. ${cfg.negocio_telefono}` : '',
+    cfg.negocio_email, cfg.negocio_web,
+    cfg.negocio_rfc ? `RFC: ${cfg.negocio_rfc}` : '',
+  ].filter(Boolean).join('   ·   ')
+  const negLineas = [cfg.negocio_direccion, contacto].filter(Boolean)
+  const dudas = cfg.negocio_telefono || cfg.whatsapp_principal || ''
+
+  // ── Membrete + pie (una vez por página) ──
+  const marco = () => {
+    const pagina = doc.getNumberOfPages()
+    const s = 30, lx = margin, ly = margin - 6
+    if (logo) { try { doc.addImage(logo, 'PNG', lx, ly, s, s) } catch { /* logo opcional */ } }
+    else {
+      fill([17, 17, 17]); doc.roundedRect(lx, ly, s, s, 5, 5, 'F')
+      ink(WHITE); doc.setFont('helvetica', 'bold'); doc.setFontSize(17)
+      doc.text('R', lx + s / 2, ly + s / 2 + 6, { align: 'center' })
+    }
+    const wx = lx + s + 10
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(16); ink(INK)
+    const wm = clip(nombre, pageWidth - margin - wx - 155)
+    doc.text(wm, wx, margin + 9)
+    fill(GOLD); doc.rect(wx, margin + 14, doc.getTextWidth(wm), 2.2, 'F') // subrayado dorado
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(9); ink(MUTE)
+    doc.text('CATÁLOGO DE EQUIPOS', pageWidth - margin, margin + 2, { align: 'right' })
+    doc.text(new Date().toLocaleDateString('es-MX', { day: '2-digit', month: 'long', year: 'numeric' }),
+      pageWidth - margin, margin + 14, { align: 'right' })
+    stroke(LINE); doc.setLineWidth(0.8)
+    doc.line(margin, margin + 30, pageWidth - margin, margin + 30)
+    if (pagina === 1) {
+      ink(MUTE); doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5)
+      let by = margin + 42
+      negLineas.forEach(l => { doc.text(clip(l, inner), margin, by); by += 11 })
+      doc.setFontSize(8)
+      doc.text(clip(`Filtros: ${summarizeFilters(filters)}`, inner), margin, by)
+    }
+    // Pie: información importante + contacto
+    ink(MUTE); doc.setFont('helvetica', 'normal'); doc.setFontSize(7.5)
+    doc.text('Precios en pesos (MXN), sujetos a cambio sin previo aviso  ·  Este catálogo es informativo y no aparta el equipo.',
+      pageWidth / 2, pageHeight - 30, { align: 'center' })
+    const pie = [`Página ${pagina}`, dudas ? `Dudas: ${dudas}` : '', cfg.negocio_web || cfg.negocio_footer || 'REMALI']
+      .filter(Boolean).join('   ·   ')
+    doc.text(pie, pageWidth / 2, pageHeight - 20, { align: 'center' })
+    ink(INK)
+  }
+
+  const topFor = (pagina: number) =>
+    pagina === 1 ? margin + 42 + negLineas.length * 11 + 16 : margin + 44
+
+  let y = 0
+  const nuevaPagina = () => { doc.addPage(); marco(); y = topFor(doc.getNumberOfPages()) }
+  const ensure = (h: number) => { if (y + h > bottom) nuevaPagina() }
+
+  // Pill de sección + conteo.
+  const seccion = (titulo: string, n: number, color: [number, number, number]) => {
+    ensure(46)
+    const label = titulo.toUpperCase()
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(9.5)
+    const tw = doc.getTextWidth(label)
+    const padX = 12, ph = 20
+    fill(color); doc.roundedRect(margin, y, tw + padX * 2, ph, 5, 5, 'F')
+    ink(WHITE); doc.text(label, margin + padX, y + 13.5)
+    ink(color); doc.setFont('helvetica', 'normal'); doc.setFontSize(9)
+    doc.text(`${n} ${n === 1 ? 'equipo' : 'equipos'}`, margin + tw + padX * 2 + 10, y + 13.5)
+    ink(INK)
+    y += ph + 12
+  }
+
+  // Tarjeta de un equipo. kind: 'venta' | 'renta1' (una modalidad) | 'renta3' (día/semana/mes).
+  const tarjeta = (i: ProductRow, color: [number, number, number], kind: 'venta' | 'renta1' | 'renta3') => {
+    const h = kind === 'renta3' ? 76 : 52
+    ensure(h + 10)
+    const x = margin, w = inner
+    fill(CARD); stroke(LINE); doc.setLineWidth(0.8)
+    doc.roundedRect(x, y, w, h, 7, 7, 'FD')
+    fill(color); doc.rect(x + 1.2, y + 8, 3.2, h - 16, 'F') // franja de acento
+
+    const lx = x + 16
+    const rightW = kind === 'renta3' ? 0 : 152
+    const titleMaxW = w - 32 - rightW - 6
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(12); ink(INK)
+    doc.text(clip(i.title || '—', titleMaxW), lx, y + 20)
+    const meta = [i.brand, i.category, i.type].filter(Boolean).join('   ·   ') || '—'
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); ink(MUTE)
+    doc.text(clip(meta, kind === 'renta3' ? w - 34 : titleMaxW), lx, y + 33)
+
+    if (kind === 'renta3') {
+      stroke(LINE); doc.setLineWidth(0.6)
+      doc.line(lx, y + 43, x + w - 14, y + 43)
+      const gridW = (x + w - 14) - lx, cw = gridW / 3
+      const vals = triple(i)
+      const us = ['DÍA', 'SEMANA', 'MES']
+      vals.forEach((v, idx) => {
+        const cx = lx + cw * idx + cw / 2
+        ink(MUTE); doc.setFont('helvetica', 'bold'); doc.setFontSize(7.5)
+        doc.text(us[idx], cx, y + 55, { align: 'center' })
+        ink(v == null ? MUTE : color); doc.setFont('helvetica', 'bold'); doc.setFontSize(12)
+        doc.text(v == null ? '—' : money(v), cx, y + 68, { align: 'center' })
+      })
+    } else {
+      const rx = x + w - 16
+      const label = kind === 'venta' ? 'PRECIO DE VENTA' : `PRECIO / ${unitLabel.toUpperCase()}`
+      ink(MUTE); doc.setFont('helvetica', 'bold'); doc.setFontSize(7.5)
+      doc.text(label, rx, y + 21, { align: 'right' })
+      ink(color); doc.setFont('helvetica', 'bold'); doc.setFontSize(15)
+      doc.text(money(i.price), rx, y + 38, { align: 'right' })
+    }
+    ink(INK)
+    y += h + 10
+  }
+
+  marco()
+  y = topFor(1)
+
+  if (ventas.length) {
+    seccion('Equipos en venta', ventas.length, AZUL)
+    ventas.forEach(i => tarjeta(i, AZUL, 'venta'))
+    y += 6
+  }
+  if (rentas.length) {
+    seccion('Equipos en renta', rentas.length, NARANJA)
+    rentas.forEach(i => tarjeta(i, NARANJA, rentaTodosPrecios ? 'renta3' : 'renta1'))
+  }
+  if (!ventas.length && !rentas.length) {
+    ink(MUTE); doc.setFont('helvetica', 'normal'); doc.setFontSize(11)
+    doc.text('No hay equipos que coincidan con lo seleccionado.', margin, y + 10)
+  }
 
   doc.save('equipos.pdf')
 }
 
-export async function downloadEquipoPdf(e: EquipoLike, unit: Unit, imageUrl?: string) {
-  const doc = new jsPDF({ unit: 'pt', format: 'letter' })
-  const margin = 40
-  const pageWidth = doc.internal.pageSize.getWidth()
-  const pageHeight = doc.internal.pageSize.getHeight()
-  const centerX = pageWidth / 2
-
-  doc.setFont('helvetica', 'bold')
-  doc.setFontSize(16)
-  doc.text('Ficha de Equipo', centerX, margin, { align: 'center' })
-  doc.setFont('helvetica', 'normal')
-  doc.setFontSize(10)
-  doc.text(`Remali • Fecha: ${new Date().toLocaleDateString('es-MX')}`, centerX, margin + 16, { align: 'center' })
-  doc.text(`Unidad de precio: ${unit}`, centerX, margin + 30, { align: 'center' })
-
-  let y = margin + 48
-  doc.setFont('helvetica', 'bold')
-  doc.setFontSize(14)
-  doc.text(e.modelo || 'Equipo', margin, y)
-  y += 18
-
-  const precioDia = toNumber(e.precio_dia)
-  const precioSemana = toNumber(e.precio_semana)
-  const precioMes = toNumber(e.precio_mes)
-  const displayPrice =
-    unit === 'dia' ? (precioDia ?? precioSemana ?? precioMes ?? 0) :
-    unit === 'semana' ? (precioSemana ?? (precioDia ? precioDia * 7 : null) ?? precioMes ?? 0) :
-    (precioMes ?? (precioDia ? precioDia * 30 : null) ?? (precioSemana ? precioSemana * 4 : null) ?? 0)
-
-  const info: Array<[string, string]> = [
-    ['Precio', `$${formatCurrency(displayPrice)} por ${unit}`],
-    ['Disponibilidad', availabilityText(e)],
-    ['Estado', e.estado || '—'],
-    ['Categoría', e.categoria?.nombre || '—'],
-    ['Tipo', e.tipo?.nombre || '—'],
-    ['Marca', e.marca?.nombre || '—'],
-    ['Condición', e.condicion || '—'],
-  ]
-
-  autoTable(doc, {
-    startY: y,
-    margin: { left: margin, right: margin },
-    head: [['Campo', 'Valor']],
-    body: info,
-    styles: { fontSize: 10, cellPadding: 6, overflow: 'linebreak' },
-    headStyles: { fillColor: [84, 136, 175], textColor: 255 },
-    alternateRowStyles: { fillColor: [245, 248, 251] },
-    columnStyles: {
-      0: { cellWidth: 160 },
-      1: { cellWidth: pageWidth - margin * 2 - 160 },
-    },
-    didDrawPage: data => {
-      doc.setFont('helvetica', 'normal')
-      doc.setFontSize(10)
-      doc.text(`Página ${data.pageNumber}`, centerX, pageHeight - 18, { align: 'center' })
-    },
-    theme: 'striped',
-  })
-
-  let imgY = (doc as any).lastAutoTable?.finalY || (margin + 48)
-  imgY += 20
-  if (imageUrl) {
-    const dataUrl = await toDataUrl(imageUrl)
-    if (dataUrl) {
-      const imgW = pageWidth - margin * 2
-      const imgH = 220
-      try {
-        doc.addImage(dataUrl, 'JPEG', margin, imgY, imgW, imgH, undefined, 'FAST')
-        imgY += imgH + 12
-      } catch {}
-    }
-  }
-
-  const desc = (e.descripcion || '').trim()
-  if (desc) {
-    doc.setFont('helvetica', 'bold')
-    doc.setFontSize(12)
-    doc.text('Descripción', margin, imgY)
-    imgY += 14
-    doc.setFont('helvetica', 'normal')
-    doc.setFontSize(10)
-    const lines = doc.splitTextToSize(desc, pageWidth - margin * 2)
-    doc.text(lines, margin, imgY)
-  }
-
-  doc.save(`equipo-${e.id}.pdf`)
-}
-
 type CartItem = { id: number; title: string; price: number; qty: number }
-type ExtraItem = { id: number; title: string; price: number; qty: number }
 type ClientInfo = { nombre?: string; empresa?: string; email?: string; telefono?: string; direccion?: string; responsable?: string; obra_telefono?: string; obra_email?: string }
 type Coupon = { code: string; discount: number }
 
@@ -237,7 +260,7 @@ type Modalidad = 'venta' | Unit
 
 export async function downloadCotizacionPdf(args: {
   items: Array<CartItem & { unit?: Modalidad }>
-  extras?: ExtraItem[]
+  extras?: CartItem[]
   client?: ClientInfo
   coupon?: Coupon
   notas?: string
@@ -259,13 +282,22 @@ export async function downloadCotizacionPdf(args: {
   const wRent = Math.floor(avail * 0.10)
   const w3 = avail - w0 - wUnit - wTipo - wQty - w2 - wRent
 
-  const subtotalCart = items.reduce((s, i) => s + i.price * i.qty, 0)
-  const subtotalExtras = extras.reduce((s, i) => s + i.price * i.qty, 0)
-  const subtotal = subtotalCart + subtotalExtras
+  /* Espejo del backend: VENTA ya incluye IVA (solo se desglosa); RENTA va sin
+     IVA y suma 16% únicamente si el cliente pidió factura. Los extras siguen
+     la regla de renta (sin IVA incluido). Descuento proporcional. */
+  const subVenta = items.reduce((s, i) => s + (i.unit === 'venta' ? i.price * i.qty : 0), 0)
+  const subRenta = items.reduce((s, i) => s + (i.unit !== 'venta' ? i.price * i.qty : 0), 0)
+    + extras.reduce((s, i) => s + i.price * i.qty, 0)
+  const subtotal = subVenta + subRenta
   const discountAmt = coupon ? subtotal * coupon.discount : 0
-  const preTaxTotal = Math.max(0, subtotal - discountAmt)
-  const ivaAmt = iva ? preTaxTotal * 0.16 : 0
-  const total = preTaxTotal + ivaAmt
+  const factor = subtotal > 0 ? Math.max(0, subtotal - discountAmt) / subtotal : 1
+  const ventaNeta = subVenta * factor            // IVA incluido
+  const rentaNeta = subRenta * factor            // sin IVA
+  const ivaVentaIncluido = ventaNeta - ventaNeta / 1.16
+  const ivaRenta = iva ? rentaNeta * 0.16 : 0
+  const baseSinIVA = ventaNeta / 1.16 + rentaNeta
+  const ivaAmt = ivaVentaIncluido + ivaRenta
+  const total = ventaNeta + rentaNeta + ivaRenta
 
   // Solo tiene sentido anunciar "unidad de precio" si TODO se renta con la misma.
   const units = items.map(i => i.unit).filter(u => u && u !== 'venta') as Unit[]
@@ -371,7 +403,7 @@ export async function downloadCotizacionPdf(args: {
       const precioMes = toNumber(e?.precio_mes)
       const precioPorUnidadApi = toNumber((e as any)?.precio_por_unidad)
       const unidadEfectivaApi: Unit | null = ((e as any)?.unidad_efectiva || null)
-      let displayPrice = esVenta ? (toNumber(e?.precio_venta) ?? i.price) :
+      const displayPrice = esVenta ? (toNumber(e?.precio_venta) ?? i.price) :
         precioPorUnidadApi != null ? precioPorUnidadApi :
         u === 'dia' ? (precioDia ?? precioSemana ?? precioMes ?? i.price) :
         u === 'semana' ? (precioSemana ?? (precioDia ? precioDia * 7 : null) ?? precioMes ?? i.price) :
@@ -465,9 +497,10 @@ export async function downloadCotizacionPdf(args: {
     didDrawPage: drawHeaderFooter,
     head: [['Detalle', 'Monto']],
     body: [
-      ['Subtotal', `$${formatCurrency(subtotal)}`],
+      ...(subRenta > 0 ? [['Subtotal renta (sin IVA)', `$${formatCurrency(rentaNeta)}`]] as Array<[string, string]> : []),
+      ...(subVenta > 0 ? [['Subtotal venta (IVA incluido)', `$${formatCurrency(ventaNeta)}`]] as Array<[string, string]> : []),
       ['Descuento', `$${formatCurrency(discountAmt)}`],
-      ...(iva ? [['IVA 16%', `$${formatCurrency(ivaAmt)}`]] as Array<[string, string]> : []),
+      ...(iva ? [['Base (sin IVA)', `$${formatCurrency(baseSinIVA)}`], ['IVA 16%', `$${formatCurrency(ivaAmt)}`]] as Array<[string, string]> : []),
       ['Total', `$${formatCurrency(total)}`],
     ],
     styles: { fontSize: 10, cellPadding: 6, overflow: 'linebreak' },
@@ -521,7 +554,7 @@ export async function downloadCotizacionPdf(args: {
   doc.setFontSize(10)
   doc.text(`Remali • Fecha: ${new Date().toLocaleDateString('es-MX')}`, centerX, margin + 16, { align: 'center' })
   doc.text(`Página ${last}`, centerX, pageHeight - 18, { align: 'center' })
-  let startY = margin + 60
+  const startY = margin + 60
 
   doc.setFont('helvetica', 'normal')
   doc.setFontSize(10)

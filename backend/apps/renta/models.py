@@ -1,6 +1,7 @@
 from datetime import timedelta
 from decimal import Decimal
 
+from django.conf import settings
 from django.db import models, transaction
 from django.core.exceptions import ValidationError
 from django.utils import timezone
@@ -52,6 +53,11 @@ class Renta(models.Model):
         help_text="Nombre del cliente (si no es una empresa registrada)"
     )
     telefono_cliente = models.CharField(max_length=40, blank=True, default='')
+    # Cuenta del cliente (si el admin la vincula): habilita "Tus rentas" en su panel.
+    usuario = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='rentas_cliente',
+    )
 
     modalidad = models.CharField(max_length=10, choices=MODALIDADES)
     duracion = models.PositiveIntegerField(

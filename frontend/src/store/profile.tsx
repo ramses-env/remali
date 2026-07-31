@@ -15,6 +15,9 @@ type User = {
   puede?: { nivel: number; rol: string }
   /* Para saber si al cliente le falta completar su perfil sin pedir otro endpoint. */
   datos_completos?: boolean
+  /* Correo confirmado y "perfil verificado" (correo + datos) = lo que da el 5%. */
+  email_verificado?: boolean
+  perfil_verificado?: boolean
 }
 
 type ProfileContextType = {

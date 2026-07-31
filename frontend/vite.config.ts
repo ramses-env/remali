@@ -14,6 +14,9 @@ export default defineConfig(({ mode }) => ({
   server: {
     port: 5173,
     host: true,
+    // Permite abrir el sitio a través de un túnel público (cloudflared/localtunnel)
+    // para pruebas. Vite bloquea hosts desconocidos por defecto.
+    allowedHosts: true,
     proxy: {
       '/api': {
         target: 'http://localhost:8000',

@@ -3,12 +3,14 @@
 Los precios se capturan SIN IVA (son el subtotal); el IVA (16%) se suma solo si
 `aplica_iva`. Una cotización aceptada puede después convertirse en venta/renta.
 """
+import secrets
 from datetime import timedelta
 from decimal import Decimal
 
 from django.conf import settings
 from django.db import models
 from django.db.models import Max
+from django.utils import timezone
 
 IVA_RATE = Decimal('0.16')
 
@@ -36,8 +38,20 @@ class Cotizacion(models.Model):
     cliente_telefono = models.CharField(max_length=40, blank=True, default='')
     cliente_email = models.EmailField(blank=True, default='', help_text='Correo destino para enviar la cotización')
     empresa = models.ForeignKey('empresas.Empresa', null=True, blank=True, on_delete=models.SET_NULL, related_name='cotizaciones')
+    # Cliente dueño de la solicitud, si la mandó con sesión iniciada. Es lo que
+    # permite mostrarle "Mis cotizaciones" en su cuenta. Anónimo => queda null.
+    usuario = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='cotizaciones_cliente',
+    )
 
     vigencia_dias = models.PositiveIntegerField(default=15, help_text='Días de validez de la cotización')
+    # Fecha de vencimiento GUARDADA (creación + vigencia). Se persiste para poder
+    # filtrar/paginar "vencidas" en la base de datos, no en memoria.
+    vence_el = models.DateField(null=True, blank=True, editable=False)
+    # Token para el link público (compartir la cotización por WhatsApp/correo sin
+    # login). No adivinable; solo expone el PDF de ESA cotización.
+    token_publico = models.CharField(max_length=32, unique=True, null=True, blank=True, editable=False)
     aplica_iva = models.BooleanField(default=True, help_text='Suma IVA (16%) al total')
     estado = models.CharField(max_length=10, choices=ESTADOS, default='borrador')
     notas = models.TextField(blank=True, default='')
@@ -72,6 +86,12 @@ class Cotizacion(models.Model):
     def save(self, *args, **kwargs):
         if not self.folio:
             self.folio = self.generar_folio()
+        if not self.token_publico:
+            self.token_publico = secrets.token_hex(16)
+        # vence_el = alta + vigencia. En el alta `creada` la pone auto_now_add en
+        # este mismo save, así que si aún no hay fecha se usa hoy (mismo día).
+        base = self.creada.date() if self.creada else timezone.now().date()
+        self.vence_el = base + timedelta(days=self.vigencia_dias or 0)
         super().save(*args, **kwargs)
 
     def recalcular_tipo(self):
@@ -106,12 +126,23 @@ class Cotizacion(models.Model):
         return sum((i.subtotal for i in self.items.all() if i.modalidad != 'venta'), Decimal('0.00'))
 
     @property
+    def base(self):
+        """Base gravable (sin IVA). En VENTA el precio YA incluye IVA, así que se
+        desglosa (precio / 1.16); en RENTA el subtotal ya viene sin IVA."""
+        base_venta = self.subtotal_venta / (Decimal('1') + IVA_RATE)
+        return (base_venta + self.subtotal_renta).quantize(Decimal('0.01'))
+
+    @property
     def iva(self):
-        return (self.subtotal * IVA_RATE).quantize(Decimal('0.01')) if self.aplica_iva else Decimal('0.00')
+        """VENTA: IVA incluido en el precio, se desglosa (siempre). RENTA: se suma
+        solo si el cliente pidió factura (aplica_iva)."""
+        iva_venta = self.subtotal_venta - self.subtotal_venta / (Decimal('1') + IVA_RATE)
+        iva_renta = (self.subtotal_renta * IVA_RATE) if self.aplica_iva else Decimal('0.00')
+        return (iva_venta + iva_renta).quantize(Decimal('0.01'))
 
     @property
     def total(self):
-        return (self.subtotal + self.iva).quantize(Decimal('0.01'))
+        return (self.base + self.iva).quantize(Decimal('0.01'))
 
     @property
     def cliente_display(self):
@@ -121,9 +152,19 @@ class Cotizacion(models.Model):
 
     @property
     def vigencia_hasta(self):
+        # Guardada en vence_el; si por algo falta (registro viejo sin migrar), se
+        # deriva al vuelo para no romper la carta ni el PDF.
+        if self.vence_el:
+            return self.vence_el
         if not self.creada:
             return None
         return (self.creada.date() + timedelta(days=self.vigencia_dias or 0))
+
+    @property
+    def vencida(self) -> bool:
+        """Enviada o en borrador cuya validez ya pasó (y no se cerró)."""
+        v = self.vigencia_hasta
+        return self.estado in ('borrador', 'enviada') and bool(v) and v < timezone.now().date()
 
     def __str__(self):
         return f'{self.folio} · {self.cliente_display}'
@@ -164,3 +205,26 @@ class CotizacionItem(models.Model):
 
     def __str__(self):
         return f'{self.descripcion} x{self.cantidad}'
+
+
+class CotizacionFoto(models.Model):
+    """Fotos que acompañan la cotización (el equipo ofertado, una referencia).
+
+    A diferencia de la evidencia de una renta —que prueba en qué estado salió y
+    volvió una máquina y por eso se congela— estas son apoyo visual: le muestran
+    al cliente qué se le está cotizando. Salen en la carta y en el PDF que recibe.
+    Como no prueban nada, se pueden agregar y quitar mientras la cotización exista.
+    """
+    cotizacion = models.ForeignKey(Cotizacion, on_delete=models.CASCADE, related_name='fotos')
+    imagen = models.ImageField(upload_to='cotizaciones/fotos/')
+    # El admin decide el orden en que aparecen; se rellena con el siguiente hueco
+    # al subir, así el orden de captura se respeta sin que tenga que tocarlo.
+    orden = models.PositiveIntegerField(default=0)
+    creada = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'cotizacion_fotos'
+        ordering = ['orden', 'id']
+
+    def __str__(self):
+        return f'{self.cotizacion_id} · foto {self.pk}'

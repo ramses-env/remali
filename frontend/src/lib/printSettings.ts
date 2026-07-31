@@ -10,7 +10,7 @@ import { useEffect, useState } from 'react'
 import { cargarConfigPublica, configPublicaEnCache, EVT_CONFIG } from './configPublica'
 
 export type PrintMethod = 'usb' | 'serial' | 'navegador'
-export type Negocio = { nombre: string; direccion: string; telefono: string; rfc: string; footer: string }
+export type Negocio = { nombre: string; direccion: string; telefono: string; email: string; web: string; rfc: string; representante: string; footer: string; condiciones: string; condicionesRenta: string; datosBancarios: string; cierre: string }
 export type PrintSettings = {
   method: PrintMethod           // cómo se conecta la impresora térmica
   thermalWidth: 58 | 80         // ancho del papel térmico en mm
@@ -26,13 +26,12 @@ type PrintSettingsLocales = Omit<PrintSettings, 'negocio'>
 const KEY = 'print_settings'
 const EVT = 'print-settings-change'
 export const NEGOCIO_DEFAULT: Negocio = {
-  nombre: 'REMALI MAQUINARIA', direccion: '', telefono: '', rfc: '',
-  footer: '¡Gracias por su preferencia!',
+  nombre: 'REMALI MAQUINARIA', direccion: '', telefono: '', email: '', web: '', rfc: '', representante: '',
+  footer: '¡Gracias por su preferencia!', condiciones: '', condicionesRenta: '', datosBancarios: '', cierre: '',
 }
 const LOCALES_DEFAULT: PrintSettingsLocales = {
   method: 'usb', thermalWidth: 58, baud: 9600, docSize: 'carta', printSpeed: 70,
 }
-export const DEFAULTS: PrintSettings = { ...LOCALES_DEFAULT, negocio: NEGOCIO_DEFAULT }
 
 /** Datos del negocio publicados por el panel; con respaldo a los de fábrica. */
 export function getNegocio(): Negocio {
@@ -41,8 +40,15 @@ export function getNegocio(): Negocio {
     nombre: c.negocio_nombre || NEGOCIO_DEFAULT.nombre,
     direccion: c.negocio_direccion || '',
     telefono: c.negocio_telefono || '',
+    email: c.negocio_email || '',
+    web: c.negocio_web || '',
     rfc: c.negocio_rfc || '',
+    representante: c.negocio_representante || '',
     footer: c.negocio_footer || NEGOCIO_DEFAULT.footer,
+    condiciones: c.cotizacion_condiciones || '',
+    condicionesRenta: c.cotizacion_condiciones_renta || '',
+    datosBancarios: c.datos_bancarios || '',
+    cierre: c.cotizacion_cierre || '',
   }
 }
 

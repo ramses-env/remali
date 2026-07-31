@@ -7,6 +7,7 @@ import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import ThemeToggle from './ThemeToggle'
 import { AvatarInicial } from '@/components/ui/avatar-inicial'
+import LogoRemali from '@/components/ui/logo-remali'
 
 export default function Navbar() {
   const { token, logout } = useAuth()
@@ -43,11 +44,7 @@ export default function Navbar() {
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 flex items-center justify-between">
         {/* Logo */}
         <Link to="/" className="flex items-center gap-3 group">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-amber-400 to-orange-500 p-[2px]">
-            <div className="w-full h-full bg-app rounded-[10px] flex items-center justify-center">
-              <span className="text-xl font-black text-transparent bg-clip-text bg-gradient-to-tr from-amber-400 to-orange-500">R</span>
-            </div>
-          </div>
+          <LogoRemali className="w-10 h-10 text-ink group-hover:text-gold transition-colors" />
           <span className="text-xl font-black tracking-tight text-ink group-hover:opacity-80 transition-opacity hidden sm:block">
             REMALI
           </span>
@@ -71,9 +68,10 @@ export default function Navbar() {
 
         {/* Acciones */}
         <div className="flex items-center gap-3">
-          {/* Carrito / cotización del cliente */}
+          {/* Cotización del cliente: es el módulo de cotizar, no un carrito de
+              tienda — el ícono de documento comunica eso (igual que el dock). */}
           <Link to="/cotizacion" aria-label="Tu cotización" className="relative w-9 h-9 rounded-full border border-edge bg-surface-2 text-mute hover:text-gold transition-colors flex items-center justify-center">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="9" cy="21" r="1" /><circle cx="20" cy="21" r="1" /><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6" /></svg>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="8" y="2" width="8" height="4" rx="1" /><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" /><path d="M9 12h6M9 16h4" /></svg>
             {cartCount > 0 && (
               <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-gold text-black text-[10px] font-black flex items-center justify-center">{cartCount}</span>
             )}

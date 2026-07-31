@@ -52,6 +52,16 @@ class PerfilUsuario(models.Model):
     )
     fecha_actualizacion = models.DateTimeField(auto_now=True)
 
+    # ── Verificación de correo ──────────────────────────────────────────────
+    # Con datos_completos, es lo que desbloquea el 5%. Google ya trae el correo
+    # verificado; el alta con contraseña se confirma con un token por correo.
+    email_verificado = models.BooleanField(default=False)
+    email_token = models.CharField(max_length=64, blank=True, default='', editable=False)
+    email_verificado_en = models.DateTimeField(null=True, blank=True)
+    # El premio del 5% se entrega UNA sola vez: sin esto se re-mandaría el correo
+    # y se re-generaría el cupón cada vez que edita el perfil ya estando completo.
+    recompensado = models.BooleanField(default=False)
+
     class Meta:
         db_table = 'perfiles_usuario'
         verbose_name = 'Perfil de usuario'
@@ -59,6 +69,11 @@ class PerfilUsuario(models.Model):
 
     def __str__(self):
         return f'Perfil de {self.usuario.username}'
+
+    @property
+    def telefono_valido(self) -> bool:
+        """Teléfono con 10 dígitos, sin contar espacios, guiones o paréntesis."""
+        return len(''.join(c for c in self.telefono if c.isdigit())) == 10
 
     @property
     def datos_completos(self) -> bool:
@@ -69,11 +84,47 @@ class PerfilUsuario(models.Model):
         ejemplo) y nadie se acuerda de recalcularlo.
         """
         return all([
-            self.telefono.strip(),
+            self.telefono_valido,
             self.empresa.strip(),
             self.obra_direccion.strip(),
             self.obra_responsable.strip(),
         ])
+
+    @property
+    def perfil_verificado(self) -> bool:
+        """Correo confirmado + datos completos: lo que desbloquea el 5%."""
+        return self.email_verificado and self.datos_completos
+
+    def nuevo_email_token(self):
+        import secrets
+        self.email_token = secrets.token_urlsafe(32)
+        return self.email_token
+
+
+class ObraCliente(models.Model):
+    """Obra que guarda un CLIENTE para reusar sus datos al cotizar.
+
+    Aparte de empresas.Obra (curada por administración) a propósito: aquí el
+    cliente guarda lo suyo sin ensuciar el catálogo formal. Un cliente puede
+    tener varias; al cotizar elige una y se rellenan los datos de la obra.
+    """
+    usuario = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='obras')
+    nombre = models.CharField(max_length=120, help_text='Alias para identificarla (ej. "Torre Costera")')
+    responsable = models.CharField(max_length=180, blank=True, default='')
+    direccion = models.CharField(max_length=255, blank=True, default='')
+    telefono = models.CharField(max_length=30, blank=True, default='')
+    email = models.EmailField(blank=True, default='')
+    creada = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'obras_cliente'
+        verbose_name = 'Obra de cliente'
+        verbose_name_plural = 'Obras de cliente'
+        ordering = ['nombre']
+
+    def __str__(self):
+        return self.nombre
 
 
 class Categoria(models.Model):
@@ -117,8 +168,14 @@ class Marca(models.Model):
 
 
 class Equipo(models.Model):
+    # Nueva se vende, seminueva se renta. La condición del EQUIPO define su modo
+    # (venta/renta) en todo el sitio: catálogo, precios, ficha y cotización. Un
+    # equipo es una cosa o la otra, nunca ambas.
+    CONDICIONES = [('nueva', 'Nueva'), ('seminueva', 'Seminueva')]
+
     modelo = models.CharField(max_length=120, default='')
     descripcion = models.TextField(blank=True)
+    condicion = models.CharField(max_length=10, choices=CONDICIONES, default='nueva')
     imagen = models.ImageField(upload_to='products/', blank=True, null=True)
     # Ficha técnica: PDF ya diseñado que sube el admin; el cliente lo descarga.
     ficha_tecnica = models.FileField(
@@ -166,6 +223,11 @@ class Equipo(models.Model):
     precio_mes = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
 
     fecha_creacion = models.DateTimeField(auto_now_add=True)
+
+    @property
+    def modo(self):
+        """'venta' si el equipo es nuevo; 'renta' si es seminuevo."""
+        return 'renta' if self.condicion == 'seminueva' else 'venta'
 
     # 🔥 ESTADO CALCULADO AUTOMÁTICO
     @property
@@ -258,8 +320,44 @@ class ConfiguracionSitio(models.Model):
     negocio_nombre = models.CharField(max_length=120, blank=True, default='REMALI')
     negocio_telefono = models.CharField(max_length=40, blank=True, default='')
     negocio_direccion = models.CharField(max_length=255, blank=True, default='')
+    negocio_email = models.EmailField(blank=True, default='')
+    negocio_web = models.CharField(max_length=120, blank=True, default='')
     negocio_rfc = models.CharField(max_length=20, blank=True, default='')
+    negocio_representante = models.CharField(
+        max_length=120, blank=True, default='',
+        help_text='Nombre que firma la cotización (ej. C.P. Nombre Apellido)')
     negocio_footer = models.CharField(max_length=200, blank=True, default='¡Gracias por su preferencia!')
+
+    # ── Cotizaciones: condiciones de pago y datos bancarios ──
+    # Salen en la carta y el PDF. Son editables (no texto quemado) porque el
+    # porcentaje de anticipo, el descuento y la cuenta cambian con el tiempo.
+    cotizacion_condiciones = models.TextField(
+        blank=True,
+        default=('Anticipo del 60% para iniciar el pedido; el resto contra entrega.\n'
+                 'Pago de contado (una sola exhibición): 5% de descuento.\n'
+                 'Precios sujetos a cambio sin previo aviso.'),
+        help_text='Condiciones que aparecen en las cotizaciones de VENTA')
+    cotizacion_condiciones_renta = models.TextField(
+        blank=True,
+        default=('IMPORTANTE\n'
+                 'El equipo deberá entregarse en las mismas condiciones en que se recibe (limpio); de lo '
+                 'contrario se hará un cargo adicional de $300.00 más IVA.\n'
+                 'Diariamente y antes de arrancar el motor, verificar el nivel de aceite y agregar en caso necesario.\n'
+                 'Hacer cambio de aceite cada 25 horas de trabajo.\n'
+                 'Utilizar gasolina limpia en los motores.\n'
+                 'No desarmar parcial ni totalmente ningún equipo sin autorización de nuestra gerencia de servicio; '
+                 'reportar cualquier desperfecto a los tels. 744-507-33-34 / 744-373-72-01.\n'
+                 'En caso de no atender lo anterior, o de avería y daños en la máquina, la reparación será por cuenta del cliente.'),
+        help_text='Condiciones que aparecen en las cotizaciones de RENTA')
+    datos_bancarios = models.TextField(
+        blank=True, default='',
+        help_text='Datos para depósito/transferencia que se muestran en la cotización '
+                  '(banco, titular, cuenta, CLABE)')
+    cotizacion_cierre = models.TextField(
+        blank=True,
+        default=('Confiando en que lo anterior sea de su agrado y esperando contar con '
+                 'su valiosa preferencia, le extendemos un cordial saludo.'),
+        help_text='Frase de despedida al pie de la cotización')
 
     actualizada = models.DateTimeField(auto_now=True)
 
@@ -318,6 +416,14 @@ class Cupon(models.Model):
         help_text="Fracción de descuento (0-1, ej. 0.15 = 15%)"
     )
     activo = models.BooleanField(default=True)
+    # Un cupón puede ser general (usuario vacío) o PERSONAL de un cliente —el del
+    # 5% por completar perfil—. `motivo` deja rastro de por qué se emitió.
+    usuario = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True,
+        on_delete=models.CASCADE, related_name='cupones',
+    )
+    motivo = models.CharField(max_length=40, blank=True, default='')
+    creado = models.DateTimeField(auto_now_add=True, null=True)
 
     class Meta:
         db_table = 'cupones'

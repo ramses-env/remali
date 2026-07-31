@@ -43,6 +43,10 @@ class Ticket:
         for _ in range(n):
             self.add('', size=6)
 
+    def logo(self, size=24, gap=1.2):
+        """Marca REMALI (cuadro oscuro con R) centrada, para el encabezado."""
+        self._lines.append({'type': 'logo', 'size': size, 'gap': gap})
+
     # ── Render ──
     def _wrap(self, text, font, size, max_w):
         if not text:
@@ -66,6 +70,8 @@ class Ticket:
         for l in self._lines:
             if l['type'] == 'line':
                 ops.append({'kind': 'line', 'size': l['size'], 'gap': l['gap']})
+            elif l['type'] == 'logo':
+                ops.append({'kind': 'logo', 'size': l['size'], 'gap': l['gap']})
             elif l['type'] == 'row':
                 ops.append(l)
             else:
@@ -87,6 +93,15 @@ class Ticket:
                 c.setLineWidth(0.4)
                 c.line(self.margin, y + o['size'] * 0.4, self.width - self.margin, y + o['size'] * 0.4)
                 continue
+            if kind == 'logo':
+                s = o['size']
+                c.setFillColorRGB(0.067, 0.090, 0.153)                     # cuadro (tinta)
+                c.roundRect((self.width - s) / 2, y, s, s, s * 0.18, stroke=0, fill=1)
+                c.setFillColorRGB(1, 1, 1)                                  # R en blanco
+                c.setFont('Helvetica-Bold', s * 0.6)
+                c.drawCentredString(self.width / 2, y + s * 0.26, 'R')
+                c.setFillColorRGB(0, 0, 0)                                  # restaurar para el texto
+                continue
             font = 'Helvetica-Bold' if o['bold'] else 'Helvetica'
             c.setFont(font, o['size'])
             if kind == 'row':
@@ -106,6 +121,7 @@ class Ticket:
 def render_comprobante_pdf(data: dict, width_mm=58) -> bytes:
     """Renderiza un comprobante (dict de `datos_comprobante_*`) a PDF térmico."""
     t = Ticket(width_mm=width_mm)
+    t.logo()
     t.add('REMALI MAQUINARIA', bold=True, size=11, align='center')
     t.add(data.get('titulo', 'Comprobante'), size=9, align='center')
     t.blank()

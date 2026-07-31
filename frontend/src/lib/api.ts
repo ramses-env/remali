@@ -23,8 +23,10 @@ function esDeFondo(config: any) {
   return SIN_INDICADOR.some(s => url.includes(s))
 }
 
-function normalizeBase(url?: string) {
-  let u = (url || '').trim()
+/** Normaliza VITE_API_URL a una base usable ('/api', ':8000' → localhost, etc.).
+ *  La comparte resolveMediaUrl para derivar el origin del backend. */
+export function normalizeBase(url?: string) {
+  const u = (url || '').trim()
   if (!u) return '/api'
   if (u.startsWith('/')) return u
   if (u.startsWith(':')) return `http://localhost${u}`

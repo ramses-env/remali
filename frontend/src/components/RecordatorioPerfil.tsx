@@ -70,9 +70,9 @@ export default function RecordatorioPerfil() {
             >
               <AvatarInicial nombre={user?.first_name} correo={user?.email} tamano="md" />
               <span className="min-w-0">
-                <span className="block text-sm font-bold text-ink">Completa tu perfil</span>
+                <span className="block text-sm font-bold text-ink">Completa tu perfil y obtén 5%</span>
                 <span className="block text-[13px] leading-snug text-mute">
-                  Así te cotizamos y entregamos más rápido.
+                  Un descuento por darnos tus datos de contacto y obra.
                 </span>
               </span>
               <ArrowRight className="ml-auto h-4 w-4 shrink-0 text-gold transition-transform group-hover:translate-x-0.5" />

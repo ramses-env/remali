@@ -50,3 +50,48 @@ def enviar_async(asunto, cuerpo, destinatarios, adjuntos=None):
         daemon=True, name='correo-remali',
     ).start()
     return True
+
+
+def enviar_plantilla_brevo(template_id, email, nombre=None, params=None, adjuntos=None):
+    """Dispara una PLANTILLA transaccional de Brevo por su API, en un hilo.
+
+    El diseño vive en Brevo (editable sin tocar código) y usa `{{ params.xxx }}`
+    para los datos que le pasamos aquí. `adjuntos` es la misma lista de
+    (nombre, contenido_bytes, content_type) que usa `enviar_async`; se mandan en
+    base64. El asunto y el remitente los define la propia plantilla en Brevo.
+
+    Devuelve True si está configurada (BREVO_API_KEY + template_id) y se encoló;
+    False si falta configuración — así quien llama puede caer al SMTP de texto.
+    """
+    import os
+
+    api_key = os.environ.get('BREVO_API_KEY', '').strip()
+    if not api_key or not template_id or not email:
+        return False
+    import base64
+    import json
+    import urllib.request
+
+    cuerpo = {
+        'templateId': int(template_id),
+        'to': [{'email': email, 'name': nombre or email}],
+        'params': params or {},
+    }
+    if adjuntos:
+        cuerpo['attachment'] = [
+            {'name': nom, 'content': base64.b64encode(contenido).decode('ascii')}
+            for nom, contenido, _tipo in adjuntos
+        ]
+    payload = json.dumps(cuerpo).encode('utf-8')
+
+    def _worker():
+        try:
+            req = urllib.request.Request(
+                'https://api.brevo.com/v3/smtp/email', data=payload,
+                headers={'api-key': api_key, 'content-type': 'application/json', 'accept': 'application/json'})
+            urllib.request.urlopen(req, timeout=20)
+        except Exception:
+            log.exception('No se pudo enviar la plantilla Brevo %s a %s', template_id, email)
+
+    threading.Thread(target=_worker, daemon=True, name='brevo-remali').start()
+    return True

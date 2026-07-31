@@ -4,6 +4,7 @@ from . import views
 urlpatterns = [
     path('rentas/', views.listar_rentas, name='listar_rentas'),
     path('rentas/crear/', views.crear_renta, name='crear_renta'),
+    path('rentas/mias/', views.rentas_mias, name='rentas_mias'),   # cliente: sus rentas
     path('rentas/<int:pk>/entregar/', views.confirmar_entrega, name='confirmar_entrega'),
     path('rentas/<int:pk>/devolver/', views.devolver_renta, name='devolver_renta'),
     path('rentas/<int:pk>/cancelar/', views.cancelar_renta, name='cancelar_renta'),

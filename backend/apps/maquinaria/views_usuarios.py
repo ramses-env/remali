@@ -41,6 +41,10 @@ def _serialize(u: User):
         'activo': u.is_active,
         'telefono': getattr(perfil, 'telefono', '') or '',
         'puesto': getattr(perfil, 'puesto', '') or '',
+        # Estado de verificación del cliente (para ver/filtrar quién completó perfil)
+        'email_verificado': bool(getattr(perfil, 'email_verificado', False)),
+        'datos_completos': bool(perfil and perfil.datos_completos),
+        'perfil_verificado': bool(perfil and perfil.perfil_verificado),
         'ultimo_acceso': u.last_login,
         'creado': u.date_joined,
     }

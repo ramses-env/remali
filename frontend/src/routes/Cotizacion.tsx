@@ -1,20 +1,46 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useCart, MODALIDAD_LABEL } from '../store/cart'
-import { downloadCotizacionPdf } from '../lib/pdf'
+// Solo el TIPO: la función se importa dinámicamente al descargar, para que
+// jsPDF (~350 KB) no entre al bundle inicial de la tienda.
+import type { downloadCotizacionPdf } from '../lib/pdf'
 import { Link, useNavigate } from 'react-router-dom'
 import { useToast } from '../store/toast'
 import api from '../lib/api'
 import { waLink } from '../lib/whatsapp'
 import { useConfigPublica } from '../lib/configPublica'
+import { useProfile } from '../store/profile'
+import { formatMoney } from '../lib/utils'
 
 const inputBase = 'w-full bg-surface-2 border rounded-xl px-4 py-2.5 text-sm text-ink placeholder-mute focus:outline-none transition-colors'
-const money = (n: number) => '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+const money = formatMoney
+
+/** Carga jsPDF bajo demanda y genera el PDF de la cotización. */
+const pedirPdf = async (args: Parameters<typeof downloadCotizacionPdf>[0]) =>
+  (await import('../lib/pdf')).downloadCotizacionPdf(args)
+
+/* A NIVEL DE MÓDULO a propósito. Si se define dentro de Cotizacion(), cada
+   tecleo re-crea el componente y React remonta el <input> de adentro: pierde el
+   foco y solo deja escribir un carácter. Fuera, su identidad es estable. */
+function Field({ label, ok, showErrors, children }: { label: string; ok: boolean; showErrors: boolean; children: React.ReactNode }) {
+  return (
+    <div>
+      <label className="block text-[11px] font-bold tracking-wide text-mute mb-1.5 uppercase">{label}</label>
+      {children}
+      {showErrors && !ok && <p className="text-[11px] text-red-500 mt-1">Campo obligatorio</p>}
+    </div>
+  )
+}
+
+type ObraCli = { id: number; nombre: string; responsable: string; direccion: string; telefono: string; email: string }
 
 export default function Cotizacion() {
   const { state, dispatch } = useCart()
   const { notify } = useToast()
   const nav = useNavigate()
   const cfg = useConfigPublica()   // WhatsApp del negocio, configurado en el panel
+  const { user } = useProfile()    // si hay sesión, precargamos su perfil
+  const [prefilled, setPrefilled] = useState(false)
+  const [obras, setObras] = useState<ObraCli[]>([])   // obras guardadas del cliente
   const [nombre, setNombre] = useState('')
   const [empresa, setEmpresa] = useState('')
   const [email, setEmail] = useState('')
@@ -28,6 +54,50 @@ export default function Cotizacion() {
   const [sending, setSending] = useState(false)
   const [sentFolio, setSentFolio] = useState<string | null>(null)
   const [sentWaMsg, setSentWaMsg] = useState('')
+  // Snapshot para poder descargar el PDF DESPUÉS de enviar (el carrito ya se limpió).
+  const [sentPdfArgs, setSentPdfArgs] = useState<Parameters<typeof downloadCotizacionPdf>[0] | null>(null)
+
+  // Autorrelleno desde el perfil: le ahorra al cliente volver a escribir sus
+  // datos. Solo rellena lo que está vacío (con `v || ...`), así nunca pisa lo
+  // que ya haya tecleado, aunque el fetch llegue tarde.
+  useEffect(() => {
+    if (!user) return
+    let vivo = true
+    api.get('/auth/perfil/').then(r => {
+      if (!vivo) return
+      const p = r.data || {}
+      const keep = (v: string, val?: string) => v || (val || '').trim()
+      setNombre(v => keep(v, p.first_name))
+      setEmpresa(v => keep(v, p.empresa))
+      setEmail(v => keep(v, p.email))
+      setTelefono(v => v || (p.telefono || '').replace(/\D+/g, '').slice(0, 10))
+      setResponsable(v => keep(v, p.obra_responsable))
+      setDireccion(v => keep(v, p.obra_direccion))
+      if (p.first_name || p.empresa || p.telefono) setPrefilled(true)
+    }).catch(() => { /* sin sesión o sin perfil: se llena a mano */ })
+    // Obras guardadas: para elegir una y no re-escribir sus datos.
+    api.get<ObraCli[]>('/obras-cliente/').then(r => vivo && setObras(r.data || [])).catch(() => {})
+    return () => { vivo = false }
+  }, [user])
+
+  // Elegir una obra guardada llena sus campos (reemplaza lo que hubiera).
+  function usarObra(o: ObraCli) {
+    setResponsable(o.responsable || '')
+    setDireccion(o.direccion || '')
+    setObraTelefono((o.telefono || '').replace(/\D+/g, '').slice(0, 10))
+    setObraEmail(o.email || '')
+  }
+
+  // Guardar la obra actual en la cuenta, para reusarla después.
+  async function guardarObra() {
+    if (!direccion.trim() && !responsable.trim()) { notify('Llena la obra antes de guardarla', 'x'); return }
+    const nombre = direccion.trim().slice(0, 60) || `Obra ${obras.length + 1}`
+    try {
+      const r = await api.post<ObraCli>('/obras-cliente/', { nombre, responsable, direccion, telefono: obraTelefono, email: obraEmail })
+      setObras(prev => [...prev.filter(o => o.id !== r.data.id), r.data])
+      notify('Obra guardada en tu cuenta')
+    } catch { notify('No se pudo guardar la obra', 'x') }
+  }
 
   const isEmail = (v: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)
   const isPhone10 = (v: string) => v.replace(/\D+/g, '').length === 10
@@ -44,18 +114,22 @@ export default function Cotizacion() {
     validTelefono && validDireccion && validResponsable && validObraTelefono && validObraEmail
   ), [state.items, validNombre, validEmpresa, validClientEmail, validTelefono, validDireccion, validResponsable, validObraTelefono, validObraEmail])
 
+  // Argumentos del PDF, compartidos por "descargar" y por el snapshot de éxito.
+  function pdfArgs() {
+    return {
+      items: state.items,
+      client: { nombre, empresa, email, telefono, direccion, responsable, obra_telefono: obraTelefono, obra_email: obraEmail },
+      coupon: state.coupon,
+      iva: factura,
+    }
+  }
   async function handleDownload() {
     if (!formValid) {
       notify('Completa los campos obligatorios para generar la cotización', 'x')
       setShowErrors(true)
       return
     }
-    await downloadCotizacionPdf({
-      items: state.items,
-      client: { nombre, empresa, email, telefono, direccion, responsable, obra_telefono: obraTelefono, obra_email: obraEmail },
-      coupon: state.coupon,
-      iva: factura,
-    })
+    await pedirPdf(pdfArgs())
   }
 
   // Envía la solicitud al backend. El navegador manda equipo_id + cantidad + unit;
@@ -77,6 +151,7 @@ export default function Cotizacion() {
       // Mensaje de WhatsApp pre-llenado (se arma ANTES de limpiar el carrito).
       const resumen = state.items.map(i => `${i.qty}x ${i.title}`).join(', ')
       setSentWaMsg(`Hola, soy ${nombre}. Envié la solicitud de cotización ${r.data.folio}${resumen ? ` (${resumen})` : ''}. Quisiera continuar por aquí.`)
+      setSentPdfArgs(pdfArgs())   // conserva los datos para descargar el PDF tras limpiar
       setSentFolio(r.data.folio)
       dispatch({ type: 'clear' })
     } catch (err: any) {
@@ -86,20 +161,24 @@ export default function Cotizacion() {
     }
   }
 
-  const subtotal = state.items.reduce((s, i) => s + i.price * i.qty, 0)
+  /* Espejo del backend (cotizaciones/models.py): los precios de VENTA ya
+     incluyen IVA (solo se desglosa, nunca se suma); los de RENTA van sin IVA
+     y se les suma 16% únicamente si el cliente pide factura. El descuento se
+     reparte proporcional entre ambas porciones. */
+  const subVenta = state.items.reduce((s, i) => s + (i.unit === 'venta' ? i.price * i.qty : 0), 0)
+  const subRenta = state.items.reduce((s, i) => s + (i.unit !== 'venta' ? i.price * i.qty : 0), 0)
+  const subtotal = subVenta + subRenta
   const discountAmt = state.coupon ? subtotal * state.coupon.discount : 0
-  const preTaxTotal = Math.max(0, subtotal - discountAmt)
-  const ivaAmt = factura ? preTaxTotal * 0.16 : 0
-  const totalConIVA = preTaxTotal + ivaAmt
+  const factor = subtotal > 0 ? Math.max(0, subtotal - discountAmt) / subtotal : 1
+  const ventaNeta = subVenta * factor            // IVA incluido
+  const rentaNeta = subRenta * factor            // sin IVA
+  const ivaVentaIncluido = ventaNeta - ventaNeta / 1.16   // desglose informativo
+  const ivaRenta = factura ? rentaNeta * 0.16 : 0
+  const baseSinIVA = ventaNeta / 1.16 + rentaNeta
+  const ivaAmt = ivaVentaIncluido + ivaRenta     // lo que la factura desglosaría
+  const totalConIVA = ventaNeta + rentaNeta + ivaRenta
 
   const inp = (ok: boolean) => `${inputBase} ${showErrors && !ok ? 'border-red-500' : 'border-edge focus:border-gold/60'}`
-  const Field = ({ label, ok, children }: { label: string; ok: boolean; children: React.ReactNode }) => (
-    <div>
-      <label className="block text-[11px] font-bold tracking-wide text-mute mb-1.5 uppercase">{label}</label>
-      {children}
-      {showErrors && !ok && <p className="text-[11px] text-red-500 mt-1">Campo obligatorio</p>}
-    </div>
-  )
 
   if (sentFolio) {
     return (
@@ -115,6 +194,13 @@ export default function Cotizacion() {
               <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M17.5 14.4c-.3-.1-1.7-.8-1.9-.9-.3-.1-.5-.1-.7.1-.2.3-.7.9-.9 1.1-.2.2-.3.2-.6.1-.3-.1-1.2-.5-2.3-1.4-.9-.8-1.4-1.7-1.6-2-.2-.3 0-.5.1-.6.1-.1.3-.3.4-.5.1-.1.2-.3.2-.4.1-.2 0-.3 0-.5-.1-.1-.7-1.6-.9-2.2-.2-.6-.5-.5-.7-.5h-.6c-.2 0-.5.1-.8.4-.3.3-1 1-1 2.5s1.1 2.9 1.2 3.1c.1.2 2.1 3.2 5.1 4.5.7.3 1.3.5 1.7.6.7.2 1.4.2 1.9.1.6-.1 1.7-.7 2-1.4.2-.7.2-1.3.2-1.4-.1-.1-.3-.2-.6-.3zM12 2C6.5 2 2 6.5 2 12c0 1.8.5 3.5 1.3 5L2 22l5.1-1.3c1.4.8 3.1 1.2 4.9 1.2 5.5 0 10-4.5 10-10S17.5 2 12 2z" /></svg>
               Continuar por WhatsApp
             </a>
+          )}
+          {sentPdfArgs && (
+            <button onClick={() => pedirPdf(sentPdfArgs)}
+              className="px-5 py-2.5 rounded-full border border-edge text-ink text-sm font-bold hover:bg-surface-2 transition-colors flex items-center justify-center gap-2 active:scale-[0.98]">
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.7}><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+              Descargar PDF
+            </button>
           )}
           <Link to="/equipos" className="px-5 py-2.5 rounded-full border border-edge text-ink text-sm font-bold hover:bg-surface-2 transition-colors flex items-center justify-center">Seguir viendo equipos</Link>
         </div>
@@ -171,35 +257,60 @@ export default function Cotizacion() {
           {/* ── Datos + resumen (sticky) ── */}
           <div className="min-[900px]:sticky min-[900px]:top-24 rounded-2xl border border-edge bg-surface p-6 space-y-5">
             <div>
-              <p className="text-sm font-extrabold text-ink mb-3 flex items-center gap-2"><span className="w-1.5 h-4 rounded-full bg-gold" /> Datos del cliente</p>
+              <p className="text-sm font-extrabold text-ink mb-3 flex items-center gap-2"><span className="w-1.5 h-4 rounded-full bg-gold" /> Datos del cliente
+                {prefilled && <span className="stagger-item ml-auto text-[10px] font-semibold uppercase tracking-wide text-gold/90">Desde tu perfil</span>}
+              </p>
               <div className="space-y-3">
-                <Field label="Nombre" ok={validNombre}><input className={inp(validNombre)} value={nombre} onChange={e => setNombre(e.target.value)} placeholder="Tu nombre" /></Field>
-                <Field label="Empresa" ok={validEmpresa}><input className={inp(validEmpresa)} value={empresa} onChange={e => setEmpresa(e.target.value)} placeholder="Empresa" /></Field>
-                <Field label="Email (opcional)" ok={validClientEmail}><input type="email" className={inp(validClientEmail)} value={email} onChange={e => setEmail(e.target.value)} placeholder="correo@ejemplo.com" /></Field>
-                <Field label="Teléfono" ok={validTelefono}><input type="tel" inputMode="numeric" maxLength={10} className={inp(validTelefono)} value={telefono} onChange={e => setTelefono(e.target.value.replace(/\D+/g, '').slice(0, 10))} placeholder="10 dígitos" /></Field>
+                <Field label="Nombre" ok={validNombre} showErrors={showErrors}><input className={inp(validNombre)} value={nombre} onChange={e => setNombre(e.target.value)} placeholder="Tu nombre" /></Field>
+                <Field label="Empresa" ok={validEmpresa} showErrors={showErrors}><input className={inp(validEmpresa)} value={empresa} onChange={e => setEmpresa(e.target.value)} placeholder="Empresa" /></Field>
+                <Field label="Email (opcional)" ok={validClientEmail} showErrors={showErrors}><input type="email" className={inp(validClientEmail)} value={email} onChange={e => setEmail(e.target.value)} placeholder="correo@ejemplo.com" /></Field>
+                <Field label="Teléfono" ok={validTelefono} showErrors={showErrors}><input type="tel" inputMode="numeric" maxLength={10} className={inp(validTelefono)} value={telefono} onChange={e => setTelefono(e.target.value.replace(/\D+/g, '').slice(0, 10))} placeholder="10 dígitos" /></Field>
               </div>
             </div>
 
             <div className="pt-4 border-t border-edge">
               <p className="text-sm font-extrabold text-ink mb-3 flex items-center gap-2"><span className="w-1.5 h-4 rounded-full bg-gold" /> Datos de la obra</p>
+              {obras.length > 0 && (
+                <div className="mb-3 flex flex-wrap items-center gap-2">
+                  <span className="text-[11px] text-mute">Tus obras:</span>
+                  {obras.map(o => (
+                    <button key={o.id} type="button" onClick={() => usarObra(o)}
+                      className="max-w-[170px] truncate text-xs px-2.5 py-1 rounded-full border border-edge text-ink transition-colors hover:border-gold/60 hover:text-gold active:scale-[0.97]">
+                      {o.nombre}
+                    </button>
+                  ))}
+                </div>
+              )}
               <div className="space-y-3">
-                <Field label="Responsable" ok={validResponsable}><input className={inp(validResponsable)} value={responsable} onChange={e => setResponsable(e.target.value)} placeholder="Encargado de obra" /></Field>
-                <Field label="Dirección" ok={validDireccion}><input className={inp(validDireccion)} value={direccion} onChange={e => setDireccion(e.target.value)} placeholder="Dónde está la obra" /></Field>
-                <Field label="Teléfono de la obra" ok={validObraTelefono}><input type="tel" inputMode="numeric" maxLength={10} className={inp(validObraTelefono)} value={obraTelefono} onChange={e => setObraTelefono(e.target.value.replace(/\D+/g, '').slice(0, 10))} placeholder="10 dígitos" /></Field>
-                <Field label="Email de la obra" ok={validObraEmail}><input type="email" className={inp(validObraEmail)} value={obraEmail} onChange={e => setObraEmail(e.target.value)} placeholder="correo@ejemplo.com" /></Field>
+                <Field label="Responsable" ok={validResponsable} showErrors={showErrors}><input className={inp(validResponsable)} value={responsable} onChange={e => setResponsable(e.target.value)} placeholder="Encargado de obra" /></Field>
+                <Field label="Dirección" ok={validDireccion} showErrors={showErrors}><input className={inp(validDireccion)} value={direccion} onChange={e => setDireccion(e.target.value)} placeholder="Dónde está la obra" /></Field>
+                <Field label="Teléfono de la obra" ok={validObraTelefono} showErrors={showErrors}><input type="tel" inputMode="numeric" maxLength={10} className={inp(validObraTelefono)} value={obraTelefono} onChange={e => setObraTelefono(e.target.value.replace(/\D+/g, '').slice(0, 10))} placeholder="10 dígitos" /></Field>
+                <Field label="Email de la obra" ok={validObraEmail} showErrors={showErrors}><input type="email" className={inp(validObraEmail)} value={obraEmail} onChange={e => setObraEmail(e.target.value)} placeholder="correo@ejemplo.com" /></Field>
               </div>
+              {user && (
+                <button type="button" onClick={guardarObra}
+                  className="mt-2.5 text-xs font-semibold text-gold transition-opacity hover:opacity-80">
+                  + Guardar esta obra en mi cuenta
+                </button>
+              )}
             </div>
 
-            {/* Resumen */}
+            {/* Resumen — venta ya incluye IVA; renta lo suma solo con factura */}
             <div className="pt-4 border-t border-edge space-y-1.5 text-sm">
-              <div className="flex justify-between"><span className="text-mute">Subtotal</span><span className="text-ink font-semibold">{money(subtotal)}</span></div>
+              {subRenta > 0 && <div className="flex justify-between"><span className="text-mute">Subtotal renta</span><span className="text-ink font-semibold">{money(rentaNeta)}</span></div>}
+              {subVenta > 0 && <div className="flex justify-between"><span className="text-mute">Subtotal venta <span className="text-[11px]">(IVA incluido)</span></span><span className="text-ink font-semibold">{money(ventaNeta)}</span></div>}
               {state.coupon && <div className="flex justify-between"><span className="text-mute">Descuento ({(state.coupon.discount * 100).toFixed(0)}%)</span><span className="text-red-500 font-semibold">− {money(discountAmt)}</span></div>}
-              {factura && <div className="flex justify-between"><span className="text-mute">IVA (16%)</span><span className="text-ink font-semibold">{money(ivaAmt)}</span></div>}
+              {factura && (
+                <>
+                  <div className="flex justify-between"><span className="text-mute">Base (sin IVA)</span><span className="text-ink font-semibold">{money(baseSinIVA)}</span></div>
+                  <div className="flex justify-between"><span className="text-mute">IVA (16%)</span><span className="text-ink font-semibold">{money(ivaAmt)}</span></div>
+                </>
+              )}
               <label className="flex items-center gap-3 py-2 cursor-pointer">
                 <button type="button" role="switch" aria-checked={factura} onClick={() => setFactura(f => !f)} className={`relative w-10 h-[22px] rounded-full flex-none transition-colors ${factura ? 'bg-gold' : 'bg-ink/15'}`}>
                   <span className={`absolute top-[2px] w-[18px] h-[18px] rounded-full bg-white shadow transition-all ${factura ? 'left-[20px]' : 'left-[2px]'}`} />
                 </button>
-                <span className="text-[13px] text-ink">¿Deseas factura? (se suma IVA 16%)</span>
+                <span className="text-[13px] text-ink">¿Deseas factura?{subRenta > 0 ? ' (la renta suma IVA 16%)' : ' (el precio ya lo incluye)'}</span>
               </label>
               <div className="flex justify-between pt-2.5 mt-1 border-t border-edge text-[17px] font-extrabold"><span className="text-ink">Total</span><span className="text-price">{money(totalConIVA)}</span></div>
             </div>

@@ -32,7 +32,7 @@ from django.conf import settings
 from .models import (
     Equipo, Categoria, Marca, Tipo, ImagenProducto,
     Cupon, Notificacion, PerfilUsuario, crear_notificacion,
-    ConversacionSoporte, MensajeSoporte, ConfiguracionSitio, CorreoAviso,
+    ConversacionSoporte, MensajeSoporte, ConfiguracionSitio, CorreoAviso, ObraCliente,
 )
 from .permissions import IsAdminGroupOrStaff
 
@@ -65,6 +65,7 @@ from .serializers import (
     CuponSerializer, NotificacionSerializer, PerfilUsuarioSerializer,
     ConfiguracionSitioSerializer, CorreoAvisoSerializer,
     ConversacionSoporteListSerializer, ConversacionSoporteDetailSerializer, MensajeSoporteSerializer,
+    ObraClienteSerializer,
 )
 
 
@@ -103,12 +104,13 @@ class EquipoListCreate(generics.ListCreateAPIView):
         qs = super().get_queryset()
         params = self.request.query_params
 
-        # Disponibilidad derivada de las unidades de inventario
+        # Venta = equipos nuevos, Renta = seminuevos. Lo decide la condición del
+        # propio equipo (un equipo es de venta O de renta, nunca ambos).
         uso = (params.get('uso') or '').strip().lower()
         if uso == 'venta':
-            qs = qs.filter(unidades__estado='disponible').distinct()
+            qs = qs.filter(condicion='nueva')
         elif uso == 'renta':
-            qs = qs.filter(unidades__condicion='seminueva', unidades__estado='disponible').distinct()
+            qs = qs.filter(condicion='seminueva')
 
         if params.get('price_min'):
             qs = qs.filter(precio_dia__gte=params['price_min'])
@@ -238,8 +240,15 @@ def configuracion_publica(request):
         'negocio_nombre': cfg.negocio_nombre,
         'negocio_telefono': cfg.negocio_telefono,
         'negocio_direccion': cfg.negocio_direccion,
+        'negocio_email': cfg.negocio_email,
+        'negocio_web': cfg.negocio_web,
         'negocio_rfc': cfg.negocio_rfc,
+        'negocio_representante': cfg.negocio_representante,
         'negocio_footer': cfg.negocio_footer,
+        'cotizacion_condiciones': cfg.cotizacion_condiciones,
+        'cotizacion_condiciones_renta': cfg.cotizacion_condiciones_renta,
+        'datos_bancarios': cfg.datos_bancarios,
+        'cotizacion_cierre': cfg.cotizacion_cierre,
     })
 
 
@@ -373,6 +382,174 @@ def cambiar_password(request):
     return Response({'detail': 'Contraseña actualizada.', 'tenia_password': tenia_password})
 
 
+def _bienvenida_brevo(email, nombre):
+    """Dispara la PLANTILLA de bienvenida por la API de Brevo, en un hilo.
+
+    Devuelve True si está configurada (BREVO_API_KEY + BREVO_WELCOME_TEMPLATE_ID)
+    y se encoló; False si no hay plantilla (entonces se manda el texto plano).
+    La plantilla usa {{ params.nombre }} para personalizar.
+    """
+    import os
+
+    from .correo import enviar_plantilla_brevo
+    tpl = os.environ.get('BREVO_WELCOME_TEMPLATE_ID', '').strip()
+    return enviar_plantilla_brevo(tpl, email, nombre, {'nombre': nombre or ''})
+
+
+def enviar_bienvenida(user):
+    """Bienvenida al crear una cuenta de cliente. Nunca revienta el alta.
+
+    Si hay plantilla de Brevo configurada, se usa esa (diseño editable en Brevo);
+    si no, un correo de texto por el SMTP normal.
+    """
+    email = (getattr(user, 'email', '') or '').strip()
+    if not email:
+        return
+    nombre = (getattr(user, 'first_name', '') or '').strip()
+    try:
+        if _bienvenida_brevo(email, nombre):
+            return
+        from .correo import enviar_async
+        cfg = ConfiguracionSitio.get_solo()
+        negocio = cfg.negocio_nombre or 'REMALI'
+        contacto = cfg.negocio_telefono or cfg.whatsapp_principal or ''
+        web = cfg.negocio_web or 'remali.mx'
+        cuerpo = (
+            f'Hola {nombre}'.rstrip() + ',\n\n'
+            f'¡Bienvenido a {negocio}! Tu cuenta ya está lista.\n\n'
+            f'Desde tu cuenta puedes ver nuestro catálogo de maquinaria y pedir '
+            f'cotizaciones en línea; nosotros te contactamos para confirmar disponibilidad.\n\n'
+            + (f'Visítanos en {web}.\n' if web else '')
+            + (f'¿Dudas? Escríbenos al {contacto}.\n' if contacto else '')
+            + f'\nGracias por confiar en {negocio}.\n— El equipo de {negocio}\n'
+        )
+        enviar_async(f'¡Bienvenido a {negocio}!', cuerpo, [email])
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception('No se pudo enviar la bienvenida a %s', email)
+
+
+def _enviar_verificacion(user, perfil, request=None):
+    """Correo con el link para confirmar el correo del usuario. No revienta nada."""
+    email = (getattr(user, 'email', '') or '').strip()
+    if not email:
+        return
+    try:
+        if not perfil.email_token:
+            perfil.nuevo_email_token()
+            perfil.save(update_fields=['email_token'])
+        ruta = f'/api/auth/verificar-correo/{perfil.email_token}/'
+        link = request.build_absolute_uri(ruta) if request is not None else ruta
+        nombre = (getattr(user, 'first_name', '') or '').strip()
+        import os
+        from .correo import enviar_async, enviar_plantilla_brevo
+        tpl = os.environ.get('BREVO_VERIFY_TEMPLATE_ID', '').strip()
+        if enviar_plantilla_brevo(tpl, email, nombre, {'nombre': nombre, 'link': link}):
+            return
+        cfg = ConfiguracionSitio.get_solo()
+        negocio = cfg.negocio_nombre or 'REMALI'
+        cuerpo = (
+            f'Hola {nombre}'.rstrip() + ',\n\n'
+            f'Confirma tu correo para activar tu cuenta en {negocio} y desbloquear un '
+            f'5% de descuento al completar tu perfil:\n\n'
+            f'{link}\n\n'
+            f'Si no creaste esta cuenta, ignora este correo.\n'
+        )
+        enviar_async(f'Confirma tu correo · {negocio}', cuerpo, [email])
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception('No se pudo enviar la verificación a %s', email)
+
+
+def _generar_cupon_perfil(user):
+    """Crea (una sola vez) el cupón personal de 5% por completar el perfil."""
+    import secrets
+    from decimal import Decimal
+    from .models import Cupon
+    existente = user.cupones.filter(motivo='perfil').first()
+    if existente:
+        return existente
+    for _ in range(6):
+        codigo = 'PERFIL-' + secrets.token_hex(3).upper()
+        if not Cupon.objects.filter(codigo=codigo).exists():
+            return Cupon.objects.create(
+                codigo=codigo, descuento=Decimal('0.05'), activo=True,
+                usuario=user, motivo='perfil',
+            )
+    return None
+
+
+def _enviar_recompensa(user, codigo):
+    """Correo de '¡ganaste 5%!' con el código del cupón. No revienta nada."""
+    email = (getattr(user, 'email', '') or '').strip()
+    if not email:
+        return
+    try:
+        nombre = (getattr(user, 'first_name', '') or '').strip()
+        import os
+        from .correo import enviar_async, enviar_plantilla_brevo
+        tpl = os.environ.get('BREVO_REWARD_TEMPLATE_ID', '').strip()
+        if enviar_plantilla_brevo(tpl, email, nombre, {'nombre': nombre, 'codigo': codigo, 'descuento': '5%'}):
+            return
+        cfg = ConfiguracionSitio.get_solo()
+        negocio = cfg.negocio_nombre or 'REMALI'
+        cuerpo = (
+            f'¡Felicidades {nombre}'.rstrip() + '!\n\n'
+            f'Completaste tu perfil en {negocio} y ganaste un 5% de descuento.\n\n'
+            f'Tu código: {codigo}\n\n'
+            f'Úsalo en tu próxima cotización. ¡Gracias por confiar en {negocio}!\n'
+        )
+        enviar_async(f'Ganaste 5% en {negocio}', cuerpo, [email])
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception('No se pudo enviar la recompensa a %s', email)
+
+
+def revisar_recompensa(perfil):
+    """Si el perfil quedó verificado (correo + datos) y aún no se le premió,
+    genera su cupón de 5% y le manda el correo. Idempotente; nunca revienta."""
+    try:
+        if not perfil.perfil_verificado or perfil.recompensado:
+            return
+        cupon = _generar_cupon_perfil(perfil.usuario)
+        perfil.recompensado = True
+        perfil.save(update_fields=['recompensado'])
+        if cupon:
+            _enviar_recompensa(perfil.usuario, cupon.codigo)
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception('No se pudo entregar la recompensa de perfil')
+
+
+@api_view(['GET'])
+@permission_classes([permissions.AllowAny])   # público: se abre desde el link del correo
+def verificar_correo_usuario(request, token):
+    """Confirma el correo del usuario (link del correo) y lo regresa al sitio."""
+    from django.shortcuts import redirect
+    from django.utils import timezone
+    perfil = PerfilUsuario.objects.filter(email_token=token).exclude(email_token='').first() if token else None
+    if not perfil:
+        return redirect('/?correo=invalido')
+    if not perfil.email_verificado:
+        perfil.email_verificado = True
+        perfil.email_verificado_en = timezone.now()
+        perfil.save(update_fields=['email_verificado', 'email_verificado_en'])
+        enviar_bienvenida(perfil.usuario)   # ahora sí: cuenta confirmada
+        revisar_recompensa(perfil)
+    return redirect('/?correo=verificado')
+
+
+@api_view(['POST'])
+@permission_classes([permissions.IsAuthenticated])
+def reenviar_verificacion(request):
+    """Reenvía el correo de verificación al usuario autenticado."""
+    perfil, _ = PerfilUsuario.objects.get_or_create(usuario=request.user)
+    if perfil.email_verificado:
+        return Response({'detail': 'Tu correo ya está verificado.'})
+    _enviar_verificacion(request.user, perfil, request)
+    return Response({'detail': 'Te reenviamos el correo de verificación.'})
+
+
 @api_view(['POST'])
 @permission_classes([permissions.AllowAny])  # público: alta de cliente desde la tienda
 @throttle_classes([RegistroThrottle])
@@ -425,7 +602,9 @@ def registro(request):
     grupo, _ = Group.objects.get_or_create(name='Cliente')
     user.groups.add(grupo)
 
-    return Response({'detail': 'Cuenta creada.'}, status=201)
+    perfil, _ = PerfilUsuario.objects.get_or_create(usuario=user)
+    _enviar_verificacion(user, perfil, request)   # confirma el correo; la bienvenida va al verificarlo
+    return Response({'detail': 'Cuenta creada. Te enviamos un correo para confirmar tu cuenta.'}, status=201)
 
 
 @api_view(['POST'])
@@ -498,11 +677,22 @@ def google_login(request):
         grupo, _ = Group.objects.get_or_create(name='Cliente')
         user.groups.add(grupo)
         creada = True
+        enviar_bienvenida(user)   # bienvenida solo en el alta, no en logins posteriores
 
     if not user.is_active:
         # Mismo criterio fail-closed que nivel_de: cuenta desactivada no entra,
         # aunque su Google sea válido.
         return Response({'detail': 'Tu cuenta no está activa. Contacta al administrador.'}, status=403)
+
+    # Google ya verificó el correo: refléjalo en el perfil y premia si ya tiene los
+    # datos completos (p. ej. un cliente antiguo que ahora entra por Google).
+    perfil, _ = PerfilUsuario.objects.get_or_create(usuario=user)
+    if not perfil.email_verificado:
+        from django.utils import timezone
+        perfil.email_verificado = True
+        perfil.email_verificado_en = timezone.now()
+        perfil.save(update_fields=['email_verificado', 'email_verificado_en'])
+        revisar_recompensa(perfil)
 
     refresh = RefreshToken.for_user(user)
     return Response({'access': str(refresh.access_token), 'refresh': str(refresh), 'creada': creada})
@@ -558,6 +748,8 @@ def me(request):
         'groups': list(u.groups.values_list('name', flat=True)),
         'puede': puede_de(u),
         'datos_completos': bool(perfil and perfil.datos_completos),
+        'email_verificado': bool(perfil and perfil.email_verificado),
+        'perfil_verificado': bool(perfil and perfil.perfil_verificado),
     })
 
 
@@ -570,6 +762,45 @@ class PerfilDetail(generics.RetrieveUpdateAPIView):
     def get_object(self):
         perfil, _ = PerfilUsuario.objects.get_or_create(usuario=self.request.user)
         return perfil
+
+    def perform_update(self, serializer):
+        perfil = serializer.save()
+        revisar_recompensa(perfil)   # ¿ya completó todo y falta entregarle el 5%?
+
+
+class ObrasClienteList(generics.ListCreateAPIView):
+    """Las obras que el cliente guarda para reusar sus datos al cotizar."""
+    serializer_class = ObraClienteSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        return ObraCliente.objects.filter(usuario=self.request.user)
+
+    def perform_create(self, serializer):
+        serializer.save(usuario=self.request.user)
+
+
+class ObraClienteDetail(generics.RetrieveUpdateDestroyAPIView):
+    serializer_class = ObraClienteSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        return ObraCliente.objects.filter(usuario=self.request.user)
+
+
+@api_view(['GET'])
+@permission_classes([EsOperador])   # el operador vincula la renta a la cuenta del cliente
+def clientes_lookup(request):
+    """Cuentas de cliente para vincular una renta a su panel ("Tus rentas").
+    Solo id/nombre/correo; accesible a operadores (no expone todo el usuario)."""
+    from django.contrib.auth import get_user_model
+    User = get_user_model()
+    qs = (User.objects.filter(is_active=True, groups__name='Cliente')
+          .order_by('first_name', 'username')[:500])
+    data = [{'id': u.id,
+             'nombre': (f'{u.first_name} {u.last_name}'.strip() or u.username),
+             'email': u.email} for u in qs]
+    return Response({'clientes': data})
 
 
 # ─────────────────────────────────────────────

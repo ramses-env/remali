@@ -5,6 +5,7 @@ import { ArrowLeft } from 'lucide-react'
 
 import ThemeToggle from '@/components/ThemeToggle'
 import { useRedirigirSiHaySesion } from '@/lib/sesion'
+import LogoRemali from '@/components/ui/logo-remali'
 
 /* El escalonado va aquí y no en cada pantalla: sign-in y sign-up deben entrar
    igual, y si cada una define sus tiempos terminan desincronizadas. */
@@ -157,13 +158,9 @@ export function AuthSplitScreen() {
             <Link
               to="/"
               aria-label="Ir al inicio"
-              className="mx-auto mb-5 block w-12 h-12 rounded-xl bg-gradient-to-tr from-amber-400 to-orange-500 p-[2px] transition-transform duration-150 active:scale-[0.97]"
+              className="mx-auto mb-5 block w-12 h-12 text-ink transition-transform duration-150 active:scale-[0.97]"
             >
-              <div className="w-full h-full bg-app rounded-[10px] flex items-center justify-center">
-                <span className="text-xl font-black text-transparent bg-clip-text bg-gradient-to-tr from-amber-400 to-orange-500">
-                  R
-                </span>
-              </div>
+              <LogoRemali className="w-12 h-12" />
             </Link>
 
             {/* `mode="wait"`: la saliente termina antes de entrar la nueva. Si se

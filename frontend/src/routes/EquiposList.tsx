@@ -9,7 +9,7 @@ import PriceUnitToggle from '../components/PriceUnitToggle'
 import FloatingFilters from '../components/FloatingFilters'
 import FilterSidebar from '../components/FilterSidebar'
 import { usePriceUnit } from '../store/priceUnit'
-import { downloadEquiposPdf } from '../lib/pdf'
+import { toNumber } from '../lib/utils'
 
 gsap.registerPlugin(ScrollTrigger)
 
@@ -22,6 +22,9 @@ type Equipo = {
   precio_dia?: number | string | null
   precio_semana?: number | string | null
   precio_mes?: number | string | null
+  precio_venta?: number | string | null
+  condicion?: string
+  modo?: 'venta' | 'renta'
   estado?: string
   tipo?: { id: number; nombre: string }
   categoria?: { id: number; nombre: string }
@@ -29,12 +32,6 @@ type Equipo = {
   disponible_venta?: boolean
   disponible_renta?: boolean
   condiciones?: string[]
-}
-
-function toNumber(v: any): number | null {
-  const n = typeof v === 'string' ? parseFloat(v) : typeof v === 'number' ? v : null
-  if (n === null || Number.isNaN(n)) return null
-  return n
 }
 
 export default function EquiposList() {
@@ -56,6 +53,27 @@ export default function EquiposList() {
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState(false)
   const [uso, setUso] = useState<'' | 'venta' | 'renta'>('')
+
+  // Popover de descarga: el cliente elige qué incluir en el PDF.
+  const [dlOpen, setDlOpen] = useState(false)
+  const [dlVenta, setDlVenta] = useState(true)
+  const [dlRenta, setDlRenta] = useState(true)
+  const [dlTodosPrecios, setDlTodosPrecios] = useState(true)
+  const dlRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!dlOpen) return
+    const onDoc = (e: MouseEvent) => {
+      if (dlRef.current && !dlRef.current.contains(e.target as Node)) setDlOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setDlOpen(false) }
+    document.addEventListener('mousedown', onDoc)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDoc)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [dlOpen])
 
   // Animaciones GSAP de entrada
   useEffect(() => {
@@ -129,17 +147,25 @@ export default function EquiposList() {
   })
 
   const asProduct = useMemo(() => (e: Equipo) => {
+    const modo: 'venta' | 'renta' = e.modo || (e.condicion === 'seminueva' ? 'renta' : 'venta')
     const d = toNumber(e.precio_dia)
     const s = toNumber(e.precio_semana)
     const m = toNumber(e.precio_mes)
-    const price =
+    const rentaPrice =
       unit === 'dia' ? (d ?? s ?? m ?? 0) :
       unit === 'semana' ? (s ?? (d ? d * 7 : null) ?? m ?? 0) :
       (m ?? (d ? d * 30 : null) ?? (s ? s * 4 : null) ?? 0)
+    // Venta muestra su precio de venta; renta, el de la modalidad elegida.
+    const price = modo === 'venta' ? (toNumber(e.precio_venta) ?? 0) : rentaPrice
     return {
       id: e.id,
       title: e.modelo,
       price,
+      modo,
+      // Precios crudos por modalidad: los usa el PDF para ofrecer "los tres precios".
+      precioDia: d,
+      precioSemana: s,
+      precioMes: m,
       image: resolveMediaUrl(e.imagen || (e.imagenes || [])[0] || '') || '',
       description: e.descripcion || '',
       condition: (e as any).condicion || '',
@@ -178,6 +204,10 @@ export default function EquiposList() {
         default: return b.id - a.id // recientes
       }
     })
+    // El cliente pidió los equipos de venta SEPARADOS de los de renta: en
+    // "Todos" van agrupados (venta primero), con el orden elegido dentro de
+    // cada grupo. Con un chip (Comprar/Rentar) activo el grupo ya es único.
+    out = [...out.filter(p => p.modo === 'venta'), ...out.filter(p => p.modo !== 'venta')]
     return out
   }, [items, filters, query, sortKey, unit, asProduct])
 
@@ -228,8 +258,11 @@ export default function EquiposList() {
         </p>
         <div className="overflow-hidden mb-1">
           <h1 className="text-5xl md:text-7xl font-black tracking-tighter leading-[0.92]">
-            {'CATÁLOGO'.split('').map((c, i) => <span key={i} className="char inline-block">{c}</span>)}{' '}
-            <span className="text-gold">{'DE EQUIPOS'.split('').map((c, i) => <span key={i} className="char inline-block">{c === ' ' ? ' ' : c}</span>)}</span>
+            {/* Cada PALABRA en un contenedor nowrap: la animación sigue letra por
+                letra, pero el salto de línea solo cae ENTRE palabras completas
+                (antes la "E" de EQUIPOS se quedaba arriba y el resto abajo). */}
+            <span className="inline-block whitespace-nowrap">{'CATÁLOGO'.split('').map((c, i) => <span key={i} className="char inline-block">{c}</span>)}</span>{' '}
+            <span className="text-gold"><span className="inline-block whitespace-nowrap">{'DE'.split('').map((c, i) => <span key={`d${i}`} className="char inline-block">{c}</span>)}</span>{' '}<span className="inline-block whitespace-nowrap">{'EQUIPOS'.split('').map((c, i) => <span key={`e${i}`} className="char inline-block">{c}</span>)}</span></span>
           </h1>
         </div>
         <p className="catalog-header-title text-mute text-sm md:text-base mt-4 max-w-xl leading-relaxed">
@@ -259,7 +292,10 @@ export default function EquiposList() {
       </div>
 
       {/* ── BARRA DE CONTROLES ── */}
-      <div className="catalog-controls sticky top-[64px] z-30 bg-app/90 backdrop-blur-md border-y border-edge px-6 md:px-16 lg:px-24 py-4">
+      {/* En móvil NO es fija: apilada (buscador + filtros + precio + conteo) mide
+          demasiado y, pegada arriba, tapaba media pantalla y estorbaba para ver
+          las máquinas. Se deja fija solo en desktop, donde sí cabe en una fila. */}
+      <div className="catalog-controls relative md:sticky md:top-[64px] z-30 bg-app/90 backdrop-blur-md border-y border-edge px-6 md:px-16 lg:px-24 py-4">
         <div className="flex flex-col md:flex-row md:items-center gap-4">
           {/* Buscador */}
           <div className="relative flex-1 max-w-xl">
@@ -373,16 +409,75 @@ export default function EquiposList() {
             {/* Toggle precio */}
             <PriceUnitToggle />
 
-            {/* PDF */}
-            <button
-              onClick={async () => await downloadEquiposPdf(filteredAll, filters, unit)}
-              className="flex items-center gap-2 px-4 py-2.5 rounded-full border border-edge bg-surface-2 text-mute hover:text-ink hover:border-edge text-sm font-medium transition-colors"
-            >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-              </svg>
-              <span className="hidden sm:inline">PDF</span>
-            </button>
+            {/* PDF con opciones de descarga */}
+            <div className="relative" ref={dlRef}>
+              <button
+                onClick={() => setDlOpen(o => !o)}
+                aria-expanded={dlOpen}
+                aria-label="Opciones de descarga PDF"
+                className="flex items-center gap-2 px-4 py-2.5 rounded-full border border-edge bg-surface-2 text-mute hover:text-ink hover:border-edge text-sm font-medium transition-colors"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+                <span className="hidden sm:inline">PDF</span>
+                <svg className={`w-3 h-3 transition-transform duration-200 ${dlOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" /></svg>
+              </button>
+
+              {dlOpen && (
+                <div className="absolute right-0 mt-2 w-72 rounded-2xl border border-edge bg-surface shadow-[0_16px_50px_rgba(0,0,0,0.5)] p-4 z-50 origin-top-right stagger-item">
+                  <p className="text-sm font-bold text-ink">Descargar catálogo</p>
+                  <p className="text-[11px] text-mute mb-3">Elige qué incluir en el PDF.</p>
+
+                  <label className="flex items-center justify-between gap-3 py-1.5 cursor-pointer">
+                    <span className="text-sm text-ink">Equipos en venta</span>
+                    <span className="flex items-center gap-2">
+                      <span className="text-[11px] text-mute font-mono">{filteredAll.filter(p => p.modo === 'venta').length}</span>
+                      <input type="checkbox" className="w-4 h-4 accent-gold" checked={dlVenta} onChange={e => setDlVenta(e.target.checked)} />
+                    </span>
+                  </label>
+
+                  <label className="flex items-center justify-between gap-3 py-1.5 cursor-pointer">
+                    <span className="text-sm text-ink">Equipos en renta</span>
+                    <span className="flex items-center gap-2">
+                      <span className="text-[11px] text-mute font-mono">{filteredAll.filter(p => p.modo !== 'venta').length}</span>
+                      <input type="checkbox" className="w-4 h-4 accent-gold" checked={dlRenta} onChange={e => setDlRenta(e.target.checked)} />
+                    </span>
+                  </label>
+
+                  {/* Precios de renta: los tres o solo la unidad activa */}
+                  <div className={`mt-2.5 mb-3.5 transition-opacity ${dlRenta ? '' : 'opacity-40 pointer-events-none'}`}>
+                    <p className="text-[11px] text-mute mb-1.5">Precios de renta</p>
+                    <div className="flex rounded-full border border-edge overflow-hidden text-[11px] font-semibold">
+                      <button
+                        type="button"
+                        onClick={() => setDlTodosPrecios(true)}
+                        className={`flex-1 px-2 py-1.5 transition-colors ${dlTodosPrecios ? 'bg-gold text-black' : 'text-mute hover:text-ink'}`}
+                      >Día · Semana · Mes</button>
+                      <button
+                        type="button"
+                        onClick={() => setDlTodosPrecios(false)}
+                        className={`flex-1 px-2 py-1.5 transition-colors ${!dlTodosPrecios ? 'bg-gold text-black' : 'text-mute hover:text-ink'}`}
+                      >Solo {unit === 'mes' ? 'mes' : unit === 'semana' ? 'semana' : 'día'}</button>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    disabled={!dlVenta && !dlRenta}
+                    onClick={async () => {
+                      setDlOpen(false)
+                      // jsPDF pesa ~350 KB: se descarga solo cuando alguien genera un PDF.
+                      const { downloadEquiposPdf } = await import('../lib/pdf')
+                      await downloadEquiposPdf(filteredAll, filters, unit, { venta: dlVenta, renta: dlRenta, rentaTodosPrecios: dlTodosPrecios })
+                    }}
+                    className="w-full py-2.5 rounded-full bg-gold text-black text-sm font-bold btn-acento disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    Descargar PDF
+                  </button>
+                </div>
+              )}
+            </div>
 
             {/* Contador */}
             <p className="text-xs text-mute font-mono whitespace-nowrap">
@@ -453,16 +548,14 @@ export default function EquiposList() {
                   id={p.id}
                   title={p.title}
                   price={p.price}
+                  modo={p.modo}
                   image={p.image || ''}
                   subtitle={p.description?.slice(0, 48)}
                   meta={[p.category, p.brand].filter(Boolean).join(' · ')}
                   linkTo={`/equipo/${p.id}`}
-                  tags={[
-                    ...(p.condiciones.includes('nueva') ? [{ label: 'Nuevo', tone: 'new' as const }] : []),
-                    ...(p.condiciones.includes('seminueva') ? [{ label: 'Seminuevo', tone: 'used' as const }] : []),
-                    ...(p.rentaOk ? [{ label: 'Renta', tone: 'rent' as const }] : []),
-                    ...(p.ventaOk ? [{ label: 'Venta', tone: 'sale' as const }] : []),
-                  ]}
+                  tags={p.modo === 'venta'
+                    ? [{ label: 'Venta', tone: 'sale' as const }]
+                    : [{ label: 'Renta', tone: 'rent' as const }]}
                 />
               </div>
             ))}

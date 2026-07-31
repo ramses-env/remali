@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import api from '../lib/api'
+import { toNumber } from '../lib/utils'
 import { useCart, type Modalidad } from '../store/cart'
 import { useToast } from '../store/toast'
 import { usePriceUnit, formatCurrency, type PriceUnit } from '../store/priceUnit'
@@ -28,12 +29,6 @@ type Equipo = {
   categoria?: { id: number; nombre: string }
   tipo?: { id: number; nombre: string }
   marca?: { id: number; nombre: string }
-}
-
-function toNumber(v: any): number | null {
-  const n = typeof v === 'string' ? parseFloat(v) : typeof v === 'number' ? v : null
-  if (n === null || Number.isNaN(n)) return null
-  return n
 }
 
 const UNIT_LABEL: Record<PriceUnit, string> = { dia: 'día', semana: 'semana', mes: 'mes' }
@@ -265,10 +260,13 @@ export default function EquipoDetail() {
             <div className="flex flex-col gap-2.5 mb-6">
               <button onClick={() => { addToCart(); nav('/cotizacion') }} className="text-center py-3.5 rounded-[10px] bg-gold text-black font-bold text-[14.5px] hover:opacity-90 transition-opacity">Solicitar cotización</button>
               <button onClick={() => { addToCart(); notify('Añadido a tu cotización') }} className="text-center py-3.5 rounded-[10px] border border-edge text-ink font-bold text-[14.5px] hover:bg-surface-2 transition-colors">Añadir al carrito</button>
-              <button onClick={descargarFicha} className="flex items-center justify-center gap-2 py-3 rounded-[10px] text-mute font-semibold text-[13.5px] hover:text-ink transition-colors">
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.8"><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
-                Descargar ficha técnica
-              </button>
+              {/* La ficha técnica es solo para equipos de venta (nuevos). */}
+              {e.condicion !== 'seminueva' && (
+                <button onClick={descargarFicha} className="flex items-center justify-center gap-2 py-3 rounded-[10px] text-mute font-semibold text-[13.5px] hover:text-ink transition-colors">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.8"><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                  Descargar ficha técnica
+                </button>
+              )}
             </div>
 
             <div className="border-t border-edge pt-[18px] grid grid-cols-2 gap-x-5 gap-y-4">

@@ -1,3 +1,5 @@
+import logging
+
 from datetime import date
 from decimal import Decimal
 
@@ -17,6 +19,9 @@ from maquinaria.throttling import SubidaEvidenciaThrottle
 from . import evidencia as ev
 from inventario.models import Inventario
 from .models import EvidenciaRenta, Renta
+
+logger = logging.getLogger(__name__)
+
 
 
 def _serialize_evidencia(e: EvidenciaRenta, request=None):
@@ -205,6 +210,7 @@ def crear_renta(request):
             telefono_cliente=telefono_cliente,
             empresa_id=empresa_id,
             obra_id=obra_id,
+            usuario_id=datos.get('usuario_id') or None,   # cuenta del cliente, para "Tus rentas"
             descuento=descuento,
             deposito=deposito,
             fecha_inicio=fecha_inicio,
@@ -247,7 +253,8 @@ def crear_renta(request):
                     concepto=f'Renta {r.modalidad} · {equipo_nombre} ({inv.codigo})',
                 )
             except Exception:
-                pass
+                # La venta/renta ya quedó registrada; que no truene por facturación.
+                logger.exception('No se pudo registrar la solicitud de factura de la renta')
 
         return Response({
             'renta': _serialize_renta(r),
@@ -579,3 +586,32 @@ def mis_tareas(request):
         'proximas': sum(1 for t in tareas if t['urgencia'] == 'proxima'),
     }
     return Response({'tareas': tareas, 'resumen': resumen})
+
+
+@api_view(['GET'])
+@permission_classes([permissions.IsAuthenticated])
+def rentas_mias(request):
+    """Las rentas ligadas a la cuenta del cliente (para 'Tus rentas')."""
+    hoy = timezone.localdate()
+    LABEL = {'activa': 'Activa', 'reservada': 'Reservada',
+             'finalizada': 'Finalizada', 'cancelada': 'Cancelada'}
+    qs = (Renta.objects
+          .filter(usuario=request.user)
+          .select_related('inventario__equipo')
+          .order_by('-creado_en')[:100])
+    data = []
+    for r in qs:
+        eq = getattr(getattr(r.inventario, 'equipo', None), 'modelo', '') if r.inventario_id else ''
+        vencida = r.estado == 'activa' and r.fecha_fin and r.fecha_fin < hoy
+        data.append({
+            'id': r.id,
+            'equipo': eq,
+            'modalidad': r.modalidad,
+            'estado': r.estado,
+            'estado_label': 'Vencida' if vencida else LABEL.get(r.estado, r.estado),
+            'fecha_inicio': r.fecha_inicio,
+            'fecha_fin': r.fecha_fin,
+            'total': str(r.total),
+            'direccion': r.direccion,
+        })
+    return Response({'rentas': data})

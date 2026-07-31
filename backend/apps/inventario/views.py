@@ -1,3 +1,5 @@
+import logging
+
 from decimal import Decimal
 
 from django.db import transaction
@@ -12,6 +14,9 @@ from maquinaria.models import Equipo
 from maquinaria.permissions import IsAdminGroupOrStaff, EsOperador
 from .models import Inventario, OrdenReparacion, OrdenReparacionItem
 from .serializers import InventarioSerializer, OrdenReparacionSerializer
+
+logger = logging.getLogger(__name__)
+
 
 
 class UnidadesPorEquipo(generics.ListCreateAPIView):
@@ -302,7 +307,8 @@ def vender_unidad(request, pk: int):
                     concepto=f'Venta de {equipo_nombre} ({unidad.codigo})',
                 )
             except Exception:
-                pass
+                # La venta/renta ya quedó registrada; que no truene por facturación.
+                logger.exception('No se pudo registrar la solicitud de factura de la venta de equipo')
 
     unidad.refresh_from_db()
     return Response({

@@ -20,6 +20,7 @@ export default function LogoRemali({
       role="img"
       aria-label={title}
       fill="currentColor"
+      fillRule="evenodd"
       xmlns="http://www.w3.org/2000/svg"
     >
       <title>{title}</title>

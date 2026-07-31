@@ -1,3 +1,5 @@
+import logging
+
 from django.db import transaction
 from django.http import HttpResponse
 from rest_framework.decorators import api_view, permission_classes
@@ -6,6 +8,9 @@ from rest_framework import permissions
 
 from maquinaria.permissions import IsAdminGroupOrStaff, EsOperador
 from .models import Venta, ItemVenta
+
+logger = logging.getLogger(__name__)
+
 
 
 @api_view(['POST'])
@@ -63,7 +68,8 @@ def venta_mostrador(request):
                         concepto='Venta de refacciones',
                     )
                 except Exception:
-                    pass
+                    # La venta/renta ya quedó registrada; que no truene por facturación.
+                    logger.exception('No se pudo registrar la solicitud de factura de la venta de refacciones')
     except ValueError as e:
         return Response({'detalle': str(e)}, status=400)
 
