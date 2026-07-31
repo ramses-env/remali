@@ -64,7 +64,7 @@ export default function MisCotizacionEstado() {
     { t: 'Cotización recibida', d: `Folio ${cot.folio} generado.` },
     { t: 'Revisión de disponibilidad', d: 'Confirmamos existencias y fechas de entrega.' },
     { t: 'Autorización', d: 'Quien autoriza aprueba desde la liga o por WhatsApp.' },
-    { t: 'Entrega en obra', d: 'Agendamos día y hora; llevamos el equipo probado.' },
+    { t: 'Entrega en obra', d: compl ? 'Tu fecha de entrega ya aparece en "Mis cotizaciones → Próximas entregas" y en Tus rentas.' : 'Al aceptar, coordinamos día y hora contigo por WhatsApp; llevamos el equipo probado.' },
   ]
   const chip = rech ? { txt: 'No procedió', cls: 'text-red-500 border-red-500/40' }
     : venc ? { txt: 'Vencida — vuelve a cotizar', cls: 'text-mute border-edge' }
