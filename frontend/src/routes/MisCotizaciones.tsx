@@ -115,6 +115,10 @@ export default function MisCotizaciones() {
 
               {(c.pdf || c.carrito.length > 0) && (
                 <div className="mt-3.5 pt-3.5 border-t border-edge flex flex-wrap items-center gap-x-5 gap-y-2">
+                  <Link to={`/mis-cotizaciones/${c.folio}`}
+                    className="inline-flex items-center gap-2 text-sm font-bold text-gold transition-opacity hover:opacity-80 active:scale-[0.98]">
+                    Ver estado →
+                  </Link>
                   {c.pdf && (
                     <a href={c.pdf} target="_blank" rel="noopener noreferrer"
                        className="group inline-flex items-center gap-2 text-sm font-semibold text-ink transition-[color,transform] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] hover:text-gold active:scale-[0.98]">

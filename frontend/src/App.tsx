@@ -9,6 +9,7 @@ import Login from './routes/Login'
 import Registro from './routes/Registro'
 import Perfil from './routes/Perfil'
 import MisCotizaciones from './routes/MisCotizaciones'
+import MisCotizacionEstado from './routes/MisCotizacionEstado'
 import MisRentas from './routes/MisRentas'
 import RecordatorioPerfil from './components/RecordatorioPerfil'
 import CambioTipoCotizacion from './components/CambioTipoCotizacion'
@@ -85,6 +86,7 @@ function App() {
                       footer: es su casa, no una sección del panel de operación. */}
                   <Route path="/perfil" element={<Perfil />} />
                   <Route path="/mis-cotizaciones" element={<MisCotizaciones />} />
+                  <Route path="/mis-cotizaciones/:folio" element={<MisCotizacionEstado />} />
                   <Route path="/mis-rentas" element={<MisRentas />} />
                   <Route path="*" element={<Home />} />
                 </Routes>
