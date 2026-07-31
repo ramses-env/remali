@@ -164,6 +164,7 @@ def alertas_renta(request):
 def crear_renta(request):
     datos = request.data or {}
     inventario_id = datos.get('inventario_id')
+    cotizacion_id = datos.get('cotizacion_id')
     modalidad = (datos.get('modalidad') or '').lower()
     duracion = int(datos.get('duracion', 1) or 1)
     direccion = (datos.get('direccion') or '').strip()
@@ -220,7 +221,22 @@ def crear_renta(request):
         r.fecha_fin = r.calcular_fecha_fin()
 
         try:
-            r.save()  # valida traslape, calcula montos y ocupa la unidad si es 'activa'
+            r.save()
+            # Liga con su cotización: explícita si viene, o match único e inequívoco
+            # (mismo cliente, tipo renta, aceptada y sin rentas ya ligadas).
+            try:
+                from cotizaciones.models import Cotizacion as _Cot
+                cot = None
+                if cotizacion_id:
+                    cot = _Cot.objects.filter(id=cotizacion_id, tipo='renta').first()
+                elif r.usuario_id:
+                    cands = list(_Cot.objects.filter(usuario_id=r.usuario_id, tipo='renta', estado='aceptada', rentas_convertidas__isnull=True)[:2])
+                    cot = cands[0] if len(cands) == 1 else None
+                if cot:
+                    r.cotizacion = cot
+                    r.save(update_fields=['cotizacion'])
+            except Exception:
+                pass  # valida traslape, calcula montos y ocupa la unidad si es 'activa'
         except ValidationError as e:
             return Response({'detalle': ' '.join(e.messages)}, status=400)
         except ValueError as e:

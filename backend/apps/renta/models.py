@@ -54,6 +54,12 @@ class Renta(models.Model):
     )
     telefono_cliente = models.CharField(max_length=40, blank=True, default='')
     # Cuenta del cliente (si el admin la vincula): habilita "Tus rentas" en su panel.
+    # Cotización de la que nació esta renta (cierra el ciclo del cliente:
+    # su stepper marca "completada" cuando la renta existe).
+    cotizacion = models.ForeignKey(
+        'cotizaciones.Cotizacion', null=True, blank=True,
+        on_delete=models.SET_NULL, related_name='rentas_convertidas',
+    )
     usuario = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL,
         related_name='rentas_cliente',
