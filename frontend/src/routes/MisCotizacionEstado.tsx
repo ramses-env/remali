@@ -8,7 +8,7 @@ import resolveMediaUrl from '../lib/resolveMediaUrl'
 
 type Cot = {
   folio: string; estado: string; estado_label: string; tipo: string; total: string
-  creada?: string; vence_el?: string | null; pdf?: string | null; atendida_por?: string | null; atendida?: boolean; convertida?: boolean
+  creada?: string; vence_el?: string | null; pdf?: string | null; atendida_por?: string | null; atendida?: boolean; convertida?: boolean; entrega_prometida?: string | null
   items: { descripcion: string; cantidad: number }[]
   carrito?: { id: number; title: string; qty: number; unit?: string; image?: string }[]
 }
@@ -60,11 +60,14 @@ export default function MisCotizacionEstado() {
   // Señales reales: atendida (un admin ya la revisó) empuja a autorización;
   // aceptada empuja a entrega; convertida completa todo.
   const activo = compl ? 4 : acep ? 3 : cot.atendida ? 2 : 1
+  const entrega = cot.entrega_prometida
+    ? new Date(cot.entrega_prometida).toLocaleString('es-MX', { weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
+    : null
   const pasos = [
     { t: 'Cotización recibida', d: `Folio ${cot.folio} generado.` },
     { t: 'Revisión de disponibilidad', d: 'Confirmamos existencias y fechas de entrega.' },
     { t: 'Autorización', d: 'Quien autoriza aprueba desde la liga o por WhatsApp.' },
-    { t: 'Entrega en obra', d: compl ? 'Tu fecha de entrega ya aparece en "Mis cotizaciones → Próximas entregas" y en Tus rentas.' : 'Al aceptar, coordinamos día y hora contigo por WhatsApp; llevamos el equipo probado.' },
+    { t: 'Entrega en obra', d: entrega ? `Programada: ${entrega}. Llevamos el equipo probado.` : compl ? 'Tu fecha de entrega ya aparece en "Mis cotizaciones → Próximas entregas" y en Tus rentas.' : 'Al aceptar, coordinamos día y hora contigo por WhatsApp; llevamos el equipo probado.' },
   ]
   const chip = rech ? { txt: 'No procedió', cls: 'text-red-500 border-red-500/40' }
     : venc ? { txt: 'Vencida — vuelve a cotizar', cls: 'text-mute border-edge' }
@@ -138,6 +141,7 @@ export default function MisCotizacionEstado() {
               <div className="flex flex-wrap gap-x-10 gap-y-4">
                 <div><p className={monoLabel}>Folio</p><p className="font-mono text-[15px] font-bold mt-1">{cot.folio}</p></div>
                 <div><p className={monoLabel}>Total</p><p className="text-[15px] font-extrabold text-price mt-1">{formatMoney(cot.total)}</p></div>
+                {entrega && <div><p className={monoLabel}>Entrega</p><p className="text-[15px] font-bold mt-1 text-emerald-500">{entrega}</p></div>}
                 {cot.vence_el && <div><p className={monoLabel}>Vigencia</p><p className="text-[15px] font-bold mt-1">{cot.vence_el}</p></div>}
               </div>
               {cot.pdf && <a href={cot.pdf} target="_blank" rel="noopener noreferrer" className="text-[14px] font-semibold text-gold hover:opacity-80">Ver completa →</a>}

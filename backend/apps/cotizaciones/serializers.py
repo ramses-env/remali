@@ -57,7 +57,7 @@ class CotizacionSerializer(serializers.ModelSerializer):
             'vigencia_dias', 'aplica_iva', 'notas',
             'items', 'fotos', 'subtotal', 'subtotal_venta', 'subtotal_renta', 'base', 'iva', 'total',
             'cliente_display', 'vigencia_hasta', 'vencida', 'token_publico',
-            'convertida', 'venta_id', 'atendida_en', 'atendida_por_nombre', 'escalada_en',
+            'convertida', 'venta_id', 'atendida_en', 'atendida_por_nombre', 'entrega_prometida', 'escalada_en',
             'creada', 'actualizada',
         ]
         read_only_fields = ['folio', 'origen', 'datos_solicitud', 'atendida_en', 'escalada_en', 'creada', 'actualizada']

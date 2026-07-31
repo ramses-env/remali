@@ -5756,7 +5756,17 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
     if ((estado === 'enviada' || estado === 'aceptada') && (!(clienteNombre.trim() || empresaSel) || c.items.length === 0)) {
       notify('Agrega el nombre del cliente y al menos un concepto primero', 'err'); return
     }
-    api.patch<Cotizacion>(`/cotizaciones/${c.id}/`, { estado })
+    const data: Record<string, unknown> = { estado }
+    if (estado === 'aceptada') {
+      // Fecha/hora prometida de entrega: el cliente la ve en su vista de estado.
+      const v = window.prompt('Fecha y hora prometida de entrega (opcional)\nFormato: 2026-08-03 08:00', '')
+      if (v && v.trim()) {
+        const d = new Date(v.trim().replace(' ', 'T'))
+        if (!isNaN(d.getTime())) data.entrega_prometida = d.toISOString()
+        else notify('Fecha no válida; se aceptó sin fecha de entrega', 'err')
+      }
+    }
+    api.patch<Cotizacion>(`/cotizaciones/${c.id}/`, data)
       .then(r => { apply(r.data); notify(`Estado: ${cotEstadoMeta(estado).label}`) })
       .catch(() => notify('No se pudo cambiar el estado', 'err'))
   }

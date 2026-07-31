@@ -240,6 +240,7 @@ def cotizaciones_mias(request):
             'vence_el': c.vence_el,
             'items': [{'descripcion': i.descripcion, 'cantidad': i.cantidad} for i in c.items.all()],
             'carrito': (c.datos_solicitud or {}).get('carrito') or [],   # para "volver a cotizar"
+            'entrega_prometida': c.entrega_prometida,
             'atendida': bool(c.atendida_en or c.atendida_por_id),
             'convertida': bool(len(c.conversiones.all())),
             'atendida_por': (
