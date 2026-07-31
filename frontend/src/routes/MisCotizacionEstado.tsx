@@ -37,8 +37,11 @@ export default function MisCotizacionEstado() {
     }
     cargar()
     /* Tiempo real para el cliente: el admin acepta / pone fecha / convierte y
-       el stepper avanza solo — sin que nadie refresque. */
-    const id = window.setInterval(() => cargar(true), 15_000)
+       el stepper avanza solo. 4 s con la pestaña visible = se siente
+       instantáneo; oculta no gasta (el navegador la estrangula y el
+       visibilitychange refresca al volver). Es UNA consulta chica por
+       cliente mirando SU cotización: carga despreciable. */
+    const id = window.setInterval(() => { if (document.visibilityState === 'visible') cargar(true) }, 4_000)
     const alVolver = () => { if (document.visibilityState === 'visible') cargar(true) }
     document.addEventListener('visibilitychange', alVolver)
     return () => { vivo = false; window.clearInterval(id); document.removeEventListener('visibilitychange', alVolver) }
