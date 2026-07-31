@@ -1981,7 +1981,7 @@ function EquiposAdmin({ equipos, categorias, tipos, marcas, reload, notify }: {
       {invEquipo && <InventoryModal equipo={invEquipo} onClose={() => setInvEquipo(null)} notify={notify} />}
       {previewFicha && (
         <FichaTecnicaModal
-          equipo={{ modelo: form.modelo, descripcion: form.descripcion, imagen: form.imagen, especificaciones: specs, categoria: form.categoria, marca: form.marca }}
+          equipo={{ modelo: form.modelo, descripcion: form.descripcion, imagen: form.imagen, especificaciones: specs, categoria: form.categoria, tipo: form.tipo, marca: form.marca, condicion: cond, que_incluye: form.que_incluye }}
           onClose={() => setPreviewFicha(false)}
         />
       )}
