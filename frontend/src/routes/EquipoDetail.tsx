@@ -260,7 +260,7 @@ export default function EquipoDetail() {
                   ? <img src={activeSrc} alt={e.modelo} onClick={() => setFullImage(true)} className="max-w-full max-h-full object-contain cursor-zoom-in p-6" crossOrigin="anonymous" referrerPolicy="no-referrer" onError={ev => { const t = ev.currentTarget; if (t.dataset.fb === '1') return; t.dataset.fb = '1'; t.src = '/vite.svg' }} />
                   : <span className="text-mute text-sm">Sin imagen</span>}
                 {promo > 0 && (
-                  <span className="absolute top-3.5 left-3.5 bg-red-600 text-white text-[12px] font-extrabold tracking-wide px-3 py-1.5 rounded-lg">PROMO −{promo}%</span>
+                  <span className="absolute top-3.5 left-3.5 bg-red-600 text-white text-[15px] sm:text-[17px] font-extrabold tracking-wide px-4 py-2 sm:px-5 sm:py-2.5 rounded-xl shadow-lg">PROMO −{promo}%</span>
                 )}
                 {images.length > 1 && (
                   <span className={`${mono} absolute bottom-3.5 right-3.5 px-2.5 py-1.5 rounded-lg bg-app/70 border border-edge backdrop-blur text-mute`}>
