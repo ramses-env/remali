@@ -28,7 +28,7 @@ export function useToast() {
 
 function ToastView({ toasts }: { toasts: Toast[] }) {
   return (
-    <div className="fixed bottom-6 right-6 z-50 space-y-2">
+    <div className="fixed top-[76px] inset-x-0 z-[130] flex flex-col items-center gap-2 px-4 pointer-events-none">
       <AnimatePresence>
         {toasts.map(t => (
           <motion.div
@@ -36,16 +36,16 @@ function ToastView({ toasts }: { toasts: Toast[] }) {
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 10 }}
-            className="px-4 py-2 rounded-full shadow bg-gradient-to-r from-[#5488af] to-[#487aa1] text-white text-sm flex items-center gap-2"
+            className="toast-in pointer-events-auto flex items-center gap-2.5 px-5 py-3.5 rounded-2xl border border-gold/40 bg-surface text-ink text-sm font-bold shadow-[0_18px_50px_rgba(0,0,0,0.4)]"
           >
             {t.kind === 'cart' && (
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M2.25 3h1.386c.51 0 .955.343 1.088.834l.383 1.437M7.5 14.25h9.563a1.875 1.875 0 001.822-1.416l1.32-5.274A.938.938 0 0019.31 6.75H5.107" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M7.5 21a.75.75 0 100-1.5.75.75 0 000 1.5zm9 0a.75.75 0 100-1.5.75.75 0 000 1.5z"/></svg>
             )}
             {t.kind === 'heart' && (
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" className="w-4 h-4 stroke-white fill-white"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M11.995 20.5s-7-4.5-7-10.5a4 4 0 017-2.5 4 4 0 017 2.5c0 6-7 10.5-7 10.5z"></path></svg>
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" className="w-4 h-4 stroke-gold fill-gold"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M11.995 20.5s-7-4.5-7-10.5a4 4 0 017-2.5 4 4 0 017 2.5c0 6-7 10.5-7 10.5z"></path></svg>
             )}
             {t.kind === 'bookmark' && (
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" className="w-4 h-4 stroke-white fill-white"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M6 3h12a1 1 0 011 1v16l-7-4-7 4V4a1 1 0 011-1z"></path></svg>
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" className="w-4 h-4 stroke-gold fill-gold"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M6 3h12a1 1 0 011 1v16l-7-4-7 4V4a1 1 0 011-1z"></path></svg>
             )}
             {t.kind === 'x' && (
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" className="w-4 h-4 stroke-white fill-none"><circle cx="12" cy="12" r="9" strokeWidth="1.5"></circle><path d="M8 8L16 16" strokeWidth="1.5" strokeLinecap="round"></path><path d="M16 8L8 16" strokeWidth="1.5" strokeLinecap="round"></path></svg>

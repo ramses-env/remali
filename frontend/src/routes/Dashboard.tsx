@@ -1170,7 +1170,7 @@ export default function Dashboard() {
 
       {/* ─── TOAST ─── */}
       {toast && (
-        <div className={`fixed bottom-6 right-6 z-[120] px-5 py-3 rounded-xl border text-sm font-semibold shadow-2xl bg-surface ${
+        <div className={`toast-in fixed top-[76px] left-1/2 -translate-x-1/2 z-[130] max-w-[calc(100vw-2rem)] flex items-center gap-2.5 px-5 py-3.5 rounded-2xl border text-sm font-bold shadow-[0_18px_50px_rgba(0,0,0,0.4)] bg-surface ${
           toast.type === 'ok' ? 'border-emerald-500/40 text-emerald-500' : 'border-red-500/40 text-red-500'
         }`}>
           {toast.msg}
