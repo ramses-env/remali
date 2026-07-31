@@ -1,4 +1,6 @@
+import { useState } from 'react'
 import { Route, Routes, useLocation } from 'react-router-dom'
+import CuentaRegresiva, { LANZAMIENTO, bypassEstreno } from './components/CuentaRegresiva'
 import Navbar from './components/Navbar'
 import Home from './routes/Home'
 import EquiposList from './routes/EquiposList'
@@ -22,6 +24,12 @@ function App() {
     location.pathname === '/login' ||
     location.pathname === '/registro'
 
+  /* Estreno (lunes 3 de agosto, 12:00 AM): hasta entonces la tienda pública
+     muestra la cuenta regresiva. Login/registro/dashboard quedan libres para
+     el equipo, y /?acceso=remali deja previsualizar la tienda completa.
+     Al llegar a cero se libera sola, sin recargar. */
+  const [espera, setEspera] = useState(() => Date.now() < LANZAMIENTO && !bypassEstreno())
+
   return (
     <I18nProvider>
       <RouteLoader />
@@ -33,6 +41,8 @@ function App() {
             <Route path="/dashboard" element={<RequireAdmin><Dashboard /></RequireAdmin>} />
           </Routes>
         </ErrorBoundary>
+      ) : espera ? (
+        <CuentaRegresiva alTerminar={() => setEspera(false)} />
       ) : (
         <PriceUnitProvider>
           {/* La tienda pública usa el amarillo brillante del sistema (no el dorado del admin).
