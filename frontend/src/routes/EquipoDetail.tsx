@@ -92,8 +92,9 @@ export default function EquipoDetail() {
   const precioDia = toNumber(e?.precio_dia)
   const precioSemana = toNumber(e?.precio_semana)
   const precioMes = toNumber(e?.precio_mes)
-  const seRenta = precioDia !== null || precioSemana !== null || precioMes !== null
-  const seVende = precioVenta !== null
+  const esEquipoRenta = e?.condicion === 'seminueva'
+  const seRenta = esEquipoRenta
+  const seVende = !esEquipoRenta
 
   // Modalidades que este equipo realmente ofrece (hay quien solo se vende).
   const modalidades = useMemo<Modalidad[]>(() => {
@@ -126,14 +127,9 @@ export default function EquipoDetail() {
     if (m !== 'venta') setUnit(m)   // mantiene sincronizado el selector global del catálogo
   }
 
-  const availability = useMemo(() => {
-    const v = e?.disponible_venta, r = e?.disponible_renta
-    if (v && r) return 'Renta y venta'
-    if (v) return 'Venta'
-    if (r) return 'Renta'
-    return 'No disponible'
-  }, [e])
-  const hayStock = availability !== 'No disponible'
+  // Para el cliente cada máquina es UNA cosa: se vende o se renta.
+  const availability = esEquipoRenta ? 'Renta' : 'Venta'
+  const hayStock = esEquipoRenta ? (e?.disponible_renta ?? true) : (e?.disponible_venta ?? true)
 
   async function subirImagenes(ev: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(ev.target.files || [])
