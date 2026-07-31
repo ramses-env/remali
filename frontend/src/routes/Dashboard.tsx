@@ -2420,10 +2420,20 @@ function RentModal({ unit, equipo, onClose, onDone, notify }: {
   if (ticketUrl) return <TicketModal url={ticketUrl} onClose={onDone} />
 
   return (
-    <div className="fixed inset-0 z-[70] bg-black/70 backdrop-blur-sm flex items-start justify-center p-6 overflow-y-auto" onClick={onClose}>
-      <div onClick={e => e.stopPropagation()} className="bg-surface border border-edge rounded-3xl p-6 max-w-[760px] w-full my-4 sm:my-auto shadow-[0_20px_50px_rgba(33,29,22,0.18)]">
-        <h3 className="font-black text-ink mb-1">{esReserva ? 'Reservar' : 'Rentar'} {unit.codigo}</h3>
-        <p className="text-xs text-mute mb-5">{equipo.modelo}</p>
+    <div className="fixed inset-0 z-[70] bg-black/40 backdrop-blur-[2px]" onClick={onClose}>
+      <motion.div
+        initial={{ x: '100%' }} animate={{ x: 0 }} transition={{ duration: 0.3, ease: [0.23, 1, 0.32, 1] }}
+        onClick={e => e.stopPropagation()}
+        className="fixed inset-y-0 right-0 w-full sm:max-w-[560px] bg-surface border-l border-edge shadow-[-24px_0_60px_rgba(33,29,22,0.22)] flex flex-col"
+      >
+        <div className="px-6 py-4 border-b border-edge flex items-start justify-between gap-3 shrink-0">
+          <div className="min-w-0">
+            <h3 className="font-black text-ink">{esReserva ? 'Reservar' : 'Rentar'} {unit.codigo}</h3>
+            <p className="text-xs text-mute mt-0.5">{equipo.modelo}</p>
+          </div>
+          <button onClick={onClose} className="w-8 h-8 rounded-[9px] flex items-center justify-center text-mute hover:text-ink hover:bg-surface-2 transition-colors shrink-0" aria-label="Cerrar"><svg className="w-[18px] h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" d="M6 6l12 12M18 6L6 18" /></svg></button>
+        </div>
+        <div className="p-6 flex-1 overflow-y-auto">
         <div className="space-y-3">
           <div>
             <label className={label}>Empresa (cliente registrado)</label>
@@ -2481,11 +2491,12 @@ function RentModal({ unit, equipo, onClose, onDone, notify }: {
             )}
           </div>
         </div>
-        <div className="flex gap-2 mt-6">
-          <button onClick={onClose} className="flex-1 py-2.5 rounded-full border border-edge text-mute text-sm font-medium hover:text-ink transition-colors">Cancelar</button>
-          <button onClick={submit} disabled={busy} className="btn-renta flex-1 py-2.5 rounded-full text-sm font-bold">{esReserva ? 'Reservar' : 'Registrar renta'}</button>
         </div>
-      </div>
+        <div className="px-6 py-4 border-t border-edge flex justify-end gap-3 shrink-0">
+          <button onClick={onClose} className="px-6 py-2.5 rounded-full border border-edge text-mute text-sm font-medium hover:text-ink transition-colors">Cancelar</button>
+          <button onClick={submit} disabled={busy} className="btn-renta px-7 py-2.5 rounded-full text-sm font-bold">{esReserva ? 'Reservar' : 'Registrar renta'}</button>
+        </div>
+      </motion.div>
     </div>
   )
 }
@@ -2548,10 +2559,20 @@ function SellModal({ unit, equipo, onClose, onDone, notify }: {
   if (ticketUrl) return <TicketModal url={ticketUrl} onClose={onDone} />
 
   return (
-    <div className="fixed inset-0 z-[70] bg-black/70 backdrop-blur-sm flex items-start justify-center p-6 overflow-y-auto" onClick={onClose}>
-      <div onClick={e => e.stopPropagation()} className="bg-surface border border-edge rounded-3xl p-6 max-w-[760px] w-full my-4 sm:my-auto shadow-[0_20px_50px_rgba(33,29,22,0.18)]">
-        <h3 className="font-black text-ink mb-1">Vender {unit.codigo}</h3>
-        <p className="text-xs text-mute mb-5">{equipo.modelo} · {unit.condicion}</p>
+    <div className="fixed inset-0 z-[70] bg-black/40 backdrop-blur-[2px]" onClick={onClose}>
+      <motion.div
+        initial={{ x: '100%' }} animate={{ x: 0 }} transition={{ duration: 0.3, ease: [0.23, 1, 0.32, 1] }}
+        onClick={e => e.stopPropagation()}
+        className="fixed inset-y-0 right-0 w-full sm:max-w-[560px] bg-surface border-l border-edge shadow-[-24px_0_60px_rgba(33,29,22,0.22)] flex flex-col"
+      >
+        <div className="px-6 py-4 border-b border-edge flex items-start justify-between gap-3 shrink-0">
+          <div className="min-w-0">
+            <h3 className="font-black text-ink">Vender {unit.codigo}</h3>
+            <p className="text-xs text-mute mt-0.5">{equipo.modelo} · {unit.condicion}</p>
+          </div>
+          <button onClick={onClose} className="w-8 h-8 rounded-[9px] flex items-center justify-center text-mute hover:text-ink hover:bg-surface-2 transition-colors shrink-0" aria-label="Cerrar"><svg className="w-[18px] h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" d="M6 6l12 12M18 6L6 18" /></svg></button>
+        </div>
+        <div className="p-6 flex-1 overflow-y-auto">
         <div className="space-y-3">
           <div>
             <label className={label}>Empresa (cliente registrado)</label>
@@ -2578,11 +2599,12 @@ function SellModal({ unit, equipo, onClose, onDone, notify }: {
           </div>
           <FacturaFields requiere={requiereFactura} onRequiere={setRequiereFactura} factura={factura} onFactura={setFactura} empresaNombre={empresaId ? empresas.find(e => String(e.id) === empresaId)?.nombre : undefined} />
         </div>
-        <div className="flex gap-2 mt-6">
-          <button onClick={onClose} className="flex-1 py-2.5 rounded-full border border-edge text-mute text-sm font-medium hover:text-ink transition-colors">Cancelar</button>
-          <button onClick={submit} disabled={busy} className="flex-1 py-2.5 rounded-full bg-gold text-black text-sm font-bold hover:opacity-90 transition-opacity disabled:opacity-50">Registrar venta</button>
         </div>
-      </div>
+        <div className="px-6 py-4 border-t border-edge flex justify-end gap-3 shrink-0">
+          <button onClick={onClose} className="px-6 py-2.5 rounded-full border border-edge text-mute text-sm font-medium hover:text-ink transition-colors">Cancelar</button>
+          <button onClick={submit} disabled={busy} className="px-7 py-2.5 rounded-full bg-gold text-black text-sm font-bold hover:opacity-90 transition-opacity disabled:opacity-50">Registrar venta</button>
+        </div>
+      </motion.div>
     </div>
   )
 }
