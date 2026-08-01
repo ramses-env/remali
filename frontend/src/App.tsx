@@ -93,6 +93,7 @@ function App() {
                   <Route path="/mis-compras" element={<MisCompras />} />
                   <Route path="/vincular/venta/:token" element={<VincularCuenta tipo="venta" />} />
                   <Route path="/vincular/renta/:token" element={<VincularCuenta tipo="renta" />} />
+                  <Route path="/vincular/cotizacion/:token" element={<VincularCuenta tipo="cotizacion" />} />
                   <Route path="*" element={<Home />} />
                 </Routes>
               </ErrorBoundary>

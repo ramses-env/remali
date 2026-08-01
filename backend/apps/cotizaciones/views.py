@@ -241,6 +241,68 @@ def vincular_cuenta_cotizacion(request, pk):
     return Response({'cuenta': f'{u.first_name} {u.last_name}'.strip() or u.username})
 
 
+@api_view(['POST'])
+@permission_classes([EsOperador])
+def generar_vinculo_cotizacion(request, pk):
+    """Liga de un solo uso para que el cliente ligue esta cotización a su cuenta."""
+    import secrets
+    from datetime import timedelta
+    from django.utils import timezone
+    cot = Cotizacion.objects.filter(pk=pk).first()
+    if not cot:
+        return Response({'detalle': 'Cotización no encontrada'}, status=404)
+    if cot.usuario_id:
+        return Response({'detalle': 'Ya está vinculada a una cuenta.'}, status=400)
+    cot.token_vinculo = secrets.token_hex(16)
+    cot.token_vinculo_expira = timezone.now() + timedelta(days=30)
+    cot.save(update_fields=['token_vinculo', 'token_vinculo_expira'])
+    # Ruta relativa: el frontend le antepone su origen (dev, túnel o remali.mx).
+    return Response({
+        'token': cot.token_vinculo,
+        'ruta': f'/vincular/cotizacion/{cot.token_vinculo}',
+        'expira': cot.token_vinculo_expira,
+    })
+
+
+@api_view(['GET', 'POST'])
+@permission_classes([IsAuthenticated])
+def vinculo_cotizacion(request, token):
+    """GET previsualiza la cotización de la liga; POST la liga a la cuenta (un solo uso)."""
+    from django.utils import timezone
+    cot = Cotizacion.objects.prefetch_related('items').filter(token_vinculo=token).first()
+    if not cot:
+        return Response({'detalle': 'Enlace no válido o ya utilizado.'}, status=404)
+    if cot.token_vinculo_expira and cot.token_vinculo_expira < timezone.now():
+        return Response({'detalle': 'Este enlace ya caducó. Pide uno nuevo.'}, status=410)
+
+    items = list(cot.items.all()[:3])
+    concepto = ', '.join(i.descripcion for i in items) or 'Cotización de maquinaria'
+
+    if request.method == 'GET':
+        return Response({
+            'tipo': 'cotizacion', 'id': cot.id, 'fecha': cot.creada, 'total': str(cot.total),
+            'cliente': cot.cliente_nombre or '', 'concepto': concepto,
+            'ya_ligada': bool(cot.usuario_id),
+        })
+
+    if cot.usuario_id and cot.usuario_id != request.user.id:
+        return Response({'detalle': 'Esta cotización ya está en otra cuenta.'}, status=400)
+    cot.usuario = request.user
+    campos = ['usuario', 'token_vinculo', 'token_vinculo_expira']
+    # Hereda contacto de la cuenta si la captura no lo traía: el PDF y los
+    # recordatorios le llegan a él.
+    if not (cot.cliente_email or '').strip():
+        cot.cliente_email = (request.user.email or '').strip().lower()
+        campos.append('cliente_email')
+    if not (cot.cliente_nombre or '').strip():
+        cot.cliente_nombre = (f'{request.user.first_name} {request.user.last_name}'.strip() or request.user.username)
+        campos.append('cliente_nombre')
+    cot.token_vinculo = None
+    cot.token_vinculo_expira = None
+    cot.save(update_fields=campos)
+    return Response({'detalle': 'Listo: la cotización quedó en tu cuenta.', 'id': cot.id})
+
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def latido_cotizaciones(request):

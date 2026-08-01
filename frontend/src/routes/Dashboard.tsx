@@ -5587,6 +5587,35 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
       onChanged()
     } catch { notify('No se pudo vincular', 'err') }
   }
+
+  /* Vincular por LIGA (lo que escala con cientos de clientes): se genera un
+     enlace de un solo uso, se manda por WhatsApp, y al abrirlo con su sesión
+     la cotización cae en SU cuenta — sin buscar en ningún selector. */
+  const [ligaVinculo, setLigaVinculo] = useState('')
+  const [ligaCopiada, setLigaCopiada] = useState(false)
+  const [generandoLiga, setGenerandoLiga] = useState(false)
+  async function generarLigaVinculo() {
+    if (ligaVinculo || generandoLiga) return
+    setGenerandoLiga(true)
+    try {
+      const r = await api.post<{ ruta: string }>(`/cotizaciones/${cotizacion.id}/vinculo/`, {}, { fondo: true } as never)
+      setLigaVinculo(`${window.location.origin}${r.data.ruta}`)
+    } catch (e: any) {
+      notify(e?.response?.data?.detalle || 'No se pudo generar la liga', 'err')
+    } finally { setGenerandoLiga(false) }
+  }
+  async function copiarLigaVinculo() {
+    try {
+      await navigator.clipboard.writeText(ligaVinculo)
+      setLigaCopiada(true)
+      setTimeout(() => setLigaCopiada(false), 1800)
+    } catch { notify('No se pudo copiar; selecciona el texto a mano', 'err') }
+  }
+  function waVinculo() {
+    const msg = `Hola${clienteNombre ? ' ' + clienteNombre : ''}, te preparé la cotización ${c.folio}. Ábrela con tu cuenta para verla en "Mis cotizaciones" y aceptarla cuando gustes:\n${ligaVinculo}`
+    const tel = (clienteTel || '').replace(/\D/g, '')
+    return `https://wa.me/${tel.length === 10 ? '52' + tel : tel}?text=${encodeURIComponent(msg)}`
+  }
   const [c, setC] = useState<Cotizacion>(cotizacion)
   const [notas, setNotas] = useState(cotizacion.notas || '')
   const [email, setEmail] = useState(cotizacion.cliente_email || '')
@@ -5958,13 +5987,35 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
               <p className={labelCot}>Cliente</p>
               {/* Vincular la cotización a una cuenta de la tienda: el cliente
                   la ve en "Mis cotizaciones" y ÉL decide aceptarla. */}
-              {!bloqueada && (
+              {!bloqueada && (c.usuario_nombre ? (
                 <button onClick={vincularCuentaCot}
                   className="mb-2 text-[12px] font-bold text-gold hover:opacity-80 transition-opacity">
-                  {c.usuario_nombre ? 'Cambiar cuenta' : '+ Vincular a una cuenta'}
+                  Cambiar cuenta
                 </button>
-              )}
+              ) : (
+                <div className="mb-2 flex items-center gap-3">
+                  <button onClick={generarLigaVinculo} disabled={generandoLiga}
+                    className="text-[12px] font-bold text-gold hover:opacity-80 transition-opacity disabled:opacity-50">
+                    {ligaVinculo ? '✓ Liga generada' : generandoLiga ? 'Generando…' : '+ Vincular por liga'}
+                  </button>
+                  <button onClick={vincularCuentaCot} className="text-[11px] font-semibold text-mute hover:text-ink transition-colors">
+                    o elegir de la lista
+                  </button>
+                </div>
+              ))}
             </div>
+            {ligaVinculo && !c.usuario_nombre && (
+              <div className="mb-3 flex items-center gap-2.5 bg-surface-2 border border-edge rounded-xl px-3 py-2.5">
+                <span className="flex-1 min-w-0 text-[12.5px] text-mute overflow-hidden text-ellipsis whitespace-nowrap">{ligaVinculo.replace(/^https?:\/\//, '')}</span>
+                <button onClick={copiarLigaVinculo} className="h-8 px-3 shrink-0 rounded-lg border border-edge bg-surface text-[12px] font-bold text-ink hover:bg-surface-2 transition-colors">
+                  {ligaCopiada ? '✓ Copiada' : 'Copiar'}
+                </button>
+                <a href={waVinculo()} target="_blank" rel="noopener noreferrer"
+                  className="h-8 px-3 shrink-0 rounded-lg bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 text-[12px] font-bold inline-flex items-center hover:bg-emerald-500/25 transition-colors">
+                  WhatsApp
+                </a>
+              </div>
+            )}
             {c.usuario_nombre && (
               /* Vino de una cuenta de la tienda: la identidad es del cliente,
                  no se recaptura. Los campos de abajo quedan para ajustes de

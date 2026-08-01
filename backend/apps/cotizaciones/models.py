@@ -67,6 +67,11 @@ class Cotizacion(models.Model):
     entrega_prometida = models.DateTimeField(null=True, blank=True)
     # Cuándo se le mandó el recordatorio de vigencia (para no repetirlo).
     recordatorio_vigencia = models.DateTimeField(null=True, blank=True)
+    # Liga de vinculación de un solo uso: el cliente la abre con su sesión y la
+    # cotización queda en SU cuenta (mismo mecanismo que ventas/rentas — con
+    # cientos de clientes, buscar en un selector no escala).
+    token_vinculo = models.CharField(max_length=64, null=True, blank=True, unique=True)
+    token_vinculo_expira = models.DateTimeField(null=True, blank=True)
     escalada_en = models.DateTimeField(null=True, blank=True, help_text='Cuándo se avisó a los respaldos por falta de atención')
 
     creada = models.DateTimeField(auto_now_add=True)

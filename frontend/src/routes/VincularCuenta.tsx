@@ -19,12 +19,12 @@ type Info = {
 /** Página pública de la "liga de vinculación": el cliente abre el enlace que le
  *  mandó el admin; si no tiene sesión se le pide iniciar, y al confirmar la
  *  venta/renta queda ligada a SU cuenta (la liga es de un solo uso). */
-export default function VincularCuenta({ tipo }: { tipo: 'venta' | 'renta' }) {
+export default function VincularCuenta({ tipo }: { tipo: 'venta' | 'renta' | 'cotizacion' }) {
   const { token } = useParams()
   const nav = useNavigate()
   const { token: sesion } = useAuth()
   const ruta = `/vincular/${tipo}/${token}`
-  const titulo = tipo === 'renta' ? 'renta' : 'compra'
+  const titulo = tipo === 'renta' ? 'renta' : tipo === 'cotizacion' ? 'cotización' : 'compra'
 
   const [info, setInfo] = useState<Info | null>(null)
   const [cargando, setCargando] = useState(true)
