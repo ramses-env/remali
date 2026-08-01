@@ -49,7 +49,7 @@ function Tarjeta({ r, i }: { r: RentaMia; i: number }) {
   const saldo = Number(r.saldo || 0)
   const total = Number(r.total || 0)
   return (
-    <div style={{ animationDelay: `${i * 40}ms` }} className="stagger-item rounded-2xl border border-edge bg-surface px-4 py-3">
+    <div style={{ animationDelay: `${i * 40}ms` }} className="stagger-item rounded-2xl border border-edge bg-surface px-5 py-4">
       {/* Línea 1: quién es y cuánto — el restante va EN la misma línea del total */}
       <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
         <span className="text-sm font-extrabold text-ink">{r.equipo || 'Equipo'}</span>
@@ -65,7 +65,7 @@ function Tarjeta({ r, i }: { r: RentaMia; i: number }) {
         </span>
       </div>
       {/* Línea 2: fechas, orden y dirección — con Detalle al final, sin filas extra */}
-      <div className="mt-1.5 flex items-center gap-2 text-[12.5px] text-mute min-w-0">
+      <div className="mt-2 flex items-center gap-2 text-[13px] text-mute min-w-0">
         <CalendarClock className="h-3.5 w-3.5 shrink-0" />
         <span className="whitespace-nowrap">Del {fecha(r.fecha_inicio)} al {fecha(r.fecha_fin)}</span>
         <button
