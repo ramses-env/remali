@@ -11,6 +11,7 @@ import Perfil from './routes/Perfil'
 import MisCotizaciones from './routes/MisCotizaciones'
 import MisCotizacionEstado from './routes/MisCotizacionEstado'
 import MisRentas from './routes/MisRentas'
+import MisCompras from './routes/MisCompras'
 import VincularCuenta from './routes/VincularCuenta'
 import RecordatorioPerfil from './components/RecordatorioPerfil'
 import CambioTipoCotizacion from './components/CambioTipoCotizacion'
@@ -89,6 +90,7 @@ function App() {
                   <Route path="/mis-cotizaciones" element={<MisCotizaciones />} />
                   <Route path="/mis-cotizaciones/:folio" element={<MisCotizacionEstado />} />
                   <Route path="/mis-rentas" element={<MisRentas />} />
+                  <Route path="/mis-compras" element={<MisCompras />} />
                   <Route path="/vincular/venta/:token" element={<VincularCuenta tipo="venta" />} />
                   <Route path="/vincular/renta/:token" element={<VincularCuenta tipo="renta" />} />
                   <Route path="*" element={<Home />} />

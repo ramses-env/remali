@@ -44,6 +44,16 @@ class Venta(models.Model):
         related_name='ventas_pos'
     )
 
+    # Cuenta de CLIENTE ligada a la venta. Es DISTINTA de `usuario` (que es el
+    # vendedor/operador): se llena cuando el cliente reclama la liga, para que la
+    # compra pueda aparecer en su cuenta.
+    cliente_usuario = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='compras_cliente',
+    )
+
     # Liga de vinculación: el admin genera un enlace; el cliente, ya con sesión,
     # lo abre y la venta queda ligada a SU cuenta. Es de un solo uso (al
     # reclamarse se limpia el token) y con caducidad.

@@ -3,7 +3,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import * as z from 'zod'
-import { BadgePercent, CalendarClock, Check, Copy, Eye, EyeOff, FileText, Loader2, Lock, Mail, ShieldCheck, TriangleAlert, User } from 'lucide-react'
+import { BadgePercent, CalendarClock, Check, Copy, Eye, EyeOff, FileText, Loader2, Lock, Mail, ShieldCheck, ShoppingBag, TriangleAlert, User } from 'lucide-react'
 
 import api from '../lib/api'
 import Migas from '../components/Migas'
@@ -160,6 +160,13 @@ export default function Perfil() {
           >
             <CalendarClock className="h-4 w-4" />
             Tus rentas
+          </Link>
+          <Link
+            to="/mis-compras"
+            className="inline-flex shrink-0 items-center gap-2.5 rounded-xl px-3.5 py-2.5 text-sm font-semibold text-mute transition-colors hover:text-ink"
+          >
+            <ShoppingBag className="h-4 w-4" />
+            Mis compras
           </Link>
         </nav>
 

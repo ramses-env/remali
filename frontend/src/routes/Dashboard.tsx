@@ -93,6 +93,8 @@ type Venta = {
   metodo_pago: string
   fecha: string
   vendedor?: string | null
+  telefono_cliente?: string | null
+  cuenta?: string | null
   unidad?: { id: number; codigo: string; numero_serie?: string | null; equipo?: string | null } | null
   origen?: { folio: string; resumen: string } | null
 }
@@ -3177,9 +3179,16 @@ function RentaDetalleModal({ renta: r, onClose, onTicket }: { renta: RentaFull; 
                 </div>
                 {/* Liga: el cliente la abre y liga la renta a SU cuenta (un solo uso, 30 días). */}
                 {liga ? (
-                  <div className="flex items-center gap-2">
-                    <input readOnly value={liga} onFocus={e => e.currentTarget.select()} className="flex-1 bg-app border border-edge rounded-[9px] px-3 py-2 text-[11px] text-ink outline-none" />
-                    <button onClick={async () => { try { await navigator.clipboard.writeText(liga); setCopiado(true); setTimeout(() => setCopiado(false), 1500) } catch { /* noop */ } }} className="shrink-0 px-3 py-2 rounded-[9px] bg-gold text-black text-[12px] font-bold">{copiado ? '✓' : 'Copiar'}</button>
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <input readOnly value={liga} onFocus={e => e.currentTarget.select()} className="flex-1 bg-app border border-edge rounded-[9px] px-3 py-2 text-[11px] text-ink outline-none" />
+                      <button onClick={async () => { try { await navigator.clipboard.writeText(liga); setCopiado(true); setTimeout(() => setCopiado(false), 1500) } catch { /* noop */ } }} className="shrink-0 px-3 py-2 rounded-[9px] bg-gold text-black text-[12px] font-bold">{copiado ? '✓' : 'Copiar'}</button>
+                    </div>
+                    {(() => {
+                      const tel = (telefono || '').replace(/\D/g, ''); const num = tel.length === 10 ? '52' + tel : tel
+                      const msg = `Hola, aquí tienes tu renta en REMALI. Ábrela para guardarla en tu cuenta:\n${liga}`
+                      return <a href={`https://wa.me/${num}?text=${encodeURIComponent(msg)}`} target="_blank" rel="noopener noreferrer" className="flex items-center justify-center gap-2 w-full py-2 rounded-[9px] bg-[#25D366] text-white text-[12px] font-bold hover:opacity-90 transition-opacity"><svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M17.5 14.4c-.3-.15-1.7-.84-2-.94-.26-.1-.45-.15-.64.15-.19.29-.74.94-.9 1.13-.17.19-.33.22-.62.07-.3-.15-1.25-.46-2.38-1.47-.88-.78-1.47-1.75-1.64-2.05-.17-.29-.02-.45.13-.6.13-.13.29-.34.44-.5.15-.17.19-.29.29-.48.1-.19.05-.36-.02-.5-.08-.15-.64-1.55-.88-2.12-.23-.56-.47-.48-.64-.49h-.55c-.19 0-.5.07-.76.36-.26.29-1 .98-1 2.38s1.02 2.76 1.17 2.95c.15.19 2.01 3.07 4.87 4.3.68.29 1.21.47 1.62.6.68.22 1.3.19 1.79.11.55-.08 1.7-.69 1.94-1.36.24-.67.24-1.24.17-1.36-.07-.12-.26-.19-.55-.34zM12 2a10 10 0 00-8.6 15.06L2 22l5.06-1.33A10 10 0 1012 2z"/></svg>Enviar por WhatsApp</a>
+                    })()}
                   </div>
                 ) : (
                   <button onClick={generarLiga} disabled={genLiga} className="text-[12px] font-semibold text-mute hover:text-gold transition-colors disabled:opacity-50">
@@ -3327,7 +3336,15 @@ function VentasAdmin({ ventas, reload, notify }: { ventas: Venta[]; reload: () =
                   <td className="px-5 py-3">
                     <div className="flex items-center gap-2.5">
                       <span className="w-8 h-8 rounded-lg bg-gold-soft text-gold flex items-center justify-center shrink-0 font-black text-sm">{(v.nombre_cliente?.[0] || '#').toUpperCase()}</span>
-                      <span className="text-sm font-semibold text-ink truncate">{v.nombre_cliente || 'Cliente general'}</span>
+                      <div className="min-w-0">
+                        <span className="text-sm font-semibold text-ink truncate block">{v.nombre_cliente || 'Cliente general'}</span>
+                        {v.cuenta && (
+                          <span className="text-[10.5px] text-emerald-600 dark:text-emerald-400 font-medium truncate flex items-center gap-1">
+                            <svg className="w-3 h-3 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-3-3v6M7.5 7.5l-1 1a3.5 3.5 0 000 5l1 1m9-9l1 1a3.5 3.5 0 010 5l-1 1"/></svg>
+                            Ligada a {v.cuenta}
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </td>
                   <td className="px-3 py-3">
@@ -4569,13 +4586,21 @@ function RefaccionesAdmin({ refacciones, reload, notify }: {
                 <input className={`${input} font-mono`} value={form.codigo_barras} onChange={e => setForm({ ...form, codigo_barras: e.target.value })} placeholder="Escanéalo o déjalo vacío" />
                 <p className="text-[11px] text-mute mt-1.5">Si la refacción ya trae código, escríbelo o escanéalo. Si lo dejas <b>vacío</b>, el sistema genera uno único automáticamente.</p>
               </div>
-              <label className="flex items-center gap-3 px-4 py-3 rounded-xl border border-edge cursor-pointer hover:bg-surface-2 transition-colors">
-                <input type="checkbox" checked={form.para_venta} onChange={e => setForm({ ...form, para_venta: e.target.checked })} className="w-4 h-4 accent-[#B8872E]" />
-                <div>
-                  <p className="text-sm font-semibold text-ink">También se vende al público</p>
-                  <p className="text-[11px] text-mute">Por defecto las refacciones son solo para mantenimiento.</p>
-                </div>
-              </label>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={form.para_venta}
+                onClick={() => setForm({ ...form, para_venta: !form.para_venta })}
+                className="w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-edge cursor-pointer hover:bg-surface-2 transition-colors text-left"
+              >
+                <span className={`relative shrink-0 w-11 h-6 rounded-full transition-colors ${form.para_venta ? 'bg-gold' : 'bg-surface-2 border border-edge'}`}>
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${form.para_venta ? 'translate-x-5' : ''}`} />
+                </span>
+                <span>
+                  <span className="block text-sm font-semibold text-ink">También se vende al público</span>
+                  <span className="block text-[11px] text-mute">Por defecto las refacciones son solo para mantenimiento.</span>
+                </span>
+              </button>
             </div>
             <div className="px-6 py-4 border-t border-edge flex justify-end gap-3 shrink-0 bg-surface">
               <button onClick={() => setFormOpen(false)} className="px-6 py-2.5 rounded-full border border-edge text-ink text-sm font-semibold hover:bg-surface-2 transition-colors">Cancelar</button>
@@ -6694,8 +6719,15 @@ type UsuarioPanel = {
  */
 function estiloRol(u: UsuarioPanel) {
   if (u.es_superusuario) return { label: 'Dueño', cls: 'bg-ink text-app' }
+  if (u.rol === 'Cliente') return { label: 'Cliente', cls: 'bg-surface-2 text-mute' }
   if (u.rol) return { label: u.rol, cls: 'bg-yellow text-[#111827]' }
   return { label: 'Sin rol', cls: 'bg-surface-2 text-mute' }
+}
+
+/** Un cliente es quien SOLO tiene el grupo Cliente; todo lo demás es equipo
+ *  (incluye cuentas sin rol: se crearon para el panel y están a medio dar de alta). */
+function esCliente(u: UsuarioPanel) {
+  return u.rol === 'Cliente' && !u.es_superusuario
 }
 
 /** Mismo criterio para el avatar de iniciales. */
@@ -6792,7 +6824,12 @@ function UsuariosAdmin({ usuarios, reload, notify, yoId }: {
 
   const activos = usuarios.filter(u => u.activo)
   const admins = activos.filter(u => u.es_admin)
-  const filtrados = usuarios.filter(u => {
+  // Dos mundos separados: el equipo que opera el panel y los clientes de la tienda.
+  const [grupo, setGrupo] = useState<'equipo' | 'clientes'>('equipo')
+  const equipo = usuarios.filter(u => !esCliente(u))
+  const clientes = usuarios.filter(esCliente)
+  const sinVerificar = clientes.filter(u => !u.email_verificado).length
+  const filtrados = (grupo === 'equipo' ? equipo : clientes).filter(u => {
     if (!q.trim()) return true
     return `${u.nombre} ${u.username} ${u.email} ${u.rol || ''} ${u.puesto}`.toLowerCase().includes(q.toLowerCase().trim())
   })
@@ -6833,17 +6870,28 @@ function UsuariosAdmin({ usuarios, reload, notify, yoId }: {
         </div>
 
         <div className="flex flex-wrap gap-x-7 gap-y-2 mt-5 pt-5 border-t border-edge text-sm">
-          <span className="text-mute">Con acceso <b className="text-ink font-black ml-1">{activos.length}</b></span>
+          <span className="text-mute">Equipo de trabajo <b className="text-ink font-black ml-1">{equipo.length}</b></span>
+          <span className="text-mute">Clientes <b className="text-ink font-black ml-1">{clientes.length}</b></span>
           <span className="text-mute">Administran <b className="text-ink font-black ml-1">{admins.length}</b></span>
           {usuarios.length - activos.length > 0 &&
             <span className="text-mute">Sin acceso <b className="text-ink font-black ml-1">{usuarios.length - activos.length}</b></span>}
+          {sinVerificar > 0 &&
+            <span className="text-mute">Clientes sin verificar <b className="text-amber-600 font-black ml-1">{sinVerificar}</b></span>}
         </div>
       </div>
 
       {/* Tabla */}
       <div className="bg-surface border border-edge rounded-2xl">
-        <div className="px-4 sm:px-5 py-3.5 border-b border-edge">
-          <div className="relative max-w-md">
+        <div className="px-4 sm:px-5 py-3.5 border-b border-edge flex flex-wrap items-center gap-3">
+          <div className="flex border border-edge rounded-xl overflow-hidden shrink-0">
+            {([['equipo', `Equipo de trabajo (${equipo.length})`], ['clientes', `Clientes (${clientes.length})`]] as const).map(([g, etiqueta]) => (
+              <button key={g} onClick={() => setGrupo(g)}
+                className={`px-4 py-2.5 text-[13px] font-bold transition-colors ${grupo === g ? 'bg-ink text-app' : 'text-mute hover:text-ink hover:bg-surface-2'}`}>
+                {etiqueta}
+              </button>
+            ))}
+          </div>
+          <div className="relative flex-1 min-w-[200px] max-w-md">
             <svg className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-mute pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><circle cx="11" cy="11" r="7" /><path d="M20 20l-3.5-3.5" /></svg>
             <input value={q} onChange={e => setQ(e.target.value)} placeholder="Buscar por nombre, usuario o rol"
               className="w-full bg-surface-2 border border-edge rounded-xl pl-9 pr-3 py-2.5 text-sm text-ink placeholder-mute focus:outline-none focus:border-gold/50 transition-colors" />
@@ -6852,7 +6900,7 @@ function UsuariosAdmin({ usuarios, reload, notify, yoId }: {
 
         {filtrados.length === 0 ? (
           <div className="px-6 py-16 text-center">
-            <p className="text-sm text-ink font-semibold">{q ? 'Nadie coincide con esa búsqueda' : 'Aún no hay más cuentas'}</p>
+            <p className="text-sm text-ink font-semibold">{q ? 'Nadie coincide con esa búsqueda' : grupo === 'clientes' ? 'Aún no hay clientes registrados' : 'Aún no hay más cuentas'}</p>
             <p className="text-[13px] text-mute mt-1.5 max-w-[46ch] mx-auto">
               {q ? 'Prueba con el nombre de pila o el usuario.' : 'Agrega a quien trabaje contigo para que registre rentas y ventas con su propio nombre.'}
             </p>
@@ -6867,8 +6915,10 @@ function UsuariosAdmin({ usuarios, reload, notify, yoId }: {
                       no se desborda en pantallas chicas. */}
                   <th scope="col" className={`${th} w-full`}>Usuario</th>
                   <th scope="col" className={`${th} hidden md:table-cell w-px`}>Correo</th>
-                  <th scope="col" className={`${th} hidden lg:table-cell w-px`}>Teléfono</th>
-                  <th scope="col" className={`${th} hidden sm:table-cell w-px`}>Último acceso</th>
+                  <th scope="col" className={`${th} hidden xl:table-cell w-px`}>Teléfono</th>
+                  <th scope="col" className={`${th} hidden sm:table-cell w-px`}>Estado</th>
+                  <th scope="col" className={`${th} hidden lg:table-cell w-px`}>Registro</th>
+                  <th scope="col" className={`${th} hidden xl:table-cell w-px`}>Último acceso</th>
                   <th scope="col" className={`${th} text-right w-px`}>Acciones</th>
                 </tr>
               </thead>
@@ -6892,18 +6942,6 @@ function UsuariosAdmin({ usuarios, reload, notify, yoId }: {
                             </div>
                             <div className="mt-1 flex items-center gap-2 flex-wrap">
                               <span className={`text-[10px] uppercase font-semibold px-2 py-0.5 rounded-full ${rol.cls}`}>{rol.label}</span>
-                              {/* Estado de verificación del cliente (correo + datos = 5%). Solo
-                                  para clientes: el personal se da de alta a mano, no "verifica". */}
-                              {!u.es_admin && !u.es_superusuario && (
-                                u.perfil_verificado ? (
-                                  <span className="inline-flex items-center gap-1 text-[10px] uppercase font-semibold px-2 py-0.5 rounded-full bg-libre/10 text-libre">
-                                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="3"><path d="M5 13l4 4L19 7" /></svg>
-                                    Verificado
-                                  </span>
-                                ) : (
-                                  <span className="text-[10px] uppercase font-semibold px-2 py-0.5 rounded-full bg-surface-2 text-mute">Sin verificar</span>
-                                )
-                              )}
                               {u.puesto && <span className="text-[12px] text-mute truncate">{u.puesto}</span>}
                             </div>
                             {/* En pantallas chicas las columnas se esconden: el dato baja aquí. */}
@@ -6916,10 +6954,33 @@ function UsuariosAdmin({ usuarios, reload, notify, yoId }: {
                       <td className={`${td} hidden md:table-cell whitespace-nowrap`}>
                         <span className="text-[13.5px] text-ink">{u.email || <span className="text-mute">—</span>}</span>
                       </td>
-                      <td className={`${td} hidden lg:table-cell whitespace-nowrap`}>
+                      <td className={`${td} hidden xl:table-cell whitespace-nowrap`}>
                         <span className="text-[13.5px] text-ink font-mono">{u.telefono || <span className="text-mute font-sans">—</span>}</span>
                       </td>
+                      {/* Estado: acceso al sistema y, en clientes, si su correo es real */}
                       <td className={`${td} hidden sm:table-cell`}>
+                        <div className="flex items-center gap-1.5 flex-nowrap">
+                          {u.activo ? (
+                            <span className="inline-flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-600 whitespace-nowrap"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />Activo</span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1 rounded-full bg-red-500/10 text-red-500 whitespace-nowrap"><span className="w-1.5 h-1.5 rounded-full bg-red-500" />Inactivo</span>
+                          )}
+                          {esCliente(u) && (
+                            u.email_verificado ? (
+                              <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full border border-emerald-500/30 bg-emerald-500/5 text-emerald-600 whitespace-nowrap" title="Confirmó su correo con el link">
+                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="3"><path d="M5 13l4 4L19 7" /></svg>
+                                Verificado
+                              </span>
+                            ) : (
+                              <span className="text-[11px] font-bold px-2.5 py-1 rounded-full border border-amber-500/30 bg-amber-500/5 text-amber-600 whitespace-nowrap" title="Aún no abre el link de confirmación: no puede iniciar sesión">Sin verificar</span>
+                            )
+                          )}
+                        </div>
+                      </td>
+                      <td className={`${td} hidden lg:table-cell whitespace-nowrap`}>
+                        <span className="text-[13px] text-mute">{u.creado ? new Date(u.creado).toLocaleDateString('es-MX') : '—'}</span>
+                      </td>
+                      <td className={`${td} hidden xl:table-cell`}>
                         <span className="text-[13px] text-mute whitespace-nowrap">{hace(u.ultimo_acceso)}</span>
                       </td>
                       <td className={`${td} text-right`}>

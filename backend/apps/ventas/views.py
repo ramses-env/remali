@@ -85,7 +85,7 @@ def venta_mostrador(request):
 def listar_ventas(request):
     """Lista de ventas (incluye ventas de maquinaria con su unidad)."""
     qs = Venta.objects.all().select_related(
-        'inventario', 'inventario__equipo', 'usuario', 'empresa', 'cotizacion'
+        'inventario', 'inventario__equipo', 'usuario', 'cliente_usuario', 'empresa', 'cotizacion'
     ).order_by('-fecha')
 
     solo_maquinaria = (request.query_params.get('maquinaria') or '') in ('1', 'true', 'True')
@@ -111,6 +111,9 @@ def listar_ventas(request):
             'metodo_pago': v.metodo_pago,
             'fecha': v.fecha,
             'vendedor': getattr(v.usuario, 'username', None),
+            # Cuenta de cliente ligada (por la liga de vinculación), si la hay.
+            'cuenta': ((v.cliente_usuario.get_full_name() or v.cliente_usuario.username)
+                       if v.cliente_usuario_id else None),
             # Sin unidad amarrada (venta desde cotización): que la columna diga
             # de qué equipo(s) fue y de qué folio nació, no un guion.
             'origen': (
@@ -126,6 +129,25 @@ def listar_ventas(request):
             },
         })
     return Response({'ventas': data, 'total': len(data)})
+
+
+@api_view(['GET'])
+@permission_classes([permissions.IsAuthenticated])
+def ventas_mias(request):
+    """Compras del cliente en sesión (ligadas por la liga de vinculación)."""
+    qs = (Venta.objects.filter(cliente_usuario=request.user)
+          .select_related('inventario', 'inventario__equipo', 'cotizacion')
+          .order_by('-fecha')[:100])
+    data = []
+    for v in qs:
+        inv = v.inventario
+        concepto = (inv.equipo.modelo if inv and inv.equipo else None) \
+            or (v.cotizacion.folio if v.cotizacion_id and v.cotizacion else None) or 'Compra'
+        data.append({
+            'id': v.id, 'fecha': v.fecha, 'total': str(v.total),
+            'estado': v.estado, 'metodo_pago': v.metodo_pago, 'concepto': concepto,
+        })
+    return Response({'compras': data})
 
 
 @api_view(['POST', 'PATCH'])
@@ -201,16 +223,16 @@ def vinculo_venta(request, token: str):
         return Response({
             'tipo': 'venta', 'id': v.id, 'fecha': v.fecha, 'total': str(v.total),
             'cliente': v.nombre_cliente or '', 'concepto': concepto,
-            'ya_ligada': bool(v.usuario_id),
+            'ya_ligada': bool(v.cliente_usuario_id),
         })
 
     # POST → reclamar
     if v.estado == 'cancelada':
         return Response({'detalle': 'Esta venta está cancelada; no se puede vincular.'}, status=400)
-    v.usuario = request.user
-    v.token_vinculo = None            # un solo uso: se limpia al reclamar
+    v.cliente_usuario = request.user   # cuenta del CLIENTE (no el vendedor)
+    v.token_vinculo = None             # un solo uso: se limpia al reclamar
     v.token_vinculo_expira = None
-    v.save(update_fields=['usuario', 'token_vinculo', 'token_vinculo_expira'])
+    v.save(update_fields=['cliente_usuario', 'token_vinculo', 'token_vinculo_expira'])
     return Response({'detalle': 'Listo: la venta quedó ligada a tu cuenta.', 'id': v.id})
 
 
