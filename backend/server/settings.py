@@ -118,6 +118,9 @@ GOOGLE_CLIENT_ID = os.environ.get(
 # Application definition
 
 INSTALLED_APPS = [
+    # 'daphne' va PRIMERO: reemplaza runserver por su servidor ASGI, para que en
+    # local (manage.py runserver) funcionen los WebSockets sin configurar nada más.
+    'daphne',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -126,6 +129,7 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'rest_framework',
     'corsheaders',
+    'channels',
     'maquinaria',
     'inventario',
     'refacciones',
@@ -182,6 +186,7 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = 'server.wsgi.application'
+ASGI_APPLICATION = 'server.asgi.application'
 
 
 # Database
@@ -378,10 +383,21 @@ else:
         }
     }
 
-# Cuando se integre Celery/Channels, reutilizar REDIS_URL como broker:
-#   CELERY_BROKER_URL = REDIS_URL
-#   CHANNEL_LAYERS = {'default': {'BACKEND': 'channels_redis.core.RedisChannelLayer',
-#                                 'CONFIG': {'hosts': [REDIS_URL]}}}
+# Channels: capa de canales para WebSockets (notificaciones en tiempo real).
+# Con REDIS_URL usa Redis — necesario en producción con varios workers, para que
+# un push llegue al cliente sin importar qué worker atendió su conexión. Sin
+# Redis cae a memoria: sirve en local (un proceso) y NO tumba producción, aunque
+# ahí el push no cruzaría entre workers (por eso en Railway conviene Redis).
+if REDIS_URL:
+    CHANNEL_LAYERS = {
+        'default': {
+            'BACKEND': 'channels_redis.core.RedisChannelLayer',
+            'CONFIG': {'hosts': [REDIS_URL]},
+        }
+    }
+else:
+    CHANNEL_LAYERS = {'default': {'BACKEND': 'channels.layers.InMemoryChannelLayer'}}
+# Para Celery en el futuro: CELERY_BROKER_URL = REDIS_URL
 
 # Estaba en CORS_ALLOW_ALL_ORIGINS = True: cualquier sitio del mundo podía llamar
 # a la API desde el navegador de un usuario. En realidad casi no hace falta CORS —

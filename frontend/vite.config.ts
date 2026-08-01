@@ -18,6 +18,12 @@ export default defineConfig(({ mode }) => ({
     // para pruebas. Vite bloquea hosts desconocidos por defecto.
     allowedHosts: true,
     proxy: {
+      // WebSocket de notificaciones en tiempo real (Channels).
+      '/ws': {
+        target: 'ws://localhost:8000',
+        ws: true,
+        changeOrigin: true,
+      },
       '/api': {
         target: 'http://localhost:8000',
         changeOrigin: true,

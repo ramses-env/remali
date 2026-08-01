@@ -30,3 +30,9 @@ six==1.17.0
 sqlparse==0.5.4
 urllib3==2.6.3
 whitenoise==6.11.0
+
+# Tiempo real (WebSockets) — notificaciones instantáneas del cliente
+channels==4.3.2
+channels-redis==4.3.0
+daphne==4.2.3
+uvicorn[standard]==0.52.0

@@ -55,10 +55,11 @@ RUN python manage.py collectstatic --noinput --skip-checks
 # que es mejor servir algo y dejar el error a la vista en los logs que dejar el
 # sitio caído. Cuando se apague el modo construcción, una base rota se nota de
 # inmediato porque todo responde error.
-CMD ["sh", "-c", "python manage.py migrate --skip-checks || echo '>>> AVISO: migrate falló (¿base no disponible?). Arranco igual: la página de construcción no necesita base.'; PYTHONPATH=. gunicorn server.wsgi:application \
-  --bind 0.0.0.0:${PORT:-8080} \
-  --worker-class gthread \
-  --workers ${WEB_CONCURRENCY:-2} \
-  --threads ${WEB_THREADS:-4} \
-  --timeout ${WEB_TIMEOUT:-60} \
-  --access-logfile - --error-logfile -"]
+# ASGI (uvicorn) en vez de gunicorn WSGI: sirve HTTP *y* WebSockets (Channels),
+# necesarios para las notificaciones en tiempo real. WEB_CONCURRENCY sigue
+# controlando el número de procesos. Nota Railway: para que un push cruce entre
+# procesos, añade un servicio Redis y define REDIS_URL; sin él cada proceso solo
+# empuja a los clientes conectados a él (no tumba nada, solo no comparte).
+CMD ["sh", "-c", "python manage.py migrate --skip-checks || echo '>>> AVISO: migrate falló (¿base no disponible?). Arranco igual: la página de construcción no necesita base.'; PYTHONPATH=. uvicorn server.asgi:application \
+  --host 0.0.0.0 --port ${PORT:-8080} \
+  --workers ${WEB_CONCURRENCY:-2}"]

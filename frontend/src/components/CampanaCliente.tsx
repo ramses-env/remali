@@ -1,10 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
 import api from '../lib/api'
+import { leerToken } from '../lib/token'
 
 type Notif = { id: number; tipo: string; titulo: string; mensaje?: string; creada: string; leida: boolean }
 
-/** Campana de notificaciones personales del cliente. Sondea el backend cada
- *  25 s (no hay WebSockets); muestra el conteo sin leer y, al abrir, marca leídas. */
+/** Campana de notificaciones personales del cliente.
+ *  - Carga inicial por HTTP (/notificaciones/mias/).
+ *  - Push INSTANTÁNEO por WebSocket (Channels): en cuanto el backend crea una
+ *    notificación para este cliente, llega sin recargar ni sondear.
+ *  - Sondeo lento (60 s) solo como red de seguridad si el socket se cae. */
 export default function CampanaCliente() {
   const [items, setItems] = useState<Notif[]>([])
   const [noLeidas, setNoLeidas] = useState(0)
@@ -14,13 +18,38 @@ export default function CampanaCliente() {
   const cargar = () => {
     api.get<{ notificaciones: Notif[]; no_leidas: number }>('/notificaciones/mias/', { fondo: true } as never)
       .then(r => { setItems(r.data.notificaciones || []); setNoLeidas(r.data.no_leidas || 0) })
-      .catch(() => { /* silencioso: es un sondeo de fondo */ })
+      .catch(() => { /* sondeo de fondo, silencioso */ })
   }
 
   useEffect(() => {
     cargar()
-    const id = setInterval(cargar, 25000)
+    const id = setInterval(cargar, 60000)   // red de seguridad si el WS cae
     return () => clearInterval(id)
+  }, [])
+
+  // WebSocket para tiempo real de verdad.
+  useEffect(() => {
+    let vivo = true
+    let reintento: ReturnType<typeof setTimeout> | undefined
+    let ws: WebSocket | null = null
+
+    const conectar = () => {
+      const token = leerToken()
+      if (!token || !vivo) return
+      const proto = location.protocol === 'https:' ? 'wss' : 'ws'
+      ws = new WebSocket(`${proto}://${location.host}/ws/notificaciones/?token=${encodeURIComponent(token)}`)
+      ws.onmessage = (e) => {
+        try {
+          const n: Notif = JSON.parse(e.data)
+          setItems(prev => [n, ...prev.filter(x => x.id !== n.id)].slice(0, 50))
+          setNoLeidas(c => c + 1)
+        } catch { /* ignore */ }
+      }
+      ws.onclose = () => { if (vivo) reintento = setTimeout(conectar, 5000) }   // reconexión
+      ws.onerror = () => { try { ws?.close() } catch { /* */ } }
+    }
+    conectar()
+    return () => { vivo = false; if (reintento) clearTimeout(reintento); try { ws?.close() } catch { /* */ } }
   }, [])
 
   useEffect(() => {

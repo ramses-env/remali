@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { createPortal } from 'react-dom'
 import api from '../lib/api'
-import { confirmar } from './Dialogo'
 
 type VentaLike = {
   id: number
@@ -22,8 +21,9 @@ type VentaLike = {
 
 const money = (n?: string | number) => `$${(Number(n) || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}`
 
-/** Detalle de una venta (reemplaza el ticket térmico): info + acciones
- *  (cancelar, vincular a una cuenta por liga, y la orden carta en PDF). */
+/** Detalle de una venta, fiel al diseño "Modal Venta REMALI": tarjeta del
+ *  equipo, totales con el cobrado en grande, la liga de vinculación con sus
+ *  estados y la confirmación de cancelar como franja inline (no diálogo). */
 export default function VentaDetalleModal({ venta, onClose, onChanged, notify }: {
   venta: VentaLike
   onClose: () => void
@@ -32,12 +32,14 @@ export default function VentaDetalleModal({ venta, onClose, onChanged, notify }:
 }) {
   const [liga, setLiga] = useState('')
   const [generando, setGenerando] = useState(false)
+  const [confirmando, setConfirmando] = useState(false)
   const [cancelando, setCancelando] = useState(false)
   const [copiado, setCopiado] = useState(false)
   const [pdf, setPdf] = useState(false)
   const cancelada = venta.estado === 'cancelada'
 
   const generarLiga = async () => {
+    if (liga || generando) return
     setGenerando(true)
     try {
       const r = await api.post<{ ruta: string }>(`/ventas/${venta.id}/vinculo/`, {}, { fondo: true } as never)
@@ -53,19 +55,13 @@ export default function VentaDetalleModal({ venta, onClose, onChanged, notify }:
     try {
       await navigator.clipboard.writeText(liga)
       setCopiado(true)
-      setTimeout(() => setCopiado(false), 1500)
+      setTimeout(() => setCopiado(false), 1800)
     } catch {
       notify('No se pudo copiar; copia el texto manualmente', 'err')
     }
   }
 
   const cancelar = async () => {
-    const ok = await confirmar({
-      titulo: 'Cancelar venta',
-      mensaje: `¿Cancelar la venta #${venta.id}? Se devuelve la máquina a inventario y se repone el stock de refacciones.`,
-      aceptar: 'Cancelar venta',
-    })
-    if (!ok) return
     setCancelando(true)
     try {
       await api.post(`/ventas/${venta.id}/cancelar/`, {})
@@ -102,80 +98,150 @@ export default function VentaDetalleModal({ venta, onClose, onChanged, notify }:
     return `https://wa.me/${num}?text=${encodeURIComponent(msg)}`
   }
 
-  const fila = (k: string, v: React.ReactNode) => (
-    <div className="flex justify-between gap-4 py-2 border-b border-edge last:border-0">
-      <span className="text-mute text-sm">{k}</span>
-      <span className="text-ink text-sm font-medium text-right">{v}</span>
-    </div>
-  )
+  const fecha = new Date(venta.fecha)
+  const cuandoQuien = [
+    fecha.toLocaleDateString('es-MX', { day: 'numeric', month: 'short', year: 'numeric' }),
+    fecha.toLocaleTimeString('es-MX', { hour: 'numeric', minute: '2-digit' }),
+    venta.vendedor ? `vendió ${venta.vendedor}` : '',
+  ].filter(Boolean).join(' · ')
+  const equipoNombre = venta.unidad?.equipo || venta.origen?.resumen || 'Venta de refacciones'
+  const equipoDetalle = venta.unidad
+    ? `${venta.unidad.codigo} · 1 equipo · venta`
+    : (venta.origen ? `Cotización ${venta.origen.folio}` : 'mostrador')
 
   return createPortal(
-    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50" onClick={onClose}>
-      <div className="w-full max-w-lg bg-surface rounded-2xl border border-edge shadow-2xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 sm:p-6 bg-black/45 backdrop-blur-[2px] overflow-y-auto" onClick={onClose}>
+      <div className="w-full max-w-[560px] bg-surface rounded-[22px] border border-edge shadow-[0_30px_70px_rgba(0,0,0,0.28)] overflow-hidden my-auto" onClick={e => e.stopPropagation()}>
+
         {/* Encabezado */}
-        <div className="px-6 py-4 border-b border-edge flex items-center justify-between gap-3">
+        <div className="flex items-start justify-between gap-5 px-6 sm:px-[26px] pt-6 pb-5 border-b border-edge">
           <div>
-            <h3 className="font-bold text-ink">Venta #{venta.id}</h3>
-            <p className="text-xs text-mute">{new Date(venta.fecha).toLocaleString('es-MX')}</p>
+            <div className="flex items-center gap-2.5">
+              <h2 className="text-[22px] font-bold tracking-[-0.02em] text-ink m-0">Venta #{venta.id}</h2>
+              <span className={`text-[12px] font-bold tracking-[0.04em] px-2.5 py-[5px] rounded-full ${cancelada ? 'bg-red-500/10 text-red-500' : 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400'}`}>
+                {cancelada ? 'CANCELADA' : 'ACTIVA'}
+              </span>
+            </div>
+            <div className="text-[13.5px] text-mute mt-1.5">{cuandoQuien}</div>
           </div>
-          <span className={`text-[11px] px-2.5 py-1 rounded-full font-semibold uppercase ${cancelada ? 'bg-red-500/10 text-red-500' : 'bg-emerald-500/10 text-emerald-600'}`}>
-            {cancelada ? 'Cancelada' : 'Activa'}
-          </span>
+          <button onClick={onClose} aria-label="Cerrar"
+            className="w-[34px] h-[34px] shrink-0 rounded-[10px] bg-surface-2 text-mute hover:text-ink hover:bg-edge/60 transition-colors grid place-items-center text-[16px]">
+            ×
+          </button>
         </div>
 
-        {/* Información */}
-        <div className="px-6 py-4">
-          {fila('Cliente', venta.nombre_cliente || venta.empresa || 'Cliente general')}
-          {fila('Equipo', venta.unidad ? `${venta.unidad.equipo || '—'} (${venta.unidad.codigo})` : (venta.origen?.resumen || '—'))}
-          {venta.origen && fila('Cotización', venta.origen.folio)}
-          {fila('Método de pago', <span className="capitalize">{venta.metodo_pago}</span>)}
-          {venta.vendedor && fila('Vendedor', venta.vendedor)}
-          {venta.cuenta && fila('Cuenta ligada', <span className="text-emerald-600 dark:text-emerald-400">{venta.cuenta}</span>)}
-          {venta.subtotal && fila('Subtotal', money(venta.subtotal))}
-          {venta.iva && fila('IVA', money(venta.iva))}
-          {fila('Total', <span className="text-price font-black text-base">{money(venta.total)}</span>)}
-        </div>
+        <div className="px-6 sm:px-[26px] pt-[22px]">
+          {/* Equipo */}
+          <div className="flex items-center gap-3.5 border border-edge rounded-[14px] px-4 py-3.5">
+            <div className="w-12 h-12 shrink-0 rounded-[11px]" style={{ background: 'repeating-linear-gradient(135deg, var(--c-surface-2, #f4f4f5) 0 7px, rgba(120,120,130,0.12) 7px 14px)' }} />
+            <div className="min-w-0">
+              <div className="text-[15.5px] font-bold text-ink truncate">{equipoNombre}</div>
+              <div className="text-[13px] text-mute mt-[3px] truncate">{equipoDetalle}</div>
+            </div>
+          </div>
 
-        {/* Vincular a una cuenta */}
-        {!cancelada && (
-          <div className="px-6 pb-4">
-            <div className="rounded-xl bg-surface-2 border border-edge p-4">
-              <p className="text-sm font-semibold text-ink">Vincular a la cuenta de un cliente</p>
-              <p className="text-xs text-mute mt-1">Genera una liga y envíasela. Al abrirla con su sesión, esta venta queda en su historial. Un solo uso · caduca en 30 días.</p>
-              {liga ? (
-                <div className="mt-3 space-y-2">
-                  <div className="flex items-center gap-2">
-                    <input readOnly value={liga} onFocus={e => e.currentTarget.select()} className="flex-1 bg-app border border-edge rounded-lg px-3 py-2 text-xs text-ink outline-none" />
-                    <button onClick={copiar} className="shrink-0 px-3 py-2 rounded-lg bg-gold text-black text-xs font-bold">{copiado ? '✓' : 'Copiar'}</button>
-                  </div>
-                  <a href={waHref()} target="_blank" rel="noopener noreferrer" className="flex items-center justify-center gap-2 w-full py-2 rounded-lg bg-[#25D366] text-white text-xs font-bold hover:opacity-90 transition-opacity">
-                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M17.5 14.4c-.3-.15-1.7-.84-2-.94-.26-.1-.45-.15-.64.15-.19.29-.74.94-.9 1.13-.17.19-.33.22-.62.07-.3-.15-1.25-.46-2.38-1.47-.88-.78-1.47-1.75-1.64-2.05-.17-.29-.02-.45.13-.6.13-.13.29-.34.44-.5.15-.17.19-.29.29-.48.1-.19.05-.36-.02-.5-.08-.15-.64-1.55-.88-2.12-.23-.56-.47-.48-.64-.49h-.55c-.19 0-.5.07-.76.36-.26.29-1 .98-1 2.38s1.02 2.76 1.17 2.95c.15.19 2.01 3.07 4.87 4.3.68.29 1.21.47 1.62.6.68.22 1.3.19 1.79.11.55-.08 1.7-.69 1.94-1.36.24-.67.24-1.24.17-1.36-.07-.12-.26-.19-.55-.34zM12 2a10 10 0 00-8.6 15.06L2 22l5.06-1.33A10 10 0 1012 2z"/></svg>
-                    Enviar por WhatsApp
+          {/* Cliente / pago */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-[18px]">
+            <div>
+              <div className="text-[12.5px] text-mute">Cliente</div>
+              <div className="text-[15px] font-semibold text-ink mt-1">{venta.nombre_cliente || venta.empresa || 'Cliente general'}</div>
+              {venta.cuenta && <div className="text-[12px] text-emerald-600 dark:text-emerald-400 font-semibold mt-0.5">Ligada a {venta.cuenta}</div>}
+            </div>
+            <div>
+              <div className="text-[12.5px] text-mute">Método de pago</div>
+              <div className="text-[15px] font-semibold text-ink mt-1 capitalize">{venta.metodo_pago}</div>
+            </div>
+          </div>
+
+          {/* Totales */}
+          <div className="border border-edge rounded-[14px] px-[18px] py-4 mt-[18px]">
+            <div className="flex justify-between gap-4 text-sm text-mute">
+              <span>Subtotal</span><span className="font-semibold text-ink">{money(venta.subtotal)}</span>
+            </div>
+            <div className="flex justify-between gap-4 text-sm text-mute mt-2.5">
+              <span>IVA 16%</span><span className="font-semibold text-ink">{money(venta.iva)}</span>
+            </div>
+            <div className="flex items-baseline justify-between gap-4 border-t border-edge mt-3.5 pt-3.5">
+              <span className="text-[15px] font-bold text-ink">Total cobrado</span>
+              <span className="text-[26px] font-extrabold tracking-[-0.025em] text-ink">{money(venta.total)}</span>
+            </div>
+          </div>
+
+          {/* Vincular a la cuenta del cliente */}
+          {!cancelada && !venta.cuenta && (
+            <div className="border border-edge rounded-[14px] p-[18px] mt-4 bg-surface-2/60">
+              <div className="flex items-start justify-between gap-4 flex-wrap">
+                <div className="min-w-0 flex-1">
+                  <div className="text-[15px] font-bold text-ink">Vincular a la cuenta del cliente</div>
+                  <div className="text-[13.5px] text-mute leading-relaxed mt-[5px]">Al abrir la liga con su sesión, esta venta aparece en su historial. Un solo uso · caduca en 30 días.</div>
+                </div>
+                <button onClick={generarLiga} disabled={generando}
+                  className={`h-[42px] px-[18px] rounded-[11px] text-sm font-bold whitespace-nowrap transition-colors disabled:opacity-60 ${
+                    liga
+                      ? 'border border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 cursor-default'
+                      : 'bg-ink text-app hover:opacity-90'
+                  }`}>
+                  {liga ? '✓ Liga generada' : generando ? 'Generando…' : 'Generar liga'}
+                </button>
+              </div>
+
+              {liga && (
+                <div className="flex items-center gap-2.5 bg-surface border border-edge rounded-[11px] px-3 py-2.5 mt-3.5">
+                  <span className="flex-1 min-w-0 text-[13px] text-mute overflow-hidden text-ellipsis whitespace-nowrap">{liga.replace(/^https?:\/\//, '')}</span>
+                  <button onClick={copiar}
+                    className="h-[34px] px-[13px] shrink-0 rounded-[9px] border border-edge bg-surface text-[13px] font-semibold text-ink hover:bg-surface-2 transition-colors whitespace-nowrap">
+                    {copiado ? '✓ Copiada' : 'Copiar'}
+                  </button>
+                  <a href={waHref()} target="_blank" rel="noopener noreferrer"
+                    className="h-[34px] px-[13px] shrink-0 rounded-[9px] bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 text-[13px] font-bold hover:bg-emerald-500/25 transition-colors whitespace-nowrap inline-flex items-center">
+                    WhatsApp
                   </a>
                 </div>
-              ) : (
-                <button onClick={generarLiga} disabled={generando} className="mt-3 px-4 py-2 rounded-full border border-edge text-ink text-sm font-semibold hover:bg-surface transition-colors disabled:opacity-50">
-                  {generando ? 'Generando…' : 'Generar liga'}
-                </button>
               )}
+            </div>
+          )}
+        </div>
+
+        {/* Acciones */}
+        <div className="flex items-center justify-between gap-4 px-6 sm:px-[26px] py-5 mt-[22px] border-t border-edge flex-wrap">
+          <div className="flex gap-2">
+            <button onClick={ordenCarta} disabled={pdf}
+              className="h-[44px] px-4 rounded-[12px] border border-edge bg-surface text-[14px] font-semibold text-ink hover:bg-surface-2 transition-colors whitespace-nowrap disabled:opacity-50">
+              {pdf ? 'Abriendo…' : '↓ Orden carta (PDF)'}
+            </button>
+            {!cancelada && (
+              <button onClick={() => setConfirmando(true)}
+                className="h-[44px] px-4 rounded-[12px] text-[14px] font-semibold text-red-600 dark:text-red-400 hover:bg-red-500/10 transition-colors whitespace-nowrap">
+                Cancelar venta
+              </button>
+            )}
+          </div>
+          <button onClick={onClose} className="h-[46px] px-[26px] rounded-[12px] bg-ink text-app text-[15px] font-bold hover:opacity-90 transition-opacity">
+            Cerrar
+          </button>
+        </div>
+
+        {/* Confirmación inline de cancelar (franja, como el diseño) */}
+        {confirmando && !cancelada && (
+          <div className="border-t border-red-500/30 bg-red-500/10 px-6 sm:px-[26px] py-[18px] flex items-center justify-between gap-4 flex-wrap">
+            <div className="min-w-0">
+              <div className="text-[14.5px] font-bold text-red-700 dark:text-red-300">¿Cancelar la venta #{venta.id}?</div>
+              <div className="text-[13.5px] text-red-600 dark:text-red-400 mt-1">
+                {venta.unidad ? 'Se devuelve la unidad al inventario' : 'Se repone el stock'} y el cobro queda sin efecto.
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <button onClick={() => setConfirmando(false)}
+                className="h-10 px-4 rounded-[11px] border border-red-500/30 bg-surface text-[13.5px] font-semibold text-red-700 dark:text-red-300 hover:bg-red-500/5 transition-colors">
+                Mejor no
+              </button>
+              <button onClick={cancelar} disabled={cancelando}
+                className="h-10 px-4 rounded-[11px] bg-red-600 text-white text-[13.5px] font-bold hover:bg-red-700 transition-colors whitespace-nowrap disabled:opacity-60">
+                {cancelando ? 'Cancelando…' : 'Sí, cancelar'}
+              </button>
             </div>
           </div>
         )}
-
-        {/* Acciones */}
-        <div className="px-6 py-4 border-t border-edge flex items-center justify-between gap-2 flex-wrap">
-          <button onClick={ordenCarta} disabled={pdf} className="text-sm text-mute hover:text-ink font-semibold disabled:opacity-50">
-            {pdf ? 'Abriendo…' : 'Orden carta (PDF)'}
-          </button>
-          <div className="flex items-center gap-2">
-            {!cancelada && (
-              <button onClick={cancelar} disabled={cancelando} className="px-4 py-2 rounded-full border border-red-500/30 text-red-600 dark:text-red-400 text-sm font-semibold hover:bg-red-500/10 transition-colors disabled:opacity-50">
-                {cancelando ? 'Cancelando…' : 'Cancelar venta'}
-              </button>
-            )}
-            <button onClick={onClose} className="px-5 py-2 rounded-full bg-ink text-app text-sm font-bold">Cerrar</button>
-          </div>
-        </div>
       </div>
     </div>,
     document.body,

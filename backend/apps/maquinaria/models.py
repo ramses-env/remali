@@ -497,10 +497,35 @@ def crear_notificacion(tipo, titulo, mensaje='', seccion='', ref='', data=None, 
         existe = Notificacion.objects.filter(ref=ref).exists()
         if existe:
             return None
-    return Notificacion.objects.create(
+    n = Notificacion.objects.create(
         tipo=tipo, titulo=titulo, mensaje=mensaje, seccion=seccion, ref=ref,
         data=(data or {}), usuario=usuario,
     )
+    # Notificación personal → push instantáneo al WebSocket del cliente.
+    if usuario is not None:
+        _push_notificacion_ws(usuario, n)
+    return n
+
+
+def _push_notificacion_ws(usuario, n):
+    """Empuja la notificación al WebSocket del cliente (tiempo real). Best-effort:
+    si Channels no está listo o falla, NO revienta la creación."""
+    try:
+        from channels.layers import get_channel_layer
+        from asgiref.sync import async_to_sync
+        layer = get_channel_layer()
+        if layer is None:
+            return
+        uid = usuario.id if hasattr(usuario, 'id') else usuario
+        async_to_sync(layer.group_send)(f'notifs_{uid}', {
+            'type': 'notif.push',
+            'data': {
+                'id': n.id, 'tipo': n.tipo, 'titulo': n.titulo,
+                'mensaje': n.mensaje, 'creada': n.creada.isoformat(), 'leida': False,
+            },
+        })
+    except Exception:
+        pass
 
 
 class SelloTema(models.Model):
