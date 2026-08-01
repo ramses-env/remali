@@ -228,6 +228,59 @@ export default function Cotizacion() {
   }
   const borrarBorrador = (id: number) => persistir(borradores.filter(b => b.id !== id))
 
+  // Total de una lista de items con el MISMO espejo del backend (venta con IVA
+  // incluido, renta +16% solo con factura); para el resumen al enviar borradores.
+  function totalDe(items: Borrador['items'], coupon?: Borrador['coupon']) {
+    const sv = items.reduce((s, i) => s + (i.unit === 'venta' ? i.price * i.qty : 0), 0)
+    const sr = items.reduce((s, i) => s + (i.unit !== 'venta' ? i.price * i.qty : 0), 0)
+    const sub = sv + sr
+    const desc = coupon ? sub * coupon.discount : 0
+    const f = sub > 0 ? Math.max(0, sub - desc) / sub : 1
+    const vn = sv * f, rn = sr * f
+    return vn + rn + (factura ? rn * 0.16 : 0)
+  }
+
+  /* Enviar UN borrador a REMALI tal cual, sin tocar el carrito: hizo 4
+     versiones y manda solo la elegida. Usa los datos de contacto/obra del
+     formulario; si faltan, carga el borrador y señala qué completar. Al
+     enviarse, el borrador se borra — ya vive en el sistema con folio. */
+  async function enviarBorrador(b: Borrador) {
+    const datosValidos = validNombre && validEmpresa && validClientEmail &&
+      validTelefono && validDireccion && validResponsable && validObraTelefono && validObraEmail
+    if (!datosValidos) {
+      cargarBorrador(b)
+      setShowErrors(true)
+      notify('Cargué el borrador; completa tus datos de contacto y obra para enviarlo', 'x')
+      return
+    }
+    if (sending) return
+    setSending(true)
+    try {
+      const r = await api.post<{ folio: string; liga?: string }>('/tienda/cotizacion/', {
+        items: b.items.map(i => ({ equipo_id: i.id, cantidad: i.qty, unit: i.unit || 'venta' })),
+        cliente: { nombre, empresa, email, telefono },
+        obra: { responsable, direccion, telefono: obraTelefono, email: obraEmail },
+        requiere_factura: factura,
+      })
+      const resumen = b.items.map(i => `${i.qty}x ${i.title}`).join(', ')
+      setSentWaMsg(`Hola, soy ${nombre}. Envié la solicitud de cotización ${r.data.folio}${resumen ? ` (${resumen})` : ''}. Quisiera continuar por aquí.`)
+      setSentPdfArgs({
+        items: b.items,
+        client: { nombre, empresa, email, telefono, direccion, responsable, obra_telefono: obraTelefono, obra_email: obraEmail },
+        coupon: b.coupon,
+        iva: factura,
+      })
+      setSentResumen({ items: b.items, total: totalDe(b.items, b.coupon), obra: direccion.trim() || empresa.trim() })
+      setSentLiga(r.data.liga || null)
+      setSentFolio(r.data.folio)
+      borrarBorrador(b.id)
+    } catch (err: any) {
+      notify(err?.response?.data?.detalle || 'No se pudo enviar la solicitud', 'x')
+    } finally {
+      setSending(false)
+    }
+  }
+
   if (sentFolio) {
     const wa = waLink(cfg.whatsapp_principal, sentWaMsg)
     const pasos = [
@@ -373,13 +426,19 @@ export default function Cotizacion() {
                 {borradores.map(b => (
                   <div key={b.id} className="relative group/bd">
                     <button onClick={() => cargarBorrador(b)}
-                      className="flex flex-col items-start gap-0.5 pl-4 pr-8 py-2.5 rounded-xl border border-edge bg-app text-left hover:border-gold/60 transition-colors active:scale-[0.98]">
+                      className="flex flex-col items-start gap-0.5 pl-4 pr-24 py-2.5 rounded-xl border border-edge bg-app text-left hover:border-gold/60 transition-colors active:scale-[0.98]">
                       <span className="text-[13.5px] font-bold text-ink">{b.nombre}</span>
                       <span className="text-[11.5px] text-mute">{new Date(b.creado).toLocaleDateString('es-MX', { day: '2-digit', month: 'short' })} · toca para cargar</span>
                     </button>
                     <button aria-label="Borrar borrador" onClick={() => borrarBorrador(b.id)}
                       className="absolute top-1.5 right-1.5 w-5 h-5 grid place-items-center rounded-full text-mute hover:text-red-500 hover:bg-red-500/10 transition-colors">
                       <svg viewBox="0 0 24 24" className="w-3 h-3 stroke-current fill-none" strokeWidth="2.2" strokeLinecap="round"><path d="M6 6l12 12M18 6L6 18" /></svg>
+                    </button>
+                    {/* Enviar ESTE borrador a REMALI, sin pasar por el carrito */}
+                    <button onClick={() => enviarBorrador(b)} disabled={sending}
+                      className="absolute bottom-1.5 right-1.5 inline-flex items-center gap-1 h-6 px-2 rounded-full bg-gold text-black text-[10.5px] font-black hover:opacity-90 transition-opacity disabled:opacity-50">
+                      <svg viewBox="0 0 24 24" className="w-3 h-3 stroke-current fill-none" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 2 11 13" /><path d="M22 2 15 22l-4-9-9-4 20-7z" /></svg>
+                      Enviar
                     </button>
                   </div>
                 ))}
