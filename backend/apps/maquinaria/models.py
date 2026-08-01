@@ -473,6 +473,21 @@ class Notificacion(models.Model):
         return f'[{self.tipo}] {self.titulo}'
 
 
+def nombre_propio(texto):
+    """Nombre con mayúsculas de nombre propio: "jazmin mendoza" → "Jazmin Mendoza".
+
+    Los conectores (de, del, la...) van en minúscula salvo al inicio:
+    "maría de lourdes" → "María de Lourdes". Se aplica en TODA entrada de
+    nombres de cliente (registro, Google, perfil, cotización pública)."""
+    conectores = {'de', 'del', 'la', 'las', 'los', 'y', 'e', 'da', 'di', 'van', 'von'}
+    palabras = (texto or '').strip().split()
+    out = []
+    for i, p in enumerate(palabras):
+        pl = p.lower()
+        out.append(pl if (i > 0 and pl in conectores) else (pl[:1].upper() + pl[1:]))
+    return ' '.join(out)
+
+
 def crear_notificacion(tipo, titulo, mensaje='', seccion='', ref='', data=None, usuario=None):
     """Crea una notificación; si se pasa `ref` evita duplicar (leída o no) con la misma ref.
 

@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from .models import (
     Equipo, Cupon, Categoria, Tipo, Marca, PerfilUsuario, Notificacion,
-    ConfiguracionSitio, CorreoAviso, ObraCliente,
+    ConfiguracionSitio, CorreoAviso, ObraCliente, nombre_propio,
 )
 
 
@@ -94,7 +94,13 @@ class PerfilUsuarioSerializer(serializers.ModelSerializer):
         user = instance.usuario
         for attr in ('email', 'first_name', 'last_name'):
             if attr in user_data:
-                setattr(user, attr, user_data[attr])
+                valor = user_data[attr]
+                # Reglas de la casa: correos en minúsculas, nombres como nombre propio.
+                if attr == 'email':
+                    valor = (valor or '').strip().lower()
+                else:
+                    valor = nombre_propio(valor)
+                setattr(user, attr, valor)
         user.save()
         for attr, value in validated_data.items():
             setattr(instance, attr, value)

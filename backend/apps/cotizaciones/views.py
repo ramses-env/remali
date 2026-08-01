@@ -98,7 +98,7 @@ def crear_cotizacion_publica(request):
     confía en los que manda el navegador). Crea una Cotizacion origen=cliente
     en estado 'enviada' y avisa al admin por notificación.
     """
-    from maquinaria.models import Equipo, crear_notificacion
+    from maquinaria.models import Equipo, crear_notificacion, nombre_propio
 
     d = request.data or {}
     items = d.get('items') or []
@@ -147,7 +147,7 @@ def crear_cotizacion_publica(request):
             estado='enviada',
             # Si la mandó con sesión, queda ligada a su cuenta para "Mis cotizaciones".
             usuario=request.user if request.user.is_authenticated else None,
-            cliente_nombre=nombre,
+            cliente_nombre=nombre_propio(nombre),
             cliente_telefono=(cliente.get('telefono') or '').strip(),
             cliente_email=(cliente.get('email') or '').strip().lower(),
             aplica_iva=bool(d.get('requiere_factura')),

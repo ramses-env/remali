@@ -31,7 +31,7 @@ from django.conf import settings
 
 from .models import (
     Equipo, Categoria, Marca, Tipo, ImagenProducto,
-    Cupon, Notificacion, PerfilUsuario, crear_notificacion,
+    Cupon, Notificacion, PerfilUsuario, crear_notificacion, nombre_propio,
     ConfiguracionSitio, CorreoAviso, ObraCliente,
 )
 from .permissions import IsAdminGroupOrStaff
@@ -625,7 +625,7 @@ def registro(request):
         # Dos altas simultáneas con el mismo correo: la segunda choca con el índice.
         return Response({'detail': 'Ya existe una cuenta con ese correo.'}, status=400)
 
-    user.first_name = nombre[:150]
+    user.first_name = nombre_propio(nombre)[:150]
     user.is_staff = False
     user.is_superuser = False
     user.save(update_fields=['first_name', 'is_staff', 'is_superuser'])
@@ -701,8 +701,8 @@ def google_login(request):
         user = User.objects.create_user(username=email, email=email)
         _adoptar_cotizaciones(user)
         user.set_unusable_password()   # entra por Google, no tiene contraseña
-        user.first_name = (info.get('given_name') or '')[:150]
-        user.last_name = (info.get('family_name') or '')[:150]
+        user.first_name = nombre_propio(info.get('given_name') or '')[:150]
+        user.last_name = nombre_propio(info.get('family_name') or '')[:150]
         user.is_staff = False
         user.is_superuser = False
         user.save()
