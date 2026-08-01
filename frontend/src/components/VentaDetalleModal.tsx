@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { createPortal } from 'react-dom'
 import api from '../lib/api'
+import { descargarBlob } from '../lib/descargar'
 
 type VentaLike = {
   id: number
@@ -81,9 +82,7 @@ export default function VentaDetalleModal({ venta, onClose, onChanged, notify }:
     setPdf(true)
     try {
       const r = await api.get(`/ventas/${venta.id}/ticket/`, { responseType: 'blob', fondo: true } as never)
-      const url = URL.createObjectURL(r.data as Blob)
-      window.open(url, '_blank', 'noopener,noreferrer')
-      setTimeout(() => URL.revokeObjectURL(url), 60000)
+      descargarBlob(r.data as Blob, `orden-venta-${venta.id}.pdf`)
     } catch {
       notify('No se pudo abrir el PDF', 'err')
     } finally {

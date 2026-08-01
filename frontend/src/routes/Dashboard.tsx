@@ -5570,6 +5570,23 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
   cotizacion: Cotizacion; empresas: Empresa[]; recienCreada?: boolean; notify: (m: string, t?: 'ok' | 'err') => void
   onClose: () => void; onChanged: () => void; onPrint: (c: Cotizacion) => void; onConvertida: (ventaId: number) => void
 }) {
+  // Vincular/cambiar la cuenta de la tienda dueña de esta cotización.
+  async function vincularCuentaCot() {
+    try {
+      const rc = await api.get<{ clientes: { id: number; nombre: string; empresa?: string }[] }>('/clientes-lookup/')
+      const lista = rc.data.clientes || []
+      if (!lista.length) { await confirmar({ titulo: 'Sin cuentas', mensaje: 'Aún no hay cuentas de cliente en el sistema.', aceptar: 'Entendido' }); return }
+      const sel = await elegir({
+        titulo: 'Vincular a una cuenta',
+        mensaje: 'El cliente verá esta cotización en "Mis cotizaciones" y podrá aceptarla.',
+        opciones: lista.map(cl => ({ valor: String(cl.id), label: cl.nombre, detalle: cl.empresa || undefined })),
+      })
+      if (!sel || !sel[0]) return
+      await api.post(`/cotizaciones/${cotizacion.id}/vincular/`, { usuario_id: Number(sel[0]) })
+      notify('Cotización vinculada a la cuenta')
+      onChanged()
+    } catch { notify('No se pudo vincular', 'err') }
+  }
   const [c, setC] = useState<Cotizacion>(cotizacion)
   const [notas, setNotas] = useState(cotizacion.notas || '')
   const [email, setEmail] = useState(cotizacion.cliente_email || '')
@@ -5937,7 +5954,17 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
           {/* Datos del cliente (arriba): para corregir un nombre/teléfono mal
               capturado sin tener que rehacer la cotización. */}
           <div>
-            <p className={labelCot}>Cliente</p>
+            <div className="flex items-center justify-between gap-3">
+              <p className={labelCot}>Cliente</p>
+              {/* Vincular la cotización a una cuenta de la tienda: el cliente
+                  la ve en "Mis cotizaciones" y ÉL decide aceptarla. */}
+              {!bloqueada && (
+                <button onClick={vincularCuentaCot}
+                  className="mb-2 text-[12px] font-bold text-gold hover:opacity-80 transition-opacity">
+                  {c.usuario_nombre ? 'Cambiar cuenta' : '+ Vincular a una cuenta'}
+                </button>
+              )}
+            </div>
             {c.usuario_nombre && (
               /* Vino de una cuenta de la tienda: la identidad es del cliente,
                  no se recaptura. Los campos de abajo quedan para ajustes de

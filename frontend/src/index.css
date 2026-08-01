@@ -29,6 +29,11 @@
   --c-price:      #111827;   /* precios: negro en claro (el dorado no resalta) */
   --c-stroke:     #E5E7EB;
   --c-grid:       rgba(17, 24, 39, 1);
+  /* Colores SUAVES solo para gráficas (dona, barras), estilo dashboard pastel.
+     No se usan en botones/insignias: esos necesitan contraste fuerte. */
+  --chart-blue:   #6E8CF0;   /* azul aciano */
+  --chart-green:  #57BE86;   /* verde menta */
+  --chart-gray:   #AEB6C9;   /* gris lavanda */
 }
 
 .dark {
@@ -53,6 +58,10 @@
   --c-price:      #f2b736;   /* precios: el dorado sí resalta en oscuro */
   --c-stroke:     rgba(255, 255, 255, 0.16);
   --c-grid:       rgba(255, 255, 255, 1);
+  /* Versión más brillante para que resalten sobre el panel oscuro. */
+  --chart-blue:   #8AA6F5;
+  --chart-green:  #63D196;
+  --chart-gray:   #8B93A6;
 }
 
 /* Tokens expuestos como utilidades de Tailwind (cascada con .dark) */

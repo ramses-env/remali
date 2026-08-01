@@ -18,7 +18,7 @@ class CotizacionPagination(PageNumberPagination):
     page_size_query_param = 'page_size'
     max_page_size = 100
 
-from maquinaria.permissions import IsAdminGroupOrStaff
+from maquinaria.permissions import IsAdminGroupOrStaff, EsOperador
 from maquinaria.throttling import SolicitudPublicaThrottle, SubidaEvidenciaThrottle
 from .models import Cotizacion, CotizacionItem, CotizacionFoto
 from .serializers import CotizacionSerializer, CotizacionFotoSerializer
@@ -205,6 +205,40 @@ def crear_cotizacion_publica(request):
     # Liga pública (PDF con token): el cliente la puede copiar y compartir.
     liga = request.build_absolute_uri(f'/api/cotizaciones/publica/{cot.token_publico}/pdf/') if getattr(cot, 'token_publico', None) else None
     return Response({'detalle': 'Solicitud recibida', 'folio': cot.folio, 'id': cot.id, 'liga': liga}, status=201)
+
+
+@api_view(['POST'])
+@permission_classes([EsOperador])
+def vincular_cuenta_cotizacion(request, pk):
+    """Vincula (o cambia/quita) la cuenta de cliente de una cotización.
+
+    Para las capturadas en el panel: al vincularla, el cliente la ve en su
+    "Mis cotizaciones" (su latido la trae en segundos) y ÉL decide aceptarla;
+    de ahí sigue el flujo normal hacia venta o renta."""
+    cot = Cotizacion.objects.filter(pk=pk).first()
+    if not cot:
+        return Response({'detalle': 'Cotización no encontrada'}, status=404)
+    uid = request.data.get('usuario_id')
+    if not uid:
+        cot.usuario = None
+        cot.save(update_fields=['usuario'])
+        return Response({'cuenta': None})
+    from django.contrib.auth import get_user_model
+    u = get_user_model().objects.filter(pk=uid, is_active=True, groups__name='Cliente').first()
+    if not u:
+        return Response({'detalle': 'Cuenta de cliente no encontrada'}, status=404)
+    cot.usuario = u
+    campos = ['usuario']
+    # Si la captura no traía correo/nombre, hereda los de la cuenta: así el
+    # PDF y los avisos le llegan a él sin recapturar nada.
+    if not (cot.cliente_email or '').strip():
+        cot.cliente_email = (u.email or '').strip().lower()
+        campos.append('cliente_email')
+    if not (cot.cliente_nombre or '').strip():
+        cot.cliente_nombre = (f'{u.first_name} {u.last_name}'.strip() or u.username)
+        campos.append('cliente_nombre')
+    cot.save(update_fields=campos)
+    return Response({'cuenta': f'{u.first_name} {u.last_name}'.strip() or u.username})
 
 
 @api_view(['GET'])

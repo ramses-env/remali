@@ -13,6 +13,7 @@ urlpatterns = [
     # Público (sin login): el cliente abre su cotización por el token compartido.
     path('cotizaciones/publica/<str:token>/pdf/', views.cotizacion_publica_pdf),
     path('cotizaciones/<int:pk>/', views.CotizacionDetail.as_view()),
+    path('cotizaciones/<int:pk>/vincular/', views.vincular_cuenta_cotizacion),
     path('cotizaciones/<int:pk>/items/', views.cotizacion_agregar_item),
     path('cotizaciones/<int:pk>/items/<int:item_id>/', views.cotizacion_item),
     path('cotizaciones/<int:pk>/items/<int:item_id>/modalidad/', views.cotizacion_item_modalidad),

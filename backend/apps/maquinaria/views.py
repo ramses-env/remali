@@ -1022,18 +1022,39 @@ def _sync_alertas_vencimiento():
         if r.estado != 'activa':
             continue
         dias = (r.fecha_fin - hoy).days
+        # Ventana horaria para MÚLTIPLES recordatorios sin spamear (4 al día, uno
+        # por cada 6 h): el ref la incluye, así entra un aviso nuevo por bloque
+        # mientras la renta siga pendiente — para que al admin no se le olvide.
+        parte = timezone.localtime().hour // 6
         if dias < 0:
+            # Vencida: un recordatorio NUEVO cada día que siga sin devolverse.
             candidatas.append(Notificacion(
                 tipo='alerta', titulo=f'Renta vencida · {equipo}',
                 mensaje=f'{cliente} debió devolver el equipo el {r.fecha_fin}. Ubicación: {r.direccion}.',
-                seccion='rentas', ref=f'renta-vencida-{r.id}-{r.fecha_fin}', data=data,
+                seccion='rentas', ref=f'renta-vencida-{r.id}-{hoy}-{parte}', data=data,
             ))
-        elif dias <= 1:
-            candidatas.append(Notificacion(
-                tipo='alerta', titulo=f'Renta por vencer · {equipo}',
-                mensaje=f'La renta de {cliente} vence el {r.fecha_fin}.',
-                seccion='rentas', ref=f'renta-porvencer-{r.id}-{r.fecha_fin}', data=data,
-            ))
+        elif r.modalidad == 'dia':
+            # Renta por DÍA: NO avisar el día que se renta (fecha_fin = mañana).
+            # Avisar el DÍA de entrega (dias==0), acercándose a la hora en que se
+            # hizo la renta, con recordatorios cada 6 h ese día.
+            if dias == 0:
+                hora_renta = timezone.localtime(r.creado_en).hour if r.creado_en else 0
+                if timezone.localtime().hour >= hora_renta:
+                    candidatas.append(Notificacion(
+                        tipo='alerta', titulo=f'Renta por vencer · {equipo}',
+                        mensaje=f'La renta por día de {cliente} vence hoy. Ubicación: {r.direccion}.',
+                        seccion='rentas', ref=f'renta-porvencer-{r.id}-{r.fecha_fin}-{parte}', data=data,
+                    ))
+        else:
+            # Semana y mes: UN DÍA ANTES (dias==1) y el DÍA de vencimiento
+            # (dias==0), con recordatorios cada 6 h en ambos días.
+            if dias in (0, 1):
+                cuando = 'mañana' if dias == 1 else 'hoy'
+                candidatas.append(Notificacion(
+                    tipo='alerta', titulo=f'Renta por vencer · {equipo}',
+                    mensaje=f'La renta de {cliente} vence {cuando} ({r.fecha_fin}). Ubicación: {r.direccion}.',
+                    seccion='rentas', ref=f'renta-porvencer-{r.id}-{r.fecha_fin}-{hoy}-{parte}', data=data,
+                ))
 
     if not candidatas:
         return
