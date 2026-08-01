@@ -70,8 +70,11 @@ def _asignar_rol(usuario: User, rol: str | None):
 @api_view(['GET'])
 @permission_classes([EsDueno])
 def roles_disponibles(request):
-    """Grupos existentes, para el selector de rol."""
-    return Response({'roles': list(Group.objects.order_by('name').values_list('name', flat=True))})
+    """Grupos existentes, para el selector de rol.
+
+    'Cliente' se excluye a propósito: desde el panel solo se crea EQUIPO;
+    los clientes nacen registrándose en la tienda."""
+    return Response({'roles': list(Group.objects.exclude(name='Cliente').order_by('name').values_list('name', flat=True))})
 
 
 @api_view(['GET', 'POST'])
@@ -94,6 +97,9 @@ def usuarios(request):
     email = (d.get('email') or '').strip()
     if email and User.objects.filter(email__iexact=email).exists():
         return Response({'detalle': f'Ya hay una cuenta con el correo "{email}".'}, status=400)
+
+    if (d.get('rol') or '').strip() == 'Cliente':
+        return Response({'detalle': 'Desde el panel solo se crea equipo de trabajo; los clientes se registran en la tienda.'}, status=400)
 
     with transaction.atomic():
         u = User.objects.create_user(
@@ -166,6 +172,8 @@ def usuario_detalle(request, pk: int):
     quedaria_admin = _es_admin(u)
     if 'rol' in d:
         nuevo_rol = (d.get('rol') or '').strip() or None
+        if nuevo_rol == 'Cliente':
+            return Response({'detalle': 'El rol Cliente no se asigna desde el panel.'}, status=400)
         quedaria_admin = u.is_superuser or u.is_staff or nuevo_rol == ROL_ADMIN
     activo = u.is_active if 'activo' not in d else bool(d.get('activo'))
 

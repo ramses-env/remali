@@ -6833,7 +6833,7 @@ function UsuariosAdmin({ usuarios, reload, notify, yoId }: {
   const [roles, setRoles] = useState<string[]>([])
 
   useEffect(() => {
-    api.get<{ roles: string[] }>('/usuarios/roles/').then(r => setRoles(r.data?.roles || [])).catch(() => {})
+    api.get<{ roles: string[] }>('/usuarios/roles/').then(r => setRoles((r.data?.roles || []).filter(x => x !== 'Cliente'))).catch(() => {})
   }, [])
 
   const activos = usuarios.filter(u => u.activo)
