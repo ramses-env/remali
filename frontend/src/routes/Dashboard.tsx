@@ -6825,6 +6825,7 @@ function UsuariosAdmin({ usuarios, reload, notify, yoId }: {
 }) {
   const [q, setQ] = useState('')
   const [editando, setEditando] = useState<UsuarioPanel | null>(null)
+  const [viendo, setViendo] = useState<UsuarioPanel | null>(null)
   const [creando, setCreando] = useState(false)
   const [roles, setRoles] = useState<string[]>([])
 
@@ -6999,6 +7000,11 @@ function UsuariosAdmin({ usuarios, reload, notify, yoId }: {
                       )}
                       <td className={`${td} text-right`}>
                         <div className="flex items-center justify-end gap-1">
+                          <button onClick={() => setViendo(u)}
+                            className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-lg text-[13px] font-bold text-mute hover:text-ink hover:bg-surface-2 transition-colors">
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.9"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z" /><circle cx="12" cy="12" r="3" /></svg>
+                            <span className="hidden sm:inline">Ver</span>
+                          </button>
                           <button onClick={() => setEditando(u)}
                             className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-lg text-[13px] font-bold text-mute hover:text-ink hover:bg-surface-2 transition-colors">
                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.9"><path d="M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17z" /></svg>
@@ -7030,7 +7036,98 @@ function UsuariosAdmin({ usuarios, reload, notify, yoId }: {
           onSaved={(msg) => { notify(msg); setCreando(false); setEditando(null); reload() }}
           notify={notify} />
       )}
+
+      {viendo && (
+        <UsuarioDetalle u={viendo} soyYo={viendo.id === yoId}
+          onClose={() => setViendo(null)}
+          onEditar={() => { const u = viendo; setViendo(null); setEditando(u) }} />
+      )}
     </div>
+  )
+}
+
+/* ── Ficha completa de un usuario (el "ojo" de la tabla) ── */
+function UsuarioDetalle({ u, soyYo, onClose, onEditar }: {
+  u: UsuarioPanel; soyYo?: boolean; onClose: () => void; onEditar: () => void
+}) {
+  const rol = estiloRol(u)
+  const Dato = ({ k, v, mono }: { k: string; v?: React.ReactNode; mono?: boolean }) => (
+    <div className="flex items-start gap-3.5 py-3">
+      <div className="min-w-0">
+        <p className="text-[11px] font-bold uppercase tracking-[0.5px] text-mute">{k}</p>
+        <p className={`text-[14px] font-bold text-ink mt-0.5 break-words ${mono ? 'font-mono text-[13.5px]' : ''}`}>{v || <span className="text-mute font-sans font-normal">—</span>}</p>
+      </div>
+    </div>
+  )
+  const Chip = ({ cls, children }: { cls: string; children: React.ReactNode }) => (
+    <span className={`inline-flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1 rounded-full whitespace-nowrap ${cls}`}>{children}</span>
+  )
+  return createPortal(
+    <div className="fixed inset-0 z-[60] bg-black/40 backdrop-blur-[2px]" onClick={onClose}>
+      <motion.div
+        initial={{ x: '100%' }} animate={{ x: 0 }} transition={{ duration: 0.3, ease: [0.23, 1, 0.32, 1] }}
+        onClick={e => e.stopPropagation()}
+        className="fixed inset-y-0 right-0 w-full sm:max-w-[560px] bg-surface border-l border-edge shadow-[-24px_0_60px_rgba(33,29,22,0.22)] flex flex-col"
+      >
+        <div className="px-6 sm:px-7 py-4 border-b border-edge flex items-center justify-between shrink-0">
+          <h2 className="font-bold text-ink">Detalle de usuario</h2>
+          <button onClick={onClose} aria-label="Cerrar" className="w-8 h-8 rounded-[9px] grid place-items-center text-mute hover:text-ink hover:bg-surface-2 transition-colors">
+            <svg className="w-[18px] h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" d="M6 6l12 12M18 6L6 18" /></svg>
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto">
+          {/* Héroe: quién es y en qué estado está */}
+          <div className="px-6 sm:px-7 py-6 border-b border-edge">
+            <div className="flex items-center gap-4">
+              <div className={`shrink-0 w-16 h-16 rounded-full grid place-items-center text-[20px] font-black ${estiloAvatar(u)}`}>{iniciales(u)}</div>
+              <div className="min-w-0">
+                <p className="text-[18px] font-black text-ink leading-tight break-words">{u.nombre}{soyYo && <span className="ml-2 align-middle text-[10px] uppercase font-semibold px-1.5 py-0.5 rounded bg-surface-2 text-mute">Tú</span>}</p>
+                <p className="text-[13px] text-mute mt-0.5 break-all">@{u.username}</p>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-1.5 mt-4">
+              <Chip cls={rol.cls}>{rol.label}</Chip>
+              {u.activo
+                ? <Chip cls="bg-emerald-500/10 text-emerald-600"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />Activo</Chip>
+                : <Chip cls="bg-red-500/10 text-red-500"><span className="w-1.5 h-1.5 rounded-full bg-red-500" />Inactivo</Chip>}
+              {esCliente(u) && (u.email_verificado
+                ? <Chip cls="border border-emerald-500/30 bg-emerald-500/5 text-emerald-600"><svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="3"><path d="M5 13l4 4L19 7" /></svg>Correo verificado</Chip>
+                : <Chip cls="border border-amber-500/30 bg-amber-500/5 text-amber-600">Sin verificar</Chip>)}
+              {esCliente(u) && u.datos_completos && <Chip cls="bg-surface-2 text-mute">Perfil completo</Chip>}
+            </div>
+          </div>
+
+          {/* Datos de la cuenta */}
+          <div className="px-6 sm:px-7 py-5 border-b border-edge">
+            <p className="text-[11px] font-extrabold tracking-[0.5px] text-gold mb-1">DATOS DE LA CUENTA</p>
+            <div className="divide-y divide-edge">
+              <Dato k="Usuario" v={u.username} mono />
+              <Dato k="Nombre completo" v={u.nombre} />
+              <Dato k="Rol" v={rol.label} />
+              {u.puesto && <Dato k="Puesto" v={u.puesto} />}
+              <Dato k="Cuenta creada" v={u.creado ? new Date(u.creado).toLocaleDateString('es-MX', { day: 'numeric', month: 'long', year: 'numeric' }) : undefined} />
+              <Dato k="Último acceso" v={hace(u.ultimo_acceso)} />
+            </div>
+          </div>
+
+          {/* Contacto */}
+          <div className="px-6 sm:px-7 py-5">
+            <p className="text-[11px] font-extrabold tracking-[0.5px] text-gold mb-1">CONTACTO</p>
+            <div className="divide-y divide-edge">
+              <Dato k="Correo" v={u.email} mono />
+              <Dato k="Teléfono" v={u.telefono} mono />
+            </div>
+          </div>
+        </div>
+
+        <div className="px-6 sm:px-7 py-4 border-t border-edge flex justify-end gap-2.5 shrink-0">
+          <button onClick={onClose} className="px-6 py-2.5 rounded-full border border-edge text-ink text-sm font-semibold hover:bg-surface-2 transition-colors">Cerrar</button>
+          <button onClick={onEditar} className="px-7 py-2.5 rounded-full bg-gold text-black text-sm font-bold hover:opacity-90 transition-opacity">Editar</button>
+        </div>
+      </motion.div>
+    </div>,
+    document.body,
   )
 }
 
