@@ -293,7 +293,7 @@ class CotizacionListCreate(generics.ListCreateAPIView):
     pagination_class = CotizacionPagination
 
     def get_queryset(self):
-        qs = Cotizacion.objects.all().select_related('empresa').prefetch_related('items', 'fotos', 'conversiones')
+        qs = Cotizacion.objects.all().select_related('empresa', 'usuario', 'atendida_por').prefetch_related('items', 'fotos', 'conversiones')
         p = self.request.query_params
         estado = (p.get('estado') or '').strip().lower()
         if estado == 'vencida':
@@ -332,7 +332,7 @@ class CotizacionDetail(generics.RetrieveUpdateDestroyAPIView):
 
     serializer_class = CotizacionSerializer
     permission_classes = [IsAdminGroupOrStaff]
-    queryset = Cotizacion.objects.all().select_related('empresa').prefetch_related('items', 'fotos', 'conversiones')
+    queryset = Cotizacion.objects.all().select_related('empresa', 'usuario', 'atendida_por').prefetch_related('items', 'fotos', 'conversiones')
 
     def update(self, request, *args, **kwargs):
         # Una vez convertida en venta, la cotización queda de solo lectura: es el

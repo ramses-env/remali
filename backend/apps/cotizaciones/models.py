@@ -77,6 +77,11 @@ class Cotizacion(models.Model):
         verbose_name = 'Cotización'
         verbose_name_plural = 'Cotizaciones'
         ordering = ['-creada']
+        # Los listados filtran por estado y ordenan por fecha; el índice evita
+        # el filesort y el escaneo completo conforme crece el historial.
+        indexes = [
+            models.Index(fields=['estado', '-creada']),
+        ]
 
     def generar_folio(self):
         ultimo = Cotizacion.objects.filter(folio__startswith='COT-').aggregate(m=Max('folio'))['m']

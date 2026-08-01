@@ -129,6 +129,12 @@ class Renta(models.Model):
         verbose_name = 'Renta'
         verbose_name_plural = 'Rentas'
         ordering = ['-creado_en']
+        # Alertas ("por vencer"/"vencidas") filtran estado + fecha_fin; el
+        # listado ordena por creado_en. Índices para que no haga full-scan.
+        indexes = [
+            models.Index(fields=['estado', 'fecha_fin']),
+            models.Index(fields=['-creado_en']),
+        ]
 
     # ─────────────────────────────────────────────
     #  CÁLCULOS

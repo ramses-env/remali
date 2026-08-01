@@ -6824,7 +6824,9 @@ function MenuFila({ opciones }: { opciones: OpcionMenu[] }) {
 function UsuariosAdmin({ usuarios, reload, notify, yoId }: {
   usuarios: UsuarioPanel[]; reload: () => void; notify: (m: string, t?: 'ok' | 'err') => void; yoId?: number
 }) {
-  const [q, setQ] = useState('')
+  // Filtros del directorio (aplican en vivo sobre la pestaña activa)
+  const [f, setF] = useState({ q: '', correo: '', tel: '', desde: '', hasta: '' })
+  const hayFiltros = Object.values(f).some(Boolean)
   const [editando, setEditando] = useState<UsuarioPanel | null>(null)
   const [viendo, setViendo] = useState<UsuarioPanel | null>(null)
   const [creando, setCreando] = useState(false)
@@ -6837,14 +6839,30 @@ function UsuariosAdmin({ usuarios, reload, notify, yoId }: {
   const activos = usuarios.filter(u => u.activo)
   const admins = activos.filter(u => u.es_admin)
   // Dos mundos separados: el equipo que opera el panel y los clientes de la tienda.
-  const [grupo, setGrupo] = useState<'equipo' | 'clientes'>('equipo')
+  const [grupo, setGrupo] = useState<'todos' | 'equipo' | 'clientes'>('todos')
+  const [asignando, setAsignando] = useState<UsuarioPanel | null>(null)
   const equipo = usuarios.filter(u => !esCliente(u))
   const clientes = usuarios.filter(esCliente)
   const sinVerificar = clientes.filter(u => !u.email_verificado).length
-  const filtrados = (grupo === 'equipo' ? equipo : clientes).filter(u => {
-    if (!q.trim()) return true
-    return `${u.nombre} ${u.username} ${u.email} ${u.rol || ''} ${u.puesto}`.toLowerCase().includes(q.toLowerCase().trim())
+  const filtrados = (grupo === 'todos' ? usuarios : grupo === 'equipo' ? equipo : clientes).filter(u => {
+    if (f.q.trim() && !`${u.nombre} ${u.username} ${u.rol || ''} ${u.puesto}`.toLowerCase().includes(f.q.toLowerCase().trim())) return false
+    if (f.correo.trim() && !(u.email || '').toLowerCase().includes(f.correo.toLowerCase().trim())) return false
+    if (f.tel.trim() && !(u.telefono || '').replace(/\D/g, '').includes(f.tel.replace(/\D/g, ''))) return false
+    if (f.desde && (!u.creado || new Date(u.creado) < new Date(f.desde))) return false
+    if (f.hasta) { const h = new Date(f.hasta); h.setHours(23, 59, 59, 999); if (!u.creado || new Date(u.creado) > h) return false }
+    return true
   })
+  const verificados = clientes.filter(u => u.email_verificado).length
+  const inactivos = usuarios.length - activos.length
+  // En "Todos" la tabla muestra ambos mundos con un separador de sección.
+  const equipoF = filtrados.filter(u => !esCliente(u))
+  const clientesF = filtrados.filter(esCliente)
+  const filas: (UsuarioPanel | { sep: string })[] = grupo === 'todos'
+    ? [
+        ...(equipoF.length ? [{ sep: `Equipo de trabajo (${equipoF.length})` }] : []), ...equipoF,
+        ...(clientesF.length ? [{ sep: `Clientes (${clientesF.length})` }] : []), ...clientesF,
+      ]
+    : filtrados
 
   async function desactivar(u: UsuarioPanel) {
     const ok = await confirmar({
@@ -6912,40 +6930,76 @@ function UsuariosAdmin({ usuarios, reload, notify, yoId }: {
           </button>
         </div>
 
-        <div className="flex flex-wrap gap-x-7 gap-y-2 mt-5 pt-5 border-t border-edge text-sm">
-          <span className="text-mute">Equipo de trabajo <b className="text-ink font-black ml-1">{equipo.length}</b></span>
-          <span className="text-mute">Clientes <b className="text-ink font-black ml-1">{clientes.length}</b></span>
-          <span className="text-mute">Administran <b className="text-ink font-black ml-1">{admins.length}</b></span>
-          {usuarios.length - activos.length > 0 &&
-            <span className="text-mute">Sin acceso <b className="text-ink font-black ml-1">{usuarios.length - activos.length}</b></span>}
-          {sinVerificar > 0 &&
-            <span className="text-mute">Clientes sin verificar <b className="text-amber-600 font-black ml-1">{sinVerificar}</b></span>}
+      </div>
+
+      {/* KPIs del directorio */}
+      <KpiGrid
+        gridClassName="grid-cols-2 lg:grid-cols-4"
+        items={[
+          { label: 'Usuarios totales', value: String(usuarios.length), helper: `${equipo.length} de equipo · ${clientes.length} clientes` },
+          { label: 'Sin acceso', value: String(inactivos), tone: inactivos > 0 ? 'danger' : 'muted', emphasis: inactivos > 0 },
+          { label: 'Clientes sin verificar', value: String(sinVerificar), tone: sinVerificar > 0 ? 'warning' : 'muted', emphasis: sinVerificar > 0 },
+          { label: 'Clientes verificados', value: String(verificados), tone: 'success' },
+        ]}
+      />
+
+      {/* Filtros */}
+      <div className="bg-surface border border-edge rounded-2xl px-5 py-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          {([
+            ['q', 'Nombre o usuario', 'Filtrar por nombre'],
+            ['correo', 'Correo', 'Filtrar por correo'],
+            ['tel', 'Teléfono', 'Filtrar por teléfono'],
+          ] as const).map(([k, etiqueta, ph]) => (
+            <div key={k}>
+              <label className="block text-[12px] font-semibold text-mute mb-1.5">{etiqueta}</label>
+              <input value={f[k]} onChange={e => setF({ ...f, [k]: e.target.value })} placeholder={ph}
+                className="w-full bg-surface-2 border border-edge rounded-xl px-3.5 py-2.5 text-sm text-ink placeholder-mute focus:outline-none focus:border-gold/50 transition-colors" />
+            </div>
+          ))}
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="block text-[12px] font-semibold text-mute mb-1.5">Desde</label>
+              <input type="date" value={f.desde} onChange={e => setF({ ...f, desde: e.target.value })}
+                className="w-full bg-surface-2 border border-edge rounded-xl px-3 py-2.5 text-sm text-ink focus:outline-none focus:border-gold/50 transition-colors" />
+            </div>
+            <div>
+              <label className="block text-[12px] font-semibold text-mute mb-1.5">Hasta</label>
+              <input type="date" value={f.hasta} onChange={e => setF({ ...f, hasta: e.target.value })}
+                className="w-full bg-surface-2 border border-edge rounded-xl px-3 py-2.5 text-sm text-ink focus:outline-none focus:border-gold/50 transition-colors" />
+            </div>
+          </div>
         </div>
+        {hayFiltros && (
+          <div className="flex justify-end mt-3">
+            <button onClick={() => setF({ q: '', correo: '', tel: '', desde: '', hasta: '' })}
+              className="inline-flex items-center gap-2 h-9 px-4 rounded-full border border-edge text-[13px] font-bold text-mute hover:text-ink hover:bg-surface-2 transition-colors">
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round"><path d="M3 12a9 9 0 1 0 2.6-6.4M3 4v5h5" /></svg>
+              Limpiar filtros ({filtrados.length} resultado{filtrados.length === 1 ? '' : 's'})
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Tabla */}
       <div className="bg-surface border border-edge rounded-2xl">
-        <div className="px-4 sm:px-5 py-3.5 border-b border-edge flex flex-wrap items-center gap-3">
+        <div className="px-4 sm:px-5 py-3.5 border-b border-edge flex flex-wrap items-center justify-between gap-3">
           <div className="flex border border-edge rounded-xl overflow-hidden shrink-0">
-            {([['equipo', `Equipo de trabajo (${equipo.length})`], ['clientes', `Clientes (${clientes.length})`]] as const).map(([g, etiqueta]) => (
+            {([['todos', `Todos (${usuarios.length})`], ['equipo', `Equipo de trabajo (${equipo.length})`], ['clientes', `Clientes (${clientes.length})`]] as const).map(([g, etiqueta]) => (
               <button key={g} onClick={() => setGrupo(g)}
                 className={`px-4 py-2.5 text-[13px] font-bold transition-colors ${grupo === g ? 'bg-ink text-app' : 'text-mute hover:text-ink hover:bg-surface-2'}`}>
                 {etiqueta}
               </button>
             ))}
           </div>
-          <div className="relative flex-1 min-w-[200px] max-w-md">
-            <svg className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-mute pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><circle cx="11" cy="11" r="7" /><path d="M20 20l-3.5-3.5" /></svg>
-            <input value={q} onChange={e => setQ(e.target.value)} placeholder="Buscar por nombre, usuario o rol"
-              className="w-full bg-surface-2 border border-edge rounded-xl pl-9 pr-3 py-2.5 text-sm text-ink placeholder-mute focus:outline-none focus:border-gold/50 transition-colors" />
-          </div>
+          <span className="text-[13px] text-mute">{filtrados.length} de {(grupo === 'todos' ? usuarios : grupo === 'equipo' ? equipo : clientes).length}</span>
         </div>
 
         {filtrados.length === 0 ? (
           <div className="px-6 py-16 text-center">
-            <p className="text-sm text-ink font-semibold">{q ? 'Nadie coincide con esa búsqueda' : grupo === 'clientes' ? 'Aún no hay clientes registrados' : 'Aún no hay más cuentas'}</p>
+            <p className="text-sm text-ink font-semibold">{hayFiltros ? 'Nadie coincide con esos filtros' : grupo === 'clientes' ? 'Aún no hay clientes registrados' : 'Aún no hay más cuentas'}</p>
             <p className="text-[13px] text-mute mt-1.5 max-w-[46ch] mx-auto">
-              {q ? 'Prueba con el nombre de pila o el usuario.' : 'Agrega a quien trabaje contigo para que registre rentas y ventas con su propio nombre.'}
+              {hayFiltros ? 'Afloja alguno de los filtros o límpialos para ver todo.' : 'Agrega a quien trabaje contigo para que registre rentas y ventas con su propio nombre.'}
             </p>
           </div>
         ) : (
@@ -6957,16 +7011,24 @@ function UsuariosAdmin({ usuarios, reload, notify, yoId }: {
                       sobrante y el resto se ajusta a su contenido, así la tabla
                       no se desborda en pantallas chicas. */}
                   <th scope="col" className={`${th} w-full`}>Usuario</th>
-                  {grupo === 'clientes' && <th scope="col" className={`${th} hidden md:table-cell w-px`}>Correo</th>}
+                  {grupo !== 'equipo' && <th scope="col" className={`${th} hidden md:table-cell w-px`}>Correo</th>}
                   <th scope="col" className={`${th} hidden xl:table-cell w-px`}>Teléfono</th>
                   <th scope="col" className={`${th} hidden sm:table-cell w-px`}>Estado</th>
                   <th scope="col" className={`${th} hidden lg:table-cell w-px`}>Registro</th>
-                  {grupo === 'equipo' && <th scope="col" className={`${th} hidden xl:table-cell w-px`}>Último acceso</th>}
+                  {grupo !== 'clientes' && <th scope="col" className={`${th} hidden xl:table-cell w-px`}>Último acceso</th>}
                   <th scope="col" className={`${th} text-right w-px`}>Acciones</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-edge">
-                {filtrados.map(u => {
+                {filas.map((item, idx) => {
+                  if ('sep' in item) {
+                    return (
+                      <tr key={`sep-${idx}`} className="bg-surface-2/70">
+                        <td colSpan={99} className="px-5 sm:px-6 py-2 text-[11px] font-extrabold uppercase tracking-[0.6px] text-mute">{item.sep}</td>
+                      </tr>
+                    )
+                  }
+                  const u = item
                   const rol = estiloRol(u)
                   const soyYo = u.id === yoId
                   return (
@@ -6988,13 +7050,13 @@ function UsuariosAdmin({ usuarios, reload, notify, yoId }: {
                               {u.puesto && <span className="text-[12px] text-mute truncate">{u.puesto}</span>}
                             </div>
                             {/* En pantallas chicas las columnas se esconden: el dato baja aquí. */}
-                            {grupo === 'clientes' && <p className="md:hidden text-[12px] text-mute truncate mt-1">{u.email || u.username}</p>}
+                            {esCliente(u) && <p className="md:hidden text-[12px] text-mute truncate mt-1">{u.email || u.username}</p>}
                           </div>
                         </div>
                       </td>
                       {/* nowrap: con `w-px` la columna se encoge al mínimo y un
                           teléfono con espacios se partiría en varias líneas. */}
-                      {grupo === 'clientes' && (
+                      {grupo !== 'equipo' && (
                         <td className={`${td} hidden md:table-cell whitespace-nowrap`}>
                           <span className="text-[13.5px] text-ink">{u.email || <span className="text-mute">—</span>}</span>
                         </td>
@@ -7007,7 +7069,7 @@ function UsuariosAdmin({ usuarios, reload, notify, yoId }: {
                         <div className="flex items-center gap-1.5 flex-nowrap">
                           {/* En clientes el "Activo" verde sobra (casi todos lo están);
                               solo se señala la excepción: Inactivo en rojo. */}
-                          {u.activo ? (grupo === 'equipo' && (
+                          {u.activo ? (!esCliente(u) && (
                             <span className="inline-flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-600 whitespace-nowrap"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />Activo</span>
                           )) : (
                             <span className="inline-flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1 rounded-full bg-red-500/10 text-red-500 whitespace-nowrap"><span className="w-1.5 h-1.5 rounded-full bg-red-500" />Inactivo</span>
@@ -7027,7 +7089,7 @@ function UsuariosAdmin({ usuarios, reload, notify, yoId }: {
                       <td className={`${td} hidden lg:table-cell whitespace-nowrap`}>
                         <span className="text-[13px] text-mute">{u.creado ? new Date(u.creado).toLocaleDateString('es-MX') : '—'}</span>
                       </td>
-                      {grupo === 'equipo' && (
+                      {grupo !== 'clientes' && (
                         <td className={`${td} hidden xl:table-cell`}>
                           <span className="text-[13px] text-mute whitespace-nowrap">{hace(u.ultimo_acceso)}</span>
                         </td>
@@ -7059,6 +7121,7 @@ function UsuariosAdmin({ usuarios, reload, notify, yoId }: {
                                 : { label: 'Devolver acceso', icono: <svg className="w-[17px] h-[17px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round"><path d="M3 12a9 9 0 1 0 2.6-6.4M3 4v5h5" /></svg>, onClick: () => reactivar(u) },
                             ] : [
                               { label: 'Cambiar contraseña', icono: <svg className="w-[18px] h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.9"><path d="M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17z" /><path d="M13.5 6.5l3 3" /></svg>, onClick: () => setEditando(u) },
+                              { label: 'Asignar rol', icono: <svg className="w-[17px] h-[17px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.9" strokeLinejoin="round"><path d="M12 3l7 3v5c0 4.5-3 8.2-7 10-4-1.8-7-5.5-7-10V6z" /></svg>, onClick: () => setAsignando(u), deshabilitado: u.es_superusuario, razon: 'El dueño no cambia de rol' },
                               u.activo
                                 ? { label: 'Quitar acceso', icono: <svg className="w-[17px] h-[17px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.9" strokeLinecap="round"><path d="M4 7h16" /><path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" /><path d="M18 7l-.8 12.1a2 2 0 0 1-2 1.9H8.8a2 2 0 0 1-2-1.9L6 7" /><path d="M10 11v6M14 11v6" /></svg>, onClick: () => desactivar(u), peligro: true, deshabilitado: soyYo, razon: 'No puedes quitarte tu propio acceso' }
                                 : { label: 'Devolver acceso', icono: <svg className="w-[17px] h-[17px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round"><path d="M3 12a9 9 0 1 0 2.6-6.4M3 4v5h5" /></svg>, onClick: () => reactivar(u) },
@@ -7088,7 +7151,90 @@ function UsuariosAdmin({ usuarios, reload, notify, yoId }: {
           onClose={() => setViendo(null)}
           onEditar={() => { const u = viendo; setViendo(null); setEditando(u) }} />
       )}
+
+      {asignando && (
+        <AsignarRolModal u={asignando} roles={roles.filter(r => r !== 'Cliente')}
+          onClose={() => setAsignando(null)}
+          onSaved={(msg) => { notify(msg); setAsignando(null); reload() }}
+          notify={notify} />
+      )}
     </div>
+  )
+}
+
+/* ── Asignar rol (pills de un solo elegido, como el directorio de referencia) ── */
+function AsignarRolModal({ u, roles, onClose, onSaved, notify }: {
+  u: UsuarioPanel; roles: string[]; onClose: () => void
+  onSaved: (m: string) => void; notify: (m: string, t?: 'ok' | 'err') => void
+}) {
+  const [sel, setSel] = useState<string>(u.rol || '')
+  const [guardando, setGuardando] = useState(false)
+
+  function guardar() {
+    setGuardando(true)
+    api.patch(`/usuarios/${u.id}/`, { rol: sel })
+      .then(() => onSaved(sel ? `${u.nombre} ahora es ${sel}` : `${u.nombre} quedó sin rol`))
+      .catch(err => notify(errorMsg(err, 'No se pudo cambiar el rol'), 'err'))
+      .finally(() => setGuardando(false))
+  }
+
+  const Pill = ({ valor, etiqueta }: { valor: string; etiqueta: string }) => {
+    const activo = sel === valor
+    return (
+      <button onClick={() => setSel(valor)}
+        className={`inline-flex items-center gap-2 h-10 px-4 rounded-full border text-[13.5px] font-bold transition-colors ${
+          activo ? 'bg-ink text-app border-ink' : 'bg-surface border-edge text-ink hover:bg-surface-2'
+        }`}>
+        {activo
+          ? <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M5 13l4 4L19 7" /></svg>
+          : <span className="w-3.5 h-3.5 rounded-full border-2 border-current opacity-40" />}
+        {etiqueta}
+      </button>
+    )
+  }
+
+  return createPortal(
+    <div className="fixed inset-0 z-[60] bg-black/40 backdrop-blur-[2px]" onClick={onClose}>
+      <motion.div
+        initial={{ x: '100%' }} animate={{ x: 0 }} transition={{ duration: 0.3, ease: [0.23, 1, 0.32, 1] }}
+        onClick={e => e.stopPropagation()}
+        className="fixed inset-y-0 right-0 w-full sm:max-w-[520px] bg-surface border-l border-edge shadow-[-24px_0_60px_rgba(33,29,22,0.22)] flex flex-col"
+      >
+        <div className="px-6 sm:px-7 py-4 border-b border-edge flex items-center justify-between shrink-0">
+          <h2 className="font-bold text-ink">Asignar rol</h2>
+          <button onClick={onClose} aria-label="Cerrar" className="w-8 h-8 rounded-[9px] grid place-items-center text-mute hover:text-ink hover:bg-surface-2 transition-colors">
+            <svg className="w-[18px] h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" d="M6 6l12 12M18 6L6 18" /></svg>
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-6 sm:px-7 py-6">
+          {/* Quién es */}
+          <div className="flex items-center gap-3.5 bg-surface-2 border border-edge rounded-2xl px-4 py-3.5">
+            <div className={`shrink-0 w-12 h-12 rounded-full grid place-items-center text-[15px] font-black ${estiloAvatar(u)}`}>{iniciales(u)}</div>
+            <div className="min-w-0">
+              <p className="text-[15px] font-bold text-ink truncate">{u.nombre}</p>
+              <p className="text-[13px] text-mute truncate">{u.email || u.username}</p>
+            </div>
+          </div>
+
+          <p className="text-[13px] font-extrabold uppercase tracking-[0.5px] text-ink mt-6 mb-3">Roles disponibles</p>
+          <div className="flex flex-wrap gap-2">
+            {roles.map(r => <Pill key={r} valor={r} etiqueta={r} />)}
+            <Pill valor="" etiqueta="Sin rol" />
+          </div>
+          {sel === '' && <p className="text-[12px] text-mute mt-3">Sin rol la cuenta existe pero no puede entrar al panel.</p>}
+        </div>
+
+        <div className="px-6 sm:px-7 py-4 border-t border-edge flex justify-end gap-2.5 shrink-0">
+          <button onClick={onClose} className="px-6 py-2.5 rounded-full border border-edge text-ink text-sm font-semibold hover:bg-surface-2 transition-colors">Cancelar</button>
+          <button onClick={guardar} disabled={guardando || sel === (u.rol || '')}
+            className="px-7 py-2.5 rounded-full bg-ink text-app text-sm font-bold hover:opacity-90 transition-opacity disabled:opacity-40">
+            {guardando ? 'Guardando…' : 'Actualizar rol'}
+          </button>
+        </div>
+      </motion.div>
+    </div>,
+    document.body,
   )
 }
 

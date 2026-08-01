@@ -93,6 +93,9 @@ class Venta(models.Model):
         verbose_name = 'Venta'
         verbose_name_plural = 'Ventas'
         ordering = ['-fecha']
+        indexes = [
+            models.Index(fields=['estado', '-fecha']),
+        ]
 
     # ─────────────────────────────────────────────
     #  MONTOS
