@@ -6924,11 +6924,11 @@ function UsuariosAdmin({ usuarios, reload, notify, yoId }: {
                       sobrante y el resto se ajusta a su contenido, así la tabla
                       no se desborda en pantallas chicas. */}
                   <th scope="col" className={`${th} w-full`}>Usuario</th>
-                  <th scope="col" className={`${th} hidden md:table-cell w-px`}>Correo</th>
+                  {grupo === 'equipo' && <th scope="col" className={`${th} hidden md:table-cell w-px`}>Correo</th>}
                   <th scope="col" className={`${th} hidden xl:table-cell w-px`}>Teléfono</th>
                   <th scope="col" className={`${th} hidden sm:table-cell w-px`}>Estado</th>
                   <th scope="col" className={`${th} hidden lg:table-cell w-px`}>Registro</th>
-                  <th scope="col" className={`${th} hidden xl:table-cell w-px`}>Último acceso</th>
+                  {grupo === 'equipo' && <th scope="col" className={`${th} hidden xl:table-cell w-px`}>Último acceso</th>}
                   <th scope="col" className={`${th} text-right w-px`}>Acciones</th>
                 </tr>
               </thead>
@@ -6955,15 +6955,17 @@ function UsuariosAdmin({ usuarios, reload, notify, yoId }: {
                               {u.puesto && <span className="text-[12px] text-mute truncate">{u.puesto}</span>}
                             </div>
                             {/* En pantallas chicas las columnas se esconden: el dato baja aquí. */}
-                            <p className="md:hidden text-[12px] text-mute truncate mt-1">{u.email || u.username}</p>
+                            {grupo === 'equipo' && <p className="md:hidden text-[12px] text-mute truncate mt-1">{u.email || u.username}</p>}
                           </div>
                         </div>
                       </td>
                       {/* nowrap: con `w-px` la columna se encoge al mínimo y un
                           teléfono con espacios se partiría en varias líneas. */}
-                      <td className={`${td} hidden md:table-cell whitespace-nowrap`}>
-                        <span className="text-[13.5px] text-ink">{u.email || <span className="text-mute">—</span>}</span>
-                      </td>
+                      {grupo === 'equipo' && (
+                        <td className={`${td} hidden md:table-cell whitespace-nowrap`}>
+                          <span className="text-[13.5px] text-ink">{u.email || <span className="text-mute">—</span>}</span>
+                        </td>
+                      )}
                       <td className={`${td} hidden xl:table-cell whitespace-nowrap`}>
                         <span className="text-[13.5px] text-ink font-mono">{u.telefono || <span className="text-mute font-sans">—</span>}</span>
                       </td>
@@ -6990,9 +6992,11 @@ function UsuariosAdmin({ usuarios, reload, notify, yoId }: {
                       <td className={`${td} hidden lg:table-cell whitespace-nowrap`}>
                         <span className="text-[13px] text-mute">{u.creado ? new Date(u.creado).toLocaleDateString('es-MX') : '—'}</span>
                       </td>
-                      <td className={`${td} hidden xl:table-cell`}>
-                        <span className="text-[13px] text-mute whitespace-nowrap">{hace(u.ultimo_acceso)}</span>
-                      </td>
+                      {grupo === 'equipo' && (
+                        <td className={`${td} hidden xl:table-cell`}>
+                          <span className="text-[13px] text-mute whitespace-nowrap">{hace(u.ultimo_acceso)}</span>
+                        </td>
+                      )}
                       <td className={`${td} text-right`}>
                         <div className="flex items-center justify-end gap-1">
                           <button onClick={() => setEditando(u)}
