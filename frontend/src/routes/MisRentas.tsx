@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLatido } from '../lib/latido'
 import { Link, useNavigate } from 'react-router-dom'
 import { CalendarClock, Loader2, PackageOpen } from 'lucide-react'
@@ -146,6 +146,21 @@ export default function MisRentas() {
     return () => { vivo = false }
   }, [token, nav])
 
+  // Próximas entregas / recolecciones: la agenda vive AQUÍ, con las rentas.
+  const eventos = useMemo(() => {
+    const hoy = new Date(); hoy.setHours(0, 0, 0, 0)
+    const ev: { fecha: Date; titulo: string; sub: string }[] = []
+    for (const r of rentas) {
+      if (r.estado === 'cancelada' || r.estado === 'finalizada') continue
+      const ini = r.fecha_inicio ? new Date(r.fecha_inicio + 'T12:00') : null
+      const fin = r.fecha_fin ? new Date(r.fecha_fin + 'T12:00') : null
+      if (ini && ini >= hoy) ev.push({ fecha: ini, titulo: `Entrega · ${r.equipo}`, sub: `Inicio de renta ${MOD[r.modalidad] || ''}`.trim() })
+      if (fin && fin >= hoy) ev.push({ fecha: fin, titulo: `Recolección · ${r.equipo}`, sub: 'Fin de renta' })
+    }
+    return ev.sort((a, b) => a.fecha.getTime() - b.fecha.getTime()).slice(0, 3)
+  }, [rentas])
+  const mesDia = (d: Date) => ({ mes: d.toLocaleDateString('es-MX', { month: 'short' }).replace('.', '').toUpperCase(), dia: String(d.getDate()).padStart(2, '0') })
+
   const activas = rentas.filter(r => ['activa', 'vencida', 'reservada'].includes(r.estado))
   const historial = rentas.filter(r => ['finalizada', 'cancelada'].includes(r.estado))
 
@@ -174,6 +189,31 @@ export default function MisRentas() {
         <div className="space-y-8">
           {activas.length > 0 && (
             <section className="space-y-3">
+              {eventos.length > 0 && (
+                <div className="mb-6 rounded-[20px] border border-edge bg-surface overflow-hidden">
+                  <div className="px-5 py-4 border-b border-edge flex items-center justify-between gap-4 flex-wrap">
+                    <span className="text-[15px] font-bold">Próximas entregas</span>
+                    <span className="text-[12.5px] text-mute">Si necesitas mover una fecha, escríbenos y la cambiamos.</span>
+                  </div>
+                  {eventos.map((e, i) => {
+                    const { mes, dia } = mesDia(e.fecha)
+                    return (
+                      <div key={i} className="px-5 py-3 border-b border-edge/60 last:border-0 flex items-center gap-3.5">
+                        <div className="w-12 h-12 rounded-xl border border-edge bg-app grid place-items-center shrink-0">
+                          <div className="text-center leading-none">
+                            <p className="text-[10px] font-mono tracking-[0.14em] text-mute uppercase">{mes}</p>
+                            <p className="text-[16px] font-extrabold mt-0.5">{dia}</p>
+                          </div>
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-[14px] font-bold leading-snug line-clamp-1">{e.titulo}</p>
+                          <p className="text-[12.5px] text-mute mt-0.5">{e.sub}</p>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
               <h2 className="text-xs font-semibold uppercase tracking-[0.14em] text-mute">Activas</h2>
               {activas.map((r, i) => <Tarjeta key={r.id} r={r} i={i} />)}
             </section>

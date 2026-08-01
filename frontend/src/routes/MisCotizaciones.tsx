@@ -24,7 +24,6 @@ type CotMia = {
   pdf: string | null
   atendida_por?: string | null
 }
-type RentaMia = { id: number; equipo: string; modalidad: string; fecha_inicio: string; fecha_fin: string; estado?: string }
 
 const monoLabel = 'text-[10.5px] font-mono tracking-[0.14em] text-mute uppercase'
 const UNIT_TXT: Record<string, string> = { venta: 'compra', dia: 'renta por día', semana: 'renta por semana', mes: 'renta por mes' }
@@ -55,7 +54,6 @@ export default function MisCotizaciones() {
   const { dispatch } = useCart()
   const { notify } = useToast()
   const [cots, setCots] = useState<CotMia[]>([])
-  const [rentas, setRentas] = useState<RentaMia[]>([])
   const [cargando, setCargando] = useState(true)
   const [filtro, setFiltro] = useState<'todas' | 'enviada' | 'aceptada' | 'vencida'>('todas')
   const [q, setQ] = useState('')
@@ -67,27 +65,16 @@ export default function MisCotizaciones() {
   useEffect(() => {
     if (!token) { nav('/login?next=/mis-cotizaciones'); return }
     let vivo = true
-    const cargar = (fondo = false) => Promise.all([
-      api.get<{ cotizaciones: CotMia[] }>('/cotizaciones/mias/', { fondo } as never).then(r => r.data?.cotizaciones || []).catch(() => [] as CotMia[]),
-      api.get<{ rentas: RentaMia[] }>('/rentas/mias/', { fondo } as never).then(r => r.data?.rentas || []).catch(() => [] as RentaMia[]),
-    ]).then(([c, r]) => { if (vivo) { setCots(c); setRentas(r) } }).finally(() => vivo && setCargando(false))
+    const cargar = (fondo = false) =>
+      api.get<{ cotizaciones: CotMia[] }>('/cotizaciones/mias/', { fondo } as never)
+        .then(r => { if (vivo) setCots(r.data?.cotizaciones || []) })
+        .catch(() => {})
+        .finally(() => vivo && setCargando(false))
     cargar()
     recargar.current = () => cargar(true)
     return () => { vivo = false }
   }, [token, nav])
 
-  // Próximas entregas / recolecciones desde las rentas reales del cliente.
-  const eventos = useMemo(() => {
-    const hoy = new Date(); hoy.setHours(0, 0, 0, 0)
-    const ev: { fecha: Date; titulo: string; sub: string }[] = []
-    for (const r of rentas) {
-      const ini = r.fecha_inicio ? new Date(r.fecha_inicio + 'T12:00') : null
-      const fin = r.fecha_fin ? new Date(r.fecha_fin + 'T12:00') : null
-      if (ini && ini >= hoy) ev.push({ fecha: ini, titulo: `Entrega · ${r.equipo}`, sub: `Inicio de renta ${UNIT_TXT[r.modalidad] || ''}`.trim() })
-      if (fin && fin >= hoy) ev.push({ fecha: fin, titulo: `Recolección · ${r.equipo}`, sub: 'Fin de renta' })
-    }
-    return ev.sort((a, b) => a.fecha.getTime() - b.fecha.getTime()).slice(0, 3)
-  }, [rentas])
 
   const lista = useMemo(() => cots
     .filter(c => filtro === 'todas' || c.estado === filtro)
@@ -105,7 +92,6 @@ export default function MisCotizaciones() {
   }
 
   const fechaCorta = (s?: string | null) => s ? new Date(s.length <= 10 ? s + 'T12:00' : s).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }) : ''
-  const mesDia = (d: Date) => ({ mes: d.toLocaleDateString('es-MX', { month: 'short' }).replace('.', '').toUpperCase(), dia: String(d.getDate()).padStart(2, '0') })
 
   if (cargando) return <div className="bg-app min-h-screen grid place-items-center"><Loader2 className="w-8 h-8 text-gold animate-spin" /></div>
 
@@ -122,29 +108,6 @@ export default function MisCotizaciones() {
           <Link to="/equipos" className="h-[48px] px-6 rounded-xl bg-gold text-black text-[15px] font-bold grid place-items-center btn-acento">+ Nueva cotización</Link>
         </div>
 
-        {eventos.length > 0 && (
-          <div className="rounded-[20px] border border-edge bg-surface overflow-hidden">
-            <div className="px-6 py-5 border-b border-edge flex items-center justify-between gap-4 flex-wrap">
-              <span className="text-[16px] font-bold">Próximas entregas</span>
-              <span className="text-[13px] text-mute">Si necesitas mover una fecha, escríbenos y la cambiamos.</span>
-            </div>
-            {eventos.map((e, i) => {
-              const { mes, dia } = mesDia(e.fecha)
-              return (
-                <div key={i} className="px-6 py-4 border-b border-edge/60 last:border-0 flex items-center gap-4">
-                  <div className="w-14 h-14 rounded-xl border border-edge bg-app grid place-items-center shrink-0">
-                    <div className="text-center leading-none"><p className={monoLabel}>{mes}</p><p className="text-[18px] font-extrabold mt-0.5">{dia}</p></div>
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-[15px] font-bold leading-snug line-clamp-1">{e.titulo}</p>
-                    <p className="text-[13px] text-mute mt-0.5">{e.sub}</p>
-                  </div>
-                  <Link to="/mis-rentas" className="text-[13.5px] font-semibold text-gold hover:opacity-80 shrink-0">Ver rentas →</Link>
-                </div>
-              )
-            })}
-          </div>
-        )}
 
         <div className="flex flex-wrap items-center gap-3">
           <div className="flex gap-1.5 border border-edge rounded-full p-1 bg-surface">
