@@ -557,6 +557,15 @@ def confirmar_entrega(request, pk: int):
     r.entregada_por = request.user if request.user.is_authenticated else None
     r.save(update_fields=['entregada_en', 'entregada_por', 'actualizado_en'])
     _avisar_movimiento(r, 'entregó', request.user)
+    # Aviso PERSONAL al cliente ligado a la renta.
+    if r.usuario_id:
+        from maquinaria.models import crear_notificacion
+        eq = r.inventario.equipo.modelo if (r.inventario and r.inventario.equipo) else 'equipo'
+        crear_notificacion(
+            'renta', 'Tu equipo fue entregado',
+            f'Tu renta de {eq} ya fue entregada. Consulta "Tus rentas".',
+            ref=f'renta-entrega-{r.id}', data={'renta_id': r.id}, usuario=r.usuario,
+        )
     return Response({'detalle': 'Entrega confirmada', 'renta': _serialize_renta(r)})
 
 

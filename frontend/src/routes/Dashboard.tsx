@@ -6845,11 +6845,42 @@ function UsuariosAdmin({ usuarios, reload, notify, yoId }: {
     return `${u.nombre} ${u.username} ${u.email} ${u.rol || ''} ${u.puesto}`.toLowerCase().includes(q.toLowerCase().trim())
   })
 
-  function desactivar(u: UsuarioPanel) {
-    if (!confirm(`¿Quitarle el acceso a ${u.nombre}?\n\nNo se borra: su historial de ventas y rentas se conserva, solo deja de poder entrar.`)) return
+  async function desactivar(u: UsuarioPanel) {
+    const ok = await confirmar({
+      titulo: esCliente(u) ? `Eliminar a ${u.nombre}` : `Quitarle el acceso a ${u.nombre}`,
+      mensaje: 'No se borra su historial: cotizaciones, rentas y ventas se conservan. Solo deja de poder entrar.',
+      aceptar: esCliente(u) ? 'Eliminar' : 'Quitar acceso', tono: 'peligro',
+    })
+    if (!ok) return
     api.delete(`/usuarios/${u.id}/`)
       .then(() => { notify(`${u.nombre} ya no puede entrar`); reload() })
       .catch(err => notify(errorMsg(err, 'No se pudo desactivar'), 'err'))
+  }
+  // Contraseña sin abrir el editor: la info del cliente no se toca desde aquí.
+  async function passwordExpres(u: UsuarioPanel) {
+    const nueva = await pedir({
+      titulo: `Nueva contraseña para ${u.nombre}`,
+      mensaje: 'Mínimo 8 caracteres. Anótala y dásela en persona; el sistema no se la manda por correo.',
+      placeholder: 'Nueva contraseña',
+    })
+    if (nueva === null) return
+    if (nueva.trim().length < 8) { notify('La contraseña debe tener al menos 8 caracteres', 'err'); return }
+    api.patch(`/usuarios/${u.id}/`, { password: nueva.trim() })
+      .then(() => notify(`Contraseña nueva para ${u.nombre}`))
+      .catch(err => notify(errorMsg(err, 'No se pudo cambiar'), 'err'))
+  }
+  async function marcarVerificacion(u: UsuarioPanel, valor: boolean) {
+    const ok = await confirmar({
+      titulo: valor ? `Marcar verificado a ${u.nombre}` : `Marcar como no verificado`,
+      mensaje: valor
+        ? 'Su correo quedará como confirmado y podrá iniciar sesión.'
+        : `${u.nombre} tendrá que confirmar su correo de nuevo para poder entrar.`,
+      aceptar: 'Confirmar', tono: valor ? 'normal' : 'peligro',
+    })
+    if (!ok) return
+    api.patch(`/usuarios/${u.id}/`, { email_verificado: valor })
+      .then(() => { notify(valor ? 'Correo marcado como verificado' : 'Marcado como no verificado'); reload() })
+      .catch(err => notify(errorMsg(err, 'No se pudo cambiar'), 'err'))
   }
   function reactivar(u: UsuarioPanel) {
     api.patch(`/usuarios/${u.id}/`, { activo: true })
@@ -7007,13 +7038,25 @@ function UsuariosAdmin({ usuarios, reload, notify, yoId }: {
                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.9"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z" /><circle cx="12" cy="12" r="3" /></svg>
                             <span className="hidden sm:inline">Ver</span>
                           </button>
-                          <button onClick={() => setEditando(u)}
-                            className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-lg text-[13px] font-bold text-mute hover:text-ink hover:bg-surface-2 transition-colors">
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.9"><path d="M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17z" /></svg>
-                            <span className="hidden sm:inline">Editar</span>
-                          </button>
+                          {!esCliente(u) && (
+                            <button onClick={() => setEditando(u)}
+                              className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-lg text-[13px] font-bold text-mute hover:text-ink hover:bg-surface-2 transition-colors">
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.9"><path d="M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17z" /></svg>
+                              <span className="hidden sm:inline">Editar</span>
+                            </button>
+                          )}
                           <MenuFila
-                            opciones={[
+                            opciones={esCliente(u) ? [
+                              // El cliente es dueño de su información: aquí solo
+                              // contraseña, verificación y eliminación.
+                              { label: 'Cambiar contraseña', onClick: () => passwordExpres(u) },
+                              u.email_verificado
+                                ? { label: 'Marcar como no verificado', onClick: () => marcarVerificacion(u, false) }
+                                : { label: 'Marcar como verificado', onClick: () => marcarVerificacion(u, true) },
+                              u.activo
+                                ? { label: 'Eliminar', onClick: () => desactivar(u), peligro: true }
+                                : { label: 'Devolver acceso', onClick: () => reactivar(u) },
+                            ] : [
                               { label: 'Cambiar contraseña', onClick: () => setEditando(u) },
                               u.activo
                                 ? { label: 'Quitar acceso', onClick: () => desactivar(u), peligro: true, deshabilitado: soyYo, razon: 'No puedes quitarte tu propio acceso' }
@@ -7125,7 +7168,8 @@ function UsuarioDetalle({ u, soyYo, onClose, onEditar }: {
 
         <div className="px-6 sm:px-7 py-4 border-t border-edge flex justify-end gap-2.5 shrink-0">
           <button onClick={onClose} className="px-6 py-2.5 rounded-full border border-edge text-ink text-sm font-semibold hover:bg-surface-2 transition-colors">Cerrar</button>
-          <button onClick={onEditar} className="px-7 py-2.5 rounded-full bg-gold text-black text-sm font-bold hover:opacity-90 transition-opacity">Editar</button>
+          {/* La info del cliente es suya: el admin no la edita */}
+          {!esCliente(u) && <button onClick={onEditar} className="px-7 py-2.5 rounded-full bg-gold text-black text-sm font-bold hover:opacity-90 transition-opacity">Editar</button>}
         </div>
       </motion.div>
     </div>,

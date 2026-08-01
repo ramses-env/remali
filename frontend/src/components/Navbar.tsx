@@ -1,6 +1,7 @@
 import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { createPortal } from 'react-dom'
 import { useAuth } from '../store/auth'
+import CampanaCliente from './CampanaCliente'
 import { useProfile } from '../store/profile'
 import { useCart } from '../store/cart'
 import { useState, useEffect } from 'react'
@@ -77,6 +78,7 @@ export default function Navbar() {
             )}
           </Link>
           <ThemeToggle />
+          {esCliente && <CampanaCliente />}
 
           {token ? (
             <div className="flex items-center gap-2">

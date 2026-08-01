@@ -308,6 +308,8 @@ class CotizacionListCreate(generics.ListCreateAPIView):
 
 class CotizacionDetail(generics.RetrieveUpdateDestroyAPIView):
     def perform_update(self, serializer):
+        # Estado anterior para detectar si "la contestaron" (aviso al cliente).
+        estado_antes = serializer.instance.estado
         # Quien la trabaja desde el panel queda como su asesor asignado.
         obj = serializer.save()
         if not obj.atendida_por_id and self.request.user.is_authenticated:
@@ -315,6 +317,18 @@ class CotizacionDetail(generics.RetrieveUpdateDestroyAPIView):
             obj.atendida_por = self.request.user
             obj.atendida_en = tz.now()
             obj.save(update_fields=['atendida_por', 'atendida_en'])
+        # Notificación PERSONAL al cliente cuando su cotización es contestada.
+        if obj.usuario_id and obj.estado != estado_antes and obj.estado in ('aceptada', 'rechazada'):
+            from maquinaria.models import crear_notificacion
+            etiqueta = 'aceptada' if obj.estado == 'aceptada' else 'marcada como no disponible'
+            crear_notificacion(
+                'sistema',
+                f'Tu cotización {obj.folio} fue {etiqueta}',
+                'Entra a "Mis cotizaciones" para ver el detalle.',
+                ref=f'cot-cliente-{obj.id}-{obj.estado}',
+                data={'folio': obj.folio, 'cotizacion_id': obj.id},
+                usuario=obj.usuario,
+            )
 
     serializer_class = CotizacionSerializer
     permission_classes = [IsAdminGroupOrStaff]

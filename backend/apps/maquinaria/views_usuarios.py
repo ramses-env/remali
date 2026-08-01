@@ -142,6 +142,17 @@ def usuario_detalle(request, pk: int):
         u.save(update_fields=['password'])
         return Response({'detalle': f'Contraseña actualizada para {u.username}.', 'usuario': _serialize(u)})
 
+    # Verificación del correo (solo clientes): marcarlo como NO verificado lo
+    # obliga a confirmar de nuevo antes de poder entrar (candado del login).
+    if 'email_verificado' in d:
+        from django.utils import timezone
+        from .models import PerfilUsuario
+        perfil, _ = PerfilUsuario.objects.get_or_create(usuario=u)
+        perfil.email_verificado = bool(d.get('email_verificado'))
+        perfil.email_verificado_en = timezone.now() if perfil.email_verificado else None
+        perfil.save(update_fields=['email_verificado', 'email_verificado_en'])
+        return Response(_serialize(u))
+
     campos = []
     for campo, clave in (('first_name', 'first_name'), ('last_name', 'last_name'), ('email', 'email')):
         if clave in d:
