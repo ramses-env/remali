@@ -181,8 +181,22 @@ def registrar_abono(request, pk):
     metodo = (request.data.get('metodo') or 'efectivo').strip().lower()
     if metodo not in ('efectivo', 'tarjeta', 'transferencia'):
         return Response({'detalle': 'Método no válido.'}, status=400)
+    # Fecha del abono: hoy por defecto; editable hacia atrás (se les olvida
+    # registrarlo el mismo día) pero nunca futura.
+    fecha_txt = (request.data.get('fecha') or '').strip()
+    if fecha_txt:
+        from datetime import date as _date
+        try:
+            f = _date.fromisoformat(fecha_txt)
+        except ValueError:
+            return Response({'detalle': 'Fecha no válida (usa AAAA-MM-DD).'}, status=400)
+        if f > timezone.localdate():
+            return Response({'detalle': 'La fecha del abono no puede ser futura.'}, status=400)
+        sello = f.isoformat()
+    else:
+        sello = timezone.now().isoformat()
     pagos = list(r.pagos or [])
-    pagos.append({'fecha': timezone.now().isoformat(), 'monto': str(monto), 'metodo': metodo,
+    pagos.append({'fecha': sello, 'monto': str(monto), 'metodo': metodo,
                   'por': request.user.get_username() if request.user.is_authenticated else ''})
     r.pagos = pagos
     r.save(update_fields=['pagos', 'actualizado_en'])

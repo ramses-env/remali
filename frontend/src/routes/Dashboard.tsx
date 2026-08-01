@@ -3195,8 +3195,17 @@ function RentaDetalleModal({ renta: r, onClose, onTicket }: { renta: RentaFull; 
       ],
     })
     if (!met || !met[0]) return
+    // ¿Qué día fue? Por si se olvidó registrarlo ese día: queda la fecha real.
+    const hoyISO = new Date().toLocaleDateString('sv-SE')
+    const fecha = await pedir({
+      titulo: '¿Qué día fue el abono?',
+      mensaje: 'Déjala en hoy si acaba de pagar; cámbiala si se te pasó registrarlo ese día.',
+      inputMode: 'fecha', valor: hoyISO,
+    })
+    if (fecha === null) return
+    if (fecha && fecha > hoyISO) { notify('La fecha del abono no puede ser futura', 'err'); return }
     try {
-      const resp = await api.post<{ renta: RentaFull }>(`/rentas/${r.id}/abonos/`, { monto, metodo: met[0] })
+      const resp = await api.post<{ renta: RentaFull }>(`/rentas/${r.id}/abonos/`, { monto, metodo: met[0], fecha: fecha || undefined })
       setPagos(resp.data.renta.pagos || [])
       setPagado(Number(resp.data.renta.pagado || 0))
       setSaldo(Number(resp.data.renta.saldo || 0))
@@ -3373,7 +3382,7 @@ function RentaDetalleModal({ renta: r, onClose, onTicket }: { renta: RentaFull; 
                 <div className="space-y-1 text-[12.5px] mb-2">
                   {pagos.map((p, i) => (
                     <div key={i} className="flex justify-between gap-3">
-                      <span className="text-mute">{new Date(p.fecha).toLocaleDateString('es-MX', { day: '2-digit', month: 'short' })} · <span className="capitalize">{p.metodo}</span>{p.por ? ` · ${p.por}` : ''}</span>
+                      <span className="text-mute">{new Date(p.fecha.length === 10 ? `${p.fecha}T12:00:00` : p.fecha).toLocaleDateString('es-MX', { day: '2-digit', month: 'short' })} · <span className="capitalize">{p.metodo}</span>{p.por ? ` · ${p.por}` : ''}</span>
                       <span className="text-ink font-semibold tabular-nums">{money(Number(p.monto))}</span>
                     </div>
                   ))}

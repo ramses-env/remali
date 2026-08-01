@@ -9,7 +9,7 @@ import { createPortal } from 'react-dom'
 type Opcion = { valor: string; label: string; detalle?: string }
 type Peticion =
   | { tipo: 'confirmar'; titulo: string; mensaje?: string; aceptar?: string; cancelar?: string; tono?: 'normal' | 'peligro'; resolver: (v: boolean) => void }
-  | { tipo: 'pedir'; titulo: string; mensaje?: string; placeholder?: string; valor?: string; inputMode?: 'text' | 'decimal'; resolver: (v: string | null) => void }
+  | { tipo: 'pedir'; titulo: string; mensaje?: string; placeholder?: string; valor?: string; inputMode?: 'text' | 'decimal' | 'fecha'; resolver: (v: string | null) => void }
   | { tipo: 'elegir'; titulo: string; mensaje?: string; opciones: Opcion[]; multiple?: boolean; vacioLabel?: string; resolver: (v: string[] | null) => void }
 
 let empujar: ((p: Peticion) => void) | null = null
@@ -17,7 +17,7 @@ let empujar: ((p: Peticion) => void) | null = null
 export const confirmar = (o: { titulo: string; mensaje?: string; aceptar?: string; cancelar?: string; tono?: 'normal' | 'peligro' }) =>
   new Promise<boolean>(res => empujar ? empujar({ tipo: 'confirmar', ...o, resolver: res }) : res(window.confirm(o.titulo)))
 
-export const pedir = (o: { titulo: string; mensaje?: string; placeholder?: string; valor?: string; inputMode?: 'text' | 'decimal' }) =>
+export const pedir = (o: { titulo: string; mensaje?: string; placeholder?: string; valor?: string; inputMode?: 'text' | 'decimal' | 'fecha' }) =>
   new Promise<string | null>(res => empujar ? empujar({ tipo: 'pedir', ...o, resolver: res }) : res(window.prompt(o.titulo, o.valor || '')))
 
 export const elegir = (o: { titulo: string; mensaje?: string; opciones: Opcion[]; multiple?: boolean; vacioLabel?: string }) =>
@@ -54,7 +54,7 @@ export default function DialogoHost() {
         {actual.mensaje && <p className="text-[13.5px] text-mute mt-2 leading-relaxed whitespace-pre-line">{actual.mensaje}</p>}
 
         {actual.tipo === 'pedir' && (
-          <input autoFocus value={texto} inputMode={actual.inputMode === 'decimal' ? 'decimal' : undefined}
+          <input autoFocus value={texto} type={actual.inputMode === 'fecha' ? 'date' : 'text'} inputMode={actual.inputMode === 'decimal' ? 'decimal' : undefined}
             onChange={e => setTexto(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') { actual.resolver(texto); cerrar() } }}
             placeholder={actual.placeholder}
