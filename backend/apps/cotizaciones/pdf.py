@@ -294,9 +294,13 @@ def render_cotizacion_pdf(cot) -> bytes:
     if cot.iva:
         total('IVA (16%)', cot.iva)
     total('Total', cot.total, fuerte=True)
-    # El 5% de contado es de venta; en renta no aplica.
+    # Contado (solo venta): el MAYOR descuento entre la promo y el 5% de contado,
+    # SIN apilarlos. Solo se muestra si de verdad baja el precio (si la promo ya
+    # supera el 5%, no hay descuento extra por pagar de contado).
     if cot.tipo != 'renta':
-        total('Contado (-5%)', float(cot.total) * 0.95)
+        contado = cot.total_contado
+        if contado < cot.total:
+            total('Precio de contado', float(contado))
 
     # ── Fotos (van a media hoja, no al final) ──
     y = _dibujar_fotos(c, cot, ancho, alto, m, y, acento)

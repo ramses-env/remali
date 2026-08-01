@@ -61,6 +61,7 @@ class CotizacionSerializer(serializers.ModelSerializer):
             'cliente_display', 'vigencia_hasta', 'vencida', 'token_publico',
             'convertida', 'venta_id', 'atendida_en', 'atendida_por_nombre', 'usuario_nombre', 'usuario_email', 'entrega_prometida', 'escalada_en',
             'autorizada_por', 'autorizada_en', 'autorizacion_rechazo', 'cancelacion_solicitada', 'cancelacion_motivo',
+            'usuario',
             'creada', 'actualizada',
         ]
         read_only_fields = ['folio', 'origen', 'datos_solicitud', 'atendida_en', 'escalada_en', 'creada', 'actualizada']

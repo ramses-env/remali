@@ -147,6 +147,7 @@ type Cotizacion = {
   autorizacion_rechazo?: string
   cancelacion_solicitada?: string | null
   cancelacion_motivo?: string
+  usuario?: number | null
   usuario_email?: string | null
   origen?: 'admin' | 'cliente'
   datos_solicitud?: { empresa?: string; obra?: { responsable?: string; direccion?: string; telefono?: string; email?: string } }
@@ -1051,7 +1052,7 @@ export default function Dashboard() {
             <FacturacionAdmin solicitudes={solicitudes} reload={loadFacturacion} notify={notify} />
           )}
           {section === 'cotizaciones' && (
-            <CotizacionesAdmin empresas={empresas} notify={notify} />
+            <CotizacionesAdmin empresas={empresas} notify={notify} irAInventario={() => go('inventario')} />
           )}
           {section === 'catalogos' && (
             <CatalogosAdmin
@@ -2328,12 +2329,21 @@ function RentModal({ unit, equipo, onClose, onDone, notify }: {
   const [factura, setFactura] = useState<FacturaData>(FACTURA_VACIA)
   const [clientes, setClientes] = useState<{ id: number; nombre: string; empresa?: string }[]>([])
   const [usuarioId, setUsuarioId] = useState('')
+  // ¿Venimos de "Concretar renta" de una cotización? Precarga y liga.
+  const [deCot, setDeCot] = useState(cotParaRenta)
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
     api.get('/empresas/').then(r => setEmpresas(Array.isArray(r.data) ? r.data : (r.data?.results || []))).catch(() => {})
     // Cuentas de cliente, para vincular la renta a su panel ("Tus rentas").
     api.get<{ clientes: { id: number; nombre: string; empresa?: string }[] }>('/clientes-lookup/').then(r => setClientes(r.data.clientes || [])).catch(() => {})
+    // Datos de la cotización que se está concretando (si aplica).
+    if (cotParaRenta) {
+      if (cotParaRenta.cliente) setCliente(cotParaRenta.cliente)
+      if (cotParaRenta.telefono) setTelefono(cotParaRenta.telefono)
+      if (cotParaRenta.direccion) setDireccion(cotParaRenta.direccion)
+      if (cotParaRenta.usuario_id) setUsuarioId(String(cotParaRenta.usuario_id))
+    }
   }, [])
   useEffect(() => {
     if (!empresaId) { setObras([]); setObraId(''); return }
@@ -2377,11 +2387,13 @@ function RentModal({ unit, equipo, onClose, onDone, notify }: {
       cliente: cliente.trim(), telefono_cliente: telefono.trim(), direccion: direccion.trim(),
       fecha_inicio: fechaInicio || undefined,
       empresa_id: empresaId || undefined, obra_id: obraId || undefined, usuario_id: usuarioId || undefined,
+      cotizacion_id: deCot?.id || undefined,
       descuento: Number(descuento) || 0, deposito: Number(deposito) || 0,
       requiere_factura: requiereFactura, factura,
     })
       .then(res => {
         const est = res.data?.renta?.estado
+        cotParaRenta = null   // puente consumido: la renta quedó ligada
         notify(est === 'reservada' ? 'Reserva registrada' : 'Renta registrada')
         const id = res.data?.renta?.id
         if (id) abrirOrdenCartaPDF('rentas', id)   // orden carta en PDF (ya no ticket térmico)
@@ -2402,6 +2414,12 @@ function RentModal({ unit, equipo, onClose, onDone, notify }: {
           <div className="min-w-0">
             <h3 className="font-black text-ink">{esReserva ? 'Reservar' : 'Rentar'} {unit.codigo}</h3>
             <p className="text-xs text-mute mt-0.5">{equipo.modelo}</p>
+            {deCot && (
+              <p className="mt-1.5 inline-flex items-center gap-1.5 text-[11px] font-bold px-2 py-1 rounded-full bg-[color:var(--c-renta)]/10 text-[color:var(--c-renta)]">
+                Concretando {deCot.folio || 'cotización'} · {deCot.cliente || 'cliente'}
+                <button onClick={() => { cotParaRenta = null; setDeCot(null) }} aria-label="Quitar vínculo" className="hover:opacity-70">✕</button>
+              </p>
+            )}
           </div>
           <button onClick={onClose} className="w-8 h-8 rounded-[9px] flex items-center justify-center text-mute hover:text-ink hover:bg-surface-2 transition-colors shrink-0" aria-label="Cerrar"><svg className="w-[18px] h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" d="M6 6l12 12M18 6L6 18" /></svg></button>
         </div>
@@ -2894,6 +2912,8 @@ type MovimientoRenta = { entregada?: boolean; recogida?: boolean; en?: string | 
 type RentaFull = RentaActiva & {
   entrega?: MovimientoRenta; recoleccion?: MovimientoRenta
   cuenta?: string | null
+  pagos?: { fecha: string; monto: string; metodo: string; por?: string }[]
+  pagado?: string; saldo?: string
   estado?: string; modalidad: string; duracion?: number
   fecha_inicio?: string; fecha_devolucion_real?: string | null
   total?: string; subtotal?: string; precio_unitario?: string; descuento?: string; deposito?: string; recargo?: string
@@ -3135,6 +3155,35 @@ function RentaDetalleModal({ renta: r, onClose, onTicket }: { renta: RentaFull; 
   // Cuenta de cliente vinculada; se puede asignar o cambiar aquí mismo,
   // para las rentas que se registraron sin elegirla.
   const [cuenta, setCuenta] = useState<string | null>(r.cuenta ?? null)
+  // Pagos: muchos clientes conocidos pagan DESPUÉS; aquí se abonan.
+  const [pagos, setPagos] = useState(r.pagos || [])
+  const [pagado, setPagado] = useState(Number(r.pagado || 0))
+  const [saldo, setSaldo] = useState(Number(r.saldo ?? r.total ?? 0))
+  async function registrarAbono() {
+    const montoTxt = await pedir({
+      titulo: 'Registrar abono',
+      mensaje: `Saldo actual: ${money(saldo)}. ¿Cuánto entrega el cliente?`,
+      placeholder: 'Ej. 1500', inputMode: 'decimal',
+    })
+    if (montoTxt === null) return
+    const monto = Number(montoTxt)
+    if (!monto || monto <= 0) { return }
+    const met = await elegir({
+      titulo: 'Método del abono',
+      opciones: [
+        { valor: 'efectivo', label: 'Efectivo' },
+        { valor: 'tarjeta', label: 'Tarjeta' },
+        { valor: 'transferencia', label: 'Transferencia' },
+      ],
+    })
+    if (!met || !met[0]) return
+    try {
+      const resp = await api.post<{ renta: RentaFull }>(`/rentas/${r.id}/abonos/`, { monto, metodo: met[0] })
+      setPagos(resp.data.renta.pagos || [])
+      setPagado(Number(resp.data.renta.pagado || 0))
+      setSaldo(Number(resp.data.renta.saldo || 0))
+    } catch { /* el interceptor avisa */ }
+  }
   const [liga, setLiga] = useState('')
   const [genLiga, setGenLiga] = useState(false)
   const [copiado, setCopiado] = useState(false)
@@ -3290,6 +3339,38 @@ function RentaDetalleModal({ renta: r, onClose, onTicket }: { renta: RentaFull; 
               {rec > 0 && <div className="flex justify-between"><span className="text-mute">Recargo por retraso</span><span className="text-amber-600 font-semibold">{money(rec)}</span></div>}
               <div className="flex justify-between pt-2.5 mt-1.5 border-t border-edge text-[16px] font-extrabold"><span className="text-ink">Total</span><span className="text-price">{money(tot)}</span></div>
               {dep > 0 && <div className="flex justify-between pt-1"><span className="text-mute text-[12px]">Depósito en garantía</span><span className="text-mute text-[12px]">{money(dep)}</span></div>}
+            </div>
+
+            {/* PAGOS: abonos del cliente y saldo (muchos pagan después) */}
+            <div className="mt-4 pt-4 border-t border-edge">
+              <div className="flex items-center justify-between gap-3 mb-2">
+                <p className="text-[11px] font-extrabold tracking-[0.5px] text-gold">PAGOS</p>
+                {saldo <= 0 && tot > 0 ? (
+                  <span className="inline-flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-600"><svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="3"><path d="M5 13l4 4L19 7" /></svg>Pagada</span>
+                ) : (
+                  <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-amber-500/10 text-amber-600 whitespace-nowrap">Por cobrar {money(saldo)}</span>
+                )}
+              </div>
+              {pagos.length > 0 && (
+                <div className="space-y-1 text-[12.5px] mb-2">
+                  {pagos.map((p, i) => (
+                    <div key={i} className="flex justify-between gap-3">
+                      <span className="text-mute">{new Date(p.fecha).toLocaleDateString('es-MX', { day: '2-digit', month: 'short' })} · <span className="capitalize">{p.metodo}</span>{p.por ? ` · ${p.por}` : ''}</span>
+                      <span className="text-ink font-semibold tabular-nums">{money(Number(p.monto))}</span>
+                    </div>
+                  ))}
+                  <div className="flex justify-between gap-3 pt-1 border-t border-edge">
+                    <span className="text-mute font-semibold">Pagado</span>
+                    <span className="text-ink font-bold tabular-nums">{money(pagado)}</span>
+                  </div>
+                </div>
+              )}
+              {r.estado !== 'cancelada' && saldo > 0 && (
+                <button onClick={registrarAbono}
+                  className="mt-1 px-3.5 py-2 rounded-[9px] border border-edge text-[12px] font-bold text-ink hover:border-gold/50 hover:text-gold transition-colors">
+                  + Registrar abono
+                </button>
+              )}
             </div>
           </div>
 
@@ -5377,8 +5458,13 @@ const COT_PAGE_SIZE = 25
 
 /** Lista de cotizaciones: paginada y filtrada EN EL SERVIDOR, para que aguante
  *  miles sin cargar todo al navegador. Los conteos vienen del endpoint de stats. */
-function CotizacionesAdmin({ empresas, notify }: {
-  empresas: Empresa[]; notify: (m: string, t?: 'ok' | 'err' | 'info') => void
+/* Puente cotización→renta: la cotización aceptada que se está concretando.
+   Vive a nivel módulo para no enhebrar props por medio panel; el RentModal
+   la lee al montar y la limpia al registrar. */
+let cotParaRenta: { id: number; folio: string | null; cliente: string; telefono: string; direccion: string; usuario_id: number | null } | null = null
+
+function CotizacionesAdmin({ empresas, notify, irAInventario }: {
+  empresas: Empresa[]; notify: (m: string, t?: 'ok' | 'err' | 'info') => void; irAInventario?: () => void
 }) {
   const [q, setQ] = useState('')
   const [qDebounced, setQDebounced] = useState('')
@@ -5532,7 +5618,7 @@ function CotizacionesAdmin({ empresas, notify }: {
         )}
       </Card>
 
-      {detalle && <CotizacionDetalleModal cotizacion={detalle} empresas={empresas} recienCreada={recienCreada} notify={notify} onClose={() => { setDetalle(null); setRecienCreada(false); recargar() }} onChanged={recargar} onPrint={(c) => setCarta(c)} onConvertida={(id) => { setDetalle(null); setRecienCreada(false); recargar(); abrirOrdenCartaPDF('ventas', id) }} />}
+      {detalle && <CotizacionDetalleModal cotizacion={detalle} empresas={empresas} recienCreada={recienCreada} notify={notify} onConcretarRenta={irAInventario} onClose={() => { setDetalle(null); setRecienCreada(false); recargar() }} onChanged={recargar} onPrint={(c) => setCarta(c)} onConvertida={(id) => { setDetalle(null); setRecienCreada(false); recargar(); abrirOrdenCartaPDF('ventas', id) }} />}
       {carta && <CotizacionCartaModal cotizacion={carta} onClose={() => setCarta(null)} />}
     </div>
   )
@@ -5576,9 +5662,9 @@ function Switch({ checked, onChange, disabled, label }: {
   )
 }
 
-function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, onClose, onChanged, onPrint, onConvertida }: {
+function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, onClose, onChanged, onPrint, onConvertida, onConcretarRenta }: {
   cotizacion: Cotizacion; empresas: Empresa[]; recienCreada?: boolean; notify: (m: string, t?: 'ok' | 'err' | 'info') => void
-  onClose: () => void; onChanged: () => void; onPrint: (c: Cotizacion) => void; onConvertida: (ventaId: number) => void
+  onClose: () => void; onChanged: () => void; onPrint: (c: Cotizacion) => void; onConvertida: (ventaId: number) => void; onConcretarRenta?: () => void
 }) {
   // Vincular/cambiar la cuenta de la tienda dueña de esta cotización.
   async function vincularCuentaCot() {
@@ -5732,6 +5818,22 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
       })
       .catch(() => notify('No se pudo cambiar el estado', 'err'))
   }
+  /* Concretar la RENTA de una cotización aceptada: se cuelga la cotización
+     al puente y se manda al admin a Inventario a elegir la unidad; el
+     RentModal llega precargado y liga la renta a esta cotización. */
+  function concretarRenta() {
+    cotParaRenta = {
+      id: c.id, folio: c.folio,
+      cliente: clienteNombre || c.cliente_display || '',
+      telefono: clienteTel || c.cliente_telefono || '',
+      direccion: c.datos_solicitud?.obra?.direccion || '',
+      usuario_id: c.usuario ?? null,
+    }
+    notify(`Elige la unidad y tócale Rentar: quedará ligada a la ${c.folio || 'cotización'}`, 'info')
+    onClose()
+    onConcretarRenta?.()
+  }
+
   function aprobarCancelacion() {
     api.post(`/cotizaciones/${c.id}/aprobar-cancelacion/`, {})
       .then(() => { notify('Cancelación aprobada'); onChanged() })
@@ -6026,6 +6128,12 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
                   </button>
                 </div>
               ))}
+              {!bloqueada && c.estado === 'aceptada' && (c.tipo === 'renta' || c.tipo === 'mixta') && (
+                <button onClick={concretarRenta}
+                  className="mt-2.5 h-10 px-4 rounded-full btn-renta text-[13px] font-bold">
+                  Concretar renta →
+                </button>
+              )}
               {/* Vino autorizada por el jefe del cliente: dinero ya aprobado. */}
               {c.autorizada_por && !c.autorizacion_rechazo && (
                 <div className="mt-2 inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 text-[12.5px] font-bold">

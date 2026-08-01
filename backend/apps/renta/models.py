@@ -108,6 +108,9 @@ class Renta(models.Model):
     aplica_iva = models.BooleanField(default=False, help_text='Suma IVA (16%) porque el cliente pedirá factura')
 
     estado = models.CharField(max_length=12, choices=ESTADOS, default='activa')
+    # Abonos del cliente: lista de {fecha, monto, metodo}. Muchos conocidos
+    # pagan DESPUÉS de la renta; aquí vive cuánto ha entregado y cuánto debe.
+    pagos = models.JSONField(default=list, blank=True)
     observaciones = models.TextField(blank=True, null=True)
 
     # ── Confirmación en campo ──

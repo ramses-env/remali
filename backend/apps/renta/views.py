@@ -55,11 +55,18 @@ def _serialize_renta(r: Renta, ver_dinero: bool = True):
     Los montos van incluidos por defecto: quien entrega también cobra. El
     parámetro existe para vistas donde no hacen falta (ver `ubicaciones_equipos`).
     """
+    from decimal import Decimal as _D
+    pagado = sum((_D(str(p.get('monto', 0))) for p in (r.pagos or [])), _D('0'))
+    saldo = max((r.total or _D('0')) + (r.recargo or _D('0')) - pagado, _D('0'))
     datos = {
         'id': r.id,
         # Cuenta de cliente vinculada (para "Tus rentas"); None = sin vincular.
         'cuenta': ((f'{r.usuario.first_name} {r.usuario.last_name}'.strip()
                     or r.usuario.get_username()) if r.usuario_id else None),
+        # Abonos y saldo: cuánto ha entregado el cliente y cuánto falta.
+        'pagos': r.pagos or [],
+        'pagado': str(pagado),
+        'saldo': str(saldo),
         'inventario': {
             'id': r.inventario.id,
             'codigo': r.inventario.codigo,
@@ -149,6 +156,37 @@ def listar_rentas(request):
         qs = qs.filter(estado=estado)
     data = [_serialize_renta(r) for r in qs.order_by('-creado_en')]
     return Response({'rentas': data})
+
+
+@api_view(['POST'])
+@permission_classes([EsOperador])
+def registrar_abono(request, pk):
+    """Registra un abono del cliente (muchos pagan después de la renta).
+
+    Body: {monto, metodo}. Se acumula en r.pagos con fecha; el saldo sale
+    de total + recargo - abonos. El save dispara el latido."""
+    from decimal import Decimal, InvalidOperation
+    from django.utils import timezone
+    r = Renta.objects.filter(pk=pk).first()
+    if not r:
+        return Response({'detalle': 'Renta no encontrada'}, status=404)
+    if r.estado == 'cancelada':
+        return Response({'detalle': 'La renta está cancelada; no se abonan pagos.'}, status=400)
+    try:
+        monto = Decimal(str(request.data.get('monto', '0')))
+    except InvalidOperation:
+        return Response({'detalle': 'Monto no válido.'}, status=400)
+    if monto <= 0:
+        return Response({'detalle': 'El abono debe ser mayor a cero.'}, status=400)
+    metodo = (request.data.get('metodo') or 'efectivo').strip().lower()
+    if metodo not in ('efectivo', 'tarjeta', 'transferencia'):
+        return Response({'detalle': 'Método no válido.'}, status=400)
+    pagos = list(r.pagos or [])
+    pagos.append({'fecha': timezone.now().isoformat(), 'monto': str(monto), 'metodo': metodo,
+                  'por': request.user.get_username() if request.user.is_authenticated else ''})
+    r.pagos = pagos
+    r.save(update_fields=['pagos', 'actualizado_en'])
+    return Response({'detalle': 'Abono registrado', 'renta': _serialize_renta(r)})
 
 
 @api_view(['POST'])

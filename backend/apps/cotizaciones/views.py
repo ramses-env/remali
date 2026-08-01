@@ -167,9 +167,9 @@ def crear_cotizacion_publica(request):
                 'carrito': carrito,
             },
         )
-        for etiqueta, cant, precio, modalidad in partidas:
+        for etiqueta, cant, precio, modalidad, precio_lista in partidas:
             CotizacionItem.objects.create(cotizacion=cot, descripcion=etiqueta, cantidad=cant,
-                                          precio_unitario=precio, modalidad=modalidad)
+                                          precio_unitario=precio, precio_lista=precio_lista, modalidad=modalidad)
         cot.recalcular_tipo()   # venta, renta o mixta según lo que armó el cliente
         if por_autorizar:
             import secrets

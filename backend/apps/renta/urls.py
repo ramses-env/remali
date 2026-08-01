@@ -11,6 +11,7 @@ urlpatterns = [
     path('rentas/<int:pk>/comprobante/', views.comprobante_renta, name='comprobante_renta'),
     path('rentas/<int:pk>/ticket/', views.ticket_renta, name='ticket_renta'),
     path('rentas/<int:pk>/vincular/', views.vincular_cuenta, name='vincular_cuenta'),
+    path('rentas/<int:pk>/abonos/', views.registrar_abono, name='registrar_abono'),
     path('rentas/<int:pk>/vinculo/', views.generar_vinculo_renta, name='generar_vinculo_renta'),
     path('vinculo/renta/<str:token>/', views.vinculo_renta, name='vinculo_renta_reclamar'),
     path('rentas/alertas/', views.alertas_renta, name='alertas_renta'),
