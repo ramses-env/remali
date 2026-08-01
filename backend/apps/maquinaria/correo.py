@@ -20,12 +20,53 @@ from django.db import connections
 log = logging.getLogger(__name__)
 
 
-def _enviar(asunto, cuerpo, destinatarios, adjuntos):
+def _enviar_api_brevo(asunto, cuerpo, destinatarios, adjuntos):
+    """El mismo correo, por la API HTTP de Brevo: entra directo a su pipeline
+    transaccional (más rápido y rastreable que el relay SMTP). Devuelve False
+    si no hay BREVO_API_KEY o la API lo rechaza — el llamador cae al SMTP."""
+    import os
+    api_key = os.environ.get('BREVO_API_KEY', '').strip()
+    if not api_key:
+        return False
+    import base64
+    import json
+    import urllib.request
+    payload = {
+        'sender': {'email': settings.DEFAULT_FROM_EMAIL},
+        'to': [{'email': d} for d in destinatarios],
+        'subject': asunto,
+        'textContent': cuerpo,
+    }
+    if adjuntos:
+        payload['attachment'] = [
+            {'name': n, 'content': base64.b64encode(c).decode()} for n, c, _t in adjuntos
+        ]
+    req = urllib.request.Request(
+        'https://api.brevo.com/v3/smtp/email',
+        data=json.dumps(payload).encode(),
+        headers={'api-key': api_key, 'content-type': 'application/json', 'accept': 'application/json'},
+        method='POST',
+    )
     try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return 200 <= r.status < 300
+    except Exception:
+        log.exception('Brevo API rechazó "%s"; se intenta por SMTP', asunto)
+        return False
+
+
+def _enviar(asunto, cuerpo, destinatarios, adjuntos):
+    import time
+    t0 = time.monotonic()
+    try:
+        if _enviar_api_brevo(asunto, cuerpo, destinatarios, adjuntos):
+            log.info('Correo "%s" aceptado por Brevo API en %.1fs', asunto, time.monotonic() - t0)
+            return
         msg = EmailMessage(asunto, cuerpo, settings.DEFAULT_FROM_EMAIL, destinatarios)
         for nombre, contenido, tipo in adjuntos:
             msg.attach(nombre, contenido, tipo)
         msg.send(fail_silently=False)
+        log.info('Correo "%s" aceptado por SMTP en %.1fs', asunto, time.monotonic() - t0)
     except Exception:
         log.exception('No se pudo enviar el correo "%s" a %s', asunto, destinatarios)
     finally:
