@@ -49,23 +49,25 @@ function Tarjeta({ r, i }: { r: RentaMia; i: number }) {
   const saldo = Number(r.saldo || 0)
   const total = Number(r.total || 0)
   return (
-    <div style={{ animationDelay: `${i * 40}ms` }} className="stagger-item rounded-2xl border border-edge bg-surface p-5">
-      <div className="flex flex-wrap items-center gap-3">
+    <div style={{ animationDelay: `${i * 40}ms` }} className="stagger-item rounded-2xl border border-edge bg-surface px-4 py-3">
+      {/* Línea 1: quién es y cuánto — el restante va EN la misma línea del total */}
+      <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
         <span className="text-sm font-extrabold text-ink">{r.equipo || 'Equipo'}</span>
-        <span className={`text-[11px] font-semibold uppercase tracking-wide px-2.5 py-1 rounded-full ${estiloEstado(r.estado)}`}>{r.estado_label}</span>
-        <span className="text-[13px] text-mute">renta {MOD[r.modalidad] || r.modalidad}</span>
-        <span className="ml-auto text-right">
-          <span className="block text-sm font-extrabold text-price">{money(total)}</span>
+        <span className={`text-[10.5px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full ${estiloEstado(r.estado)}`}>{r.estado_label}</span>
+        <span className="text-[12.5px] text-mute">renta {MOD[r.modalidad] || r.modalidad}</span>
+        <span className="ml-auto flex items-baseline gap-2">
+          <span className="text-sm font-extrabold text-price tabular-nums">{money(total)}</span>
           {r.estado !== 'cancelada' && total > 0 && (
             saldo > 0
-              ? <span className="block text-[12px] font-bold text-amber-600 dark:text-amber-400 mt-0.5">Restan {money(saldo)}</span>
-              : <span className="block text-[12px] font-bold text-libre mt-0.5">Pagada</span>
+              ? <span className="text-[11.5px] font-bold text-amber-600 dark:text-amber-400 whitespace-nowrap">· restan {money(saldo)}</span>
+              : <span className="text-[11.5px] font-bold text-libre">· pagada</span>
           )}
         </span>
       </div>
-      <div className="mt-2.5 flex items-center gap-2 text-[13px] text-mute">
-        <CalendarClock className="h-4 w-4 shrink-0" />
-        <span>Del {fecha(r.fecha_inicio)} al {fecha(r.fecha_fin)}</span>
+      {/* Línea 2: fechas, orden y dirección — con Detalle al final, sin filas extra */}
+      <div className="mt-1.5 flex items-center gap-2 text-[12.5px] text-mute min-w-0">
+        <CalendarClock className="h-3.5 w-3.5 shrink-0" />
+        <span className="whitespace-nowrap">Del {fecha(r.fecha_inicio)} al {fecha(r.fecha_fin)}</span>
         <button
           onClick={async () => {
             try {
@@ -73,18 +75,16 @@ function Tarjeta({ r, i }: { r: RentaMia; i: number }) {
               descargarBlob(res.data as Blob, `orden-renta-${r.id}.pdf`)
             } catch { /* sin permiso o red: el interceptor avisa */ }
           }}
-          className="text-gold font-semibold hover:opacity-80 transition-opacity">↓ Orden (PDF)</button>
+          className="text-gold font-semibold hover:opacity-80 transition-opacity whitespace-nowrap shrink-0">↓ Orden</button>
+        {r.direccion && <span className="truncate min-w-0">· {r.direccion}</span>}
+        {r.estado !== 'cancelada' && total > 0 && (
+          <button onClick={() => setAbierto(v => !v)}
+            className="ml-auto shrink-0 inline-flex items-center gap-1 text-[12px] font-bold text-gold hover:opacity-80 transition-opacity">
+            {abierto ? 'Ocultar' : 'Detalle'}
+            <svg className={`w-3 h-3 transition-transform ${abierto ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9l6 6 6-6" /></svg>
+          </button>
+        )}
       </div>
-      {r.direccion && <p className="mt-1.5 text-[12.5px] text-mute leading-relaxed">{r.direccion}</p>}
-
-      {/* Desglose bajo demanda: la tarjeta queda limpia y el detalle a un toque. */}
-      {r.estado !== 'cancelada' && total > 0 && (
-        <button onClick={() => setAbierto(v => !v)}
-          className="mt-3 inline-flex items-center gap-1.5 text-[12.5px] font-bold text-gold hover:opacity-80 transition-opacity">
-          {abierto ? 'Ocultar' : 'Detalle'}
-          <svg className={`w-3.5 h-3.5 transition-transform ${abierto ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9l6 6 6-6" /></svg>
-        </button>
-      )}
       {abierto && r.estado !== 'cancelada' && total > 0 && (
         <div className="mt-2 pt-3 border-t border-edge">
           <div className="flex items-center justify-between gap-3">
