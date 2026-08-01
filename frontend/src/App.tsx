@@ -73,7 +73,7 @@ function App() {
           <div
             /* pb en móvil: reserva el alto del dock flotante para que no tape el
                final del contenido. En md+ el dock no existe, así que sin padding. */
-            className="min-h-screen flex flex-col bg-[#080808] text-white pb-24 md:pb-0"
+            className="min-h-screen flex flex-col bg-app text-ink pb-24 md:pb-0"
             style={{ ['--c-gold' as any]: '#f2b736', ['--c-gold-soft' as any]: 'rgba(242,183,54,0.14)' }}
           >
             <Navbar />
