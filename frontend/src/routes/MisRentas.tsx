@@ -26,6 +26,13 @@ type RentaMia = {
 
 const money = formatMoney
 const fecha = (s: string) => (s ? new Date(s + 'T00:00:00').toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }) : '—')
+/* Fechas de pagos: llegan como día suelto (AAAA-MM-DD) o como ISO completo con
+   hora; esta las traga ambas (el día suelto anclado a mediodía para que la
+   zona horaria no lo corra). */
+const fechaPago = (s: string) => {
+  const d = new Date(s && s.length === 10 ? `${s}T12:00:00` : s)
+  return isNaN(d.getTime()) ? '—' : d.toLocaleDateString('es-MX', { day: '2-digit', month: 'short' })
+}
 const MOD: Record<string, string> = { dia: 'por día', semana: 'por semana', mes: 'por mes' }
 
 function estiloEstado(estado: string) {
@@ -79,7 +86,7 @@ function Tarjeta({ r, i }: { r: RentaMia; i: number }) {
             <div className="mt-2 space-y-1 text-[12px]">
               {r.pagos!.map((p, j) => (
                 <div key={j} className="flex justify-between gap-3">
-                  <span className="text-mute">{fecha(p.fecha.length === 10 ? `${p.fecha}T12:00:00` : p.fecha)} · <span className="capitalize">{p.metodo}</span></span>
+                  <span className="text-mute">{fechaPago(p.fecha)} · <span className="capitalize">{p.metodo}</span></span>
                   <span className="text-ink font-semibold tabular-nums">{money(Number(p.monto))}</span>
                 </div>
               ))}
