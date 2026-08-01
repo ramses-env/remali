@@ -55,12 +55,12 @@ function Tarjeta({ r, i }: { r: RentaMia; i: number }) {
         <span className="text-sm font-extrabold text-ink">{r.equipo || 'Equipo'}</span>
         <span className={`text-[10.5px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full ${estiloEstado(r.estado)}`}>{r.estado_label}</span>
         <span className="text-[12.5px] text-mute">renta {MOD[r.modalidad] || r.modalidad}</span>
-        <span className="ml-auto flex items-baseline gap-2">
+        <span className="ml-auto flex items-center gap-2.5">
           <span className="text-sm font-extrabold text-price tabular-nums">{money(total)}</span>
           {r.estado !== 'cancelada' && total > 0 && (
             saldo > 0
-              ? <span className="text-[11.5px] font-bold text-amber-600 dark:text-amber-400 whitespace-nowrap">· restan {money(saldo)}</span>
-              : <span className="text-[11.5px] font-bold text-libre">· pagada</span>
+              ? <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 whitespace-nowrap">Restan {money(saldo)}</span>
+              : <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-libre/10 text-libre">Pagada</span>
           )}
         </span>
       </div>
