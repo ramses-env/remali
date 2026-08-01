@@ -556,6 +556,11 @@ def confirmar_entrega(request, pk: int):
     r.entregada_en = timezone.now()
     r.entregada_por = request.user if request.user.is_authenticated else None
     r.save(update_fields=['entregada_en', 'entregada_por', 'actualizado_en'])
+    # Entregada = la renta ya corre: si era RESERVA, pasa a activa y ocupa la
+    # unidad ahí mismo, sin esperar al cron de la fecha de inicio. Las fechas
+    # pactadas no se mueven (el vencimiento sigue siendo el acordado).
+    if r.estado == 'reservada':
+        r.activar()
     _avisar_movimiento(r, 'entregó', request.user)
     # Aviso PERSONAL al cliente ligado a la renta.
     if r.usuario_id:
