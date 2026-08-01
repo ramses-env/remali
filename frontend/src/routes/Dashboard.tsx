@@ -5722,7 +5722,12 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
       notify('Agrega el nombre del cliente y al menos un concepto primero', 'err'); return
     }
     api.patch<Cotizacion>(`/cotizaciones/${c.id}/`, { estado })
-      .then(r => { apply(r.data); notify(`Estado: ${cotEstadoMeta(estado).label}`) })
+      .then(r => {
+        apply(r.data)
+        notify(`Estado: ${cotEstadoMeta(estado).label}`)
+        // El siguiente paso natural: comprometer fecha y hora de entrega.
+        if (estado === 'aceptada' && !r.data.entrega_prometida) notify('Ahora indica la fecha y hora de entrega prometida', 'info')
+      })
       .catch(() => notify('No se pudo cambiar el estado', 'err'))
   }
   function aprobarCancelacion() {
@@ -5992,7 +5997,21 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
                   Marcar como enviada
                 </button>
               )}
-              {!bloqueada && c.estado === 'enviada' && (
+              {!bloqueada && c.estado === 'enviada' && (c.origen === 'cliente' ? (
+                /* Tubería AUTOMÁTICA (la mandó el cliente): administración solo
+                   confirma disponibilidad; el aviso a su campanita sale solo y
+                   después nada más falta fecha/hora de entrega y convertir. */
+                <div className="mt-2.5 flex gap-2">
+                  <button onClick={() => cambiarEstado('aceptada')} className="h-10 px-4 rounded-full bg-emerald-600 text-white text-[13px] font-bold hover:bg-emerald-700 transition-colors">
+                    Hay disponibilidad — aceptar
+                  </button>
+                  <button onClick={() => cambiarEstado('rechazada')} className="h-10 px-4 rounded-full text-red-600 dark:text-red-400 text-[13px] font-bold hover:bg-red-500/10 transition-colors">
+                    Sin disponibilidad
+                  </button>
+                </div>
+              ) : (
+                /* Tubería MANUAL (la capturaste tú para alguien sin cuenta):
+                   el estado sigue lo que el cliente diga por teléfono/WhatsApp. */
                 <div className="mt-2.5 flex gap-2">
                   <button onClick={() => cambiarEstado('aceptada')} className="h-10 px-4 rounded-full bg-emerald-600 text-white text-[13px] font-bold hover:bg-emerald-700 transition-colors">
                     El cliente la aceptó
@@ -6001,7 +6020,7 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
                     Rechazar
                   </button>
                 </div>
-              )}
+              ))}
               {/* Vino autorizada por el jefe del cliente: dinero ya aprobado. */}
               {c.autorizada_por && !c.autorizacion_rechazo && (
                 <div className="mt-2 inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 text-[12.5px] font-bold">
