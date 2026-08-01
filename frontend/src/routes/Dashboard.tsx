@@ -6495,6 +6495,7 @@ type TipoTarea = 'entregar' | 'recoger' | 'reparar'
 
 type Tarea = {
   tipo: TipoTarea; urgencia: Urgencia; etiqueta: string
+  adeudo?: string | null
   equipo: string; codigo: string; numero_serie?: string
   // Campos de renta (entregar / recoger)
   renta_id?: number; lugar?: string; obra?: string | null
@@ -6665,6 +6666,13 @@ function TareaCard({ t, atenuada, onEntregar, onReparar }: {
                   {t.obra ? <span><b className="font-bold">{t.obra}</b> · {t.lugar}</span> : t.lugar}
                 </p>
                 {t.contacto && <p className="text-[12.5px] text-mute pl-5">{t.contacto}{t.empresa ? ` · ${t.empresa}` : ''}</p>}
+                {/* Adeudo: la única cifra que el técnico SÍ ve — al recoger, cobra. */}
+                {t.tipo === 'recoger' && t.adeudo && (
+                  <p className="mt-2 inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-red-500/10 border border-red-500/30 text-[13px] font-bold text-red-600 dark:text-red-400">
+                    <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round"><path d="M12 7v6" /><circle cx="12" cy="17" r="0.6" className="fill-current" /></svg>
+                    Adeudo: cobrar ${Number(t.adeudo).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                  </p>
+                )}
               </div>
             ) : (
               <div className="mt-2">

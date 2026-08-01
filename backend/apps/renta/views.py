@@ -666,7 +666,12 @@ def mis_tareas(request):
               .select_related('inventario', 'inventario__equipo', 'empresa', 'obra', 'usuario')
               .prefetch_related('evidencias'))
 
+    from decimal import Decimal as _D
     for r in rentas:
+        # Adeudo: lo ÚNICO de dinero que el técnico sí debe ver — si recoge y
+        # el cliente no ha liquidado, tiene que saber cuánto cobrar en campo.
+        pagado = sum((_D(str(p.get('monto', 0))) for p in (r.pagos or [])), _D('0'))
+        saldo = max((r.total or _D('0')) + (r.recargo or _D('0')) - pagado, _D('0'))
         base = {
             'renta_id': r.id,
             'equipo': r.inventario.equipo.modelo if r.inventario.equipo else 'Equipo',
@@ -675,6 +680,7 @@ def mis_tareas(request):
             'fecha_inicio': r.fecha_inicio,
             'fecha_fin': r.fecha_fin,
             'evidencias': _contar_evidencias(r),
+            'adeudo': str(saldo) if saldo > 0 else None,
             **_lugar_de(r),
         }
 
