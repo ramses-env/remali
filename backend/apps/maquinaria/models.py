@@ -483,6 +483,11 @@ def nombre_propio(texto):
     palabras = (texto or '').strip().split()
     out = []
     for i, p in enumerate(palabras):
+        # Siglas cortas en mayúsculas (CSI, MG, SA, CV, ABC) se respetan:
+        # "CSI MG" no debe volverse "Csi Mg".
+        if p.isupper() and p.isalpha() and len(p) <= 3:
+            out.append(p)
+            continue
         pl = p.lower()
         out.append(pl if (i > 0 and pl in conectores) else (pl[:1].upper() + pl[1:]))
     return ' '.join(out)

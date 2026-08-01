@@ -114,6 +114,11 @@ class Cotizacion(models.Model):
         return f'COT-{n:04d}'
 
     def save(self, *args, **kwargs):
+        # Regla de la casa: los nombres entran como nombre propio, se capturen
+        # donde se capturen (tienda, panel, API). Siglas cortas se respetan.
+        if self.cliente_nombre:
+            from maquinaria.models import nombre_propio
+            self.cliente_nombre = nombre_propio(self.cliente_nombre)
         # El folio nace cuando la cotización se vuelve REAL (deja el borrador),
         # no al abrir el modal: así los borradores abandonados no consumen
         # folios ni dejan huecos, y dos admins no compiten por el número.

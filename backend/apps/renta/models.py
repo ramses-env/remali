@@ -218,6 +218,9 @@ class Renta(models.Model):
     # ─────────────────────────────────────────────
     @transaction.atomic
     def save(self, *args, **kwargs):
+        if self.cliente:
+            from maquinaria.models import nombre_propio
+            self.cliente = nombre_propio(self.cliente)
         es_nueva = self.pk is None
         if not self.fecha_fin:
             self.fecha_fin = self.calcular_fecha_fin()

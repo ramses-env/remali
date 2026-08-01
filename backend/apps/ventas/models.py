@@ -119,6 +119,9 @@ class Venta(models.Model):
 
     @transaction.atomic
     def save(self, *args, **kwargs):
+        if self.nombre_cliente:
+            from maquinaria.models import nombre_propio
+            self.nombre_cliente = nombre_propio(self.nombre_cliente)
         es_nueva = self.pk is None
 
         # Invariante de negocio: toda venta lleva IVA. El flag de factura solo
