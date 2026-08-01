@@ -3203,7 +3203,7 @@ function RentaDetalleModal({ renta: r, onClose, onTicket }: { renta: RentaFull; 
       inputMode: 'fecha', valor: hoyISO,
     })
     if (fecha === null) return
-    if (fecha && fecha > hoyISO) { notify('La fecha del abono no puede ser futura', 'err'); return }
+    if (fecha && fecha > hoyISO) { await confirmar({ titulo: 'Fecha futura', mensaje: 'La fecha del abono no puede ser futura.', aceptar: 'Entendido' }); return }
     try {
       const resp = await api.post<{ renta: RentaFull }>(`/rentas/${r.id}/abonos/`, { monto, metodo: met[0], fecha: fecha || undefined })
       setPagos(resp.data.renta.pagos || [])
