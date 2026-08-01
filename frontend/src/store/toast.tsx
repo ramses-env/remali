@@ -1,4 +1,5 @@
-import { createContext, useContext, useState } from 'react'
+import { createContext, useContext, useEffect, useState } from 'react'
+import { conectarAvisos } from '../lib/avisos'
 import { AnimatePresence, motion } from 'framer-motion'
 
 /* Alertas de la casa: barra gris (surface-2) con círculo de color según el
@@ -15,6 +16,10 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     setToasts(t => [...t, { id, message, kind }])
     setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 2600)
   }
+  // Los errores globales del interceptor (red, 500, permisos) también se
+  // pintan aquí: el cliente ve los mismos avisos que el panel.
+  useEffect(() => conectarAvisos(m => notify(m, 'x')), [])  // eslint-disable-line react-hooks/exhaustive-deps
+
   return (
     <ToastContext.Provider value={{ notify }}>
       {children}

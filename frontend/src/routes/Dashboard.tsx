@@ -22,6 +22,7 @@ import { invalidarConfigPublica } from '../lib/configPublica'
 import { AnimatePresence, motion } from 'framer-motion'
 import { useRecurso, invalidar, type Tema } from '../lib/realtime'
 import { useLatidoPanel } from '../lib/latido'
+import { conectarAvisos } from '../lib/avisos'
 import { CLAVE_NIVEL, recordarAcceso, ProveedorPermisos, usePuede, type Capacidades } from '../lib/acceso'
 import { buildTestTicket } from '../lib/escpos'
 import { METODOS, metodoSoportado, imprimirTermico, vincularMetodo, metodoVinculado, infoMetodo } from '../lib/printer'
@@ -543,6 +544,8 @@ export default function Dashboard() {
   // otro admin edita un producto o registra una renta) llega solo en ~2 s,
   // y solo se recarga el tema que de verdad cambió.
   useLatidoPanel('/latido/', 2_000, temas => invalidar(...(temas as Tema[])))
+  // Errores globales del interceptor (red, 500, permisos) → la pila de alertas.
+  useEffect(() => conectarAvisos(m => notify(m, 'err')), [])  // eslint-disable-line react-hooks/exhaustive-deps
   useRecurso(['ventas'], loadVentas)
   useRecurso(['empresas'], loadEmpresas)
 

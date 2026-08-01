@@ -2,6 +2,7 @@ import axios from 'axios'
 import { notificarMutacion } from './realtime'
 import { borrarToken, leerToken } from './token'
 import { empiezaPeticion, terminaPeticion } from './cargando'
+import { avisar } from './avisos'
 
 /* Peticiones que NO deben encender el indicador global de carga. Un indicador
    que se enciende sin que el usuario haya pedido nada enseña a ignorarlo, y
@@ -75,6 +76,18 @@ api.interceptors.response.use(
       const path = window.location.pathname
       if (!path.startsWith('/login')) {
         window.location.href = `/login?next=${encodeURIComponent(path)}&expired=1`
+      }
+    }
+    // Avisos GLOBALES (tienda y panel por igual): solo lo que ningún componente
+    // va a contar — red caída, errores del servidor y permisos. Los 400 de
+    // validación son de cada formulario, y los sondeos de fondo no molestan.
+    if (!esDeFondo(error?.config) && status !== 401) {
+      if (!error?.response) {
+        avisar('Sin conexión con REMALI. Revisa tu internet e inténtalo de nuevo.')
+      } else if (status >= 500) {
+        avisar('Algo falló de nuestro lado. Inténtalo de nuevo en un momento.')
+      } else if (status === 403) {
+        avisar(error.response?.data?.detalle || error.response?.data?.detail || 'No tienes permiso para hacer eso.')
       }
     }
     return Promise.reject(error)
