@@ -19,6 +19,9 @@ type RentaMia = {
   fecha_fin: string
   total: string
   direccion: string
+  pagos?: { fecha: string; monto: string; metodo: string }[]
+  pagado?: string
+  saldo?: string
 }
 
 const money = formatMoney
@@ -55,6 +58,39 @@ function Tarjeta({ r, i }: { r: RentaMia; i: number }) {
           className="text-gold font-semibold hover:opacity-80 transition-opacity">↓ Orden (PDF)</button>
       </div>
       {r.direccion && <p className="mt-1.5 text-[12.5px] text-mute leading-relaxed">{r.direccion}</p>}
+
+      {/* Sus pagos: cuánto lleva abonado y cuánto falta, sin llamar a preguntar. */}
+      {r.estado !== 'cancelada' && Number(r.total) > 0 && (
+        <div className="mt-3 pt-3 border-t border-edge">
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-[11px] font-bold uppercase tracking-wide text-mute">Pagos</span>
+            {Number(r.saldo || 0) <= 0 ? (
+              <span className="inline-flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1 rounded-full bg-libre/10 text-libre">
+                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="3"><path d="M5 13l4 4L19 7" /></svg>
+                Pagada
+              </span>
+            ) : (
+              <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 whitespace-nowrap">
+                Saldo pendiente {money(Number(r.saldo))}
+              </span>
+            )}
+          </div>
+          {(r.pagos?.length || 0) > 0 && (
+            <div className="mt-2 space-y-1 text-[12px]">
+              {r.pagos!.map((p, j) => (
+                <div key={j} className="flex justify-between gap-3">
+                  <span className="text-mute">{fecha(p.fecha.length === 10 ? `${p.fecha}T12:00:00` : p.fecha)} · <span className="capitalize">{p.metodo}</span></span>
+                  <span className="text-ink font-semibold tabular-nums">{money(Number(p.monto))}</span>
+                </div>
+              ))}
+              <div className="flex justify-between gap-3 pt-1 border-t border-edge">
+                <span className="text-mute font-semibold">Pagado</span>
+                <span className="text-ink font-bold tabular-nums">{money(Number(r.pagado || 0))}</span>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }

@@ -803,10 +803,14 @@ def rentas_mias(request):
           .filter(usuario=request.user)
           .select_related('inventario__equipo')
           .order_by('-creado_en')[:100])
+    from decimal import Decimal as _D
     data = []
     for r in qs:
         eq = getattr(getattr(r.inventario, 'equipo', None), 'modelo', '') if r.inventario_id else ''
         vencida = r.estado == 'activa' and r.fecha_fin and r.fecha_fin < hoy
+        # El cliente ve SUS abonos y su saldo: transparencia de cuánto lleva.
+        pagado = sum((_D(str(p.get('monto', 0))) for p in (r.pagos or [])), _D('0'))
+        saldo = max((r.total or _D('0')) + (r.recargo or _D('0')) - pagado, _D('0'))
         data.append({
             'id': r.id,
             'equipo': eq,
@@ -817,5 +821,8 @@ def rentas_mias(request):
             'fecha_fin': r.fecha_fin,
             'total': str(r.total),
             'direccion': r.direccion,
+            'pagos': [{'fecha': p.get('fecha'), 'monto': p.get('monto'), 'metodo': p.get('metodo')} for p in (r.pagos or [])],
+            'pagado': str(pagado),
+            'saldo': str(saldo),
         })
     return Response({'rentas': data})
