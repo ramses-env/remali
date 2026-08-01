@@ -2940,6 +2940,7 @@ type RentaFull = RentaActiva & {
   cuenta?: string | null
   pagos?: { fecha: string; monto: string; metodo: string; por?: string }[]
   pagado?: string; saldo?: string
+  factura_estado?: string | null
   estado?: string; modalidad: string; duracion?: number
   fecha_inicio?: string; fecha_devolucion_real?: string | null
   total?: string; subtotal?: string; precio_unitario?: string; descuento?: string; deposito?: string; recargo?: string
@@ -3280,6 +3281,19 @@ function RentaDetalleModal({ renta: r, onClose, onTicket }: { renta: RentaFull; 
       setAbonando(false)
     } catch { /* el interceptor avisa */ }
   }
+  // Bandeja de facturación: el timbrado es externo; desde aquí solo se manda.
+  const [factura, setFactura] = useState<string | null>(r.factura_estado ?? null)
+  const [mandandoFactura, setMandandoFactura] = useState(false)
+  async function mandarPorFacturar() {
+    setMandandoFactura(true)
+    try {
+      await api.post(`/rentas/${r.id}/por-facturar/`, {})
+      setFactura('pendiente')
+    } catch (e) {
+      const detalle = (e as { response?: { data?: { detalle?: string } } })?.response?.data?.detalle
+      if (detalle) await confirmar({ titulo: 'Facturación', mensaje: detalle, aceptar: 'Entendido' })
+    } finally { setMandandoFactura(false) }
+  }
   const [liga, setLiga] = useState('')
   const [genLiga, setGenLiga] = useState(false)
   const [copiado, setCopiado] = useState(false)
@@ -3346,6 +3360,11 @@ function RentaDetalleModal({ renta: r, onClose, onTicket }: { renta: RentaFull; 
             <div className="flex items-center gap-2 mb-2.5">
               <span className="text-[10.5px] font-bold tracking-[0.5px] text-mute">DETALLE DE RENTA</span>
               <span className={`text-[10.5px] px-2.5 py-[3px] rounded-md font-bold ${chip.cls}`}>{chip.label}</span>
+              {factura && (
+                <span className={`text-[10.5px] px-2.5 py-[3px] rounded-md font-bold ${factura === 'facturada' ? 'bg-violet-500/10 text-violet-600' : 'bg-amber-500/10 text-amber-600'}`}>
+                  {factura === 'facturada' ? 'FACTURADA' : 'POR FACTURAR'}
+                </span>
+              )}
             </div>
             <h2 className="text-[20px] font-extrabold text-ink truncate">{r.inventario.equipo || 'Equipo'}</h2>
             <p className="font-mono text-[12.5px] text-mute mt-0.5">{r.inventario.codigo}{r.inventario.numero_serie ? ` · S/N ${r.inventario.numero_serie}` : ''}</p>
@@ -3468,6 +3487,28 @@ function RentaDetalleModal({ renta: r, onClose, onTicket }: { renta: RentaFull; 
                 <button onClick={() => setAbonando(true)}
                   className="mt-1 px-3.5 py-2 rounded-[9px] border border-edge text-[12px] font-bold text-ink hover:border-gold/50 hover:text-gold transition-colors">
                   + Registrar abono
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* FACTURACIÓN: el timbrado es externo; aquí solo se manda a la bandeja */}
+          <div className="px-6 sm:px-[26px] py-[18px] border-t border-edge">
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <div className="min-w-0 flex-1">
+                <p className="text-[11px] font-extrabold tracking-[0.5px] text-gold">FACTURACIÓN</p>
+                <p className="text-[12px] text-mute mt-1 leading-relaxed">
+                  {factura === 'facturada'
+                    ? 'Factura emitida; quedó registrada en la bandeja.'
+                    : factura
+                      ? 'Está en la bandeja Por facturar. Se timbra afuera y ahí se marca.'
+                      : 'Si el cliente pide factura, mándala a la bandeja: sus datos fiscales se toman de su cuenta.'}
+                </p>
+              </div>
+              {!factura && r.estado !== 'cancelada' && (
+                <button onClick={mandarPorFacturar} disabled={mandandoFactura}
+                  className="px-3.5 py-2 rounded-[9px] border border-amber-500/40 bg-amber-500/10 text-[12px] font-bold text-amber-700 dark:text-amber-500 hover:bg-amber-500/20 transition-colors whitespace-nowrap disabled:opacity-50">
+                  {mandandoFactura ? 'Mandando…' : 'Mandar a Por facturar'}
                 </button>
               )}
             </div>

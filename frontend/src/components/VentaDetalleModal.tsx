@@ -17,6 +17,7 @@ type VentaLike = {
   telefono_cliente?: string | null
   cuenta?: string | null
   unidad?: { codigo: string; equipo?: string | null } | null
+  factura_estado?: string | null
   origen?: { folio: string; resumen: string } | null
 }
 
@@ -37,7 +38,25 @@ export default function VentaDetalleModal({ venta, onClose, onChanged, notify }:
   const [cancelando, setCancelando] = useState(false)
   const [copiado, setCopiado] = useState(false)
   const [pdf, setPdf] = useState(false)
+  // Estado en la bandeja de facturación; local para que el chip aparezca al
+  // instante al mandarla, sin esperar el refetch de la lista.
+  const [factura, setFactura] = useState<string | null>(venta.factura_estado ?? null)
+  const [mandando, setMandando] = useState(false)
   const cancelada = venta.estado === 'cancelada'
+
+  const mandarPorFacturar = async () => {
+    setMandando(true)
+    try {
+      await api.post(`/ventas/${venta.id}/por-facturar/`, {}, { fondo: true } as never)
+      setFactura('pendiente')
+      notify('En la bandeja Por facturar')
+      onChanged()
+    } catch (e: unknown) {
+      notify((e as { response?: { data?: { detalle?: string } } })?.response?.data?.detalle || 'No se pudo mandar a facturar', 'err')
+    } finally {
+      setMandando(false)
+    }
+  }
 
   const generarLiga = async () => {
     if (liga || generando) return
@@ -120,6 +139,11 @@ export default function VentaDetalleModal({ venta, onClose, onChanged, notify }:
               <span className={`text-[12px] font-bold tracking-[0.04em] px-2.5 py-[5px] rounded-full ${cancelada ? 'bg-red-500/10 text-red-500' : 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400'}`}>
                 {cancelada ? 'CANCELADA' : 'ACTIVA'}
               </span>
+              {factura && (
+                <span className={`text-[12px] font-bold tracking-[0.04em] px-2.5 py-[5px] rounded-full ${factura === 'facturada' ? 'bg-violet-500/15 text-violet-700 dark:text-violet-400' : 'bg-amber-500/15 text-amber-700 dark:text-amber-400'}`}>
+                  {factura === 'facturada' ? 'FACTURADA' : 'POR FACTURAR'}
+                </span>
+              )}
             </div>
             <div className="text-[13.5px] text-mute mt-1.5">{cuandoQuien}</div>
           </div>
@@ -208,6 +232,12 @@ export default function VentaDetalleModal({ venta, onClose, onChanged, notify }:
               className="h-[44px] px-4 rounded-[12px] border border-edge bg-surface text-[14px] font-semibold text-ink hover:bg-surface-2 transition-colors whitespace-nowrap disabled:opacity-50">
               {pdf ? 'Abriendo…' : '↓ Orden carta (PDF)'}
             </button>
+            {!cancelada && !factura && (
+              <button onClick={mandarPorFacturar} disabled={mandando}
+                className="h-[44px] px-4 rounded-[12px] border border-amber-500/40 bg-amber-500/10 text-[14px] font-semibold text-amber-700 dark:text-amber-400 hover:bg-amber-500/20 transition-colors whitespace-nowrap disabled:opacity-50">
+                {mandando ? 'Mandando…' : 'Mandar a Por facturar'}
+              </button>
+            )}
             {!cancelada && (
               <button onClick={() => setConfirmando(true)}
                 className="h-[44px] px-4 rounded-[12px] text-[14px] font-semibold text-red-600 dark:text-red-400 hover:bg-red-500/10 transition-colors whitespace-nowrap">

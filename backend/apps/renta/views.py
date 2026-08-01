@@ -63,6 +63,8 @@ def _serialize_renta(r: Renta, ver_dinero: bool = True):
         # Cuenta de cliente vinculada (para "Tus rentas"); None = sin vincular.
         'cuenta': ((f'{r.usuario.first_name} {r.usuario.last_name}'.strip()
                     or r.usuario.get_username()) if r.usuario_id else None),
+        # Estado en la bandeja de facturación (None = nadie la ha pedido).
+        'factura_estado': next((s.estado for s in r.solicitudes_factura.all() if s.estado != 'cancelada'), None),
         # Abonos y saldo: cuánto ha entregado el cliente y cuánto falta.
         'pagos': r.pagos or [],
         'pagado': str(pagado),
@@ -151,11 +153,48 @@ def listar_rentas(request):
     estado = request.query_params.get('estado') or 'activa'
     qs = Renta.objects.all().select_related(
         'inventario', 'inventario__equipo', 'empresa', 'obra', 'usuario'
-    ).prefetch_related('evidencias')   # sin esto, contar las fotos sería 1 query por renta
+    ).prefetch_related('evidencias', 'solicitudes_factura')   # sin esto, contar las fotos sería 1 query por renta
     if estado in ('reservada', 'activa', 'finalizada', 'cancelada'):
         qs = qs.filter(estado=estado)
     data = [_serialize_renta(r) for r in qs.order_by('-creado_en')]
     return Response({'rentas': data})
+
+
+@api_view(['POST'])
+@permission_classes([EsOperador])
+def mandar_por_facturar_renta(request, pk):
+    """Manda una renta YA registrada a la bandeja "Por facturar".
+
+    Las rentas se cobran sin IVA; al facturar se desglosa +16%. El snapshot
+    fiscal sale del perfil del cliente vinculado; el resto se completa en
+    la bandeja antes de timbrar afuera."""
+    from decimal import Decimal
+    from facturacion.models import SolicitudFactura
+    r = Renta.objects.select_related('usuario', 'empresa', 'inventario__equipo').filter(pk=pk).first()
+    if not r:
+        return Response({'detalle': 'Renta no encontrada'}, status=404)
+    if r.estado == 'cancelada':
+        return Response({'detalle': 'La renta está cancelada.'}, status=400)
+    if r.solicitudes_factura.exclude(estado='cancelada').exists():
+        return Response({'detalle': 'Ya está en la bandeja de facturación.', 'ya': True})
+    perfil = getattr(r.usuario, 'perfil', None) if r.usuario_id else None
+    base = (r.total or Decimal('0')) + (r.recargo or Decimal('0'))
+    iva = (base * Decimal('0.16')).quantize(Decimal('0.01'))
+    ult = (r.pagos or [{}])[-1].get('metodo', '') if r.pagos else ''
+    fp = {'efectivo': '01', 'transferencia': '03', 'tarjeta': '04'}.get(ult, '')
+    eq = r.inventario.equipo.modelo if r.inventario_id and r.inventario.equipo_id else 'Equipo'
+    s = SolicitudFactura.objects.create(
+        tipo='renta', renta=r, empresa=r.empresa if r.empresa_id else None,
+        rfc=getattr(perfil, 'fiscal_rfc', '') or '',
+        razon_social=getattr(perfil, 'fiscal_razon_social', '') or '',
+        codigo_postal=getattr(perfil, 'fiscal_cp', '') or '',
+        regimen_fiscal=getattr(perfil, 'fiscal_regimen', '') or '',
+        uso_cfdi=getattr(perfil, 'fiscal_uso_cfdi', '') or '',
+        email=getattr(perfil, 'fiscal_email', '') or (r.usuario.email if r.usuario_id else ''),
+        subtotal=base, iva=iva, total=base + iva, forma_pago=fp,
+        concepto=f'Renta de {eq}',
+    )
+    return Response({'detalle': 'En la bandeja Por facturar.', 'solicitud_id': s.id}, status=201)
 
 
 @api_view(['POST'])
@@ -297,7 +336,7 @@ def alertas_renta(request):
     hoy = timezone.localdate()
     qs = Renta.objects.filter(
         estado='activa', fecha_fin__lt=hoy
-    ).select_related('inventario', 'inventario__equipo', 'empresa', 'obra', 'usuario').prefetch_related('evidencias')
+    ).select_related('inventario', 'inventario__equipo', 'empresa', 'obra', 'usuario').prefetch_related('evidencias', 'solicitudes_factura')
     data = [_serialize_renta(r) for r in qs]
     return Response({'alertas': data, 'total': len(data)})
 
@@ -688,7 +727,7 @@ def mis_tareas(request):
     rentas = (Renta.objects
               .filter(estado__in=['activa', 'reservada'])
               .select_related('inventario', 'inventario__equipo', 'empresa', 'obra', 'usuario')
-              .prefetch_related('evidencias'))
+              .prefetch_related('evidencias', 'solicitudes_factura'))
 
     from decimal import Decimal as _D
     for r in rentas:

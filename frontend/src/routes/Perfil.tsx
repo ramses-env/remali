@@ -3,7 +3,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import * as z from 'zod'
-import { BadgePercent, CalendarClock, Check, Copy, Eye, EyeOff, FileText, Loader2, Lock, Mail, ShieldCheck, ShoppingBag, TriangleAlert, User } from 'lucide-react'
+import { BadgePercent, CalendarClock, Check, Copy, Eye, EyeOff, FileText, Loader2, Lock, Mail, ReceiptText, ShieldCheck, ShoppingBag, TriangleAlert, User } from 'lucide-react'
 
 import api from '../lib/api'
 import Migas from '../components/Migas'
@@ -41,6 +41,30 @@ const esquemaPassword = z
   })
 type ValoresPassword = z.infer<typeof esquemaPassword>
 
+/* Todo opcional: facturar es una decisión del cliente, no un requisito. Pero lo
+   que sí escriba debe estar bien — un RFC chueco truena hasta en el timbrado. */
+const esquemaFiscal = z.object({
+  fiscal_razon_social: z.string().trim().max(200).optional(),
+  fiscal_rfc: z
+    .string()
+    .trim()
+    .optional()
+    .refine(v => !v || /^[A-ZÑ&]{3,4}\d{6}[A-Z0-9]{3}$/i.test(v), { message: 'Revisa el RFC (12 o 13 caracteres).' }),
+  fiscal_regimen: z.string().optional(),
+  fiscal_cp: z
+    .string()
+    .trim()
+    .optional()
+    .refine(v => !v || /^\d{5}$/.test(v), { message: 'Son 5 dígitos.' }),
+  fiscal_uso_cfdi: z.string().optional(),
+  fiscal_email: z
+    .string()
+    .trim()
+    .optional()
+    .refine(v => !v || /.+@.+\..+/.test(v), { message: 'Revisa el correo.' }),
+})
+type ValoresFiscal = z.infer<typeof esquemaFiscal>
+
 type Perfil = ValoresPerfil & {
   email?: string
   username?: string
@@ -50,7 +74,7 @@ type Perfil = ValoresPerfil & {
   email_verificado?: boolean
   perfil_verificado?: boolean
   cupon?: { codigo: string; descuento: number } | null
-}
+} & Partial<ValoresFiscal>
 
 const CAMPO = 'h-11 rounded-xl bg-surface-2 border-edge text-ink placeholder:text-mute focus-visible:ring-gold/30'
 
@@ -60,7 +84,8 @@ export default function Perfil() {
   const [params, setParams] = useSearchParams()
   // La sección vive en la URL: así se puede volver a "Seguridad" desde el
   // historial o compartir el enlace, en vez de perderse al recargar.
-  const seccion = params.get('s') === 'seguridad' ? 'seguridad' : 'perfil'
+  const s = params.get('s')
+  const seccion = s === 'seguridad' || s === 'facturacion' ? s : 'perfil'
 
   const [cargando, setCargando] = useState(true)
   const [perfil, setPerfil] = useState<Perfil | null>(null)
@@ -92,6 +117,7 @@ export default function Perfil() {
 
   const secciones = [
     { id: 'perfil', etiqueta: 'Perfil', icono: User },
+    { id: 'facturacion', etiqueta: 'Facturación', icono: ReceiptText },
     { id: 'seguridad', etiqueta: 'Seguridad', icono: ShieldCheck },
   ] as const
 
@@ -173,6 +199,8 @@ export default function Perfil() {
         <div className="rounded-2xl border border-edge bg-surface p-6 sm:p-8">
           {seccion === 'perfil' ? (
             <PanelPerfil perfil={perfil} onGuardado={setPerfil} />
+          ) : seccion === 'facturacion' ? (
+            <PanelFacturacion perfil={perfil} onGuardado={setPerfil} />
           ) : (
             <PanelSeguridad perfil={perfil} onGuardado={setPerfil} />
           )}
@@ -381,6 +409,124 @@ function PanelPerfil({
   )
 }
 
+/* ─────────────────────── Facturación ─────────────────────── */
+
+/* Los dos catálogos del SAT que un cliente de maquinaria usa en la práctica.
+   La clave viaja tal cual a la solicitud de factura; la etiqueta es para humanos. */
+const REGIMENES = [
+  ['601', '601 · General de Ley Personas Morales'],
+  ['612', '612 · Personas Físicas con Actividades Empresariales'],
+  ['626', '626 · Régimen Simplificado de Confianza (RESICO)'],
+  ['621', '621 · Incorporación Fiscal'],
+  ['606', '606 · Arrendamiento'],
+  ['605', '605 · Sueldos y Salarios'],
+  ['616', '616 · Sin obligaciones fiscales'],
+] as const
+const USOS_CFDI = [
+  ['G03', 'G03 · Gastos en general'],
+  ['G01', 'G01 · Adquisición de mercancías'],
+  ['I08', 'I08 · Otra maquinaria y equipo'],
+  ['S01', 'S01 · Sin efectos fiscales'],
+] as const
+
+function PanelFacturacion({
+  perfil,
+  onGuardado,
+}: {
+  perfil: Perfil | null
+  onGuardado: (p: Perfil) => void
+}) {
+  const [error, setError] = useState<string | undefined>(undefined)
+  const [guardado, setGuardado] = useState(false)
+
+  const form = useForm<ValoresFiscal>({
+    resolver: zodResolver(esquemaFiscal),
+    defaultValues: {
+      fiscal_razon_social: perfil?.fiscal_razon_social || '',
+      fiscal_rfc: perfil?.fiscal_rfc || '',
+      fiscal_regimen: perfil?.fiscal_regimen || '',
+      fiscal_cp: perfil?.fiscal_cp || '',
+      fiscal_uso_cfdi: perfil?.fiscal_uso_cfdi || '',
+      fiscal_email: perfil?.fiscal_email || '',
+    },
+  })
+  const enviando = form.formState.isSubmitting
+
+  async function onSubmit(datos: ValoresFiscal) {
+    setError(undefined)
+    setGuardado(false)
+    try {
+      // El RFC viaja en mayúsculas siempre: así lo emite el SAT.
+      const r = await api.patch<Perfil>('/auth/perfil/', {
+        ...datos,
+        fiscal_rfc: (datos.fiscal_rfc || '').toUpperCase(),
+      })
+      onGuardado(r.data)
+      form.reset({ ...datos, fiscal_rfc: (datos.fiscal_rfc || '').toUpperCase() })
+      setGuardado(true)
+    } catch (err: any) {
+      setError(err?.response?.data?.detail || 'No se pudieron guardar los datos.')
+    }
+  }
+
+  return (
+    <>
+      <div className="mb-7 flex items-start gap-4">
+        <div className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-surface-2 text-gold">
+          <ReceiptText className="h-5 w-5" />
+        </div>
+        <div>
+          <h2 className="text-lg font-black tracking-tight text-ink">Datos de facturación</h2>
+          <p className="mt-1 text-sm text-mute">
+            Llénalos una sola vez. Cuando pidas factura de una renta o compra,
+            REMALI los usa tal cual — sin dictar el RFC por teléfono.
+          </p>
+        </div>
+      </div>
+
+      {error && (
+        <div className="mb-6 rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-600 dark:text-red-400">
+          {error}
+        </div>
+      )}
+
+      <Form {...form}>
+        <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-8">
+          <section className="space-y-5">
+            <Campo form={form} name="fiscal_razon_social" label="Razón social (como en tu constancia)" placeholder="CONSTRUCTORA DEL PACÍFICO SA DE CV" autoComplete="organization" disabled={enviando} />
+            <div className="grid gap-5 sm:grid-cols-2">
+              <Campo form={form} name="fiscal_rfc" label="RFC" placeholder="XAXX010101000" disabled={enviando} className="uppercase" />
+              <Campo form={form} name="fiscal_cp" label="Código postal fiscal" placeholder="39300" inputMode="numeric" maxLength={5} disabled={enviando} />
+            </div>
+            <div className="grid gap-5 sm:grid-cols-2">
+              <CampoSelect form={form} name="fiscal_regimen" label="Régimen fiscal" opciones={REGIMENES} disabled={enviando} />
+              <CampoSelect form={form} name="fiscal_uso_cfdi" label="Uso del CFDI" opciones={USOS_CFDI} disabled={enviando} />
+            </div>
+            <Campo form={form} name="fiscal_email" label="Correo para recibir facturas" placeholder="facturas@tuempresa.mx" type="email" autoComplete="email" disabled={enviando} />
+          </section>
+
+          <div className="flex flex-wrap items-center gap-4 border-t border-edge pt-6">
+            <button
+              type="submit"
+              disabled={enviando}
+              className="inline-flex h-11 items-center gap-2 rounded-full bg-gold px-7 text-sm font-bold text-gold-on transition-[transform,opacity] duration-150 hover:opacity-90 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {enviando && <Loader2 className="h-4 w-4 animate-spin" />}
+              {enviando ? 'Guardando…' : 'Guardar datos fiscales'}
+            </button>
+            {guardado && !form.formState.isDirty && (
+              <span className="inline-flex items-center gap-1.5 text-sm text-libre">
+                <Check className="h-4 w-4" />
+                Guardado
+              </span>
+            )}
+          </div>
+        </form>
+      </Form>
+    </>
+  )
+}
+
 /* ──────────────────────── Seguridad ──────────────────────── */
 
 function PanelSeguridad({
@@ -505,6 +651,33 @@ function Campo({ form, name, label, ...props }: any) {
           <FormLabel className="text-mute">{label}</FormLabel>
           <FormControl>
             <Input className={CAMPO} {...props} {...field} />
+          </FormControl>
+          <FormMessage />
+        </FormItem>
+      )}
+    />
+  )
+}
+
+function CampoSelect({ form, name, label, opciones, ...props }: any) {
+  return (
+    <FormField
+      control={form.control}
+      name={name}
+      render={({ field }: any) => (
+        <FormItem className="gap-3">
+          <FormLabel className="text-mute">{label}</FormLabel>
+          <FormControl>
+            <select
+              className={`${CAMPO} w-full appearance-none border px-3 text-sm focus-visible:outline-none ${field.value ? '' : 'text-mute'}`}
+              {...props}
+              {...field}
+            >
+              <option value="">Elegir…</option>
+              {opciones.map(([v, l]: [string, string]) => (
+                <option key={v} value={v}>{l}</option>
+              ))}
+            </select>
           </FormControl>
           <FormMessage />
         </FormItem>

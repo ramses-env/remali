@@ -42,6 +42,16 @@ class PerfilUsuario(models.Model):
         max_length=180, blank=True, default='',
         help_text='Empresa para la que trabaja el cliente (declarada por él)',
     )
+
+    # ── Datos de FACTURACIÓN del cliente (opcionales, los llena una vez) ──
+    # Al pedir factura de una compra/renta, el snapshot se arma de aquí:
+    # nadie recaptura RFCs por teléfono.
+    fiscal_razon_social = models.CharField(max_length=200, blank=True, default='')
+    fiscal_rfc = models.CharField(max_length=20, blank=True, default='')
+    fiscal_regimen = models.CharField(max_length=10, blank=True, default='', help_text='Clave SAT, ej. 601, 612, 626')
+    fiscal_cp = models.CharField(max_length=10, blank=True, default='')
+    fiscal_uso_cfdi = models.CharField(max_length=10, blank=True, default='', help_text='Clave SAT, ej. G03, P01')
+    fiscal_email = models.EmailField(blank=True, default='')
     obra_direccion = models.CharField(
         max_length=255, blank=True, default='',
         help_text='Dónde se entrega la maquinaria',

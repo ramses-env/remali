@@ -50,6 +50,7 @@ class PerfilUsuarioSerializer(serializers.ModelSerializer):
             'telefono', 'puesto', 'bio', 'avatar', 'avatar_url',
             'empresa', 'obra_direccion', 'obra_responsable', 'datos_completos', 'tiene_password',
             'email_verificado', 'perfil_verificado', 'cupon',
+            'fiscal_razon_social', 'fiscal_rfc', 'fiscal_regimen', 'fiscal_cp', 'fiscal_uso_cfdi', 'fiscal_email',
         ]
 
     def get_tiene_password(self, obj):
@@ -66,6 +67,13 @@ class PerfilUsuarioSerializer(serializers.ModelSerializer):
         if v and len(''.join(c for c in v if c.isdigit())) != 10:
             raise serializers.ValidationError('El teléfono debe tener 10 dígitos.')
         return v
+
+    def validate_fiscal_rfc(self, value):
+        """El RFC se guarda como lo emite el SAT: mayúsculas y sin espacios."""
+        return (value or '').strip().upper()
+
+    def validate_fiscal_email(self, value):
+        return (value or '').strip().lower()
 
     def get_groups(self, obj):
         return list(obj.usuario.groups.values_list('name', flat=True))

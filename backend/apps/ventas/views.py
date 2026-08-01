@@ -86,7 +86,7 @@ def listar_ventas(request):
     """Lista de ventas (incluye ventas de maquinaria con su unidad)."""
     qs = Venta.objects.all().select_related(
         'inventario', 'inventario__equipo', 'usuario', 'cliente_usuario', 'empresa', 'cotizacion'
-    ).order_by('-fecha')
+    ).prefetch_related('solicitudes_factura').order_by('-fecha')
 
     solo_maquinaria = (request.query_params.get('maquinaria') or '') in ('1', 'true', 'True')
     if solo_maquinaria:
@@ -114,6 +114,7 @@ def listar_ventas(request):
             # Cuenta de cliente ligada (por la liga de vinculación), si la hay.
             'cuenta': ((v.cliente_usuario.get_full_name() or v.cliente_usuario.username)
                        if v.cliente_usuario_id else None),
+            'factura_estado': next((s.estado for s in v.solicitudes_factura.all() if s.estado != 'cancelada'), None),
             # Sin unidad amarrada (venta desde cotización): que la columna diga
             # de qué equipo(s) fue y de qué folio nació, no un guion.
             'origen': (
@@ -177,6 +178,43 @@ def cancelar_venta(request, pk: int):
         pass
 
     return Response({'detalle': 'Venta cancelada', 'venta': {'id': v.id, 'estado': v.estado}})
+
+
+@api_view(['POST'])
+@permission_classes([IsAdminGroupOrStaff])
+def mandar_por_facturar_venta(request, pk: int):
+    """Manda una venta YA registrada a la bandeja "Por facturar".
+
+    Toda venta trae IVA, pero no todos piden factura — y muchos la piden
+    días después. El snapshot fiscal sale del perfil del cliente vinculado
+    (si lo llenó); lo que falte se completa en la bandeja."""
+    from decimal import Decimal
+    from facturacion.models import SolicitudFactura
+    v = Venta.objects.select_related('cliente_usuario', 'empresa').filter(pk=pk).first()
+    if not v:
+        return Response({'detalle': 'Venta no encontrada'}, status=404)
+    if v.estado == 'cancelada':
+        return Response({'detalle': 'La venta está cancelada.'}, status=400)
+    if v.solicitudes_factura.exclude(estado='cancelada').exists():
+        return Response({'detalle': 'Ya está en la bandeja de facturación.', 'ya': True})
+    perfil = getattr(v.cliente_usuario, 'perfil', None) if v.cliente_usuario_id else None
+    fp = {'efectivo': '01', 'transferencia': '03', 'tarjeta': '04'}.get(v.metodo_pago, '')
+    s = SolicitudFactura.objects.create(
+        tipo='venta', venta=v, empresa=v.empresa if v.empresa_id else None,
+        rfc=getattr(perfil, 'fiscal_rfc', '') or '',
+        razon_social=getattr(perfil, 'fiscal_razon_social', '') or '',
+        codigo_postal=getattr(perfil, 'fiscal_cp', '') or '',
+        regimen_fiscal=getattr(perfil, 'fiscal_regimen', '') or '',
+        uso_cfdi=getattr(perfil, 'fiscal_uso_cfdi', '') or '',
+        email=getattr(perfil, 'fiscal_email', '') or (v.cliente_usuario.email if v.cliente_usuario_id else ''),
+        # Si se cobró sin desglose (aplica_iva=False), el precio ya trae el IVA
+        # dentro: se desglosa del total cobrado, no se suma encima.
+        subtotal=v.subtotal if v.aplica_iva else (v.total / Decimal('1.16')).quantize(Decimal('0.01')),
+        iva=v.iva if v.aplica_iva else v.total - (v.total / Decimal('1.16')).quantize(Decimal('0.01')),
+        total=v.total, forma_pago=fp,
+        concepto=f'Venta #{v.id}',
+    )
+    return Response({'detalle': 'En la bandeja Por facturar.', 'solicitud_id': s.id}, status=201)
 
 
 @api_view(['POST'])
