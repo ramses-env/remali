@@ -8402,72 +8402,78 @@ function PerfilAdmin({ notify }: { notify: (m: string, t?: 'ok' | 'err') => void
   const avatarSrc = preview || perfil?.avatar_url || null
   const fullName = [perfil?.first_name, perfil?.last_name].filter(Boolean).join(' ') || perfil?.username
 
+  const inputG = 'w-full bg-surface-2 border border-edge rounded-xl px-4 py-3 text-[15px] text-ink placeholder-mute focus:outline-none focus:border-gold/50 transition-colors'
+  const labelG = 'block text-[13px] font-semibold text-mute mb-2'
+  const cambios = JSON.stringify(form) !== JSON.stringify(perfil || {}) || !!avatarFile
+
   return (
-    <div className="max-w-4xl mx-auto grid lg:grid-cols-3 gap-6">
-      {/* Tarjeta de identidad */}
-      <Card className="p-6 lg:col-span-1 h-fit text-center">
-        <div className="relative inline-block">
-          <div className="w-28 h-28 rounded-full overflow-hidden bg-surface-2 border border-edge flex items-center justify-center mx-auto">
-            {avatarSrc ? (
-              <img src={avatarSrc} alt="avatar" className="w-full h-full object-cover" />
-            ) : (
-              <span className="text-4xl font-black text-gold">{initial}</span>
-            )}
+    <div className="max-w-4xl mx-auto space-y-6">
+      {/* Héroe: quién eres, en grande */}
+      <Card className="p-7 sm:p-8">
+        <div className="flex flex-col sm:flex-row sm:items-center gap-6">
+          <div className="relative shrink-0 mx-auto sm:mx-0">
+            <div className="w-24 h-24 rounded-full overflow-hidden bg-surface-2 border border-edge flex items-center justify-center">
+              {avatarSrc ? (
+                <img src={avatarSrc} alt="avatar" className="w-full h-full object-cover" />
+              ) : (
+                <span className="text-4xl font-black text-gold">{initial}</span>
+              )}
+            </div>
+            <label className="absolute -bottom-1 -right-1 w-9 h-9 rounded-full bg-gold text-black flex items-center justify-center cursor-pointer hover:opacity-90 transition-opacity border-[3px] border-surface" title="Cambiar foto">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3 9a2 2 0 012-2h.93a2 2 0 001.66-.9l.82-1.2A2 2 0 0110.07 4h3.86a2 2 0 011.66.9l.82 1.2a2 2 0 001.66.9H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                <circle cx="12" cy="13" r="3" />
+              </svg>
+              <input type="file" accept="image/*" className="hidden" onChange={e => onPickAvatar(e.target.files?.[0] || null)} />
+            </label>
           </div>
-          {/* Botón cámara */}
-          <label className="absolute bottom-0 right-0 w-9 h-9 rounded-full bg-gold text-black flex items-center justify-center cursor-pointer hover:opacity-90 transition-opacity border-2 border-app">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M3 9a2 2 0 012-2h.93a2 2 0 001.66-.9l.82-1.2A2 2 0 0110.07 4h3.86a2 2 0 011.66.9l.82 1.2a2 2 0 001.66.9H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
-              <circle cx="12" cy="13" r="3" />
-            </svg>
-            <input type="file" accept="image/*" className="hidden" onChange={e => onPickAvatar(e.target.files?.[0] || null)} />
-          </label>
+          <div className="min-w-0 flex-1 text-center sm:text-left">
+            <h2 className="text-[24px] font-black text-ink leading-tight truncate">{fullName}</h2>
+            <p className="text-[14px] text-mute mt-1 truncate">{perfil?.email || '—'}</p>
+            {avatarFile && <p className="mt-1.5 text-[12px] text-gold font-semibold">Nueva foto seleccionada — guarda para aplicar.</p>}
+          </div>
+          <span className="shrink-0 mx-auto sm:mx-0 inline-flex px-3.5 py-1.5 rounded-full bg-gold-soft text-gold text-[12.5px] font-bold uppercase tracking-wide">{rol}</span>
         </div>
-
-        <h2 className="mt-4 text-lg font-bold text-ink truncate">{fullName}</h2>
-        <p className="text-xs text-mute font-mono truncate">@{perfil?.username}</p>
-        <span className="inline-block mt-3 px-3 py-1 rounded-full bg-gold-soft text-gold text-xs font-semibold">{rol}</span>
-
-        {avatarFile && (
-          <p className="mt-4 text-xs text-mute">Nueva foto seleccionada. Guarda para aplicar.</p>
-        )}
       </Card>
 
-      {/* Formulario de datos */}
-      <Card className="p-6 lg:col-span-2">
-        <h2 className="font-bold text-ink mb-5">Información personal</h2>
-        <div className="grid sm:grid-cols-2 gap-4">
+      {/* Información personal, amplia y en dos columnas */}
+      <Card className="p-7 sm:p-8">
+        <h2 className="text-[17px] font-black text-ink">Información personal</h2>
+        <p className="text-[13px] text-mute mt-1 mb-6">Estos datos aparecen en el panel y en los documentos que emites.</p>
+        <div className="grid sm:grid-cols-2 gap-5">
           <div>
-            <label className={label}>Nombre</label>
-            <input className={input} value={form.first_name || ''} onChange={e => setForm({ ...form, first_name: e.target.value })} placeholder="Tu nombre" />
+            <label className={labelG}>Nombre</label>
+            <input className={inputG} value={form.first_name || ''} onChange={e => setForm({ ...form, first_name: e.target.value })} placeholder="Tu nombre" />
           </div>
           <div>
-            <label className={label}>Apellido</label>
-            <input className={input} value={form.last_name || ''} onChange={e => setForm({ ...form, last_name: e.target.value })} placeholder="Tu apellido" />
+            <label className={labelG}>Apellido</label>
+            <input className={inputG} value={form.last_name || ''} onChange={e => setForm({ ...form, last_name: e.target.value })} placeholder="Tu apellido" />
           </div>
           <div className="sm:col-span-2">
-            <label className={label}>Correo electrónico</label>
-            <input type="email" className={input} value={form.email || ''} onChange={e => setForm({ ...form, email: e.target.value })} placeholder="tu@correo.com" />
+            <label className={labelG}>Correo electrónico</label>
+            <input type="email" className={inputG} value={form.email || ''} onChange={e => setForm({ ...form, email: e.target.value })} placeholder="tu@correo.com" />
           </div>
           <div>
-            <label className={label}>Teléfono</label>
-            <input className={input} value={form.telefono || ''} onChange={e => setForm({ ...form, telefono: e.target.value })} placeholder="+52 ..." />
+            <label className={labelG}>Teléfono</label>
+            <input className={inputG} value={form.telefono || ''} onChange={e => setForm({ ...form, telefono: e.target.value })} placeholder="744 000 0000" />
           </div>
           <div>
-            <label className={label}>Puesto</label>
-            <input className={input} value={form.puesto || ''} onChange={e => setForm({ ...form, puesto: e.target.value })} placeholder="Ej. Gerente" />
+            <label className={labelG}>Puesto</label>
+            <input className={inputG} value={form.puesto || ''} onChange={e => setForm({ ...form, puesto: e.target.value })} placeholder="Ej. Gerente" />
           </div>
           <div className="sm:col-span-2">
-            <label className={label}>Bio</label>
-            <textarea className={`${input} resize-none`} rows={3} value={form.bio || ''} onChange={e => setForm({ ...form, bio: e.target.value })} placeholder="Algo sobre ti" />
+            <label className={labelG}>Bio</label>
+            <textarea className={`${inputG} resize-none`} rows={3} value={form.bio || ''} onChange={e => setForm({ ...form, bio: e.target.value })} placeholder="Algo sobre ti" />
           </div>
         </div>
 
-        <div className="mt-6 flex flex-col sm:flex-row gap-3 sm:justify-end">
-          <button onClick={() => { setForm(perfil || {}); onPickAvatar(null) }} className="px-6 py-2.5 rounded-full border border-edge text-mute text-sm font-medium hover:text-ink transition-colors">
+        <div className="mt-7 pt-6 border-t border-edge flex flex-col sm:flex-row gap-3 sm:justify-end">
+          <button onClick={() => { setForm(perfil || {}); onPickAvatar(null) }} disabled={!cambios}
+            className="px-6 py-3 rounded-full border border-edge text-mute text-sm font-semibold hover:text-ink transition-colors disabled:opacity-40">
             Descartar
           </button>
-          <button onClick={save} disabled={saving} className="px-6 py-2.5 rounded-full bg-gold text-black text-sm font-bold hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center justify-center gap-2">
+          <button onClick={save} disabled={saving || !cambios}
+            className="px-7 py-3 rounded-full bg-gold text-black text-sm font-bold hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center justify-center gap-2">
             {saving ? <span className="w-4 h-4 border-2 border-black/30 border-t-black rounded-full animate-spin" /> : null}
             Guardar cambios
           </button>
