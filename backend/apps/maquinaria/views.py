@@ -757,6 +757,15 @@ def login(request):
             uname = User.objects.get(email=uname).username or uname
         except User.DoesNotExist:
             pass
+    else:
+        # Regla de la casa: los CLIENTES siempre entran con su correo; un
+        # identificador sin @ es privilegio del personal (nivel >= 1). Si el
+        # usuario tecleado pertenece a un cliente se rechaza con el mismo
+        # mensaje genérico — no revelamos qué cuentas existen.
+        from django.contrib.auth.models import User
+        posible = User.objects.filter(username__iexact=uname).first()
+        if posible is not None and nivel_de(posible) < 1:
+            return Response({'detail': 'credenciales inválidas'}, status=401)
 
     serializer = TokenObtainPairSerializer(data={'username': uname, 'password': password})
     try:

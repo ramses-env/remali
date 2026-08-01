@@ -20,7 +20,7 @@ import { Input } from '@/components/ui/input'
    existe: exigir aquí 8 caracteres dejaría fuera a cuentas válidas. Las reglas
    de fuerza van en el registro, que es donde se crea la contraseña. */
 const esquema = z.object({
-  usuario: z.string().min(1, { message: 'Escribe tu usuario o tu correo.' }),
+  usuario: z.string().min(1, { message: 'Escribe tu correo.' }),
   password: z.string().min(1, { message: 'Escribe tu contraseña.' }),
   recordar: z.boolean(),
 })
@@ -152,12 +152,12 @@ export default function Login() {
               name="usuario"
               render={({ field }) => (
                 <FormItem className="gap-3">
-                  <FormLabel className="text-mute">Usuario o correo</FormLabel>
+                  <FormLabel className="text-mute">Correo</FormLabel>
                   <FormControl>
                     {/* Muestra las dos formas válidas en vez de repetir la
                         etiqueta, que no aportaba nada. */}
                     <Input
-                      placeholder="tu usuario o tu@correo.com"
+                      placeholder="tu@correo.com"
                       autoComplete="username"
                       className="h-11 rounded-xl bg-surface-2 border-edge text-ink placeholder:text-mute focus-visible:ring-gold/30"
                       disabled={enviando}
