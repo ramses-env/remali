@@ -44,13 +44,24 @@ function estiloEstado(estado: string) {
 }
 
 function Tarjeta({ r, i }: { r: RentaMia; i: number }) {
+  // Cerrada por defecto: lo esencial arriba y el desglose de pagos bajo demanda.
+  const [abierto, setAbierto] = useState(false)
+  const saldo = Number(r.saldo || 0)
+  const total = Number(r.total || 0)
   return (
     <div style={{ animationDelay: `${i * 40}ms` }} className="stagger-item rounded-2xl border border-edge bg-surface p-5">
       <div className="flex flex-wrap items-center gap-3">
         <span className="text-sm font-extrabold text-ink">{r.equipo || 'Equipo'}</span>
         <span className={`text-[11px] font-semibold uppercase tracking-wide px-2.5 py-1 rounded-full ${estiloEstado(r.estado)}`}>{r.estado_label}</span>
         <span className="text-[13px] text-mute">renta {MOD[r.modalidad] || r.modalidad}</span>
-        <span className="ml-auto text-sm font-extrabold text-price">{money(Number(r.total))}</span>
+        <span className="ml-auto text-right">
+          <span className="block text-sm font-extrabold text-price">{money(total)}</span>
+          {r.estado !== 'cancelada' && total > 0 && (
+            saldo > 0
+              ? <span className="block text-[12px] font-bold text-amber-600 dark:text-amber-400 mt-0.5">Restan {money(saldo)}</span>
+              : <span className="block text-[12px] font-bold text-libre mt-0.5">Pagada</span>
+          )}
+        </span>
       </div>
       <div className="mt-2.5 flex items-center gap-2 text-[13px] text-mute">
         <CalendarClock className="h-4 w-4 shrink-0" />
@@ -66,22 +77,30 @@ function Tarjeta({ r, i }: { r: RentaMia; i: number }) {
       </div>
       {r.direccion && <p className="mt-1.5 text-[12.5px] text-mute leading-relaxed">{r.direccion}</p>}
 
-      {/* Sus pagos: cuánto lleva abonado y cuánto falta, sin llamar a preguntar. */}
-      {r.estado !== 'cancelada' && Number(r.total) > 0 && (
-        <div className="mt-3 pt-3 border-t border-edge">
+      {/* Desglose bajo demanda: la tarjeta queda limpia y el detalle a un toque. */}
+      {r.estado !== 'cancelada' && total > 0 && (
+        <button onClick={() => setAbierto(v => !v)}
+          className="mt-3 inline-flex items-center gap-1.5 text-[12.5px] font-bold text-gold hover:opacity-80 transition-opacity">
+          {abierto ? 'Ocultar' : 'Detalle'}
+          <svg className={`w-3.5 h-3.5 transition-transform ${abierto ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9l6 6 6-6" /></svg>
+        </button>
+      )}
+      {abierto && r.estado !== 'cancelada' && total > 0 && (
+        <div className="mt-2 pt-3 border-t border-edge">
           <div className="flex items-center justify-between gap-3">
             <span className="text-[11px] font-bold uppercase tracking-wide text-mute">Pagos</span>
-            {Number(r.saldo || 0) <= 0 ? (
+            {saldo <= 0 ? (
               <span className="inline-flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1 rounded-full bg-libre/10 text-libre">
                 <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="3"><path d="M5 13l4 4L19 7" /></svg>
                 Pagada
               </span>
             ) : (
               <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 whitespace-nowrap">
-                Saldo pendiente {money(Number(r.saldo))}
+                Saldo pendiente {money(saldo)}
               </span>
             )}
           </div>
+          {(r.pagos?.length || 0) === 0 && <p className="mt-2 text-[12px] text-mute">Aún sin abonos registrados.</p>}
           {(r.pagos?.length || 0) > 0 && (
             <div className="mt-2 space-y-1 text-[12px]">
               {r.pagos!.map((p, j) => (
