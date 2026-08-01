@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from .models import (
     Equipo, Cupon, Categoria, Tipo, Marca, PerfilUsuario, Notificacion,
-    ConversacionSoporte, MensajeSoporte, ConfiguracionSitio, CorreoAviso, ObraCliente,
+    ConfiguracionSitio, CorreoAviso, ObraCliente,
 )
 
 
@@ -9,71 +9,6 @@ class NotificacionSerializer(serializers.ModelSerializer):
     class Meta:
         model = Notificacion
         fields = ['id', 'tipo', 'titulo', 'mensaje', 'seccion', 'leida', 'data', 'creada']
-
-class MensajeSoporteSerializer(serializers.ModelSerializer):
-    autor_admin_username = serializers.SerializerMethodField()
-
-    class Meta:
-        model = MensajeSoporte
-        fields = ['id', 'autor_tipo', 'autor_admin_username', 'cuerpo', 'creada']
-
-    def get_autor_admin_username(self, obj):
-        try:
-            return obj.autor_admin.username if obj.autor_admin else None
-        except Exception:
-            return None
-
-
-class ConversacionSoporteListSerializer(serializers.ModelSerializer):
-    no_leidos_admin = serializers.SerializerMethodField()
-    ultimo_mensaje = serializers.SerializerMethodField()
-    ultima_actividad = serializers.DateTimeField(source='actualizada', read_only=True)
-
-    class Meta:
-        model = ConversacionSoporte
-        fields = [
-            'id', 'nombre', 'email', 'telefono', 'asunto', 'estado',
-            'asignado_a', 'ultima_actividad', 'ultimo_mensaje', 'no_leidos_admin',
-        ]
-        depth = 1
-
-    # Iteran la caché de prefetch_related('mensajes'); .filter()/.count()/.first()
-    # lanzarían 1 query por conversación (N+1) en la lista de soporte.
-    def get_no_leidos_admin(self, obj):
-        lr = obj.last_read_admin
-        return sum(
-            1 for m in obj.mensajes.all()
-            if m.autor_tipo == 'usuario' and (lr is None or m.creada > lr)
-        )
-
-    def get_ultimo_mensaje(self, obj):
-        mensajes = list(obj.mensajes.all())
-        if not mensajes:
-            return ''
-        m = max(mensajes, key=lambda x: (x.creada, x.id))
-        txt = (m.cuerpo or '').strip()
-        return (txt[:140] + '…') if len(txt) > 140 else txt
-
-
-class ConversacionSoporteDetailSerializer(serializers.ModelSerializer):
-    no_leidos_admin = serializers.SerializerMethodField()
-    mensajes = MensajeSoporteSerializer(many=True, read_only=True)
-
-    class Meta:
-        model = ConversacionSoporte
-        fields = [
-            'id', 'nombre', 'email', 'telefono', 'asunto', 'estado',
-            'asignado_a', 'creada', 'actualizada', 'last_read_admin',
-            'no_leidos_admin', 'mensajes',
-        ]
-        depth = 1
-
-    def get_no_leidos_admin(self, obj):
-        qs = obj.mensajes.filter(autor_tipo='usuario')
-        if obj.last_read_admin:
-            qs = qs.filter(creada__gt=obj.last_read_admin)
-        return qs.count()
-
 
 class ObraClienteSerializer(serializers.ModelSerializer):
     class Meta:

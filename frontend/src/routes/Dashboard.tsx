@@ -115,35 +115,6 @@ type Notif = {
   data?: Record<string, any>
   creada: string
 }
-type SoporteMensaje = {
-  id: number
-  autor_tipo: 'usuario' | 'admin'
-  autor_admin_username?: string | null
-  cuerpo: string
-  creada: string
-}
-type SoporteConversacion = {
-  id: number
-  nombre?: string
-  email?: string
-  telefono?: string
-  asunto?: string
-  estado: 'abierta' | 'cerrada'
-  ultima_actividad: string
-  ultimo_mensaje: string
-  no_leidos_admin: number
-}
-type SoporteConversacionDetail = {
-  id: number
-  nombre?: string
-  email?: string
-  telefono?: string
-  asunto?: string
-  estado: 'abierta' | 'cerrada'
-  creada: string
-  actualizada: string
-  mensajes: SoporteMensaje[]
-}
 /** Una partida es de venta o de renta (día/semana/mes); una cotización puede mezclar ambas. */
 type Modalidad = 'venta' | 'dia' | 'semana' | 'mes'
 const MODALIDADES: { key: Modalidad; label: string; corto: string }[] = [
@@ -203,7 +174,7 @@ function seccionInicial(): Section {
   }
 }
 
-type Section = 'resumen' | 'equipos' | 'inventario' | 'refacciones' | 'reparaciones' | 'cotizaciones' | 'catalogos' | 'empresas' | 'rentas' | 'ventas' | 'facturacion' | 'cupones' | 'notificaciones' | 'mensajeria' | 'perfil' | 'ubicaciones' | 'usuarios' | 'configuracion'
+type Section = 'resumen' | 'equipos' | 'inventario' | 'refacciones' | 'reparaciones' | 'cotizaciones' | 'catalogos' | 'empresas' | 'rentas' | 'ventas' | 'facturacion' | 'cupones' | 'notificaciones' | 'perfil' | 'ubicaciones' | 'usuarios' | 'configuracion'
 
 const SECTION_META: Record<Section, { title: string; subtitle: string }> = {
   resumen: { title: 'Resumen', subtitle: 'Monitorea tus métricas y gestiona tu operación.' },
@@ -218,7 +189,6 @@ const SECTION_META: Record<Section, { title: string; subtitle: string }> = {
   facturacion: { title: 'Por facturar', subtitle: 'Ventas y rentas que el cliente pidió facturar. Timbra aparte y márcalas.' },
   cupones: { title: 'Cupones', subtitle: 'Crea y administra códigos de descuento.' },
   notificaciones: { title: 'Notificaciones', subtitle: 'Eventos operativos y pendientes por resolver.' },
-  mensajeria: { title: 'Mensajería', subtitle: 'Conversaciones de soporte con clientes.' },
   empresas: { title: 'Empresas', subtitle: 'Clientes registrados y sus obras.' },
   perfil: { title: 'Perfil', subtitle: 'Tu información de cuenta.' },
   ubicaciones: { title: 'Mi jornada', subtitle: 'Dónde está cada máquina y qué espera en el taller.' },
@@ -400,8 +370,6 @@ export default function Dashboard() {
   const [notifs, setNotifs] = useState<Notif[]>([])
   const [noLeidas, setNoLeidas] = useState(0)
   const [empresas, setEmpresas] = useState<Empresa[]>([])
-  const [conversaciones, setConversaciones] = useState<SoporteConversacion[]>([])
-  const [mensajesNoLeidos, setMensajesNoLeidos] = useState(0)
   const [toast, setToast] = useState<{ msg: string; type: 'ok' | 'err' | 'info' | 'warning' | 'primary' } | null>(null)
 
   const notifBtnRef = useRef<HTMLButtonElement | null>(null)
@@ -515,14 +483,6 @@ export default function Dashboard() {
       .catch(() => {})
   }, [])
 
-  const loadMensajeria = useCallback(() => {
-    api.get<{ conversaciones: SoporteConversacion[]; no_leidas_total: number }>('/mensajeria/conversaciones/')
-      .then(r => {
-        setConversaciones(r.data?.conversaciones || [])
-        setMensajesNoLeidos(r.data?.no_leidas_total || 0)
-      })
-      .catch(() => {})
-  }, [])
 
   useEffect(() => {
     const mql = window.matchMedia?.('(prefers-reduced-motion: reduce)')
@@ -563,54 +523,6 @@ export default function Dashboard() {
   useRecurso(['empresas'], loadEmpresas)
 
   useEffect(() => {
-    let t: number | null = null
-
-    const tick = () => {
-      if (document.visibilityState === 'hidden') return
-      loadNotifs()
-    }
-
-    tick()
-    t = window.setInterval(tick, 5000)
-
-    const onVis = () => {
-      if (document.visibilityState === 'visible') tick()
-    }
-
-    window.addEventListener('focus', tick)
-    document.addEventListener('visibilitychange', onVis)
-    return () => {
-      if (t) window.clearInterval(t)
-      window.removeEventListener('focus', tick)
-      document.removeEventListener('visibilitychange', onVis)
-    }
-  }, [loadNotifs])
-
-  useEffect(() => {
-    let t: number | null = null
-
-    const tick = () => {
-      if (document.visibilityState === 'hidden') return
-      loadMensajeria()
-    }
-
-    tick()
-    t = window.setInterval(tick, 9000)
-
-    const onVis = () => {
-      if (document.visibilityState === 'visible') tick()
-    }
-
-    window.addEventListener('focus', tick)
-    document.addEventListener('visibilitychange', onVis)
-    return () => {
-      if (t) window.clearInterval(t)
-      window.removeEventListener('focus', tick)
-      document.removeEventListener('visibilitychange', onVis)
-    }
-  }, [loadMensajeria])
-
-  useEffect(() => {
     if (!pendingEquipoId) return
     const e = equipos.find(x => x.id === pendingEquipoId)
     if (!e) return
@@ -643,7 +555,6 @@ export default function Dashboard() {
     empresas: 'ver_dinero',
     cupones: 'editar_catalogo',
     catalogos: 'editar_catalogo',
-    mensajeria: 'cotizar',
     // El técnico opera todo desde "Mi jornada"; estos módulos de gestión son para
     // administración. Su acceso por API sigue existiendo (lo usa "Mi jornada"), aquí
     // solo se decide qué aparece en el menú. Por eso van con capacidades de
@@ -688,7 +599,6 @@ export default function Dashboard() {
         { key: 'cotizaciones', label: 'Cotizaciones', badge: cotizacionesAbiertas, icon: <><path d="M6 3.5h9l3.5 3.5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4.5a1 1 0 0 1 1-1z" /><path d="M14 3.5V8h4.5" /><path d="M8.5 12h7M8.5 15.5h7M8.5 18.5h4" /></> },
         { key: 'facturacion', label: 'Por facturar', badge: facturasPendientes, icon: <><path d="M6 3.5h9l3.5 3.5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4.5a1 1 0 0 1 1-1z" /><path d="M14 3.5V8h4.5" /><path d="M8.5 13h7M8.5 16.5h7" /></> },
         { key: 'notificaciones', label: 'Notificaciones', badge: noLeidas, icon: <><path d="M15 17h5l-1.3-1.3A2 2 0 0 1 18.1 14V11a6.1 6.1 0 1 0-12.2 0v3a2 2 0 0 1-.6 1.4L4 17h5" /><path d="M9.2 17v.8a2.8 2.8 0 0 0 5.6 0V17" /></> },
-        { key: 'mensajeria', label: 'Mensajería', badge: mensajesNoLeidos, icon: <><path d="M21 14a4 4 0 0 1-4 4H9l-4 3V6a4 4 0 0 1 4-4h8a4 4 0 0 1 4 4z" /><path d="M9 8h8M9 12h6" /></> },
         { key: 'cupones', label: 'Cupones', badge: coupons.length, icon: <><path d="M7.5 6.5h9a2 2 0 0 1 2 2V10a1.8 1.8 0 0 0 0 4v1.5a2 2 0 0 1-2 2h-9a2 2 0 0 1-2-2V14a1.8 1.8 0 0 0 0-4V8.5a2 2 0 0 1 2-2z" /><path d="M12 8.8v6.4" /></> },
       ],
     },
@@ -966,9 +876,6 @@ export default function Dashboard() {
                       <button onClick={() => { setAccountOpen(false); go('perfil') }} className="w-full flex items-center gap-3 px-4 py-3 text-[14px] font-semibold text-ink hover:bg-surface-2 transition-colors">
                         <svg className="w-4 h-4 text-mute" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.6"><circle cx="12" cy="8" r="4" /><path d="M4.5 20a7.5 7.5 0 0 1 15 0" /></svg>Perfil
                       </button>
-                      <button onClick={() => { setAccountOpen(false); go('mensajeria') }} className="w-full flex items-center gap-3 px-4 py-3 text-[14px] font-semibold text-ink hover:bg-surface-2 transition-colors">
-                        <svg className="w-4 h-4 text-mute" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.6"><rect x="3" y="6" width="18" height="12" rx="2" /><path d="M3 8l9 5 9-5" /></svg>Mensajería
-                      </button>
                       <button onClick={() => { setAccountOpen(false); go('configuracion') }} className="w-full flex items-center gap-3 px-4 py-3 text-[14px] font-semibold text-ink hover:bg-surface-2 transition-colors">
                         <svg className="w-4 h-4 text-mute" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.6"><circle cx="12" cy="12" r="3" /><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.5-2-3.4-2.3 1a7 7 0 0 0-2-1.2L16.2 2h-4l-.4 2.5a7 7 0 0 0-2 1.2l-2.3-1-2 3.4 2 1.5A7 7 0 0 0 5 12a7 7 0 0 0 .1 1.2l-2 1.5 2 3.4 2.3-1a7 7 0 0 0 2 1.2l.4 2.5h4l.4-2.5a7 7 0 0 0 2-1.2l2.3 1 2-3.4-2-1.5A7 7 0 0 0 19 12z" /></svg>Configuración
                       </button>
@@ -1022,7 +929,7 @@ export default function Dashboard() {
                             {it.icon}
                           </svg>
                           <span className={`flex-1 text-left ${colapsado ? 'lg:hidden' : ''}`}>{t(`sec.${it.key}.title`)}</span>
-                          {showBadge && (it.key === 'notificaciones' || it.key === 'mensajeria') && (<>
+                          {showBadge && it.key === 'notificaciones' && (<>
                             <span className={`min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[11px] font-bold flex items-center justify-center ${colapsado ? 'lg:hidden' : ''}`}>
                               {it.badge! > 9 ? '9+' : it.badge}
                             </span>
@@ -1139,13 +1046,6 @@ export default function Dashboard() {
               onOpen={openFromNotif}
             />
           )}
-          {section === 'mensajeria' && (
-            <MensajeriaAdmin
-              conversaciones={conversaciones}
-              reload={loadMensajeria}
-              notify={notify}
-            />
-          )}
           {section === 'cupones' && (
             <CuponesAdmin coupons={coupons} reload={loadCoupons} notify={notify} />
           )}
@@ -1170,7 +1070,7 @@ export default function Dashboard() {
             key: it.key,
             // Etiqueta corta: "Notificaciones"/"Configuración" no caben bajo un
             // icono de dock. La larga se queda en el cajón lateral.
-            label: ({ ubicaciones: 'Jornada', notificaciones: 'Avisos', configuracion: 'Ajustes', mensajeria: 'Mensajes' } as Record<string, string>)[it.key] ?? it.label,
+            label: ({ ubicaciones: 'Jornada', notificaciones: 'Avisos', configuracion: 'Ajustes' } as Record<string, string>)[it.key] ?? it.label,
             badge: it.badge,
             activo: section === it.key,
             onClick: () => go(it.key),
@@ -3481,219 +3381,6 @@ function tiempoRelativo(iso: string) {
   if (h < 24) return `hace ${h} h`
   const d = Math.floor(h / 24)
   return `hace ${d} d`
-}
-
-function MensajeriaAdmin({ conversaciones, reload, notify }: {
-  conversaciones: SoporteConversacion[]
-  reload: () => void
-  notify: (m: string, t?: 'ok' | 'err') => void
-}) {
-  const [q, setQ] = useState('')
-  const [estado, setEstado] = useState<'todas' | 'abierta' | 'cerrada'>('todas')
-  const [selectedId, setSelectedId] = useState<number | null>(null)
-  const [detail, setDetail] = useState<SoporteConversacionDetail | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [sending, setSending] = useState(false)
-  const [texto, setTexto] = useState('')
-
-  useEffect(() => { reload() }, [reload])
-
-  useEffect(() => {
-    if (selectedId) return
-    if (conversaciones.length) setSelectedId(conversaciones[0].id)
-  }, [conversaciones, selectedId])
-
-  useEffect(() => {
-    if (!selectedId) { setDetail(null); return }
-    setLoading(true)
-    api.get<SoporteConversacionDetail>(`/mensajeria/conversaciones/${selectedId}/`)
-      .then(r => setDetail(r.data))
-      .catch(() => setDetail(null))
-      .finally(() => { setLoading(false); reload() })
-  }, [selectedId, reload])
-
-  const visibles = conversaciones.filter(c => {
-    if (estado !== 'todas' && c.estado !== estado) return false
-    if (!q) return true
-    const hay = `${c.nombre || ''} ${c.email || ''} ${c.telefono || ''} ${c.asunto || ''} ${c.ultimo_mensaje || ''}`.toLowerCase()
-    return hay.includes(q.toLowerCase())
-  })
-
-  const active = visibles.find(c => c.id === selectedId) || conversaciones.find(c => c.id === selectedId) || null
-
-  const toggleEstado = () => {
-    if (!detail) return
-    const action = detail.estado === 'abierta' ? 'cerrar' : 'abrir'
-    api.post(`/mensajeria/conversaciones/${detail.id}/${action}/`)
-      .then(() => api.get<SoporteConversacionDetail>(`/mensajeria/conversaciones/${detail.id}/`))
-      .then(r => setDetail(r.data))
-      .then(() => reload())
-      .catch(() => notify('No se pudo actualizar el estado', 'err'))
-  }
-
-  const enviar = () => {
-    if (!selectedId) return
-    const msg = texto.trim()
-    if (!msg) return
-    setSending(true)
-    api.post(`/mensajeria/conversaciones/${selectedId}/responder/`, { mensaje: msg })
-      .then(() => { setTexto('') })
-      .then(() => api.get<SoporteConversacionDetail>(`/mensajeria/conversaciones/${selectedId}/`))
-      .then(r => setDetail(r.data))
-      .then(() => { reload(); notify('Mensaje enviado') })
-      .catch(() => notify('No se pudo enviar', 'err'))
-      .finally(() => setSending(false))
-  }
-
-  return (
-    <div className="space-y-4">
-      <div className="grid grid-cols-1 lg:grid-cols-[360px_1fr] gap-4">
-        <Card className="overflow-hidden">
-          <div className="px-5 py-4 border-b border-edge">
-            <div className="flex items-center justify-between gap-3">
-              <p className="text-sm font-black text-ink">Bandeja</p>
-              <button onClick={reload} className="text-xs text-mute hover:text-gold transition-colors">Actualizar</button>
-            </div>
-            <div className="mt-3 space-y-2">
-              <input
-                value={q}
-                onChange={e => setQ(e.target.value)}
-                placeholder="Buscar por nombre, correo, asunto..."
-                className="w-full bg-surface-2 border border-edge rounded-xl px-4 py-2.5 text-sm text-ink placeholder-mute focus:outline-none focus:border-gold/50 transition-colors"
-              />
-              <div className="flex items-center gap-2">
-                <select
-                  value={estado}
-                  onChange={e => setEstado(e.target.value as any)}
-                  className="bg-surface-2 border border-edge rounded-xl px-3 py-2 text-sm text-ink focus:outline-none focus:border-gold/50"
-                >
-                  <option value="todas">Todas</option>
-                  <option value="abierta">Abiertas</option>
-                  <option value="cerrada">Cerradas</option>
-                </select>
-                <div className="flex-1 text-right text-[11px] text-mute font-mono">{visibles.length} conv.</div>
-              </div>
-            </div>
-          </div>
-
-          <div className="max-h-[560px] overflow-y-auto divide-y divide-edge">
-            {visibles.map(c => {
-              const isActive = c.id === selectedId
-              return (
-                <button
-                  key={c.id}
-                  onClick={() => setSelectedId(c.id)}
-                  className={`w-full text-left px-5 py-4 transition-colors ${isActive ? 'bg-gold-soft/35' : 'hover:bg-surface-2'}`}
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className={`text-sm truncate ${c.no_leidos_admin ? 'font-black text-ink' : 'font-semibold text-ink'}`}>
-                        {c.asunto || c.nombre || c.email || 'Conversación'}
-                      </p>
-                      <p className="text-xs text-mute mt-1 line-clamp-2">{c.ultimo_mensaje || '—'}</p>
-                      <p className="text-[11px] text-mute/70 font-mono mt-2">{tiempoRelativo(c.ultima_actividad)}</p>
-                    </div>
-                    <div className="shrink-0 flex flex-col items-end gap-2">
-                      <span className={`text-[10px] px-2 py-0.5 rounded-md font-semibold uppercase ${c.estado === 'abierta' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-surface-2 text-mute'}`}>
-                        {c.estado}
-                      </span>
-                      {c.no_leidos_admin > 0 && (
-                        <span className="min-w-[22px] h-[22px] px-1.5 rounded-full bg-red-500 text-white text-[11px] font-black flex items-center justify-center">
-                          {c.no_leidos_admin > 9 ? '9+' : c.no_leidos_admin}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                </button>
-              )
-            })}
-            {visibles.length === 0 && (
-              <div className="px-6 py-14 text-center">
-                <p className="text-sm text-mute">{q ? 'Sin resultados.' : 'Aún no hay mensajes.'}</p>
-              </div>
-            )}
-          </div>
-        </Card>
-
-        <Card className="overflow-hidden">
-          <div className="px-5 py-4 border-b border-edge flex items-center justify-between gap-3">
-            <div className="min-w-0">
-              <p className="text-sm font-black text-ink truncate">{active?.asunto || active?.nombre || active?.email || 'Conversación'}</p>
-              <p className="text-[11px] text-mute font-mono truncate">
-                {(active?.email || '').trim()}{active?.telefono ? ` · ${active.telefono}` : ''}
-              </p>
-            </div>
-            <button
-              onClick={toggleEstado}
-              disabled={!detail}
-              className="text-xs font-semibold px-3 py-2 rounded-xl border border-edge bg-surface-2 text-ink hover:border-gold/40 hover:text-gold transition-colors disabled:opacity-50"
-            >
-              {detail?.estado === 'abierta' ? 'Cerrar' : 'Abrir'}
-            </button>
-          </div>
-
-          <div className="p-5">
-            {!selectedId && (
-              <div className="py-16 text-center">
-                <p className="text-sm text-mute">Selecciona una conversación.</p>
-              </div>
-            )}
-
-            {selectedId && loading && (
-              <div className="py-16 text-center">
-                <p className="text-sm text-mute">Cargando…</p>
-              </div>
-            )}
-
-            {selectedId && !loading && detail && (
-              <div className="space-y-4">
-                <div className="max-h-[420px] overflow-y-auto space-y-3 pr-1">
-                  {detail.mensajes.map(m => {
-                    const isAdmin = m.autor_tipo === 'admin'
-                    return (
-                      <div key={m.id} className={`flex ${isAdmin ? 'justify-end' : 'justify-start'}`}>
-                        <div className={`max-w-[92%] sm:max-w-[74%] rounded-2xl px-4 py-3 border ${
-                          isAdmin ? 'bg-gold-soft/40 border-gold/20 text-ink' : 'bg-surface-2 border-edge text-ink'
-                        }`}>
-                          <p className="text-sm whitespace-pre-wrap break-words">{m.cuerpo}</p>
-                          <p className="text-[11px] text-mute/70 font-mono mt-2">
-                            {isAdmin ? (m.autor_admin_username || 'Admin') : (detail.nombre || detail.email || 'Usuario')}
-                            {' · '}
-                            {tiempoRelativo(m.creada)}
-                          </p>
-                        </div>
-                      </div>
-                    )
-                  })}
-                  {detail.mensajes.length === 0 && <p className="text-sm text-mute py-10 text-center">Sin mensajes.</p>}
-                </div>
-
-                <div className="grid gap-2">
-                  <textarea
-                    value={texto}
-                    onChange={e => setTexto(e.target.value)}
-                    placeholder={detail.estado === 'abierta' ? 'Escribe una respuesta…' : 'La conversación está cerrada.'}
-                    disabled={detail.estado !== 'abierta' || sending}
-                    rows={3}
-                    className="w-full bg-surface-2 border border-edge rounded-2xl px-4 py-3 text-sm text-ink placeholder-mute focus:outline-none focus:border-gold/50 transition-colors disabled:opacity-60"
-                  />
-                  <div className="flex items-center justify-end gap-2">
-                    <button
-                      onClick={enviar}
-                      disabled={detail.estado !== 'abierta' || sending || !texto.trim()}
-                      className="px-4 py-2.5 rounded-xl bg-gold text-black font-black text-sm hover:opacity-90 active:scale-[0.99] transition disabled:opacity-50"
-                    >
-                      Enviar
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        </Card>
-      </div>
-    </div>
-  )
 }
 
 function NotificacionesAdmin({ notifs, reload, go, onOpen }: {

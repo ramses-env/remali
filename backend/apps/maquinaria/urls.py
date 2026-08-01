@@ -55,12 +55,6 @@ urlpatterns = [
     path('notificaciones/<int:pk>/leer/', views.marcar_notificacion_leida),
     path('notificaciones/leer-todas/', views.marcar_todas_leidas),
 
-    path('mensajeria/contacto/', views.crear_contacto_soporte),
-    path('mensajeria/conversaciones/', views.ConversacionesSoporteList.as_view()),
-    path('mensajeria/conversaciones/<int:pk>/', views.ConversacionSoporteDetail.as_view()),
-    path('mensajeria/conversaciones/<int:pk>/responder/', views.responder_soporte),
-    path('mensajeria/conversaciones/<int:pk>/cerrar/', views.cerrar_conversacion_soporte),
-    path('mensajeria/conversaciones/<int:pk>/abrir/', views.abrir_conversacion_soporte),
 
     # Dashboard
     path('dashboard/metricas/', views.dashboard_metrics),

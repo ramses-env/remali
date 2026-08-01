@@ -32,7 +32,7 @@ from django.conf import settings
 from .models import (
     Equipo, Categoria, Marca, Tipo, ImagenProducto,
     Cupon, Notificacion, PerfilUsuario, crear_notificacion,
-    ConversacionSoporte, MensajeSoporte, ConfiguracionSitio, CorreoAviso, ObraCliente,
+    ConfiguracionSitio, CorreoAviso, ObraCliente,
 )
 from .permissions import IsAdminGroupOrStaff
 
@@ -64,7 +64,6 @@ from .serializers import (
     EquipoSerializer, CategoriaSerializer, MarcaSerializer, TipoSerializer,
     CuponSerializer, NotificacionSerializer, PerfilUsuarioSerializer,
     ConfiguracionSitioSerializer, CorreoAvisoSerializer,
-    ConversacionSoporteListSerializer, ConversacionSoporteDetailSerializer, MensajeSoporteSerializer,
     ObraClienteSerializer,
 )
 
@@ -1048,109 +1047,3 @@ def marcar_todas_leidas(request):
     # Solo las que el usuario ve: el técnico no debe marcar leídas las del negocio.
     _notifs_visibles(request.user).filter(leida=False).update(leida=True)
     return Response({'ok': True, 'no_leidas': 0})
-
-
-@api_view(['POST'])
-@permission_classes([permissions.AllowAny])  # público: formulario de contacto del cliente
-@throttle_classes([SolicitudPublicaThrottle])  # crea registros sin sesión: mismo techo
-def crear_contacto_soporte(request):
-    nombre = (request.data.get('nombre') or '').strip()
-    email = (request.data.get('email') or '').strip().lower()
-    telefono = (request.data.get('telefono') or '').strip()
-    asunto = (request.data.get('asunto') or '').strip()
-    mensaje = (request.data.get('mensaje') or '').strip()
-    if not mensaje:
-        return Response({'detail': 'mensaje requerido'}, status=400)
-
-    conv = ConversacionSoporte.objects.create(
-        nombre=nombre,
-        email=email,
-        telefono=telefono,
-        asunto=asunto,
-        estado='abierta',
-    )
-    MensajeSoporte.objects.create(
-        conversacion=conv,
-        autor_tipo='usuario',
-        cuerpo=mensaje,
-    )
-    conv.save()
-    return Response({'id': conv.id})
-
-
-class ConversacionesSoporteList(generics.ListAPIView):
-    permission_classes = [IsAdminGroupOrStaff]
-    serializer_class = ConversacionSoporteListSerializer
-
-    def get_queryset(self):
-        qs = ConversacionSoporte.objects.all().prefetch_related('mensajes')
-        estado = (self.request.query_params.get('estado') or '').strip().lower()
-        if estado in ('abierta', 'cerrada'):
-            qs = qs.filter(estado=estado)
-        q = (self.request.query_params.get('q') or '').strip()
-        if q:
-            qs = qs.filter(
-                Q(nombre__icontains=q) |
-                Q(email__icontains=q) |
-                Q(telefono__icontains=q) |
-                Q(asunto__icontains=q)
-            )
-        return qs.order_by('-actualizada', '-id')
-
-    def list(self, request, *args, **kwargs):
-        qs = self.get_queryset()
-        data = self.get_serializer(qs, many=True).data
-        try:
-            no_leidas_total = sum(int(x.get('no_leidos_admin') or 0) for x in data)
-        except Exception:
-            no_leidas_total = 0
-        return Response({'conversaciones': data, 'no_leidas_total': no_leidas_total})
-
-
-class ConversacionSoporteDetail(generics.RetrieveAPIView):
-    permission_classes = [IsAdminGroupOrStaff]
-    serializer_class = ConversacionSoporteDetailSerializer
-    queryset = ConversacionSoporte.objects.all()
-
-    def retrieve(self, request, *args, **kwargs):
-        obj = self.get_object()
-        obj.last_read_admin = timezone.now()
-        obj.save(update_fields=['last_read_admin', 'actualizada'])
-        data = self.get_serializer(obj).data
-        return Response(data)
-
-
-@api_view(['POST'])
-@permission_classes([IsAdminGroupOrStaff])
-def responder_soporte(request, pk: int):
-    conv = get_object_or_404(ConversacionSoporte, pk=pk)
-    cuerpo = (request.data.get('mensaje') or request.data.get('cuerpo') or '').strip()
-    if not cuerpo:
-        return Response({'detail': 'mensaje requerido'}, status=400)
-    m = MensajeSoporte.objects.create(
-        conversacion=conv,
-        autor_tipo='admin',
-        autor_admin=request.user,
-        cuerpo=cuerpo,
-    )
-    conv.last_read_admin = timezone.now()
-    conv.save(update_fields=['last_read_admin', 'actualizada'])
-    return Response(MensajeSoporteSerializer(m).data)
-
-
-@api_view(['POST'])
-@permission_classes([IsAdminGroupOrStaff])
-def cerrar_conversacion_soporte(request, pk: int):
-    conv = get_object_or_404(ConversacionSoporte, pk=pk)
-    conv.estado = 'cerrada'
-    conv.save(update_fields=['estado', 'actualizada'])
-    return Response({'ok': True, 'estado': conv.estado})
-
-
-@api_view(['POST'])
-@permission_classes([IsAdminGroupOrStaff])
-def abrir_conversacion_soporte(request, pk: int):
-    conv = get_object_or_404(ConversacionSoporte, pk=pk)
-    conv.estado = 'abierta'
-    conv.save(update_fields=['estado', 'actualizada'])
-    return Response({'ok': True, 'estado': conv.estado})
