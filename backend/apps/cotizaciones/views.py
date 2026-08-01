@@ -222,6 +222,43 @@ def crear_cotizacion_publica(request):
 
 
 @api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def solicitar_cancelacion(request, pk):
+    """El CLIENTE dueño pide cancelar su cotización; REMALI decide.
+
+    No cambia el estado: deja la marca + motivo, avisa al panel con
+    notificación (y el latido la pinta). Si ya se concretó, se le pide
+    hablar con REMALI — eso ya es una venta/renta viva."""
+    from django.utils import timezone
+    cot = Cotizacion.objects.filter(pk=pk, usuario=request.user).first()
+    if not cot:
+        return Response({'detalle': 'Cotización no encontrada'}, status=404)
+    if cot.conversiones.exists() or cot.rentas_convertidas.exists():
+        return Response({'detalle': 'Esta cotización ya se concretó; contáctanos por WhatsApp para cualquier cambio.'}, status=400)
+    if cot.estado == 'rechazada':
+        return Response({'detalle': 'Esta cotización ya está cerrada.'}, status=400)
+    if cot.cancelacion_solicitada:
+        return Response({'detalle': 'Ya registramos tu solicitud de cancelación.', 'ya': True})
+    cot.cancelacion_solicitada = timezone.now()
+    cot.cancelacion_motivo = (request.data.get('motivo') or '').strip()[:500]
+    cot.save(update_fields=['cancelacion_solicitada', 'cancelacion_motivo'])
+    try:
+        from maquinaria.models import crear_notificacion
+        crear_notificacion(
+            'sistema',
+            f'El cliente pide CANCELAR la {cot.folio}',
+            f'{cot.cliente_nombre or request.user.get_username()} solicitó cancelarla'
+            + (f': {cot.cancelacion_motivo}' if cot.cancelacion_motivo else '.'),
+            seccion='cotizaciones',
+            ref=f'cancelacion-{cot.id}',
+            data={'cotizacion_id': cot.id, 'folio': cot.folio},
+        )
+    except Exception:
+        pass
+    return Response({'detalle': 'Solicitud registrada: REMALI la revisará.'})
+
+
+@api_view(['POST'])
 @permission_classes([EsOperador])
 def vincular_cuenta_cotizacion(request, pk):
     """Vincula (o cambia/quita) la cuenta de cliente de una cotización.
@@ -317,7 +354,9 @@ def autorizacion_cotizacion(request, token):
                 pass
         return Response({'detalle': 'Rechazada. Le avisamos a quien la armó.', 'folio': cot.folio, 'rechazada': True})
 
-    cot.estado = 'enviada'
+    # El jefe ya aprobó el dinero: entra ACEPTADA — a REMALI solo le queda
+    # concretar la venta o renta (convertir), sin pasos intermedios.
+    cot.estado = 'aceptada'
     cot.autorizada_por = _np(nombre_aut)[:120]
     cot.autorizada_en = timezone.now()
     cot.save(update_fields=['estado', 'autorizada_por', 'autorizada_en'])
@@ -337,8 +376,8 @@ def autorizacion_cotizacion(request, token):
     try:
         crear_notificacion(
             'sistema',
-            f'Cotización {cot.folio} autorizada · lista para atender',
-            f'{cot.autorizada_por} autorizó la cotización de {cot.cliente_nombre or "cliente"} por ${cot.total}.',
+            f'Cotización {cot.folio} AUTORIZADA · lista para concretar',
+            f'{cot.autorizada_por} la autorizó: entra ACEPTADA. Solo falta concretar la venta o renta de {cot.cliente_nombre or "cliente"} por ${cot.total}.',
             seccion='cotizaciones',
             ref=f'cotizacion-autorizada-{cot.id}',
             data={'cotizacion_id': cot.id, 'folio': cot.folio},
@@ -477,9 +516,11 @@ def cotizaciones_mias(request):
     for c in qs:
         vencida = c.estado in ('borrador', 'enviada', 'por_autorizar') and c.vence_el and c.vence_el < hoy
         data.append({
+            'id': c.id,
             'folio': c.folio,
             'estado': 'vencida' if vencida else c.estado,
             'estado_label': 'Vencida' if vencida else ('Rechazada por tu autorizador' if (c.estado == 'rechazada' and c.autorizacion_rechazo) else LABEL.get(c.estado, c.estado)),
+            'cancelacion_solicitada': c.cancelacion_solicitada.isoformat() if c.cancelacion_solicitada else None,
             # Para reenviar la liga al jefe desde "Mis cotizaciones".
             'liga_autorizacion': (f'/autorizar/{c.token_autorizacion}' if c.estado == 'por_autorizar' and c.token_autorizacion else None),
             'tipo': c.tipo,

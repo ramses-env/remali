@@ -142,6 +142,11 @@ type Cotizacion = {
   token_publico?: string
   convertida?: boolean; venta_id?: number | null
   usuario_nombre?: string | null
+  autorizada_por?: string | null
+  autorizada_en?: string | null
+  autorizacion_rechazo?: string
+  cancelacion_solicitada?: string | null
+  cancelacion_motivo?: string
   usuario_email?: string | null
   origen?: 'admin' | 'cliente'
   datos_solicitud?: { empresa?: string; obra?: { responsable?: string; direccion?: string; telefono?: string; email?: string } }
@@ -5972,6 +5977,13 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
                   className="sm:max-w-[460px]"
                 />
               )}
+              {/* Vino autorizada por el jefe del cliente: dinero ya aprobado. */}
+              {c.autorizada_por && !c.autorizacion_rechazo && (
+                <div className="mt-2 inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 text-[12.5px] font-bold">
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round"><path d="M5 13l4 4L19 7" /></svg>
+                  Autorizada por {c.autorizada_por}{c.autorizada_en ? ` · ${new Date(c.autorizada_en).toLocaleDateString('es-MX', { day: 'numeric', month: 'short' })}` : ''} — lista para concretar
+                </div>
+              )}
             </div>
             <div className="sm:w-[230px] shrink-0">
               <p className={labelCot}>Entrega prometida</p>
@@ -5992,6 +6004,18 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
               {c.items.length > 0 && c.tipo !== 'mixta' && <p className="text-[11px] text-mute mt-1.5">Se define por las partidas.</p>}
             </div>
           </div>
+
+          {/* El cliente pidió cancelar: visible ANTES que nada; tú decides. */}
+          {c.cancelacion_solicitada && (
+            <div className="rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3">
+              <p className="text-[13.5px] font-bold text-red-700 dark:text-red-300">
+                El cliente solicitó CANCELAR esta cotización
+                <span className="font-semibold text-red-600/80 dark:text-red-400/80"> · {new Date(c.cancelacion_solicitada).toLocaleDateString('es-MX', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}</span>
+              </p>
+              {c.cancelacion_motivo && <p className="text-[13px] text-red-600 dark:text-red-400 mt-1">Motivo: {c.cancelacion_motivo}</p>}
+              <p className="text-[12px] text-mute mt-1.5">Si procede, márcala como Rechazada; si no, contáctalo.</p>
+            </div>
+          )}
 
           {/* Datos del cliente (arriba): para corregir un nombre/teléfono mal
               capturado sin tener que rehacer la cotización. */}

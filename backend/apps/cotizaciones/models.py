@@ -80,6 +80,9 @@ class Cotizacion(models.Model):
     token_autorizacion = models.CharField(max_length=64, null=True, blank=True, unique=True)
     autorizada_por = models.CharField(max_length=120, blank=True, default='')
     autorizada_en = models.DateTimeField(null=True, blank=True)
+    # El cliente pidió cancelarla (REMALI decide): cuándo y por qué.
+    cancelacion_solicitada = models.DateTimeField(null=True, blank=True)
+    cancelacion_motivo = models.TextField(blank=True, default='')
     # Si quien autoriza la RECHAZA: el motivo queda aquí (vacío = autorizada).
     autorizacion_rechazo = models.TextField(blank=True, default='')
     escalada_en = models.DateTimeField(null=True, blank=True, help_text='Cuándo se avisó a los respaldos por falta de atención')
