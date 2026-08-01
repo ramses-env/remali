@@ -56,20 +56,28 @@ def render_orden_carta_pdf(d: dict) -> bytes:
     c.setStrokeColor(LINEA); c.line(m, y, ancho - m, y); y -= 8 * mm
 
     # ── Datos del cliente (meta) ──
+    from reportlab.lib.utils import simpleSplit
     c.setFillColor(TINTA)
     col2 = ancho / 2
-    x, fila = m, 0
-    for it in d.get('meta', []):
-        px = m if fila % 2 == 0 else col2
-        c.setFillColor(GRIS); c.setFont('Helvetica', 8)
-        c.drawString(px, y, str(it.get('label', '')).upper())
-        c.setFillColor(TINTA); c.setFont('Helvetica-Bold', 10)
-        c.drawString(px, y - 4.6 * mm, str(it.get('value', ''))[:60])
-        if fila % 2 == 1:
-            y -= 11 * mm
-        fila += 1
-    if fila % 2 == 1:
-        y -= 11 * mm
+    # Ancho útil de una columna: hasta el inicio de la otra menos un respiro.
+    ancho_col = col2 - m - 6 * mm
+    pares = list(d.get('meta', []))
+    for i in range(0, len(pares), 2):
+        fila_items = pares[i:i + 2]
+        lineas_fila = 1
+        for j, it in enumerate(fila_items):
+            px = m if j == 0 else col2
+            c.setFillColor(GRIS); c.setFont('Helvetica', 8)
+            c.drawString(px, y, str(it.get('label', '')).upper())
+            c.setFillColor(TINTA); c.setFont('Helvetica-Bold', 10)
+            # El valor se parte al ancho de SU columna (máx 2 renglones) en vez
+            # de correr por encima de la columna vecina (ubicaciones largas).
+            lineas = simpleSplit(str(it.get('value', '')), 'Helvetica-Bold', 10, ancho_col)[:2] or ['']
+            for k, ln in enumerate(lineas):
+                c.drawString(px, y - (4.6 + 4.2 * k) * mm, ln)
+            lineas_fila = max(lineas_fila, len(lineas))
+        # La fila baja según el par más alto: nada se encima con lo que sigue.
+        y -= (11 + 4.2 * (lineas_fila - 1)) * mm
     y -= 2 * mm
 
     # ── Partidas ──
