@@ -2479,9 +2479,9 @@ function RentModal({ unit, equipo, onClose, onDone, notify }: {
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div><label className={label}>Fecha de inicio</label><input type="date" min={hoy} className={input} value={fechaInicio} onChange={e => setFechaInicio(e.target.value)} /></div>
-            <div><label className={label}>Descuento ($)</label><input type="number" min={0} className={input} value={descuento} onChange={e => setDescuento(e.target.value)} placeholder="0" /></div>
+            <div><label className={label}>Descuento</label><InputDinero valor={descuento} onValor={setDescuento} /></div>
           </div>
-          <div><label className={label}>Depósito / garantía ($)</label><input type="number" min={0} className={input} value={deposito} onChange={e => setDeposito(e.target.value)} placeholder="0" /></div>
+          <div><label className={label}>Depósito / garantía</label><InputDinero valor={deposito} onValor={setDeposito} /></div>
           <FacturaFields requiere={requiereFactura} onRequiere={setRequiereFactura} factura={factura} onFactura={setFactura} empresaNombre={empresaId ? empresas.find(e => String(e.id) === empresaId)?.nombre : undefined} />
           {Number(precio) <= 0 && (
             <p className="text-[11px] text-amber-600 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2">
@@ -2596,7 +2596,7 @@ function SellModal({ unit, equipo, onClose, onDone, notify }: {
               <option value="transferencia" className="bg-surface">Transferencia</option>
             </select>
           </div>
-          <div><label className={label}>Precio (sin IVA)</label><input type="number" className={input} value={total} onChange={e => setTotal(e.target.value)} placeholder="0.00" /></div>
+          <div><label className={label}>Precio (sin IVA)</label><InputDinero valor={total} onValor={setTotal} placeholder="16,500" /></div>
           <div className="px-4 py-3 rounded-xl bg-surface-2 space-y-1">
             <div className="flex items-center justify-between text-xs text-mute"><span>Precio (sin IVA)</span><span>${precioNum.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
             <div className="flex items-center justify-between text-xs text-mute"><span>IVA (16%)</span><span>${ivaNum.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
@@ -3168,6 +3168,88 @@ function EvidenciasRenta({ rentaId }: { rentaId: number }) {
   )
 }
 
+/** Dinero mientras se escribe: "2000" se ve "2,000" (y "$" fijo a la
+ *  izquierda). Solo acepta dígitos y UN punto decimal; el valor que guarda
+ *  es crudo ("2000.50") para que las cuentas no carguen comas. Pieza de la
+ *  casa: úsala en todo campo de cantidades. */
+function formatearDinero(crudo: string) {
+  if (!crudo) return ''
+  const [ent, dec] = crudo.split('.')
+  const entFmt = ent ? Number(ent).toLocaleString('en-US') : ''
+  return dec !== undefined ? `${entFmt}.${dec.slice(0, 2)}` : entFmt
+}
+function InputDinero({ valor, onValor, placeholder = '0', autoFocus, className = '', disabled }: {
+  valor: string; onValor: (v: string) => void; placeholder?: string; autoFocus?: boolean; className?: string; disabled?: boolean
+}) {
+  return (
+    <div className={`relative ${className}`}>
+      <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-mute font-bold text-sm pointer-events-none">$</span>
+      <input
+        value={formatearDinero(valor)} autoFocus={autoFocus} disabled={disabled}
+        inputMode="decimal" placeholder={placeholder}
+        onChange={e => {
+          let limpio = e.target.value.replace(/[^\d.]/g, '')
+          const i = limpio.indexOf('.')
+          if (i !== -1) limpio = limpio.slice(0, i + 1) + limpio.slice(i + 1).replace(/\./g, '').slice(0, 2)
+          onValor(limpio)
+        }}
+        className="w-full bg-surface-2 border border-edge rounded-xl pl-8 pr-3.5 py-2.5 text-sm font-bold text-ink tabular-nums placeholder-mute focus:outline-none focus:border-gold/50 transition-colors disabled:opacity-60"
+      />
+    </div>
+  )
+}
+
+/** Registrar abono: TODO en un solo modal — monto (con comas), método y fecha. */
+function AbonoModal({ saldo, onClose, onRegistrar }: {
+  saldo: number; onClose: () => void
+  onRegistrar: (monto: number, metodo: string, fecha: string) => Promise<void>
+}) {
+  const money = formatMoney
+  const hoyISO = new Date().toLocaleDateString('sv-SE')
+  const [monto, setMonto] = useState('')
+  const [metodo, setMetodo] = useState('efectivo')
+  const [fecha, setFecha] = useState(hoyISO)
+  const [guardando, setGuardando] = useState(false)
+  const n = Number(monto) || 0
+
+  return createPortal(
+    <div className="fixed inset-0 z-[130] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} className="w-full max-w-sm bg-surface border border-edge rounded-2xl shadow-[0_24px_60px_rgba(0,0,0,0.3)] p-6">
+        <h3 className="font-black text-ink">Registrar abono</h3>
+        <p className="text-[12.5px] text-mute mt-1">Saldo actual: <b className="text-ink">{money(saldo)}</b></p>
+
+        <label className="block text-[12px] font-semibold text-mute mt-4 mb-1.5">¿Cuánto entrega?</label>
+        <InputDinero valor={monto} onValor={setMonto} autoFocus placeholder="2,000" />
+
+        <label className="block text-[12px] font-semibold text-mute mt-4 mb-1.5">Método</label>
+        <div className="grid grid-cols-3 gap-2">
+          {(['efectivo', 'tarjeta', 'transferencia'] as const).map(m => (
+            <button key={m} onClick={() => setMetodo(m)}
+              className={`h-10 rounded-xl border text-[12.5px] font-bold capitalize transition-colors ${metodo === m ? 'bg-ink text-app border-ink' : 'border-edge text-mute hover:text-ink hover:bg-surface-2'}`}>
+              {m}
+            </button>
+          ))}
+        </div>
+
+        <label className="block text-[12px] font-semibold text-mute mt-4 mb-1.5">Fecha del abono</label>
+        <input type="date" value={fecha} max={hoyISO} onChange={e => setFecha(e.target.value)}
+          className="w-full bg-surface-2 border border-edge rounded-xl px-3.5 py-2.5 text-sm text-ink focus:outline-none focus:border-gold/50 transition-colors" />
+        <p className="text-[11px] text-mute mt-1">Cámbiala si se te pasó registrarlo ese día; no puede ser futura.</p>
+
+        <div className="mt-5 flex justify-end gap-2.5">
+          <button onClick={onClose} className="px-5 py-2.5 rounded-full border border-edge text-ink text-sm font-semibold hover:bg-surface-2 transition-colors">Cancelar</button>
+          <button disabled={n <= 0 || guardando}
+            onClick={async () => { setGuardando(true); try { await onRegistrar(n, metodo, fecha) } finally { setGuardando(false) } }}
+            className="px-6 py-2.5 rounded-full bg-gold text-black text-sm font-bold hover:opacity-90 transition-opacity disabled:opacity-40">
+            {guardando ? 'Guardando…' : n > 0 ? `Registrar ${money(n)}` : 'Registrar'}
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  )
+}
+
 function RentaDetalleModal({ renta: r, onClose, onTicket }: { renta: RentaFull; onClose: () => void; onTicket: () => void }) {
   const money = formatMoney
   // Cuenta de cliente vinculada; se puede asignar o cambiar aquí mismo,
@@ -3177,38 +3259,14 @@ function RentaDetalleModal({ renta: r, onClose, onTicket }: { renta: RentaFull; 
   const [pagos, setPagos] = useState(r.pagos || [])
   const [pagado, setPagado] = useState(Number(r.pagado || 0))
   const [saldo, setSaldo] = useState(Number(r.saldo ?? r.total ?? 0))
-  async function registrarAbono() {
-    const montoTxt = await pedir({
-      titulo: 'Registrar abono',
-      mensaje: `Saldo actual: ${money(saldo)}. ¿Cuánto entrega el cliente?`,
-      placeholder: 'Ej. 1500', inputMode: 'decimal',
-    })
-    if (montoTxt === null) return
-    const monto = Number(montoTxt)
-    if (!monto || monto <= 0) { return }
-    const met = await elegir({
-      titulo: 'Método del abono',
-      opciones: [
-        { valor: 'efectivo', label: 'Efectivo' },
-        { valor: 'tarjeta', label: 'Tarjeta' },
-        { valor: 'transferencia', label: 'Transferencia' },
-      ],
-    })
-    if (!met || !met[0]) return
-    // ¿Qué día fue? Por si se olvidó registrarlo ese día: queda la fecha real.
-    const hoyISO = new Date().toLocaleDateString('sv-SE')
-    const fecha = await pedir({
-      titulo: '¿Qué día fue el abono?',
-      mensaje: 'Déjala en hoy si acaba de pagar; cámbiala si se te pasó registrarlo ese día.',
-      inputMode: 'fecha', valor: hoyISO,
-    })
-    if (fecha === null) return
-    if (fecha && fecha > hoyISO) { await confirmar({ titulo: 'Fecha futura', mensaje: 'La fecha del abono no puede ser futura.', aceptar: 'Entendido' }); return }
+  const [abonando, setAbonando] = useState(false)
+  async function guardarAbono(monto: number, metodo: string, fecha: string) {
     try {
-      const resp = await api.post<{ renta: RentaFull }>(`/rentas/${r.id}/abonos/`, { monto, metodo: met[0], fecha: fecha || undefined })
+      const resp = await api.post<{ renta: RentaFull }>(`/rentas/${r.id}/abonos/`, { monto, metodo, fecha: fecha || undefined })
       setPagos(resp.data.renta.pagos || [])
       setPagado(Number(resp.data.renta.pagado || 0))
       setSaldo(Number(resp.data.renta.saldo || 0))
+      setAbonando(false)
     } catch { /* el interceptor avisa */ }
   }
   const [liga, setLiga] = useState('')
@@ -3394,8 +3452,9 @@ function RentaDetalleModal({ renta: r, onClose, onTicket }: { renta: RentaFull; 
                   </div>
                 </div>
               )}
+              {abonando && <AbonoModal saldo={saldo} onClose={() => setAbonando(false)} onRegistrar={guardarAbono} />}
               {r.estado !== 'cancelada' && saldo > 0 && (
-                <button onClick={registrarAbono}
+                <button onClick={() => setAbonando(true)}
                   className="mt-1 px-3.5 py-2 rounded-[9px] border border-edge text-[12px] font-bold text-ink hover:border-gold/50 hover:text-gold transition-colors">
                   + Registrar abono
                 </button>
