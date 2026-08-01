@@ -78,16 +78,15 @@ api.interceptors.response.use(
         window.location.href = `/login?next=${encodeURIComponent(path)}&expired=1`
       }
     }
-    // Avisos GLOBALES (tienda y panel por igual): solo lo que ningún componente
-    // va a contar — red caída, errores del servidor y permisos. Los 400 de
-    // validación son de cada formulario, y los sondeos de fondo no molestan.
+    // Avisos GLOBALES (tienda y panel por igual): SOLO red caída y errores del
+    // servidor. Los 400 son de cada formulario; los 403 NO van aquí — el panel
+    // sondea módulos que cada rol no ve (técnico → métricas, usuarios...) y
+    // avisarlos inundaba la pantalla con "necesitas permisos" (visto en campo).
     if (!esDeFondo(error?.config) && status !== 401) {
       if (!error?.response) {
         avisar('Sin conexión con REMALI. Revisa tu internet e inténtalo de nuevo.')
       } else if (status >= 500) {
         avisar('Algo falló de nuestro lado. Inténtalo de nuevo en un momento.')
-      } else if (status === 403) {
-        avisar(error.response?.data?.detalle || error.response?.data?.detail || 'No tienes permiso para hacer eso.')
       }
     }
     return Promise.reject(error)

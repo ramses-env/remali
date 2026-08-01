@@ -13,7 +13,12 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([])
   function notify(message: string, kind: ToastKind = 'cart') {
     const id = Date.now() + Math.floor(Math.random() * 1000)
-    setToasts(t => [...t, { id, message, kind }])
+    setToasts(t => {
+      // El mismo mensaje repetido no se apila (una ráfaga de errores iguales
+      // debe leerse UNA vez), y nunca más de 3 a la vez.
+      if (t.some(x => x.message === message)) return t
+      return [...t, { id, message, kind }].slice(-3)
+    })
     setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 2600)
   }
   // Los errores globales del interceptor (red, 500, permisos) también se

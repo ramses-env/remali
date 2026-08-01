@@ -424,9 +424,12 @@ export default function Dashboard() {
   }, [])
 
   const notify = (msg: string, type: 'ok' | 'err' | 'info' | 'warning' | 'primary' = 'ok') => {
-    // Pila de alertas: las nuevas se agregan abajo en vez de pisar a la anterior.
+    // Pila de alertas: las nuevas abajo, sin repetidos y con tope de 3.
     const id = Date.now() + Math.floor(Math.random() * 1000)
-    setToasts(t => [...t, { id, msg, type }])
+    setToasts(t => {
+      if (t.some(x => x.msg === msg)) return t
+      return [...t, { id, msg, type }].slice(-3)
+    })
     setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 3200)
   }
 
