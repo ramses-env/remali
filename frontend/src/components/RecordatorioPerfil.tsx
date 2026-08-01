@@ -66,13 +66,13 @@ export default function RecordatorioPerfil() {
     <AnimatePresence>
       {visible && (
         <motion.div
-          initial={reducir ? { opacity: 0 } : { opacity: 0, y: 16 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={reducir ? { opacity: 0 } : { opacity: 0, y: 12 }}
+          initial={reducir ? { opacity: 0 } : { opacity: 0, y: -16, scale: 0.97 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          exit={reducir ? { opacity: 0 } : { opacity: 0, y: -12, scale: 0.97 }}
           transition={{ duration: 0.28, ease: [0.23, 1, 0.32, 1] }}
-          /* En móvil sube por encima del dock (bottom-24) para no encimarse; en
-             md+ no hay dock, así que baja a la esquina. */
-          className="fixed bottom-24 left-4 right-4 z-40 md:bottom-5 md:left-auto md:right-5 md:max-w-[360px]"
+          /* Arriba a la derecha, en el MISMO lugar donde aterrizan las demás
+             alertas (bajo el navbar); en móvil ocupa el ancho. */
+          className="fixed top-[76px] left-4 right-4 z-40 md:left-auto md:right-5 md:max-w-[360px]"
         >
           {/* Misma anatomía que las alertas: barra gris, círculo de color, ✕ */}
           <div className="flex items-center gap-3 pl-3 pr-2 py-2.5 rounded-2xl border border-edge bg-surface-2 shadow-[0_18px_50px_rgba(0,0,0,0.35)]">
