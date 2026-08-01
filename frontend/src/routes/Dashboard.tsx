@@ -4376,8 +4376,12 @@ function EmpresasAdmin({ empresas, reload, notify }: {
 
       {/* Modal empresa */}
       {formOpen && (
-        <div className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm flex items-start justify-center p-4 sm:p-6 overflow-y-auto" onClick={() => setFormOpen(false)}>
-          <div onClick={ev => ev.stopPropagation()} className="w-full sm:max-w-[880px] bg-surface border border-edge rounded-2xl overflow-hidden sm:my-auto max-h-[92vh] flex flex-col shadow-[0_20px_50px_rgba(33,29,22,0.18)]">
+        <div className="fixed inset-0 z-[60] bg-black/40 backdrop-blur-[2px]" onClick={() => setFormOpen(false)}>
+          <motion.div
+            initial={{ x: '100%' }} animate={{ x: 0 }} transition={{ duration: 0.3, ease: [0.23, 1, 0.32, 1] }}
+            onClick={(ev: React.MouseEvent) => ev.stopPropagation()}
+            className="fixed inset-y-0 right-0 w-full sm:max-w-[640px] bg-surface border-l border-edge shadow-[-24px_0_60px_rgba(33,29,22,0.22)] flex flex-col"
+          >
             <div className="px-6 py-4 border-b border-edge flex items-center justify-between shrink-0 bg-surface">
               <h2 className="font-bold text-ink">{editing ? 'Editar cliente' : 'Nuevo cliente'}</h2>
               <button onClick={() => setFormOpen(false)} className="text-mute hover:text-ink p-1"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" d="M6 6l12 12M18 6L6 18" /></svg></button>
@@ -4446,11 +4450,11 @@ function EmpresasAdmin({ empresas, reload, notify }: {
 
               <div><label className={label}>Notas</label><textarea className={`${input} resize-none`} rows={2} value={form.notas || ''} onChange={e => setForm({ ...form, notas: e.target.value })} placeholder="Información adicional" /></div>
             </div>
-            <div className="px-6 py-4 border-t border-edge flex gap-3 shrink-0 bg-surface">
-              <button onClick={() => setFormOpen(false)} className="flex-1 py-2.5 rounded-full border border-edge text-ink text-sm font-semibold hover:bg-surface-2 transition-colors">Cancelar</button>
-              <button onClick={save} className="flex-1 py-2.5 rounded-full bg-gold text-black font-bold text-sm hover:opacity-90 active:scale-[0.98] transition-[transform,opacity] duration-150">{editing ? 'Guardar' : 'Crear cliente'}</button>
+            <div className="px-6 py-4 border-t border-edge flex justify-end gap-3 shrink-0 bg-surface">
+              <button onClick={() => setFormOpen(false)} className="px-6 py-2.5 rounded-full border border-edge text-ink text-sm font-semibold hover:bg-surface-2 transition-colors">Cancelar</button>
+              <button onClick={save} className="px-7 py-2.5 rounded-full bg-gold text-black font-bold text-sm hover:opacity-90 active:scale-[0.98] transition-[transform,opacity] duration-150">{editing ? 'Guardar' : 'Crear cliente'}</button>
             </div>
-          </div>
+          </motion.div>
         </div>
       )}
 
@@ -5059,13 +5063,17 @@ function NuevaOrdenModal({ empresas, unidades, notify, onClose, onCreated }: {
   }
 
   return (
-    <div className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm flex items-start justify-center p-0 sm:p-6 overflow-y-auto" onClick={onClose}>
-      <div onClick={(e: React.MouseEvent) => e.stopPropagation()} className="w-full sm:max-w-[820px] my-0 sm:my-auto bg-surface border border-edge rounded-none sm:rounded-2xl shadow-[0_20px_50px_rgba(33,29,22,0.18)] min-h-screen sm:min-h-0">
-        <div className="px-6 py-4 border-b border-edge flex items-center justify-between sticky top-0 bg-surface z-10 sm:rounded-t-2xl">
+    <div className="fixed inset-0 z-[60] bg-black/40 backdrop-blur-[2px]" onClick={onClose}>
+      <motion.div
+        initial={{ x: '100%' }} animate={{ x: 0 }} transition={{ duration: 0.3, ease: [0.23, 1, 0.32, 1] }}
+        onClick={(e: React.MouseEvent) => e.stopPropagation()}
+        className="fixed inset-y-0 right-0 w-full sm:max-w-[560px] bg-surface border-l border-edge shadow-[-24px_0_60px_rgba(33,29,22,0.22)] flex flex-col"
+      >
+        <div className="px-6 py-4 border-b border-edge flex items-center justify-between shrink-0">
           <h2 className="font-bold text-ink">Nueva orden de reparación</h2>
           <button onClick={onClose} className="text-mute hover:text-ink p-1" aria-label="Cerrar"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" d="M6 6l12 12M18 6L6 18" /></svg></button>
         </div>
-        <div className="p-6 space-y-4">
+        <div className="p-6 space-y-4 flex-1 overflow-y-auto">
           <div className="grid grid-cols-2 gap-2">
             <button onClick={() => setTipo('cliente')} className={`px-3 py-2.5 rounded-xl border text-sm font-semibold transition-colors ${tipo === 'cliente' ? 'border-gold bg-gold-soft text-gold' : 'border-edge text-mute hover:text-ink'}`}>Equipo de cliente</button>
             <button onClick={() => setTipo('interna')} className={`px-3 py-2.5 rounded-xl border text-sm font-semibold transition-colors ${tipo === 'interna' ? 'border-gold bg-gold-soft text-gold' : 'border-edge text-mute hover:text-ink'}`}>Máquina propia</button>
@@ -5103,14 +5111,14 @@ function NuevaOrdenModal({ empresas, unidades, notify, onClose, onCreated }: {
 
           <div><label className={label}>Falla reportada / diagnóstico inicial</label><textarea className={`${input} resize-none`} rows={3} value={form.diagnostico} onChange={e => setForm({ ...form, diagnostico: e.target.value })} placeholder="Qué reporta el cliente / síntomas" /></div>
         </div>
-        <div className="px-6 py-4 border-t border-edge flex gap-3 sticky bottom-0 bg-surface sm:rounded-b-2xl">
-          <button onClick={onClose} className="flex-1 py-2.5 rounded-full border border-edge text-ink text-sm font-semibold hover:bg-surface-2 transition-colors">Cancelar</button>
-          <button onClick={crear} disabled={saving} className="flex-1 py-2.5 rounded-full bg-gold text-black font-bold text-sm hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center justify-center gap-2">
+        <div className="px-6 py-4 border-t border-edge flex justify-end gap-3 shrink-0 bg-surface">
+          <button onClick={onClose} className="px-6 py-2.5 rounded-full border border-edge text-ink text-sm font-semibold hover:bg-surface-2 transition-colors">Cancelar</button>
+          <button onClick={crear} disabled={saving} className="px-7 py-2.5 rounded-full bg-gold text-black font-bold text-sm hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center justify-center gap-2">
             {saving ? <span className="w-4 h-4 border-2 border-black/30 border-t-black rounded-full animate-spin" /> : null}
             Crear orden
           </button>
         </div>
-      </div>
+      </motion.div>
     </div>
   )
 }
@@ -7267,9 +7275,13 @@ function UsuarioModal({ usuario, roles, soyYo, onClose, onSaved, notify }: {
   const etiqueta = 'block text-[12px] font-semibold text-mute mb-1.5'
 
   return createPortal(
-    <div className="fixed inset-0 z-[60] bg-[rgba(33,29,22,0.4)] backdrop-blur-[2px] flex items-start justify-center p-0 sm:p-6 overflow-y-auto" onClick={onClose}>
-      <div onClick={e => e.stopPropagation()} className="w-full sm:max-w-[620px] bg-surface rounded-none sm:rounded-2xl shadow-[0_24px_60px_rgba(33,29,22,0.2)] min-h-screen sm:min-h-0 sm:my-auto flex flex-col overflow-hidden border-0 sm:border border-edge">
-        <div className="px-6 sm:px-7 pt-6 pb-5 border-b border-edge flex items-start justify-between gap-3">
+    <div className="fixed inset-0 z-[60] bg-black/40 backdrop-blur-[2px]" onClick={onClose}>
+      <motion.div
+        initial={{ x: '100%' }} animate={{ x: 0 }} transition={{ duration: 0.3, ease: [0.23, 1, 0.32, 1] }}
+        onClick={e => e.stopPropagation()}
+        className="fixed inset-y-0 right-0 w-full sm:max-w-[560px] bg-surface border-l border-edge shadow-[-24px_0_60px_rgba(33,29,22,0.22)] flex flex-col"
+      >
+        <div className="px-6 sm:px-7 pt-6 pb-5 border-b border-edge flex items-start justify-between gap-3 shrink-0">
           <div>
             <h2 className="text-lg font-black text-ink">{nuevo ? 'Agregar usuario' : usuario!.nombre}</h2>
             <p className="text-[13px] text-mute mt-0.5">
@@ -7357,14 +7369,14 @@ function UsuarioModal({ usuario, roles, soyYo, onClose, onSaved, notify }: {
           )}
         </div>
 
-        <div className="px-6 sm:px-7 py-5 border-t border-edge flex items-center gap-2.5">
-          <button onClick={onClose} className="flex-1 h-11 rounded-[10px] border border-edge text-ink text-[13.5px] font-bold hover:bg-surface-2 transition-colors">Cancelar</button>
+        <div className="px-6 sm:px-7 py-5 border-t border-edge flex items-center justify-end gap-2.5 shrink-0">
+          <button onClick={onClose} className="px-6 h-11 rounded-[10px] border border-edge text-ink text-[13.5px] font-bold hover:bg-surface-2 transition-colors">Cancelar</button>
           <button onClick={guardar} disabled={guardando || (nuevo && (!f.username || f.password.length < 8))}
-            className="flex-1 h-11 rounded-[10px] bg-gold text-black text-[13.5px] font-black hover:brightness-95 active:scale-[0.98] disabled:opacity-40 transition-all">
+            className="px-7 h-11 rounded-[10px] bg-gold text-black text-[13.5px] font-black hover:brightness-95 active:scale-[0.98] disabled:opacity-40 transition-all">
             {guardando ? 'Guardando…' : nuevo ? 'Crear cuenta' : 'Guardar cambios'}
           </button>
         </div>
-      </div>
+      </motion.div>
     </div>,
     document.body
   )
