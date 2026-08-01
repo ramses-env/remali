@@ -19,7 +19,7 @@ import { formatAddress, addressToFields, type AddressResult } from '../lib/geoco
 import { REGIMEN_FISCAL, USO_CFDI, RFC_PUBLICO_GENERAL } from '../lib/sat'
 import { usePrintSettings, charsPerLine } from '../lib/printSettings'
 import { invalidarConfigPublica } from '../lib/configPublica'
-import { motion } from 'framer-motion'
+import { AnimatePresence, motion } from 'framer-motion'
 import { useRecurso, invalidar, type Tema } from '../lib/realtime'
 import { useLatidoPanel } from '../lib/latido'
 import { CLAVE_NIVEL, recordarAcceso, ProveedorPermisos, usePuede, type Capacidades } from '../lib/acceso'
@@ -176,6 +176,16 @@ function seccionInicial(): Section {
   } catch {
     return 'resumen'
   }
+}
+
+/** Descarga la ORDEN CARTA en PDF de una venta/renta. Reemplaza al ticket
+ *  térmico (que solo se usa al vender refacciones). Se descarga en vez de abrir
+ *  en pestaña porque tras un `await` el navegador bloquea window.open. */
+async function abrirOrdenCartaPDF(base: 'ventas' | 'rentas', id: number) {
+  try {
+    const r = await api.get(`/${base}/${id}/ticket/`, { responseType: 'blob', fondo: true } as never)
+    descargarBlob(r.data as Blob, base === 'ventas' ? `orden-venta-${id}.pdf` : `orden-renta-${id}.pdf`)
+  } catch { /* el interceptor global ya avisa el error */ }
 }
 
 type Section = 'resumen' | 'asistente' | 'equipos' | 'inventario' | 'refacciones' | 'reparaciones' | 'cotizaciones' | 'catalogos' | 'empresas' | 'rentas' | 'ventas' | 'facturacion' | 'cupones' | 'notificaciones' | 'perfil' | 'ubicaciones' | 'usuarios' | 'configuracion'
@@ -1137,6 +1147,41 @@ export default function Dashboard() {
 ════════════════════════════════════════ */
 /* (AreaChart eliminado: el Resumen usa los widgets del comp de Claude Design) */
 
+/** Reloj del resumen con dígitos de marcador: cada dígito que cambia RUEDA
+ *  (el viejo sale hacia arriba, el nuevo entra desde abajo). Los que no
+ *  cambian no se mueven — al cambiar de minuto solo giran los necesarios. */
+function RelojVivo({ now }: { now: Date }) {
+  let h = now.getHours() % 12
+  if (h === 0) h = 12
+  const chars = [...`${h}:${String(now.getMinutes()).padStart(2, '0')}`]
+  const ampm = now.getHours() < 12 ? 'AM' : 'PM'
+  return (
+    <div className="flex items-baseline gap-2 mt-5">
+      <div className="flex text-[46px] leading-none font-black tracking-[-0.04em] text-[#111827] tabular-nums">
+        {chars.map((c, i) => c === ':' ? (
+          <span key={`sep-${i}`} className="mx-[2px] -translate-y-[3px]">:</span>
+        ) : (
+          <span key={`pos-${i}`} className="relative inline-flex overflow-hidden" style={{ height: '1em' }}>
+            <AnimatePresence mode="popLayout" initial={false}>
+              <motion.span
+                key={c}
+                initial={{ y: '100%', opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                exit={{ y: '-100%', opacity: 0 }}
+                transition={{ duration: 0.5, ease: [0.23, 1, 0.32, 1] }}
+                className="inline-block"
+              >
+                {c}
+              </motion.span>
+            </AnimatePresence>
+          </span>
+        ))}
+      </div>
+      <span className="text-[16px] font-bold text-[#9CA3AF]">{ampm}</span>
+    </div>
+  )
+}
+
 function Resumen({ equipos, rentas, unidades, ventas, me, go, metrics }: {
   equipos: Equipo[]; categorias: Option[]; tipos: Option[]; marcas: Option[]
   coupons: Coupon[]; rentas: RentaActiva[]; unidades: Unidad[]; ventas: Venta[]
@@ -1148,7 +1193,6 @@ function Resumen({ equipos, rentas, unidades, ventas, me, go, metrics }: {
   // Reloj en vivo
   const [now, setNow] = useState(() => new Date())
   useEffect(() => { const t = setInterval(() => setNow(new Date()), 1000); return () => clearInterval(t) }, [])
-  const timeStr = now.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', hour12: true })
   const dateStr = now.toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
   const nombre = me?.username || 'admin'
 
@@ -1198,12 +1242,14 @@ function Resumen({ equipos, rentas, unidades, ventas, me, go, metrics }: {
     { label: 'Ventas del catálogo', value: String(ventasActivas.length) },
   ]
 
-  // Los colores salen de los tokens: en tema oscuro suben de tono solos, y el
-  // mismo verde/azul/ámbar significa lo mismo aquí, en la dona y en los chips.
+  // Paleta SUAVE solo para la gráfica: la dona y esta leyenda comparten los
+  // mismos --chart-* (azul aciano / verde menta / gris lavanda). Las insignias
+  // de las tablas siguen con los tokens fuertes (necesitan contraste), por eso
+  // los colores de chart van aparte.
   const indicators = [
-    { label: 'Disponibles', sub: 'Listas para operar', value: String(disp), color: 'var(--c-libre)' },
-    { label: 'Rentadas', sub: 'En obra', value: String(rent), color: 'var(--c-renta)' },
-    { label: 'Mantenimiento', sub: 'En taller', value: String(mant), color: 'var(--c-taller)' },
+    { label: 'Disponibles', sub: 'Listas para operar', value: String(disp), color: 'var(--chart-green)' },
+    { label: 'Rentadas', sub: 'En obra', value: String(rent), color: 'var(--chart-blue)' },
+    { label: 'Mantenimiento', sub: 'En taller', value: String(mant), color: 'var(--chart-gray)' },
   ]
 
   /** Dona repartida por estado. Sin unidades queda un anillo gris, no un hueco. */
@@ -1212,7 +1258,7 @@ function Resumen({ equipos, rentas, unidades, ventas, me, go, metrics }: {
     if (!total) return 'conic-gradient(var(--c-surface-2) 0deg 360deg)'
     const gLibre = (disp / total) * 360
     const gRenta = gLibre + (rent / total) * 360
-    return `conic-gradient(var(--c-libre) 0deg ${gLibre}deg, var(--c-renta) ${gLibre}deg ${gRenta}deg, var(--c-taller) ${gRenta}deg 360deg)`
+    return `conic-gradient(var(--chart-green) 0deg ${gLibre}deg, var(--chart-blue) ${gLibre}deg ${gRenta}deg, var(--chart-gray) ${gRenta}deg 360deg)`
   })()
 
   // Tareas rápidas (persisten en el navegador)
@@ -1244,7 +1290,7 @@ function Resumen({ equipos, rentas, unidades, ventas, me, go, metrics }: {
           <div className="min-w-0">
             <div className="text-[26px] font-extrabold text-[#111827]">Bienvenido, {nombre}</div>
             <div className="text-[14.5px] text-[#6B7280] mt-1.5">Listo para gestionar tu inventario hoy.</div>
-            <div className="text-[38px] font-extrabold text-[#111827] mt-5 tabular-nums">{timeStr}</div>
+            <RelojVivo now={now} />
             <div className="text-[13.5px] text-[#6B7280] mt-1 capitalize">{dateStr}</div>
           </div>
           <div className="text-right shrink-0">
@@ -1403,8 +1449,8 @@ function Resumen({ equipos, rentas, unidades, ventas, me, go, metrics }: {
                 <div className="w-full rounded-t-md transition-all"
                   style={{
                     height: `${Math.max(4, (b.total / maxRev) * 100)}%`,
-                    backgroundColor: 'var(--c-gold)',
-                    opacity: i === revByMonth.length - 1 ? 1 : 0.28,
+                    backgroundColor: 'var(--chart-blue)',
+                    opacity: i === revByMonth.length - 1 ? 1 : 0.34,
                   }} />
                 <div className="text-[11px] text-mute font-semibold">{b.label}</div>
               </div>
@@ -2278,7 +2324,6 @@ function RentModal({ unit, equipo, onClose, onDone, notify }: {
   const [clientes, setClientes] = useState<{ id: number; nombre: string; empresa?: string }[]>([])
   const [usuarioId, setUsuarioId] = useState('')
   const [busy, setBusy] = useState(false)
-  const [ticketUrl, setTicketUrl] = useState<string | null>(null)
 
   useEffect(() => {
     api.get('/empresas/').then(r => setEmpresas(Array.isArray(r.data) ? r.data : (r.data?.results || []))).catch(() => {})
@@ -2334,15 +2379,12 @@ function RentModal({ unit, equipo, onClose, onDone, notify }: {
         const est = res.data?.renta?.estado
         notify(est === 'reservada' ? 'Reserva registrada' : 'Renta registrada')
         const id = res.data?.renta?.id
-        if (id) setTicketUrl(`/rentas/${id}/comprobante/`)   // muestra el comprobante en el sistema
-        else onDone()
+        if (id) abrirOrdenCartaPDF('rentas', id)   // orden carta en PDF (ya no ticket térmico)
+        onDone()
       })
       .catch(err => notify(err?.response?.data?.detalle || 'Error al rentar', 'err'))
       .finally(() => setBusy(false))
   }
-
-  // Tras registrar, mostramos el comprobante; al cerrarlo se refresca la lista
-  if (ticketUrl) return <TicketModal url={ticketUrl} onClose={onDone} />
 
   return (
     <div className="fixed inset-0 z-[70] bg-black/40 backdrop-blur-[2px]" onClick={onClose}>
@@ -2439,7 +2481,6 @@ function SellModal({ unit, equipo, onClose, onDone, notify }: {
   const [requiereFactura, setRequiereFactura] = useState(false)
   const [factura, setFactura] = useState<FacturaData>(FACTURA_VACIA)
   const [busy, setBusy] = useState(false)
-  const [ticketUrl, setTicketUrl] = useState<string | null>(null)
 
   useEffect(() => {
     api.get('/empresas/').then(r => setEmpresas(Array.isArray(r.data) ? r.data : (r.data?.results || []))).catch(() => {})
@@ -2474,14 +2515,12 @@ function SellModal({ unit, equipo, onClose, onDone, notify }: {
       .then(res => {
         notify('Venta registrada')
         const id = res.data?.venta?.id
-        if (id) setTicketUrl(`/ventas/${id}/comprobante/`)   // muestra el ticket en el sistema
-        else onDone()
+        if (id) abrirOrdenCartaPDF('ventas', id)   // orden carta en PDF (ya no ticket térmico)
+        onDone()
       })
       .catch(err => notify(err?.response?.data?.detalle || 'Error al vender', 'err'))
       .finally(() => setBusy(false))
   }
-
-  if (ticketUrl) return <TicketModal url={ticketUrl} onClose={onDone} />
 
   return (
     <div className="fixed inset-0 z-[70] bg-black/40 backdrop-blur-[2px]" onClick={onClose}>
@@ -2862,7 +2901,6 @@ function RentasAdmin({ reload, notify }: { reload: () => void; notify: (m: strin
   const [estado, setEstado] = useState<'reservada' | 'activa' | 'finalizada' | 'cancelada'>('activa')
   const [rentas, setRentas] = useState<RentaFull[]>([])
   const [loading, setLoading] = useState(true)
-  const [ticketId, setTicketId] = useState<number | null>(null)
   const [verRenta, setVerRenta] = useState<RentaFull | null>(null)
 
   const load = useCallback(() => {
@@ -2886,8 +2924,7 @@ function RentasAdmin({ reload, notify }: { reload: () => void; notify: (m: strin
 
   return (
     <div className="space-y-5">
-      {ticketId !== null && <TicketModal url={`/rentas/${ticketId}/comprobante/`} onClose={() => setTicketId(null)} />}
-      {verRenta && <RentaDetalleModal renta={verRenta} onClose={() => setVerRenta(null)} onTicket={() => { setTicketId(verRenta.id); setVerRenta(null) }} />}
+      {verRenta && <RentaDetalleModal renta={verRenta} onClose={() => setVerRenta(null)} onTicket={() => abrirOrdenCartaPDF('rentas', verRenta.id)} />}
       {/* KPIs */}
       <KpiGrid
         items={[
@@ -2964,9 +3001,9 @@ function RentasAdmin({ reload, notify }: { reload: () => void; notify: (m: strin
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
                         Ver
                       </button>
-                      <button onClick={() => setTicketId(r.id)} title="Ver / imprimir comprobante" className="inline-flex items-center gap-1.5 px-2.5 h-8 rounded-lg border border-edge text-mute text-xs font-semibold hover:text-ink hover:border-ink/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/20 transition-colors">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
-                        Ticket
+                      <button onClick={() => abrirOrdenCartaPDF('rentas', r.id)} title="Descargar orden carta (PDF)" className="inline-flex items-center gap-1.5 px-2.5 h-8 rounded-lg border border-edge text-mute text-xs font-semibold hover:text-ink hover:border-ink/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/20 transition-colors">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>
+                        Orden PDF
                       </button>
                       {estado === 'activa' && (
                         <button onClick={() => devolver(r)} title="Marcar la renta como devuelta" className="inline-flex items-center gap-1.5 px-2.5 h-8 rounded-lg border border-renta/30 text-renta text-xs font-semibold hover:bg-renta/10 hover:border-renta/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-renta/30 transition-colors">
@@ -3266,7 +3303,7 @@ function RentaDetalleModal({ renta: r, onClose, onTicket }: { renta: RentaFull; 
         {/* Footer */}
         <div className="px-6 sm:px-[26px] py-5 border-t border-edge flex items-center gap-2.5 shrink-0">
           <button onClick={onClose} className="flex-1 h-11 rounded-[9px] border border-edge text-ink text-[13.5px] font-bold hover:bg-surface-2 transition-colors">Cerrar</button>
-          <button onClick={onTicket} className="flex-1 h-11 rounded-[9px] bg-gold text-black text-[13.5px] font-bold hover:brightness-95 transition-all">Ver comprobante</button>
+          <button onClick={onTicket} className="flex-1 h-11 rounded-[9px] bg-gold text-black text-[13.5px] font-bold hover:brightness-95 transition-all">Orden carta (PDF)</button>
         </div>
       </div>
     </div>,
@@ -5344,7 +5381,6 @@ function CotizacionesAdmin({ empresas, notify }: {
   const [recienCreada, setRecienCreada] = useState(false)
   const [creando, setCreando] = useState(false)
   const [carta, setCarta] = useState<Cotizacion | null>(null)
-  const [ticketVentaId, setTicketVentaId] = useState<number | null>(null)
 
   const cargarStats = useCallback(() => {
     api.get<CotStats>('/cotizaciones/stats/').then(r => setStats(r.data)).catch(() => {})
@@ -5486,9 +5522,8 @@ function CotizacionesAdmin({ empresas, notify }: {
         )}
       </Card>
 
-      {detalle && <CotizacionDetalleModal cotizacion={detalle} empresas={empresas} recienCreada={recienCreada} notify={notify} onClose={() => { setDetalle(null); setRecienCreada(false); recargar() }} onChanged={recargar} onPrint={(c) => setCarta(c)} onConvertida={(id) => { setDetalle(null); setRecienCreada(false); recargar(); setTicketVentaId(id) }} />}
+      {detalle && <CotizacionDetalleModal cotizacion={detalle} empresas={empresas} recienCreada={recienCreada} notify={notify} onClose={() => { setDetalle(null); setRecienCreada(false); recargar() }} onChanged={recargar} onPrint={(c) => setCarta(c)} onConvertida={(id) => { setDetalle(null); setRecienCreada(false); recargar(); abrirOrdenCartaPDF('ventas', id) }} />}
       {carta && <CotizacionCartaModal cotizacion={carta} onClose={() => setCarta(null)} />}
-      {ticketVentaId && <TicketModal url={`/ventas/${ticketVentaId}/comprobante/`} onClose={() => setTicketVentaId(null)} />}
     </div>
   )
 }
