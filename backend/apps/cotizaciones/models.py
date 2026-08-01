@@ -20,6 +20,9 @@ class Cotizacion(models.Model):
     TIPOS = [('venta', 'Venta'), ('renta', 'Renta'), ('mixta', 'Venta y renta')]
     ESTADOS = [
         ('borrador', 'Borrador'),
+        # El cliente la mandó a SU jefe: aún no llega a REMALI; al autorizarse
+        # pasa sola a 'enviada' (el admin no mueve nada).
+        ('por_autorizar', 'Por autorizar'),
         ('enviada', 'Enviada'),
         ('aceptada', 'Aceptada'),
         ('rechazada', 'Rechazada'),
@@ -53,7 +56,7 @@ class Cotizacion(models.Model):
     # login). No adivinable; solo expone el PDF de ESA cotización.
     token_publico = models.CharField(max_length=32, unique=True, null=True, blank=True, editable=False)
     aplica_iva = models.BooleanField(default=True, help_text='Suma IVA (16%) al total')
-    estado = models.CharField(max_length=10, choices=ESTADOS, default='borrador')
+    estado = models.CharField(max_length=15, choices=ESTADOS, default='borrador')
     notas = models.TextField(blank=True, default='')
 
     # ── Atención / escalamiento (solo para solicitudes de cliente) ──
@@ -72,6 +75,11 @@ class Cotizacion(models.Model):
     # cientos de clientes, buscar en un selector no escala).
     token_vinculo = models.CharField(max_length=64, null=True, blank=True, unique=True)
     token_vinculo_expira = models.DateTimeField(null=True, blank=True)
+    # Autorización interna del cliente: liga pública para que quien autoriza
+    # (su jefe) apruebe SIN cuenta. Quién y cuándo quedan registrados.
+    token_autorizacion = models.CharField(max_length=64, null=True, blank=True, unique=True)
+    autorizada_por = models.CharField(max_length=120, blank=True, default='')
+    autorizada_en = models.DateTimeField(null=True, blank=True)
     escalada_en = models.DateTimeField(null=True, blank=True, help_text='Cuándo se avisó a los respaldos por falta de atención')
 
     creada = models.DateTimeField(auto_now_add=True)

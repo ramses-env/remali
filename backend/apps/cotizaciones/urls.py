@@ -16,6 +16,7 @@ urlpatterns = [
     path('cotizaciones/<int:pk>/vincular/', views.vincular_cuenta_cotizacion),
     path('cotizaciones/<int:pk>/vinculo/', views.generar_vinculo_cotizacion),
     path('vinculo/cotizacion/<str:token>/', views.vinculo_cotizacion),
+    path('autorizacion/<str:token>/', views.autorizacion_cotizacion),
     path('cotizaciones/<int:pk>/items/', views.cotizacion_agregar_item),
     path('cotizaciones/<int:pk>/items/<int:item_id>/', views.cotizacion_item),
     path('cotizaciones/<int:pk>/items/<int:item_id>/modalidad/', views.cotizacion_item_modalidad),

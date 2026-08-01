@@ -133,7 +133,7 @@ type CotizacionItem = { id: number; descripcion: string; cantidad: number; preci
 type CotizacionFoto = { id: number; imagen: string; orden: number }
 type Cotizacion = {
   id: number; folio: string; tipo: 'venta' | 'renta' | 'mixta'
-  estado: 'borrador' | 'enviada' | 'aceptada' | 'rechazada'
+  estado: 'borrador' | 'por_autorizar' | 'enviada' | 'aceptada' | 'rechazada'
   entrega_prometida?: string | null
   cliente_nombre: string; cliente_telefono: string; cliente_email?: string; empresa?: number | null; empresa_nombre?: string
   vigencia_dias: number; aplica_iva: boolean; notas: string
@@ -5359,7 +5359,11 @@ const COT_ESTADOS: { key: Cotizacion['estado']; label: string; cls: string; dot:
   { key: 'aceptada', label: 'Aceptada', cls: 'bg-emerald-500/10 text-emerald-600', dot: '#1F7A4D' },
   { key: 'rechazada', label: 'Rechazada', cls: 'bg-red-500/10 text-red-500', dot: '#B91C1C' },
 ]
-const cotEstadoMeta = (e: string) => COT_ESTADOS.find(x => x.key === e) || COT_ESTADOS[0]
+const cotEstadoMeta = (e: string) =>
+  e === 'por_autorizar'
+    // En autorización interna del cliente: visible para el admin, pero no es suya.
+    ? { key: 'por_autorizar' as const, label: 'Por autorizar', cls: 'bg-amber-500/10 text-amber-600', dot: '#B45309' }
+    : COT_ESTADOS.find(x => x.key === e) || COT_ESTADOS[0]
 
 type CotStats = { total: number; borrador: number; enviada: number; aceptada: number; rechazada: number; vencida: number; abiertas: number; monto_aceptado: string }
 type PaginaCot = { count: number; next: string | null; previous: string | null; results: Cotizacion[] }
@@ -5952,13 +5956,22 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
           <div className="flex flex-col sm:flex-row sm:items-start gap-4 sm:gap-6">
             <div className="flex-1 min-w-0">
               <p className={labelCot}>Estado</p>
-              <Segmentado
-                opciones={COT_ESTADOS.map(e => ({ key: e.key, label: e.label }))}
-                valor={c.estado}
-                onChange={(k) => cambiarEstado(k as Cotizacion['estado'])}
-                disabled={bloqueada}
-                className="sm:max-w-[460px]"
-              />
+              {c.estado === 'por_autorizar' ? (
+                /* El cliente la tiene con su jefe: al autorizarse cambia sola a
+                   Enviada — aquí no hay nada que mover. */
+                <div className="inline-flex items-center gap-2 px-3.5 py-2.5 rounded-xl border border-amber-500/40 bg-amber-500/10 text-amber-600 text-[13px] font-bold">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                  En autorización interna del cliente — llegará sola al autorizarse
+                </div>
+              ) : (
+                <Segmentado
+                  opciones={COT_ESTADOS.map(e => ({ key: e.key, label: e.label }))}
+                  valor={c.estado}
+                  onChange={(k) => cambiarEstado(k as Cotizacion['estado'])}
+                  disabled={bloqueada}
+                  className="sm:max-w-[460px]"
+                />
+              )}
             </div>
             <div className="sm:w-[230px] shrink-0">
               <p className={labelCot}>Entrega prometida</p>

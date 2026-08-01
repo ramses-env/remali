@@ -140,11 +140,13 @@ def crear_cotizacion_publica(request):
         return Response({'detalle': 'No pudimos identificar los equipos de tu solicitud.'}, status=400)
 
     obra = d.get('obra') or {}
+    # ¿La manda a autorización interna (su jefe) o directo a REMALI?
+    por_autorizar = bool(d.get('por_autorizar'))
     with transaction.atomic():
         cot = Cotizacion.objects.create(
             tipo='venta',          # provisional: lo define recalcular_tipo() con las partidas
             origen='cliente',
-            estado='enviada',
+            estado='por_autorizar' if por_autorizar else 'enviada',
             # Si la mandó con sesión, queda ligada a su cuenta para "Mis cotizaciones".
             usuario=request.user if request.user.is_authenticated else None,
             cliente_nombre=nombre_propio(nombre),
@@ -166,8 +168,20 @@ def crear_cotizacion_publica(request):
             CotizacionItem.objects.create(cotizacion=cot, descripcion=etiqueta, cantidad=cant,
                                           precio_unitario=precio, modalidad=modalidad)
         cot.recalcular_tipo()   # venta, renta o mixta según lo que armó el cliente
+        if por_autorizar:
+            import secrets
+            cot.token_autorizacion = secrets.token_hex(16)
+            cot.save(update_fields=['token_autorizacion'])
 
     tel = cot.cliente_telefono or '—'
+    if por_autorizar:
+        # Aún NO llega a REMALI: sin notificación, sin correos de aviso y sin
+        # acuse. Todo eso se dispara cuando el jefe la autorice.
+        return Response({
+            'detalle': 'Cotización lista para autorización',
+            'folio': cot.folio, 'id': cot.id,
+            'liga_autorizacion': f'/autorizar/{cot.token_autorizacion}',
+        }, status=201)
     # 1) Notificación en el panel.
     try:
         crear_notificacion(
@@ -239,6 +253,77 @@ def vincular_cuenta_cotizacion(request, pk):
         campos.append('cliente_nombre')
     cot.save(update_fields=campos)
     return Response({'cuenta': f'{u.first_name} {u.last_name}'.strip() or u.username})
+
+
+@api_view(['GET', 'POST'])
+@permission_classes([AllowAny])
+@throttle_classes([SolicitudPublicaThrottle])
+def autorizacion_cotizacion(request, token):
+    """La liga de QUIEN AUTORIZA (el jefe del cliente), sin cuenta.
+
+    GET muestra la propuesta; POST con su nombre la autoriza: pasa a
+    'enviada', se registra quién/cuándo, y REMALI se entera solo
+    (notificación + correos + acuse) — el admin no mueve nada."""
+    from django.utils import timezone
+    cot = Cotizacion.objects.prefetch_related('items').filter(token_autorizacion=token).first()
+    if not cot:
+        return Response({'detalle': 'Enlace no válido.'}, status=404)
+
+    if request.method == 'GET':
+        return Response({
+            'folio': cot.folio,
+            'cliente': cot.cliente_nombre or '',
+            'empresa': (cot.datos_solicitud or {}).get('empresa') or '',
+            'obra': ((cot.datos_solicitud or {}).get('obra') or {}).get('direccion') or '',
+            'tipo': cot.tipo,
+            'items': [{'descripcion': i.descripcion, 'cantidad': i.cantidad,
+                       'precio': str(i.precio_unitario), 'modalidad': i.modalidad} for i in cot.items.all()],
+            'subtotal': str(cot.subtotal), 'descuento': str(getattr(cot, 'descuento_total', 0) or 0), 'total': str(cot.total),
+            'vence_el': cot.vence_el,
+            'autorizada': bool(cot.autorizada_en),
+            'autorizada_por': cot.autorizada_por,
+        })
+
+    if cot.autorizada_en:
+        return Response({'detalle': 'Esta cotización ya fue autorizada.', 'folio': cot.folio, 'ya': True})
+    nombre_aut = (request.data.get('nombre') or '').strip()
+    if not nombre_aut:
+        return Response({'detalle': 'Escribe tu nombre para autorizar.'}, status=400)
+
+    from maquinaria.models import crear_notificacion, nombre_propio as _np
+    cot.estado = 'enviada'
+    cot.autorizada_por = _np(nombre_aut)[:120]
+    cot.autorizada_en = timezone.now()
+    cot.save(update_fields=['estado', 'autorizada_por', 'autorizada_en'])
+
+    # AHORA sí llega a REMALI: panel + correos + acuse, igual que un envío directo.
+    tel = cot.cliente_telefono or '—'
+    try:
+        crear_notificacion(
+            'sistema',
+            f'Cotización {cot.folio} autorizada · lista para atender',
+            f'{cot.autorizada_por} autorizó la cotización de {cot.cliente_nombre or "cliente"} por ${cot.total}.',
+            seccion='cotizaciones',
+            ref=f'cotizacion-autorizada-{cot.id}',
+            data={'cotizacion_id': cot.id, 'folio': cot.folio},
+        )
+    except Exception:
+        pass
+    try:
+        from maquinaria.correo import enviar_async
+        from maquinaria.models import CorreoAviso
+        destinatarios = list(CorreoAviso.objects.filter(verificado=True).values_list('email', flat=True))
+        if destinatarios:
+            enviar_async(
+                f'[REMALI] Cotización {cot.folio} autorizada',
+                f'{cot.autorizada_por} autorizó la cotización {cot.folio} de {cot.cliente_nombre or "—"} '
+                f'({tel}) por ${cot.total}. Ya aparece en el panel para atenderse.',
+                destinatarios,
+            )
+        _enviar_acuse_cliente(cot)
+    except Exception:
+        pass
+    return Response({'detalle': 'Autorizada: REMALI la recibió.', 'folio': cot.folio})
 
 
 @api_view(['POST'])
@@ -345,7 +430,7 @@ def cotizaciones_mias(request):
     """
     # Etiquetas de cara al cliente: 'enviada' significa "ya la recibimos y la
     # estamos revisando", no un estado interno del panel.
-    LABEL = {'borrador': 'En revisión', 'enviada': 'En revisión',
+    LABEL = {'borrador': 'En revisión', 'enviada': 'En revisión', 'por_autorizar': 'Esperando autorización',
              'aceptada': 'Aceptada', 'rechazada': 'No disponible'}
     hoy = timezone.now().date()
     qs = (Cotizacion.objects
@@ -354,11 +439,13 @@ def cotizaciones_mias(request):
           .order_by('-creada')[:100])
     data = []
     for c in qs:
-        vencida = c.estado in ('borrador', 'enviada') and c.vence_el and c.vence_el < hoy
+        vencida = c.estado in ('borrador', 'enviada', 'por_autorizar') and c.vence_el and c.vence_el < hoy
         data.append({
             'folio': c.folio,
             'estado': 'vencida' if vencida else c.estado,
             'estado_label': 'Vencida' if vencida else LABEL.get(c.estado, c.estado),
+            # Para reenviar la liga al jefe desde "Mis cotizaciones".
+            'liga_autorizacion': (f'/autorizar/{c.token_autorizacion}' if c.estado == 'por_autorizar' and c.token_autorizacion else None),
             'tipo': c.tipo,
             'total': str(c.total),
             'aplica_iva': c.aplica_iva,

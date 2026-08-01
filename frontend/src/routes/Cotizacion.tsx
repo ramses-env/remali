@@ -143,6 +143,50 @@ export default function Cotizacion() {
 
   // Envía la solicitud al backend. El navegador manda equipo_id + cantidad + unit;
   // el servidor recalcula los precios (no confía en los del cliente).
+  // Éxito del camino "a autorizar": guarda folio y liga del jefe.
+  const [sentAut, setSentAut] = useState<{ folio: string; liga: string } | null>(null)
+  const [ligaAutCopiada, setLigaAutCopiada] = useState(false)
+
+  async function crearPorAutorizar(items: typeof state.items): Promise<boolean> {
+    setSending(true)
+    try {
+      const r = await api.post<{ folio: string; liga_autorizacion: string }>('/tienda/cotizacion/', {
+        items: items.map(i => ({ equipo_id: i.id, cantidad: i.qty, unit: i.unit || 'venta' })),
+        cliente: { nombre, empresa, email, telefono },
+        obra: { responsable, direccion, telefono: obraTelefono, email: obraEmail },
+        requiere_factura: factura,
+        por_autorizar: true,
+      })
+      setSentAut({ folio: r.data.folio, liga: `${window.location.origin}${r.data.liga_autorizacion}` })
+      return true
+    } catch (err: any) {
+      notify(err?.response?.data?.detalle || 'No se pudo preparar la autorización', 'x')
+      return false
+    } finally { setSending(false) }
+  }
+
+  /* El camino con JEFE: la cotización queda "por autorizar", el jefe recibe
+     una liga pública (sin cuenta) y al autorizar llega SOLA a REMALI. */
+  async function autorizarCarrito() {
+    if (!formValid) {
+      notify('Completa los campos obligatorios para mandarla a autorizar', 'x')
+      setShowErrors(true)
+      return
+    }
+    if (await crearPorAutorizar(state.items)) dispatch({ type: 'clear' })
+  }
+  async function autorizarBorrador(b: Borrador) {
+    const datosValidos = validNombre && validEmpresa && validClientEmail &&
+      validTelefono && validDireccion && validResponsable && validObraTelefono && validObraEmail
+    if (!datosValidos) {
+      cargarBorrador(b)
+      setShowErrors(true)
+      notify('Cargué el borrador; completa tus datos para mandarlo a autorizar', 'x')
+      return
+    }
+    if (await crearPorAutorizar(b.items)) borrarBorrador(b.id)
+  }
+
   async function handleSend() {
     if (!formValid) {
       notify('Completa los campos obligatorios para enviar la solicitud', 'x')
@@ -279,6 +323,48 @@ export default function Cotizacion() {
     } finally {
       setSending(false)
     }
+  }
+
+  if (sentAut) {
+    const waJefe = `https://wa.me/?text=${encodeURIComponent(`Hola, te comparto la cotización de maquinaria para autorizar. Ábrela, revisa el total y autorízala aquí:\n${sentAut.liga}`)}`
+    return (
+      <div className="bg-app min-h-screen text-ink">
+        <div className="mx-auto max-w-xl px-6 pt-28 pb-20">
+          <div className="rounded-3xl border border-edge bg-surface shadow-[0_24px_60px_rgba(17,24,39,0.10)] p-8 text-center">
+            <div className="w-16 h-16 mx-auto rounded-full bg-gold-soft text-gold flex items-center justify-center mb-5">
+              <svg className="w-7 h-7" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" strokeLinecap="round" strokeLinejoin="round"><path d="M9 12l2 2 4-4" /><path d="M12 3l7 3v5c0 4.5-3 8.2-7 10-4-1.8-7-5.5-7-10V6z" /></svg>
+            </div>
+            <h1 className="text-[22px] font-black leading-tight">Lista para autorización</h1>
+            <p className="text-mute text-sm mt-2 max-w-[40ch] mx-auto">
+              Mándale esta liga a quien autoriza. No necesita cuenta: revisa, pone su nombre y
+              <b className="text-ink"> al autorizar nos llega sola</b> — tú no haces nada más.
+            </p>
+
+            <div className="mt-6 text-left rounded-2xl bg-surface-2 border border-edge p-4 space-y-2.5 text-[13px]">
+              <div className="flex items-center gap-2.5"><span className="w-5 h-5 rounded-full bg-emerald-500 text-white grid place-items-center text-[10px] font-black shrink-0">✓</span><span><b>Creada</b> — folio {sentAut.folio}</span></div>
+              <div className="flex items-center gap-2.5"><span className="w-5 h-5 rounded-full bg-gold text-black grid place-items-center text-[10px] font-black shrink-0">2</span><span><b>Tu jefe la autoriza</b> desde la liga</span></div>
+              <div className="flex items-center gap-2.5"><span className="w-5 h-5 rounded-full bg-surface border border-edge text-mute grid place-items-center text-[10px] font-black shrink-0">3</span><span><b>REMALI la recibe al instante</b> y te contacta</span></div>
+            </div>
+
+            <div className="mt-5 flex items-center gap-2.5 bg-surface-2 border border-edge rounded-xl px-3 py-2.5">
+              <span className="flex-1 min-w-0 text-[12.5px] text-mute overflow-hidden text-ellipsis whitespace-nowrap">{sentAut.liga.replace(/^https?:\/\//, '')}</span>
+              <button onClick={async () => { try { await navigator.clipboard.writeText(sentAut.liga); setLigaAutCopiada(true); setTimeout(() => setLigaAutCopiada(false), 1800) } catch { notify('Copia el texto manualmente', 'x') } }}
+                className="h-8 px-3 shrink-0 rounded-lg border border-edge bg-surface text-[12px] font-bold text-ink hover:bg-surface-2 transition-colors">
+                {ligaAutCopiada ? '✓ Copiada' : 'Copiar'}
+              </button>
+              <a href={waJefe} target="_blank" rel="noopener noreferrer"
+                className="h-8 px-3 shrink-0 rounded-lg bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 text-[12px] font-bold inline-flex items-center hover:bg-emerald-500/25 transition-colors">WhatsApp</a>
+            </div>
+
+            <p className="text-[11.5px] text-mute mt-3">También puedes reenviarla después desde "Mis cotizaciones".</p>
+            <div className="mt-6 grid grid-cols-2 gap-2.5">
+              <button onClick={() => setSentAut(null)} className="h-[46px] rounded-full border border-edge text-ink text-sm font-semibold hover:bg-surface-2 transition-colors">Hacer otra</button>
+              <Link to="/mis-cotizaciones" className="h-[46px] rounded-full bg-gold text-black text-sm font-bold grid place-items-center hover:opacity-90 transition-opacity">Mis cotizaciones</Link>
+            </div>
+          </div>
+        </div>
+      </div>
+    )
   }
 
   if (sentFolio) {
@@ -434,12 +520,19 @@ export default function Cotizacion() {
                       className="absolute top-1.5 right-1.5 w-5 h-5 grid place-items-center rounded-full text-mute hover:text-red-500 hover:bg-red-500/10 transition-colors">
                       <svg viewBox="0 0 24 24" className="w-3 h-3 stroke-current fill-none" strokeWidth="2.2" strokeLinecap="round"><path d="M6 6l12 12M18 6L6 18" /></svg>
                     </button>
-                    {/* Enviar ESTE borrador a REMALI, sin pasar por el carrito */}
-                    <button onClick={() => enviarBorrador(b)} disabled={sending}
-                      className="absolute bottom-1.5 right-1.5 inline-flex items-center gap-1 h-6 px-2 rounded-full bg-gold text-black text-[10.5px] font-black hover:opacity-90 transition-opacity disabled:opacity-50">
-                      <svg viewBox="0 0 24 24" className="w-3 h-3 stroke-current fill-none" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 2 11 13" /><path d="M22 2 15 22l-4-9-9-4 20-7z" /></svg>
-                      Enviar
-                    </button>
+                    {/* Acciones del borrador: a autorización (jefe) o directo a REMALI */}
+                    <div className="absolute bottom-1.5 right-1.5 flex gap-1">
+                      <button onClick={() => autorizarBorrador(b)} disabled={sending} title="Su jefe recibe una liga y al autorizar llega sola a REMALI"
+                        className="inline-flex items-center gap-1 h-6 px-2 rounded-full border border-gold/50 text-gold text-[10.5px] font-black hover:bg-gold-soft transition-colors disabled:opacity-50">
+                        <svg viewBox="0 0 24 24" className="w-3 h-3 stroke-current fill-none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 12l2 2 4-4" /><path d="M12 3l7 3v5c0 4.5-3 8.2-7 10-4-1.8-7-5.5-7-10V6z" /></svg>
+                        Autorizar
+                      </button>
+                      <button onClick={() => enviarBorrador(b)} disabled={sending}
+                        className="inline-flex items-center gap-1 h-6 px-2 rounded-full bg-gold text-black text-[10.5px] font-black hover:opacity-90 transition-opacity disabled:opacity-50">
+                        <svg viewBox="0 0 24 24" className="w-3 h-3 stroke-current fill-none" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 2 11 13" /><path d="M22 2 15 22l-4-9-9-4 20-7z" /></svg>
+                        Enviar
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -599,6 +692,11 @@ export default function Cotizacion() {
                   className="h-[52px] rounded-[13px] bg-gold text-black text-[15.5px] font-extrabold btn-acento disabled:opacity-50 flex items-center justify-center gap-2">
                   {sending && <span className="w-4 h-4 border-2 border-black/30 border-t-black rounded-full animate-spin" />}
                   Enviar a REMALI
+                </button>
+                {/* Camino con jefe: queda "por autorizar" y él recibe la liga */}
+                <button onClick={autorizarCarrito} disabled={sending}
+                  className="h-[44px] rounded-[13px] border border-gold/50 text-gold text-[13.5px] font-bold hover:bg-gold-soft transition-colors disabled:opacity-50">
+                  Mandar a autorizar (mi jefe decide)
                 </button>
                 <div className="grid grid-cols-2 gap-2.5">
                   <button onClick={handleDownload} className="h-[44px] rounded-xl border border-edge text-[13.5px] font-semibold text-ink hover:bg-surface-2 transition-colors">↓ PDF</button>

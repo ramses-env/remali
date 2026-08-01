@@ -13,6 +13,7 @@ import MisCotizacionEstado from './routes/MisCotizacionEstado'
 import MisRentas from './routes/MisRentas'
 import MisCompras from './routes/MisCompras'
 import VincularCuenta from './routes/VincularCuenta'
+import AutorizarCotizacion from './routes/AutorizarCotizacion'
 import RecordatorioPerfil from './components/RecordatorioPerfil'
 import CambioTipoCotizacion from './components/CambioTipoCotizacion'
 import DockTienda from './components/DockTienda'
@@ -94,6 +95,8 @@ function App() {
                   <Route path="/vincular/venta/:token" element={<VincularCuenta tipo="venta" />} />
                   <Route path="/vincular/renta/:token" element={<VincularCuenta tipo="renta" />} />
                   <Route path="/vincular/cotizacion/:token" element={<VincularCuenta tipo="cotizacion" />} />
+                  {/* Liga del JEFE: pública, sin cuenta; autorizar la manda a REMALI */}
+                  <Route path="/autorizar/:token" element={<AutorizarCotizacion />} />
                   <Route path="*" element={<Home />} />
                 </Routes>
               </ErrorBoundary>

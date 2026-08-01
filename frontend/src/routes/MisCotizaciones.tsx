@@ -10,6 +10,7 @@ import { useCart, type Modalidad } from '../store/cart'
 import { useToast } from '../store/toast'
 
 type CotMia = {
+  liga_autorizacion?: string | null
   folio: string
   estado: string
   estado_label: string
@@ -33,12 +34,14 @@ const PILL: Record<string, string> = {
   rechazada: 'text-red-500 border-red-500/40 bg-red-500/10',
   vencida: 'text-mute border-edge bg-surface-2',
   borrador: 'text-mute border-edge bg-surface-2',
+  por_autorizar: 'text-amber-600 dark:text-amber-400 border-amber-500/40 bg-amber-500/10',
 }
 const LINEA_ESTADO: Record<string, string> = {
   enviada: 'ESPERANDO DISPONIBILIDAD · TE CONTACTAMOS HOY',
   aceptada: 'ACEPTADA · COORDINANDO ENTREGA',
   rechazada: 'NO PROCEDIÓ',
   vencida: 'PRECIOS EXPIRADOS · VUELVE A COTIZAR',
+  por_autorizar: 'ESPERANDO AUTORIZACIÓN · COMPARTE LA LIGA',
 }
 
 /** Mis cotizaciones (diseño "Mis Cotizaciones REMALI"): próximas entregas
@@ -180,6 +183,12 @@ export default function MisCotizaciones() {
             </div>
             <div className="mt-4 pt-4 border-t border-edge flex flex-wrap items-center gap-2.5">
               <Link to={`/mis-cotizaciones/${c.folio}`} className="h-[40px] px-4 rounded-xl bg-gold-soft text-gold text-[13.5px] font-bold grid place-items-center hover:opacity-85 transition-opacity">Ver estado</Link>
+              {c.liga_autorizacion && (
+                <button onClick={async () => { try { await navigator.clipboard.writeText(`${window.location.origin}${c.liga_autorizacion}`); notify('Liga copiada: mándasela a quien autoriza') } catch { notify('No se pudo copiar', 'x') } }}
+                  className="h-[40px] px-4 rounded-xl border border-amber-500/40 text-amber-600 dark:text-amber-400 text-[13.5px] font-bold hover:bg-amber-500/10 transition-colors">
+                  Copiar liga del jefe
+                </button>
+              )}
               {c.pdf && <a href={c.pdf} target="_blank" rel="noopener noreferrer" className="h-[40px] px-4 rounded-xl border border-edge text-[13.5px] font-semibold grid place-items-center hover:bg-surface-2 transition-colors">↓ PDF</a>}
               {c.carrito?.length > 0 && <button onClick={() => volverACotizar(c)} className="h-[40px] px-4 rounded-xl border border-edge text-[13.5px] font-semibold hover:bg-surface-2 transition-colors">⟳ Volver a cotizar</button>}
               <span className="ml-auto text-[12.5px] text-mute">
