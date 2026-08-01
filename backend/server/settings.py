@@ -347,6 +347,9 @@ REST_FRAMEWORK = {
 # JWT: tokens de acceso de larga duración para que la sesión del admin no expire a los 5 min
 from datetime import timedelta
 SIMPLE_JWT = {
+    # Sin esto, entrar con JWT jamás toca last_login y el panel muestra
+    # "Nunca ha entrado" para gente que entra a diario.
+    'UPDATE_LAST_LOGIN': True,
     'ACCESS_TOKEN_LIFETIME': timedelta(hours=12),
     'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
 }

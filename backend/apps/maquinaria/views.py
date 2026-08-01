@@ -736,6 +736,9 @@ def google_login(request):
         perfil.save(update_fields=['email_verificado', 'email_verificado_en'])
         revisar_recompensa(perfil)
 
+    # El login por Google también cuenta como acceso.
+    from django.contrib.auth.models import update_last_login
+    update_last_login(None, user)
     refresh = RefreshToken.for_user(user)
     return Response({'access': str(refresh.access_token), 'refresh': str(refresh), 'creada': creada})
 

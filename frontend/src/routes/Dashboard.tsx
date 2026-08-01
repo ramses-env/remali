@@ -6763,7 +6763,7 @@ function hace(iso: string | null) {
   return d < 30 ? `Hace ${d} día${d > 1 ? 's' : ''}` : new Date(iso).toLocaleDateString('es-MX')
 }
 
-type OpcionMenu = { label: string; onClick: () => void; peligro?: boolean; deshabilitado?: boolean; razon?: string }
+type OpcionMenu = { label: string; onClick: () => void; icono?: React.ReactNode; peligro?: boolean; deshabilitado?: boolean; razon?: string }
 
 /**
  * Menú "…" de una fila. Va en portal con posición fija a propósito: la tabla
@@ -6805,12 +6805,13 @@ function MenuFila({ opciones }: { opciones: OpcionMenu[] }) {
         <>
           <div className="fixed inset-0 z-[70]" onClick={() => setPos(null)} />
           <div role="menu" style={{ top: pos.top, right: pos.right }}
-            className="fixed z-[71] min-w-[190px] bg-surface border border-edge rounded-xl shadow-[0_12px_32px_rgba(33,29,22,0.16)] p-1.5">
+            className="fixed z-[71] min-w-[230px] bg-surface border border-edge rounded-2xl shadow-[0_16px_40px_rgba(33,29,22,0.18)] p-2">
             {opciones.map((o, i) => (
               <button key={i} role="menuitem" disabled={o.deshabilitado}
                 title={o.deshabilitado ? o.razon : undefined}
                 onClick={() => { setPos(null); o.onClick() }}
-                className={`w-full text-left px-3 py-2.5 rounded-lg text-[13px] font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${o.peligro ? 'text-red-500 hover:bg-red-500/10 disabled:hover:bg-transparent' : 'text-ink hover:bg-surface-2'}`}>
+                className={`w-full flex items-center gap-3 text-left px-3.5 py-3 rounded-xl text-[14px] font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${o.peligro ? 'text-red-500 hover:bg-red-500/10 disabled:hover:bg-transparent' : 'text-ink hover:bg-surface-2'}`}>
+                {o.icono && <span className="shrink-0 w-[18px] h-[18px] grid place-items-center">{o.icono}</span>}
                 {o.label}
               </button>
             ))}
@@ -7049,18 +7050,18 @@ function UsuariosAdmin({ usuarios, reload, notify, yoId }: {
                             opciones={esCliente(u) ? [
                               // El cliente es dueño de su información: aquí solo
                               // contraseña, verificación y eliminación.
-                              { label: 'Cambiar contraseña', onClick: () => passwordExpres(u) },
+                              { label: 'Cambiar contraseña', icono: <svg className="w-[18px] h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.9"><path d="M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17z" /><path d="M13.5 6.5l3 3" /></svg>, onClick: () => passwordExpres(u) },
                               u.email_verificado
-                                ? { label: 'Marcar como no verificado', onClick: () => marcarVerificacion(u, false) }
-                                : { label: 'Marcar como verificado', onClick: () => marcarVerificacion(u, true) },
+                                ? { label: 'Marcar como no verificado', icono: <svg className="w-[16px] h-[16px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.2" strokeLinecap="round"><path d="M6 6l12 12M18 6L6 18" /></svg>, onClick: () => marcarVerificacion(u, false) }
+                                : { label: 'Marcar como verificado', icono: <svg className="w-[17px] h-[17px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M5 13l4 4L19 7" /></svg>, onClick: () => marcarVerificacion(u, true) },
                               u.activo
-                                ? { label: 'Eliminar', onClick: () => desactivar(u), peligro: true }
-                                : { label: 'Devolver acceso', onClick: () => reactivar(u) },
+                                ? { label: 'Eliminar', icono: <svg className="w-[17px] h-[17px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.9" strokeLinecap="round"><path d="M4 7h16" /><path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" /><path d="M18 7l-.8 12.1a2 2 0 0 1-2 1.9H8.8a2 2 0 0 1-2-1.9L6 7" /><path d="M10 11v6M14 11v6" /></svg>, onClick: () => desactivar(u), peligro: true }
+                                : { label: 'Devolver acceso', icono: <svg className="w-[17px] h-[17px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round"><path d="M3 12a9 9 0 1 0 2.6-6.4M3 4v5h5" /></svg>, onClick: () => reactivar(u) },
                             ] : [
-                              { label: 'Cambiar contraseña', onClick: () => setEditando(u) },
+                              { label: 'Cambiar contraseña', icono: <svg className="w-[18px] h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.9"><path d="M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17z" /><path d="M13.5 6.5l3 3" /></svg>, onClick: () => setEditando(u) },
                               u.activo
-                                ? { label: 'Quitar acceso', onClick: () => desactivar(u), peligro: true, deshabilitado: soyYo, razon: 'No puedes quitarte tu propio acceso' }
-                                : { label: 'Devolver acceso', onClick: () => reactivar(u) },
+                                ? { label: 'Quitar acceso', icono: <svg className="w-[17px] h-[17px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.9" strokeLinecap="round"><path d="M4 7h16" /><path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" /><path d="M18 7l-.8 12.1a2 2 0 0 1-2 1.9H8.8a2 2 0 0 1-2-1.9L6 7" /><path d="M10 11v6M14 11v6" /></svg>, onClick: () => desactivar(u), peligro: true, deshabilitado: soyYo, razon: 'No puedes quitarte tu propio acceso' }
+                                : { label: 'Devolver acceso', icono: <svg className="w-[17px] h-[17px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round"><path d="M3 12a9 9 0 1 0 2.6-6.4M3 4v5h5" /></svg>, onClick: () => reactivar(u) },
                             ]}
                           />
                         </div>
