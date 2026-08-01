@@ -7,6 +7,7 @@ from django.shortcuts import get_object_or_404
 
 from rest_framework import generics, permissions
 from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.exceptions import ValidationError
 
@@ -463,3 +464,52 @@ def orden_eliminar_item(request, pk: int, item_id: int):
         item.delete()
     orden = OrdenReparacion.objects.get(pk=pk)
     return Response(OrdenReparacionSerializer(orden).data)
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def unidad_qr(request, codigo):
+    """La página detrás del QR pegado en la máquina.
+
+    Anónimo (cliente, alguien que la encuentra): tarjeta pública — de quién es
+    la máquina, qué modelo es y cómo contactar a REMALI. Operador con sesión:
+    ficha de campo — estado, renta activa (con quién, dónde, fechas, adeudo) y
+    lo necesario para actuar desde el teléfono."""
+    from decimal import Decimal as _D
+    from maquinaria.permissions import nivel_de
+    inv = Inventario.objects.select_related('equipo').filter(codigo__iexact=codigo).first()
+    if not inv:
+        return Response({'detalle': 'Unidad no encontrada'}, status=404)
+
+    base = {
+        'codigo': inv.codigo,
+        'equipo': inv.equipo.modelo if inv.equipo else 'Equipo',
+        'equipo_id': inv.equipo_id,
+    }
+    if not (request.user.is_authenticated and nivel_de(request.user) >= 1):
+        return Response({'publico': True, **base})
+
+    datos = {
+        'publico': False, **base,
+        'estado': inv.estado,
+        'numero_serie': inv.numero_serie,
+        'condicion': inv.condicion,
+        'renta': None,
+    }
+    from renta.models import Renta
+    r = (Renta.objects.filter(inventario=inv, estado__in=['activa', 'reservada'])
+         .select_related('obra').order_by('-creado_en').first())
+    if r:
+        pagado = sum((_D(str(p.get('monto', 0))) for p in (r.pagos or [])), _D('0'))
+        saldo = max((r.total or _D('0')) + (r.recargo or _D('0')) - pagado, _D('0'))
+        datos['renta'] = {
+            'id': r.id,
+            'estado': r.estado,
+            'cliente': r.cliente or '',
+            'lugar': (r.obra.ubicacion if r.obra_id and r.obra.ubicacion else r.direccion) or '',
+            'fecha_inicio': r.fecha_inicio,
+            'fecha_fin': r.fecha_fin,
+            'entregada': bool(r.entregada_en),
+            'adeudo': str(saldo) if saldo > 0 else None,
+        }
+    return Response(datos)

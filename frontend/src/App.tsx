@@ -14,6 +14,7 @@ import MisRentas from './routes/MisRentas'
 import MisCompras from './routes/MisCompras'
 import VincularCuenta from './routes/VincularCuenta'
 import AutorizarCotizacion from './routes/AutorizarCotizacion'
+import UnidadQR from './routes/UnidadQR'
 import RecordatorioPerfil from './components/RecordatorioPerfil'
 import CambioTipoCotizacion from './components/CambioTipoCotizacion'
 import DockTienda from './components/DockTienda'
@@ -97,6 +98,8 @@ function App() {
                   <Route path="/vincular/cotizacion/:token" element={<VincularCuenta tipo="cotizacion" />} />
                   {/* Liga del JEFE: pública, sin cuenta; autorizar la manda a REMALI */}
                   <Route path="/autorizar/:token" element={<AutorizarCotizacion />} />
+                  {/* La página del QR pegado en cada máquina */}
+                  <Route path="/u/:codigo" element={<UnidadQR />} />
                   <Route path="*" element={<Home />} />
                 </Routes>
               </ErrorBoundary>

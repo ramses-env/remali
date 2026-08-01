@@ -2217,7 +2217,8 @@ function InventoryModal({ equipo, onClose, notify }: {
 /* ── QR de la unidad ── */
 function QRModal({ unit, equipo, onClose }: { unit: Unidad; equipo: Equipo; onClose: () => void }) {
   const [dataUrl, setDataUrl] = useState<string>('')
-  const payload = JSON.stringify({ codigo: unit.codigo, equipo: equipo.modelo, serie: unit.numero_serie })
+  // URL viva: al escanear, el teléfono abre la ficha de la unidad.
+  const payload = `${window.location.origin}/u/${unit.codigo}`
   useEffect(() => {
     QRCode.toDataURL(payload, { width: 320, margin: 1, color: { dark: '#000000', light: '#ffffff' } })
       .then(setDataUrl).catch(() => setDataUrl(''))
@@ -2852,7 +2853,8 @@ function EnviarTallerModal({ unit, onClose, onCreated, notify }: {
 function LabelModal({ unit, onClose }: { unit: Unidad; onClose: () => void }) {
   const [qr, setQr] = useState('')
   const modelo = unit.equipo_modelo || unit.equipo_info?.modelo || 'Equipo'
-  const payload = JSON.stringify({ codigo: unit.codigo, equipo: modelo, serie: unit.numero_serie })
+  // URL viva: la etiqueta impresa lleva a la ficha de la unidad.
+  const payload = `${window.location.origin}/u/${unit.codigo}`
 
   useEffect(() => {
     QRCode.toDataURL(payload, { width: 240, margin: 0, color: { dark: '#000000', light: '#ffffff' } })
