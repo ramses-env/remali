@@ -6925,7 +6925,7 @@ function UsuariosAdmin({ usuarios, reload, notify, yoId }: {
                       sobrante y el resto se ajusta a su contenido, así la tabla
                       no se desborda en pantallas chicas. */}
                   <th scope="col" className={`${th} w-full`}>Usuario</th>
-                  {grupo === 'equipo' && <th scope="col" className={`${th} hidden md:table-cell w-px`}>Correo</th>}
+                  {grupo === 'clientes' && <th scope="col" className={`${th} hidden md:table-cell w-px`}>Correo</th>}
                   <th scope="col" className={`${th} hidden xl:table-cell w-px`}>Teléfono</th>
                   <th scope="col" className={`${th} hidden sm:table-cell w-px`}>Estado</th>
                   <th scope="col" className={`${th} hidden lg:table-cell w-px`}>Registro</th>
@@ -6956,13 +6956,13 @@ function UsuariosAdmin({ usuarios, reload, notify, yoId }: {
                               {u.puesto && <span className="text-[12px] text-mute truncate">{u.puesto}</span>}
                             </div>
                             {/* En pantallas chicas las columnas se esconden: el dato baja aquí. */}
-                            {grupo === 'equipo' && <p className="md:hidden text-[12px] text-mute truncate mt-1">{u.email || u.username}</p>}
+                            {grupo === 'clientes' && <p className="md:hidden text-[12px] text-mute truncate mt-1">{u.email || u.username}</p>}
                           </div>
                         </div>
                       </td>
                       {/* nowrap: con `w-px` la columna se encoge al mínimo y un
                           teléfono con espacios se partiría en varias líneas. */}
-                      {grupo === 'equipo' && (
+                      {grupo === 'clientes' && (
                         <td className={`${td} hidden md:table-cell whitespace-nowrap`}>
                           <span className="text-[13.5px] text-ink">{u.email || <span className="text-mute">—</span>}</span>
                         </td>
