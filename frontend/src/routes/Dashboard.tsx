@@ -5897,6 +5897,9 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
   // Ya convertida en venta: queda de solo lectura. Es el respaldo de esa venta,
   // y editar partidas/precios desincronizaría su total y su ticket.
   const bloqueada = Boolean(c.convertida)
+  // Los conceptos que armó EL CLIENTE no se tocan: son su pedido, no una
+  // captura del panel. El admin solo edita partidas de sus propias cotizaciones.
+  const conceptosBloqueados = bloqueada || c.origen === 'cliente'
   const sub = Number(c.subtotal) || 0
   // Venta: el precio ya incluye IVA → se desglosa. Renta: IVA solo si hay factura.
   const esVenta = c.tipo === 'venta'
@@ -6140,7 +6143,9 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
           <div>
             <div className="flex items-center justify-between mb-2 gap-3">
               <p className={`${labelCot} mb-0`}>Partidas</p>
-              {!bloqueada && <span className="text-[12px] text-mute">Toca cualquier celda para editar</span>}
+              {conceptosBloqueados && !bloqueada
+                ? <span className="text-[12px] font-semibold text-gold">Las armó el cliente — solo lectura</span>
+                : !bloqueada && <span className="text-[12px] text-mute">Toca cualquier celda para editar</span>}
             </div>
             <div className="rounded-xl border border-edge overflow-hidden">
               <div className="overflow-x-auto">
@@ -6157,29 +6162,29 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
                   {c.items.map(it => (
                     <div key={it.id} className="flex items-center gap-2 px-3 border-b border-edge last:border-0">
                       <div className="flex-1 min-w-0 py-1">
-                        <input defaultValue={it.descripcion} disabled={bloqueada} placeholder="Concepto"
+                        <input defaultValue={it.descripcion} disabled={conceptosBloqueados} placeholder="Concepto"
                           onBlur={e => { const v = e.target.value.trim(); if (v && v !== it.descripcion) editarItem(it.id, 'descripcion', v) }}
                           className={celda} />
                       </div>
                       <div className="w-32 shrink-0 py-1">
-                        <select value={it.modalidad} disabled={bloqueada} title="¿Se vende o se renta?"
+                        <select value={it.modalidad} disabled={conceptosBloqueados} title="¿Se vende o se renta?"
                           onChange={e => cambiarModalidad(it.id, e.target.value as Modalidad)}
                           className={`${celda} cursor-pointer font-medium`}>
                           {MODALIDADES.map(mm => <option key={mm.key} value={mm.key} className="bg-surface text-ink">{mm.corto}</option>)}
                         </select>
                       </div>
                       <div className="w-16 shrink-0 py-1">
-                        <input type="number" min={1} defaultValue={it.cantidad} disabled={bloqueada}
+                        <input type="number" min={1} defaultValue={it.cantidad} disabled={conceptosBloqueados}
                           onBlur={e => { const v = Math.max(1, Number(e.target.value) || 1); if (v !== it.cantidad) editarItem(it.id, 'cantidad', v) }}
                           className={`${celda} text-center`} />
                       </div>
                       <div className="w-28 shrink-0 py-1">
-                        <input type="number" min={0} step="0.01" defaultValue={it.precio_unitario} disabled={bloqueada}
+                        <input type="number" min={0} step="0.01" defaultValue={it.precio_unitario} disabled={conceptosBloqueados}
                           onBlur={e => { const v = Number(e.target.value) || 0; if (v !== Number(it.precio_unitario)) editarItem(it.id, 'precio_unitario', v) }}
                           className={`${celda} text-right font-bold tabular-nums`} />
                       </div>
                       <div className="w-6 shrink-0 flex justify-center">
-                        {!bloqueada && (
+                        {!conceptosBloqueados && (
                           <button onClick={() => quitarItem(it.id)} title="Quitar" className="text-red-500 hover:bg-red-500/10 rounded p-1 transition active:scale-90">
                             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" d="M6 6l12 12M18 6L6 18" /></svg>
                           </button>
@@ -6187,7 +6192,7 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
                       </div>
                     </div>
                   ))}
-                  {!bloqueada && (
+                  {!conceptosBloqueados && (
                     <button onClick={agregarItem} disabled={busy} className="w-full flex items-center gap-2 px-5 py-3 text-[13px] font-bold text-gold hover:bg-gold-soft/60 transition active:scale-[0.995] disabled:opacity-50 border-t border-edge">
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.2"><path strokeLinecap="round" d="M12 5v14M5 12h14" /></svg>
                       Agregar partida

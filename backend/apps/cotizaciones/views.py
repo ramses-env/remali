@@ -713,6 +713,10 @@ def cotizacion_agregar_item(request, pk: int):
     bloqueo = _bloqueada_si_convertida(cot)
     if bloqueo:
         return bloqueo
+    if cot.origen == 'cliente':
+        # El pedido lo armó EL CLIENTE: sus conceptos no se tocan desde el
+        # panel. El admin solo edita partidas de sus propias capturas.
+        return Response({'detalle': 'Los conceptos los armó el cliente: no se modifican desde el panel.'}, status=400)
     d = request.data or {}
     desc = (d.get('descripcion') or '').strip()
     if not desc:
@@ -746,6 +750,8 @@ def cotizacion_item_modalidad(request, pk: int, item_id: int):
         item = CotizacionItem.objects.select_related('cotizacion').get(pk=item_id, cotizacion_id=pk)
     except CotizacionItem.DoesNotExist:
         return Response({'detalle': 'Partida no encontrada'}, status=404)
+    if item.cotizacion.origen == 'cliente':
+        return Response({'detalle': 'Los conceptos los armó el cliente: no se modifican desde el panel.'}, status=400)
     bloqueo = _bloqueada_si_convertida(item.cotizacion)
     if bloqueo:
         return bloqueo
@@ -879,6 +885,8 @@ def cotizacion_item(request, pk: int, item_id: int):
         item = CotizacionItem.objects.select_related('cotizacion').get(pk=item_id, cotizacion_id=pk)
     except CotizacionItem.DoesNotExist:
         return Response({'detalle': 'Partida no encontrada'}, status=404)
+    if item.cotizacion.origen == 'cliente':
+        return Response({'detalle': 'Los conceptos los armó el cliente: no se modifican desde el panel.'}, status=400)
     bloqueo = _bloqueada_si_convertida(item.cotizacion)
     if bloqueo:
         return bloqueo
