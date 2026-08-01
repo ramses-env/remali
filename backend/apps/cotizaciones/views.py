@@ -260,6 +260,37 @@ def solicitar_cancelacion(request, pk):
 
 @api_view(['POST'])
 @permission_classes([EsOperador])
+def aprobar_cancelacion(request, pk):
+    """Administración aprueba la cancelación que pidió el cliente: estado final
+    'cancelada' + aviso a su campanita. La cotización deja de contar."""
+    from django.utils import timezone as _tz
+    cot = Cotizacion.objects.filter(pk=pk).first()
+    if not cot:
+        return Response({'detalle': 'Cotización no encontrada'}, status=404)
+    if not cot.cancelacion_solicitada:
+        return Response({'detalle': 'El cliente no ha solicitado cancelarla.'}, status=400)
+    if cot.conversiones.exists() or cot.rentas_convertidas.exists():
+        return Response({'detalle': 'Ya se concretó en venta/renta; cancela aquella, no la cotización.'}, status=400)
+    if cot.estado == 'cancelada':
+        return Response({'detalle': 'Ya estaba cancelada.', 'ya': True})
+    cot.estado = 'cancelada'
+    cot.save(update_fields=['estado'])
+    if cot.usuario_id:
+        try:
+            from maquinaria.models import Notificacion
+            Notificacion.objects.create(
+                usuario=cot.usuario, tipo='sistema',
+                titulo=f'Tu cancelación de la {cot.folio} fue aprobada',
+                mensaje='Quedó cancelada sin cargos. Cuando necesites otra cotización, aquí estamos.',
+                seccion='cotizaciones', ref=f'cancelacion-ok-{cot.id}',
+            )
+        except Exception:
+            pass
+    return Response({'detalle': 'Cancelación aprobada.'})
+
+
+@api_view(['POST'])
+@permission_classes([EsOperador])
 def vincular_cuenta_cotizacion(request, pk):
     """Vincula (o cambia/quita) la cuenta de cliente de una cotización.
 
@@ -506,7 +537,7 @@ def cotizaciones_mias(request):
     # Etiquetas de cara al cliente: 'enviada' significa "ya la recibimos y la
     # estamos revisando", no un estado interno del panel.
     LABEL = {'borrador': 'En revisión', 'enviada': 'En revisión', 'por_autorizar': 'Esperando autorización',
-             'aceptada': 'Aceptada', 'rechazada': 'No disponible'}
+             'aceptada': 'Aceptada', 'rechazada': 'No disponible', 'cancelada': 'Cancelada'}
     hoy = timezone.now().date()
     qs = (Cotizacion.objects
           .filter(usuario=request.user)
@@ -608,9 +639,13 @@ class CotizacionDetail(generics.RetrieveUpdateDestroyAPIView):
         # Máquina de estados: no se regresa a etapas que ya pasaron.
         nuevo_estado = request.data.get('estado')
         if nuevo_estado and nuevo_estado != cot.estado:
+            if cot.estado == 'cancelada':
+                return Response({'detalle': 'Está cancelada: es un estado final.'}, status=400)
+            if nuevo_estado == 'cancelada' and not cot.cancelacion_solicitada:
+                return Response({'detalle': 'Cancelada solo aplica cuando el cliente la solicitó (usa Aprobar cancelación).'}, status=400)
             autorizada = bool(cot.autorizada_por) and not cot.autorizacion_rechazo
             if autorizada and nuevo_estado in ('borrador', 'enviada', 'por_autorizar'):
-                return Response({'detalle': f'Vino autorizada por {cot.autorizada_por}: solo puede estar Aceptada o Rechazada.'}, status=400)
+                return Response({'detalle': f'Vino autorizada por {cot.autorizada_por}: solo puede estar Aceptada, Rechazada o Cancelada.'}, status=400)
             if cot.estado != 'borrador' and nuevo_estado == 'borrador':
                 return Response({'detalle': 'Ya tiene folio y el cliente la conoce: no puede regresar a borrador.'}, status=400)
         return super().update(request, *args, **kwargs)

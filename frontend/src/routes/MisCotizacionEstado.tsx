@@ -208,7 +208,7 @@ export default function MisCotizacionEstado() {
             </div>
 
             {/* Solicitar cancelación: el cliente pide, REMALI decide. */}
-            {cot && !cot.convertida && !venc && cot.estado !== 'rechazada' && (
+            {cot && !cot.convertida && !venc && cot.estado !== 'rechazada' && cot.estado !== 'cancelada' && (
               (cot.cancelacion_solicitada || cancelListo) ? (
                 <div className="rounded-[20px] border border-red-500/30 bg-red-500/5 p-6">
                   <p className="text-[15px] font-extrabold text-red-600 dark:text-red-400">Cancelación solicitada</p>

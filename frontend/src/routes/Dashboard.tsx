@@ -133,7 +133,7 @@ type CotizacionItem = { id: number; descripcion: string; cantidad: number; preci
 type CotizacionFoto = { id: number; imagen: string; orden: number }
 type Cotizacion = {
   id: number; folio: string; tipo: 'venta' | 'renta' | 'mixta'
-  estado: 'borrador' | 'por_autorizar' | 'enviada' | 'aceptada' | 'rechazada'
+  estado: 'borrador' | 'por_autorizar' | 'enviada' | 'aceptada' | 'rechazada' | 'cancelada'
   entrega_prometida?: string | null
   cliente_nombre: string; cliente_telefono: string; cliente_email?: string; empresa?: number | null; empresa_nombre?: string
   vigencia_dias: number; aplica_iva: boolean; notas: string
@@ -5363,6 +5363,7 @@ const COT_ESTADOS: { key: Cotizacion['estado']; label: string; cls: string; dot:
   { key: 'enviada', label: 'Enviada', cls: 'bg-blue-500/10 text-blue-500', dot: '#2B5FAD' },
   { key: 'aceptada', label: 'Aceptada', cls: 'bg-emerald-500/10 text-emerald-600', dot: '#1F7A4D' },
   { key: 'rechazada', label: 'Rechazada', cls: 'bg-red-500/10 text-red-500', dot: '#B91C1C' },
+  { key: 'cancelada', label: 'Cancelada', cls: 'bg-red-500/10 text-red-500', dot: '#7F1D1D' },
 ]
 const cotEstadoMeta = (e: string) =>
   e === 'por_autorizar'
@@ -5724,6 +5725,11 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
       .then(r => { apply(r.data); notify(`Estado: ${cotEstadoMeta(estado).label}`) })
       .catch(() => notify('No se pudo cambiar el estado', 'err'))
   }
+  function aprobarCancelacion() {
+    api.post(`/cotizaciones/${c.id}/aprobar-cancelacion/`, {})
+      .then(() => { notify('Cancelación aprobada'); onChanged() })
+      .catch(err => notify(err?.response?.data?.detalle || 'No se pudo aprobar', 'err'))
+  }
   // Entrega prometida: editable en cualquier momento; el cliente la ve al recargar.
   function guardarEntrega(v: string) {
     const iso = v ? new Date(v).toISOString() : null
@@ -5961,27 +5967,40 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
           <div className="flex flex-col sm:flex-row sm:items-start gap-4 sm:gap-6">
             <div className="flex-1 min-w-0">
               <p className={labelCot}>Estado</p>
-              {c.estado === 'por_autorizar' ? (
-                /* El cliente la tiene con su jefe: al autorizarse cambia sola a
-                   Enviada — aquí no hay nada que mover. */
-                <div className="inline-flex items-center gap-2 px-3.5 py-2.5 rounded-xl border border-amber-500/40 bg-amber-500/10 text-amber-600 text-[13px] font-bold">
-                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
-                  En autorización interna del cliente — llegará sola al autorizarse
+              {/* SOLO LECTURA: se ven todas las etapas y en cuál va; los cambios
+                  ocurren por acciones (botones, autorización del jefe, conversión,
+                  aprobación de cancelación) — nunca tocando esta barra. */}
+              <div className="grid w-full rounded-xl border border-edge bg-surface-2 p-1 sm:max-w-[560px]"
+                style={{ gridTemplateColumns: 'repeat(4, minmax(0, 1fr))' }}>
+                {[
+                  { key: 'borrador', label: 'Borrador' },
+                  { key: c.estado === 'por_autorizar' ? 'por_autorizar' : 'enviada', label: c.estado === 'por_autorizar' ? 'Por autorizar' : 'Enviada' },
+                  { key: 'aceptada', label: 'Aceptada' },
+                  { key: c.estado === 'cancelada' ? 'cancelada' : 'rechazada', label: c.estado === 'cancelada' ? 'Cancelada' : 'Rechazada' },
+                ].map(e => (
+                  <span key={e.key} className={`text-center px-2 py-2 rounded-lg text-[13px] font-bold transition-colors ${
+                    c.estado === e.key
+                      ? (e.key === 'rechazada' || e.key === 'cancelada' ? 'bg-red-600 text-white' : e.key === 'por_autorizar' ? 'bg-amber-500 text-black' : 'bg-ink text-app')
+                      : 'text-mute'
+                  }`}>{e.label}</span>
+                ))}
+              </div>
+
+              {/* Acciones que SÍ mueven el estado, según dónde va */}
+              {!bloqueada && c.estado === 'borrador' && (
+                <button onClick={() => cambiarEstado('enviada')} className="mt-2.5 h-10 px-4 rounded-full bg-ink text-app text-[13px] font-bold hover:opacity-90 transition-opacity">
+                  Marcar como enviada
+                </button>
+              )}
+              {!bloqueada && c.estado === 'enviada' && (
+                <div className="mt-2.5 flex gap-2">
+                  <button onClick={() => cambiarEstado('aceptada')} className="h-10 px-4 rounded-full bg-emerald-600 text-white text-[13px] font-bold hover:bg-emerald-700 transition-colors">
+                    El cliente la aceptó
+                  </button>
+                  <button onClick={() => cambiarEstado('rechazada')} className="h-10 px-4 rounded-full text-red-600 dark:text-red-400 text-[13px] font-bold hover:bg-red-500/10 transition-colors">
+                    Rechazar
+                  </button>
                 </div>
-              ) : (
-                <Segmentado
-                  /* Solo etapas alcanzables: autorizada por el jefe = Aceptada/
-                     Rechazada; y una vez con folio enviado, Borrador ya no existe. */
-                  opciones={COT_ESTADOS
-                    .filter(e => (c.autorizada_por && !c.autorizacion_rechazo)
-                      ? ['aceptada', 'rechazada'].includes(e.key)
-                      : (c.estado === 'borrador' || e.key !== 'borrador'))
-                    .map(e => ({ key: e.key, label: e.label }))}
-                  valor={c.estado}
-                  onChange={(k) => cambiarEstado(k as Cotizacion['estado'])}
-                  disabled={bloqueada}
-                  className="sm:max-w-[460px]"
-                />
               )}
               {/* Vino autorizada por el jefe del cliente: dinero ya aprobado. */}
               {c.autorizada_por && !c.autorizacion_rechazo && (
@@ -6019,7 +6038,14 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
                 <span className="font-semibold text-red-600/80 dark:text-red-400/80"> · {new Date(c.cancelacion_solicitada).toLocaleDateString('es-MX', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}</span>
               </p>
               {c.cancelacion_motivo && <p className="text-[13px] text-red-600 dark:text-red-400 mt-1">Motivo: {c.cancelacion_motivo}</p>}
-              <p className="text-[12px] text-mute mt-1.5">Si procede, márcala como Rechazada; si no, contáctalo.</p>
+              {c.estado === 'cancelada' ? (
+                <p className="text-[12px] text-mute mt-1.5">Cancelación aprobada: quedó como estado final.</p>
+              ) : (
+                <button onClick={aprobarCancelacion}
+                  className="mt-2.5 h-9 px-4 rounded-full bg-red-600 text-white text-[12.5px] font-bold hover:bg-red-700 transition-colors">
+                  Aprobar cancelación
+                </button>
+              )}
             </div>
           )}
 

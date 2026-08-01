@@ -35,6 +35,7 @@ const PILL: Record<string, string> = {
   vencida: 'text-mute border-edge bg-surface-2',
   borrador: 'text-mute border-edge bg-surface-2',
   por_autorizar: 'text-amber-600 dark:text-amber-400 border-amber-500/40 bg-amber-500/10',
+  cancelada: 'text-red-500 border-red-500/40 bg-red-500/10',
 }
 const LINEA_ESTADO: Record<string, string> = {
   enviada: 'ESPERANDO DISPONIBILIDAD · TE CONTACTAMOS HOY',
@@ -42,6 +43,7 @@ const LINEA_ESTADO: Record<string, string> = {
   rechazada: 'NO PROCEDIÓ',
   vencida: 'PRECIOS EXPIRADOS · VUELVE A COTIZAR',
   por_autorizar: 'ESPERANDO AUTORIZACIÓN · COMPARTE LA LIGA',
+  cancelada: 'CANCELADA A TU SOLICITUD',
 }
 
 /** Mis cotizaciones (diseño "Mis Cotizaciones REMALI"): próximas entregas

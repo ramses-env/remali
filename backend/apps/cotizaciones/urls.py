@@ -14,6 +14,7 @@ urlpatterns = [
     path('cotizaciones/publica/<str:token>/pdf/', views.cotizacion_publica_pdf),
     path('cotizaciones/<int:pk>/', views.CotizacionDetail.as_view()),
     path('cotizaciones/<int:pk>/solicitar-cancelacion/', views.solicitar_cancelacion),
+    path('cotizaciones/<int:pk>/aprobar-cancelacion/', views.aprobar_cancelacion),
     path('cotizaciones/<int:pk>/vincular/', views.vincular_cuenta_cotizacion),
     path('cotizaciones/<int:pk>/vinculo/', views.generar_vinculo_cotizacion),
     path('vinculo/cotizacion/<str:token>/', views.vinculo_cotizacion),

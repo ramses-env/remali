@@ -26,6 +26,8 @@ class Cotizacion(models.Model):
         ('enviada', 'Enviada'),
         ('aceptada', 'Aceptada'),
         ('rechazada', 'Rechazada'),
+        # Cancelación pedida por el cliente y APROBADA por administración.
+        ('cancelada', 'Cancelada'),
     ]
 
     ORIGENES = [('admin', 'Creada por el admin'), ('cliente', 'Solicitada por el cliente')]
