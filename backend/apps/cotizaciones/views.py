@@ -280,21 +280,57 @@ def autorizacion_cotizacion(request, token):
                        'precio': str(i.precio_unitario), 'modalidad': i.modalidad} for i in cot.items.all()],
             'subtotal': str(cot.subtotal), 'descuento': str(getattr(cot, 'descuento_total', 0) or 0), 'total': str(cot.total),
             'vence_el': cot.vence_el,
-            'autorizada': bool(cot.autorizada_en),
+            'autorizada': bool(cot.autorizada_en) and not cot.autorizacion_rechazo,
+            'rechazada': bool(cot.autorizacion_rechazo),
             'autorizada_por': cot.autorizada_por,
         })
 
     if cot.autorizada_en:
-        return Response({'detalle': 'Esta cotización ya fue autorizada.', 'folio': cot.folio, 'ya': True})
+        return Response({
+            'detalle': 'Esta cotización ya fue resuelta.', 'folio': cot.folio, 'ya': True,
+            'rechazada': bool(cot.autorizacion_rechazo),
+        })
     nombre_aut = (request.data.get('nombre') or '').strip()
     if not nombre_aut:
-        return Response({'detalle': 'Escribe tu nombre para autorizar.'}, status=400)
+        return Response({'detalle': 'Escribe tu nombre para continuar.'}, status=400)
 
-    from maquinaria.models import crear_notificacion, nombre_propio as _np
+    from maquinaria.models import crear_notificacion, nombre_propio as _np, Notificacion
+
+    if (request.data.get('accion') or 'autorizar') == 'rechazar':
+        # Rechazo INTERNO: nunca llegó a REMALI, así que a REMALI no se le
+        # avisa nada. Al cliente sí — su campanita y su lista se enteran.
+        motivo = (request.data.get('motivo') or '').strip()
+        cot.estado = 'rechazada'
+        cot.autorizada_por = _np(nombre_aut)[:120]
+        cot.autorizada_en = timezone.now()
+        cot.autorizacion_rechazo = motivo or 'Sin motivo indicado'
+        cot.save(update_fields=['estado', 'autorizada_por', 'autorizada_en', 'autorizacion_rechazo'])
+        if cot.usuario_id:
+            try:
+                Notificacion.objects.create(
+                    usuario=cot.usuario, tipo='sistema',
+                    titulo=f'Tu cotización {cot.folio} fue rechazada',
+                    mensaje=f'{cot.autorizada_por} la rechazó{f": {motivo}" if motivo else ""}. Puedes armar otra versión y volver a mandarla.',
+                    seccion='cotizaciones', ref=f'aut-rechazo-{cot.id}',
+                )
+            except Exception:
+                pass
+        return Response({'detalle': 'Rechazada. Le avisamos a quien la armó.', 'folio': cot.folio, 'rechazada': True})
+
     cot.estado = 'enviada'
     cot.autorizada_por = _np(nombre_aut)[:120]
     cot.autorizada_en = timezone.now()
     cot.save(update_fields=['estado', 'autorizada_por', 'autorizada_en'])
+    if cot.usuario_id:
+        try:
+            Notificacion.objects.create(
+                usuario=cot.usuario, tipo='sistema',
+                titulo=f'Tu cotización {cot.folio} fue autorizada',
+                mensaje=f'{cot.autorizada_por} la autorizó; ya está con REMALI y te contactan pronto.',
+                seccion='cotizaciones', ref=f'aut-ok-{cot.id}',
+            )
+        except Exception:
+            pass
 
     # AHORA sí llega a REMALI: panel + correos + acuse, igual que un envío directo.
     tel = cot.cliente_telefono or '—'
@@ -443,7 +479,7 @@ def cotizaciones_mias(request):
         data.append({
             'folio': c.folio,
             'estado': 'vencida' if vencida else c.estado,
-            'estado_label': 'Vencida' if vencida else LABEL.get(c.estado, c.estado),
+            'estado_label': 'Vencida' if vencida else ('Rechazada por tu autorizador' if (c.estado == 'rechazada' and c.autorizacion_rechazo) else LABEL.get(c.estado, c.estado)),
             # Para reenviar la liga al jefe desde "Mis cotizaciones".
             'liga_autorizacion': (f'/autorizar/{c.token_autorizacion}' if c.estado == 'por_autorizar' and c.token_autorizacion else None),
             'tipo': c.tipo,

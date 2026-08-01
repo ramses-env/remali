@@ -16,6 +16,7 @@ type Info = {
   total: string
   vence_el?: string | null
   autorizada: boolean
+  rechazada?: boolean
   autorizada_por?: string
 }
 
@@ -32,6 +33,9 @@ export default function AutorizarCotizacion() {
   const [nombre, setNombre] = useState('')
   const [enviando, setEnviando] = useState(false)
   const [listo, setListo] = useState(false)
+  const [rechazando, setRechazando] = useState(false)   // muestra el motivo
+  const [motivo, setMotivo] = useState('')
+  const [rechazoListo, setRechazoListo] = useState(false)
 
   useEffect(() => {
     let vivo = true
@@ -42,21 +46,23 @@ export default function AutorizarCotizacion() {
     return () => { vivo = false }
   }, [token])
 
-  const autorizar = async () => {
-    if (!nombre.trim()) { setError('Escribe tu nombre para autorizar.'); return }
+  const decidir = async (accion: 'autorizar' | 'rechazar') => {
+    if (!nombre.trim()) { setError('Escribe tu nombre para continuar.'); return }
     setEnviando(true)
     setError('')
     try {
-      await api.post(`/autorizacion/${token}/`, { nombre: nombre.trim() }, { fondo: true } as never)
-      setListo(true)
+      await api.post(`/autorizacion/${token}/`, { nombre: nombre.trim(), accion, motivo: motivo.trim() }, { fondo: true } as never)
+      if (accion === 'rechazar') setRechazoListo(true)
+      else setListo(true)
     } catch (e: unknown) {
-      setError((e as { response?: { data?: { detalle?: string } } })?.response?.data?.detalle || 'No se pudo autorizar.')
+      setError((e as { response?: { data?: { detalle?: string } } })?.response?.data?.detalle || 'No se pudo enviar tu decisión.')
     } finally {
       setEnviando(false)
     }
   }
 
   const yaAutorizada = listo || !!info?.autorizada
+  const yaRechazada = rechazoListo || !!info?.rechazada
 
   return (
     <div className="min-h-[70vh] flex items-center justify-center px-4 py-16">
@@ -73,6 +79,19 @@ export default function AutorizarCotizacion() {
             </div>
             <h1 className="text-[22px] font-black text-ink">Enlace no disponible</h1>
             <p className="text-mute text-sm mt-2">{error}</p>
+          </div>
+        ) : yaRechazada ? (
+          <div className="text-center">
+            <div className="w-16 h-16 mx-auto rounded-full bg-red-500/10 text-red-500 flex items-center justify-center mb-5">
+              <svg className="w-8 h-8" fill="none" stroke="currentColor" strokeWidth="2.4" viewBox="0 0 24 24" strokeLinecap="round"><path d="M6 6l12 12M18 6L6 18" /></svg>
+            </div>
+            <h1 className="text-[22px] font-black text-ink">Cotización rechazada</h1>
+            <p className="text-mute text-sm mt-2 max-w-[38ch] mx-auto">
+              Le avisamos a {info?.cliente ? info.cliente.split(' ')[0] : 'quien la armó'} para que prepare otra versión. REMALI no recibió nada.
+            </p>
+            {info?.autorizada_por && !rechazoListo && (
+              <p className="text-[12.5px] text-mute mt-2">Rechazada por {info.autorizada_por}.</p>
+            )}
           </div>
         ) : yaAutorizada ? (
           <div className="text-center">
@@ -129,11 +148,35 @@ export default function AutorizarCotizacion() {
               <input value={nombre} onChange={e => setNombre(e.target.value)} placeholder="Nombre y apellido"
                 className="w-full bg-surface-2 border border-edge rounded-xl px-4 py-3 text-sm text-ink placeholder-mute focus:outline-none focus:border-gold/60 transition-colors" />
             </div>
+            {rechazando && (
+              <div className="mt-3">
+                <label className="block text-[12.5px] font-semibold text-mute mb-1.5">Motivo del rechazo (opcional)</label>
+                <textarea value={motivo} onChange={e => setMotivo(e.target.value)} rows={2} placeholder="Ej. Excede el presupuesto de la obra"
+                  className="w-full bg-surface-2 border border-edge rounded-xl px-4 py-3 text-sm text-ink placeholder-mute focus:outline-none focus:border-red-400/60 transition-colors resize-none" />
+              </div>
+            )}
             {error && <p className="text-red-500 text-[12.5px] mt-2">{error}</p>}
-            <button onClick={autorizar} disabled={enviando || !nombre.trim()}
-              className="mt-4 w-full py-3.5 rounded-full bg-gold text-black font-bold text-sm hover:opacity-90 transition-opacity disabled:opacity-50">
-              {enviando ? 'Enviando…' : 'Autorizar y enviar a REMALI'}
-            </button>
+            {rechazando ? (
+              <div className="mt-4 grid grid-cols-2 gap-2.5">
+                <button onClick={() => { setRechazando(false); setMotivo('') }}
+                  className="py-3.5 rounded-full border border-edge text-ink font-semibold text-sm hover:bg-surface-2 transition-colors">Mejor no</button>
+                <button onClick={() => decidir('rechazar')} disabled={enviando || !nombre.trim()}
+                  className="py-3.5 rounded-full bg-red-600 text-white font-bold text-sm hover:bg-red-700 transition-colors disabled:opacity-50">
+                  {enviando ? 'Enviando…' : 'Rechazar cotización'}
+                </button>
+              </div>
+            ) : (
+              <>
+                <button onClick={() => decidir('autorizar')} disabled={enviando || !nombre.trim()}
+                  className="mt-4 w-full py-3.5 rounded-full bg-gold text-black font-bold text-sm hover:opacity-90 transition-opacity disabled:opacity-50">
+                  {enviando ? 'Enviando…' : 'Autorizar y enviar a REMALI'}
+                </button>
+                <button onClick={() => setRechazando(true)} disabled={enviando}
+                  className="mt-2.5 w-full py-3 rounded-full text-red-600 dark:text-red-400 font-semibold text-sm hover:bg-red-500/10 transition-colors disabled:opacity-50">
+                  Rechazar
+                </button>
+              </>
+            )}
             <p className="text-[11.5px] text-mute mt-3 text-center">
               Al autorizar, REMALI recibe la solicitud y contacta a {info.cliente ? info.cliente.split(' ')[0] : 'tu equipo'} para coordinar. No necesitas cuenta.
             </p>
