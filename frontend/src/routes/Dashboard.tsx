@@ -132,7 +132,7 @@ const TIPO_COT_LABEL: Record<string, string> = { venta: 'Venta', renta: 'Renta',
 type CotizacionItem = { id: number; descripcion: string; cantidad: number; precio_unitario: string; subtotal: string; modalidad: Modalidad; modalidad_label: string }
 type CotizacionFoto = { id: number; imagen: string; orden: number }
 type Cotizacion = {
-  id: number; folio: string; tipo: 'venta' | 'renta' | 'mixta'
+  id: number; folio: string | null; tipo: 'venta' | 'renta' | 'mixta'
   estado: 'borrador' | 'por_autorizar' | 'enviada' | 'aceptada' | 'rechazada' | 'cancelada'
   entrega_prometida?: string | null
   cliente_nombre: string; cliente_telefono: string; cliente_email?: string; empresa?: number | null; empresa_nombre?: string
@@ -5488,7 +5488,7 @@ function CotizacionesAdmin({ empresas, notify }: {
                 const m = cotEstadoMeta(c.estado)
                 return (
                   <tr key={c.id} className="hover:bg-surface-2 transition-colors cursor-pointer" onClick={() => setDetalle(c)}>
-                    <td className="px-5 py-3 font-mono text-[13px] font-bold text-ink whitespace-nowrap">{c.folio}</td>
+                    <td className="px-5 py-3 font-mono text-[13px] font-bold text-ink whitespace-nowrap">{c.folio || <span className="text-mute font-sans font-semibold">Borrador</span>}</td>
                     <td className="px-3 py-3">
                       <div className="flex items-center gap-2">
                         <p className="text-sm font-semibold text-ink">{c.cliente_display}</p>
@@ -5924,7 +5924,7 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
         <div className="px-5 sm:px-7 py-4 sm:py-5 border-b border-edge flex items-start justify-between gap-4 bg-surface shrink-0">
           <div className="min-w-0">
             <div className="flex items-center gap-2.5 flex-wrap">
-              <span className="font-mono font-bold text-ink text-lg tracking-tight">{c.folio}</span>
+              <span className="font-mono font-bold text-ink text-lg tracking-tight">{c.folio || <span className="text-mute font-sans text-[15px]">Sin folio · nace al enviarla</span>}</span>
               <span className={`inline-flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1 rounded-full ${m.cls}`}><span className="w-1.5 h-1.5 rounded-full" style={{ background: m.dot }} />{m.label}</span>
             </div>
             <p className="text-[14px] text-mute truncate mt-1">{c.cliente_display} · {TIPO_COT_LABEL[c.tipo] || c.tipo}</p>

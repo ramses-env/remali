@@ -32,7 +32,7 @@ class Cotizacion(models.Model):
 
     ORIGENES = [('admin', 'Creada por el admin'), ('cliente', 'Solicitada por el cliente')]
 
-    folio = models.CharField(max_length=20, unique=True, editable=False, blank=True)
+    folio = models.CharField(max_length=20, unique=True, editable=False, blank=True, null=True)
     tipo = models.CharField(max_length=10, choices=TIPOS, default='venta')
     origen = models.CharField(max_length=8, choices=ORIGENES, default='admin')
     # Datos extra de la solicitud del cliente (empresa en texto, obra, etc.),
@@ -114,14 +114,31 @@ class Cotizacion(models.Model):
         return f'COT-{n:04d}'
 
     def save(self, *args, **kwargs):
-        if not self.folio:
+        # El folio nace cuando la cotización se vuelve REAL (deja el borrador),
+        # no al abrir el modal: así los borradores abandonados no consumen
+        # folios ni dejan huecos, y dos admins no compiten por el número.
+        if not self.folio and self.estado != 'borrador':
             self.folio = self.generar_folio()
+            if kwargs.get('update_fields') is not None:
+                kwargs['update_fields'] = list(set(kwargs['update_fields']) | {'folio'})
         if not self.token_publico:
             self.token_publico = secrets.token_hex(16)
         # vence_el = alta + vigencia. En el alta `creada` la pone auto_now_add en
         # este mismo save, así que si aún no hay fecha se usa hoy (mismo día).
         base = self.creada.date() if self.creada else timezone.now().date()
         self.vence_el = base + timedelta(days=self.vigencia_dias or 0)
+        # El folio es único: si otro admin ganó el número en este instante,
+        # se regenera y reintenta (savepoint para no envenenar la transacción).
+        from django.db import IntegrityError, transaction as _tx
+        for _ in range(5):
+            try:
+                with _tx.atomic():
+                    super().save(*args, **kwargs)
+                return
+            except IntegrityError:
+                if not self.folio:
+                    raise
+                self.folio = self.generar_folio()
         super().save(*args, **kwargs)
 
     def recalcular_tipo(self):
@@ -174,6 +191,32 @@ class Cotizacion(models.Model):
     def total(self):
         return (self.base + self.iva).quantize(Decimal('0.01'))
 
+    # ── Precio de CONTADO (5% de venta), SIN apilar con la promo ──
+    @property
+    def _sub_venta_lista(self):
+        return sum((i.subtotal_lista for i in self.items.all() if i.modalidad == 'venta'), Decimal('0.00'))
+
+    @property
+    def _sub_renta_lista(self):
+        return sum((i.subtotal_lista for i in self.items.all() if i.modalidad != 'venta'), Decimal('0.00'))
+
+    @property
+    def total_lista(self):
+        """Total a precio de LISTA (antes de promo). Base del descuento de contado."""
+        base = self._sub_venta_lista / (Decimal('1') + IVA_RATE) + self._sub_renta_lista
+        iva_v = self._sub_venta_lista - self._sub_venta_lista / (Decimal('1') + IVA_RATE)
+        iva_r = (self._sub_renta_lista * IVA_RATE) if self.aplica_iva else Decimal('0.00')
+        return (base + iva_v + iva_r).quantize(Decimal('0.01'))
+
+    @property
+    def total_contado(self):
+        """Mejor precio de contado (VENTA): 5% sobre el precio de LISTA, pero SIN
+        apilarse con la promo — se aplica el descuento MAYOR, no la suma. Si la
+        promo ya supera el 5%, el contado no baja más (queda igual al total)."""
+        if self.tipo == 'renta':
+            return self.total
+        return min(self.total, (self.total_lista * Decimal('0.95')).quantize(Decimal('0.01')))
+
     @property
     def cliente_display(self):
         if self.empresa_id and self.empresa:
@@ -215,6 +258,10 @@ class CotizacionItem(models.Model):
     descripcion = models.CharField(max_length=255)
     cantidad = models.PositiveIntegerField(default=1)
     precio_unitario = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'), help_text='Precio unitario SIN IVA')
+    # Precio de LISTA (antes de promo). 0 = sin promo → se usa precio_unitario.
+    # Sirve para el descuento de contado: se toma el descuento MAYOR (promo vs 5%
+    # de contado), nunca la suma de ambos.
+    precio_lista = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'))
     modalidad = models.CharField(max_length=8, choices=MODALIDADES, default='venta')
 
     class Meta:
@@ -232,6 +279,12 @@ class CotizacionItem(models.Model):
     @property
     def subtotal(self):
         return (Decimal(self.precio_unitario or 0) * self.cantidad).quantize(Decimal('0.01'))
+
+    @property
+    def subtotal_lista(self):
+        """Subtotal a precio de LISTA (antes de promo). Si no hay lista, = subtotal."""
+        base = Decimal(self.precio_lista or 0) or Decimal(self.precio_unitario or 0)
+        return (base * self.cantidad).quantize(Decimal('0.01'))
 
     def __str__(self):
         return f'{self.descripcion} x{self.cantidad}'

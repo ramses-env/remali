@@ -10,7 +10,7 @@ import LogoRemali from './ui/logo-remali'
 type Item = { id: number; descripcion: string; cantidad: number; precio_unitario: string; subtotal: string; modalidad_label?: string }
 type Foto = { id: number; imagen: string; orden: number }
 type Cotizacion = {
-  id: number; folio: string; estado: string; tipo: string
+  id: number; folio: string | null; estado: string; tipo: string
   cliente_display: string; cliente_telefono: string
   vigencia_dias: number; vigencia_hasta?: string | null; aplica_iva: boolean; notas: string
   items: Item[]; fotos?: Foto[]; subtotal: string; base: string; iva: string; total: string; creada: string

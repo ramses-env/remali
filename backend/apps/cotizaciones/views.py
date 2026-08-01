@@ -127,12 +127,15 @@ def crear_cotizacion_publica(request):
         unit = (it.get('unit') or '').lower()
         etiqueta, precio, modalidad = _resolver_partida(eq, unit)
         # Promo del equipo (la controla el admin en el panel): el precio oficial
-        # de la cotización sale ya con el descuento aplicado.
+        # de la cotización sale ya con el descuento aplicado. Guardamos el precio
+        # de LISTA (antes de promo) para el descuento de contado sin doble dip.
         promo = min(90, max(0, getattr(eq, 'promo_pct', 0) or 0))
+        precio_lista = Decimal('0')
         if precio and promo:
+            precio_lista = Decimal(str(precio))
             precio = (Decimal(precio) * (Decimal('100') - promo) / Decimal('100')).quantize(Decimal('0.01'))
             etiqueta = f'{etiqueta} (promo −{promo}%)'
-        partidas.append((etiqueta, cant, Decimal(str(precio or 0)), modalidad))
+        partidas.append((etiqueta, cant, Decimal(str(precio or 0)), modalidad, precio_lista))
         carrito.append({'id': eq.id, 'title': etiqueta, 'price': float(precio or 0),
                         'qty': cant, 'unit': unit or 'venta'})
 
@@ -303,6 +306,8 @@ def vincular_cuenta_cotizacion(request, pk):
     uid = request.data.get('usuario_id')
     if uid and not cot.items.exists():
         return Response({'detalle': 'La cotización está vacía: agrega partidas antes de vincularla.'}, status=400)
+    if uid and not cot.folio:
+        return Response({'detalle': 'Márcala como enviada primero: el folio nace ahí.'}, status=400)
     if not uid:
         cot.usuario = None
         cot.save(update_fields=['usuario'])
@@ -449,6 +454,9 @@ def generar_vinculo_cotizacion(request, pk):
     if not cot.items.exists():
         # Vincular una cotización EN BLANCO no significa nada: primero el pedido.
         return Response({'detalle': 'La cotización está vacía: agrega partidas antes de vincularla.'}, status=400)
+    if not cot.folio:
+        # Sin folio sigue siendo borrador de trabajo: el cliente no debe verla.
+        return Response({'detalle': 'Márcala como enviada primero: el folio nace ahí y es lo que el cliente verá.'}, status=400)
     cot.token_vinculo = secrets.token_hex(16)
     cot.token_vinculo_expira = timezone.now() + timedelta(days=30)
     cot.save(update_fields=['token_vinculo', 'token_vinculo_expira'])
