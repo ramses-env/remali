@@ -375,7 +375,7 @@ export default function Dashboard() {
   const [notifs, setNotifs] = useState<Notif[]>([])
   const [noLeidas, setNoLeidas] = useState(0)
   const [empresas, setEmpresas] = useState<Empresa[]>([])
-  const [toast, setToast] = useState<{ msg: string; type: 'ok' | 'err' | 'info' | 'warning' | 'primary' } | null>(null)
+  const [toasts, setToasts] = useState<{ id: number; msg: string; type: 'ok' | 'err' | 'info' | 'warning' | 'primary' }[]>([])
 
   const notifBtnRef = useRef<HTMLButtonElement | null>(null)
   const notifPanelRef = useRef<HTMLDivElement | null>(null)
@@ -407,8 +407,10 @@ export default function Dashboard() {
   }, [])
 
   const notify = (msg: string, type: 'ok' | 'err' | 'info' | 'warning' | 'primary' = 'ok') => {
-    setToast({ msg, type })
-    setTimeout(() => setToast(null), 2600)
+    // Pila de alertas: las nuevas se agregan abajo en vez de pisar a la anterior.
+    const id = Date.now() + Math.floor(Math.random() * 1000)
+    setToasts(t => [...t, { id, msg, type }])
+    setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 3200)
   }
 
   /* Cargas de DINERO que fallaron. Sin esto, un 500 o un token vencido se ve
@@ -1093,19 +1095,27 @@ export default function Dashboard() {
 
       <DialogoHost />
 
-      {/* ─── ALERTAS (barra gris, círculo de color por tipo, cerrar) ─── */}
-      {toast && (
-        <div className="toast-in fixed top-[76px] right-3 sm:right-5 z-[130] max-w-[calc(100vw-1.5rem)] flex items-center gap-3 pl-3 pr-2.5 py-2.5 rounded-2xl border border-edge bg-surface-2 shadow-[0_18px_50px_rgba(0,0,0,0.35)]">
-          <span className={`w-7 h-7 rounded-full grid place-items-center shrink-0 ${({ ok: 'bg-emerald-500', err: 'bg-red-500', info: 'bg-violet-500', warning: 'bg-amber-500', primary: 'bg-neutral-400' } as Record<string, string>)[toast.type]}`}>
-            {toast.type === 'ok' && <svg viewBox="0 0 24 24" className="w-4 h-4 stroke-white fill-none" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round"><path d="M5 13l4 4L19 7" /></svg>}
-            {(toast.type === 'err' || toast.type === 'info') && <svg viewBox="0 0 24 24" className="w-4 h-4 stroke-white fill-none" strokeWidth="2.4" strokeLinecap="round"><path d="M12 7v6" /><circle cx="12" cy="17" r="0.5" className="fill-white" /></svg>}
-            {toast.type === 'warning' && <svg viewBox="0 0 24 24" className="w-4 h-4 stroke-white fill-none" strokeWidth="2.6" strokeLinecap="round"><path d="M8 12h8" /></svg>}
-            {toast.type === 'primary' && <svg viewBox="0 0 24 24" className="w-4 h-4 stroke-white fill-none" strokeWidth="2"><path d="M15 17h5l-1.3-1.3A2 2 0 0 1 18.1 14V11a6.1 6.1 0 1 0-12.2 0v3a2 2 0 0 1-.6 1.4L4 17h5" /><path d="M9.2 17v.8a2.8 2.8 0 0 0 5.6 0V17" /></svg>}
-          </span>
-          <span className="text-sm font-bold text-ink pr-1">{toast.msg}</span>
-          <button onClick={() => setToast(null)} aria-label="Cerrar" className="w-7 h-7 grid place-items-center rounded-full text-mute hover:text-ink hover:bg-surface transition-colors shrink-0">
-            <svg viewBox="0 0 24 24" className="w-3.5 h-3.5 stroke-current fill-none" strokeWidth="2" strokeLinecap="round"><path d="M6 6l12 12M18 6L6 18" /></svg>
-          </button>
+      {/* ─── ALERTAS: pila (las nuevas abajo), círculo por tipo y barra de vida ─── */}
+      {toasts.length > 0 && (
+        <div className="fixed top-[76px] right-3 sm:right-5 z-[130] flex flex-col items-end gap-2.5 max-w-[calc(100vw-1.5rem)]">
+          {toasts.map(t => (
+            <div key={t.id} className="toast-in relative overflow-hidden flex items-center gap-3 pl-3 pr-2.5 py-2.5 rounded-2xl border border-edge bg-surface-2 shadow-[0_18px_50px_rgba(0,0,0,0.35)]">
+              <span className={`w-7 h-7 rounded-full grid place-items-center shrink-0 ${({ ok: 'bg-emerald-500', err: 'bg-red-500', info: 'bg-violet-500', warning: 'bg-amber-500', primary: 'bg-neutral-400' } as Record<string, string>)[t.type]}`}>
+                {t.type === 'ok' && <svg viewBox="0 0 24 24" className="w-4 h-4 stroke-white fill-none" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round"><path d="M5 13l4 4L19 7" /></svg>}
+                {(t.type === 'err' || t.type === 'info') && <svg viewBox="0 0 24 24" className="w-4 h-4 stroke-white fill-none" strokeWidth="2.4" strokeLinecap="round"><path d="M12 7v6" /><circle cx="12" cy="17" r="0.5" className="fill-white" /></svg>}
+                {t.type === 'warning' && <svg viewBox="0 0 24 24" className="w-4 h-4 stroke-white fill-none" strokeWidth="2.6" strokeLinecap="round"><path d="M8 12h8" /></svg>}
+                {t.type === 'primary' && <svg viewBox="0 0 24 24" className="w-4 h-4 stroke-white fill-none" strokeWidth="2"><path d="M15 17h5l-1.3-1.3A2 2 0 0 1 18.1 14V11a6.1 6.1 0 1 0-12.2 0v3a2 2 0 0 1-.6 1.4L4 17h5" /><path d="M9.2 17v.8a2.8 2.8 0 0 0 5.6 0V17" /></svg>}
+              </span>
+              <span className="text-sm font-bold text-ink pr-1">{t.msg}</span>
+              <button onClick={() => setToasts(ts => ts.filter(x => x.id !== t.id))} aria-label="Cerrar" className="w-7 h-7 grid place-items-center rounded-full text-mute hover:text-ink hover:bg-surface transition-colors shrink-0">
+                <svg viewBox="0 0 24 24" className="w-3.5 h-3.5 stroke-current fill-none" strokeWidth="2" strokeLinecap="round"><path d="M6 6l12 12M18 6L6 18" /></svg>
+              </button>
+              <span
+                className={`absolute left-0 bottom-0 h-[3px] rounded-full ${({ ok: 'bg-emerald-500', err: 'bg-red-500', info: 'bg-violet-500', warning: 'bg-amber-500', primary: 'bg-neutral-400' } as Record<string, string>)[t.type]}`}
+                style={{ animation: 'toast-avance 3.2s linear forwards' }}
+              />
+            </div>
+          ))}
         </div>
       )}
 

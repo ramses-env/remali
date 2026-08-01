@@ -448,6 +448,13 @@ class Notificacion(models.Model):
     ]
 
     tipo = models.CharField(max_length=20, choices=TIPOS, default='sistema')
+    # Destinatario. NULL = notificación del PANEL (admin/operación, se muestra por
+    # sección). Con `usuario` = notificación PERSONAL de ese cliente (sus rentas,
+    # compras, cotizaciones contestadas).
+    usuario = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True,
+        on_delete=models.CASCADE, related_name='notificaciones',
+    )
     titulo = models.CharField(max_length=200)
     mensaje = models.TextField(blank=True, default='')
     seccion = models.CharField(max_length=40, blank=True, default='')  # a qué módulo del dashboard enlaza
@@ -466,14 +473,18 @@ class Notificacion(models.Model):
         return f'[{self.tipo}] {self.titulo}'
 
 
-def crear_notificacion(tipo, titulo, mensaje='', seccion='', ref='', data=None):
-    """Crea una notificación; si se pasa `ref` evita duplicar (leída o no) con la misma ref."""
+def crear_notificacion(tipo, titulo, mensaje='', seccion='', ref='', data=None, usuario=None):
+    """Crea una notificación; si se pasa `ref` evita duplicar (leída o no) con la misma ref.
+
+    `usuario=None` → notificación del panel (admin). Con `usuario` → personal del cliente.
+    """
     if ref:
         existe = Notificacion.objects.filter(ref=ref).exists()
         if existe:
             return None
     return Notificacion.objects.create(
-        tipo=tipo, titulo=titulo, mensaje=mensaje, seccion=seccion, ref=ref, data=(data or {})
+        tipo=tipo, titulo=titulo, mensaje=mensaje, seccion=seccion, ref=ref,
+        data=(data or {}), usuario=usuario,
     )
 
 

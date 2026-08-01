@@ -1059,7 +1059,9 @@ def _notifs_visibles(user):
     El técnico (por debajo de administrador) solo ve lo operativo: su trabajo es
     el campo, no las cuentas del negocio. Administración y dueño ven todo.
     """
-    qs = Notificacion.objects.all()
+    # Solo las del PANEL (usuario NULL); las personales de cada cliente van por
+    # su propio endpoint (/notificaciones/mias/), no se mezclan con las del negocio.
+    qs = Notificacion.objects.filter(usuario__isnull=True)
     if nivel_de(user) < NIVEL_ADMIN:
         qs = qs.filter(tipo__in=TIPOS_OPERATIVOS)
     return qs
@@ -1093,4 +1095,23 @@ def marcar_notificacion_leida(request, pk: int):
 def marcar_todas_leidas(request):
     # Solo las que el usuario ve: el técnico no debe marcar leídas las del negocio.
     _notifs_visibles(request.user).filter(leida=False).update(leida=True)
+    return Response({'ok': True, 'no_leidas': 0})
+
+
+# ── Notificaciones PERSONALES del cliente (rentas, compras, cotizaciones) ──
+@api_view(['GET'])
+@permission_classes([permissions.IsAuthenticated])
+def notificaciones_mias(request):
+    """Notificaciones personales del cliente en sesión. El frontend la sondea."""
+    qs = Notificacion.objects.filter(usuario=request.user)
+    return Response({
+        'notificaciones': NotificacionSerializer(qs[:50], many=True).data,
+        'no_leidas': qs.filter(leida=False).count(),
+    })
+
+
+@api_view(['POST'])
+@permission_classes([permissions.IsAuthenticated])
+def marcar_mias_leidas(request):
+    Notificacion.objects.filter(usuario=request.user, leida=False).update(leida=True)
     return Response({'ok': True, 'no_leidas': 0})
