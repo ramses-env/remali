@@ -65,6 +65,11 @@ class Renta(models.Model):
         related_name='rentas_cliente',
     )
 
+    # Liga de vinculación (un solo uso + caducidad): el admin genera el enlace y
+    # el cliente, ya con sesión, liga esta renta a SU cuenta al abrirlo.
+    token_vinculo = models.CharField(max_length=32, unique=True, null=True, blank=True, editable=False)
+    token_vinculo_expira = models.DateTimeField(null=True, blank=True, editable=False)
+
     modalidad = models.CharField(max_length=10, choices=MODALIDADES)
     duracion = models.PositiveIntegerField(
         default=1,

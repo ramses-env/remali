@@ -84,7 +84,10 @@ export default function AsistenteIA({ notify, me }: { notify?: (m: string, t?: '
     setTexto('')
     setCargando(true)
     try {
-      const r = await api.post<{ respuesta: string }>('/asistente/preguntar/', { pregunta: q })
+      // `fondo: true` → esta petición NO enciende el loader global de la app.
+      // El único aviso de "está pensando" es el indicador del chat (orbe +
+      // puntitos); si no, el overlay global parece que algo se rompió.
+      const r = await api.post<{ respuesta: string }>('/asistente/preguntar/', { pregunta: q }, { fondo: true } as never)
       setMensajes(m => [...m, { autor: 'ia', texto: r.data.respuesta || '—' }])
     } catch (e: unknown) {
       const detalle =

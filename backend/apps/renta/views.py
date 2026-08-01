@@ -175,6 +175,60 @@ def vincular_cuenta(request, pk):
     return Response({'cuenta': f'{u.first_name} {u.last_name}'.strip() or u.username})
 
 
+@api_view(['POST'])
+@permission_classes([IsAdminGroupOrStaff])
+def generar_vinculo_renta(request, pk: int):
+    """Genera una liga de un solo uso para que un cliente ligue esta renta a su cuenta."""
+    import secrets
+    from datetime import timedelta
+    r = Renta.objects.filter(pk=pk).first()
+    if not r:
+        return Response({'detalle': 'Renta no encontrada'}, status=404)
+    if r.estado == 'cancelada':
+        return Response({'detalle': 'No se puede vincular una renta cancelada.'}, status=400)
+    r.token_vinculo = secrets.token_hex(16)
+    r.token_vinculo_expira = timezone.now() + timedelta(days=30)
+    r.save(update_fields=['token_vinculo', 'token_vinculo_expira'])
+    # Ruta RELATIVA: el frontend le antepone su propio origen (dev/túnel/prod).
+    return Response({
+        'token': r.token_vinculo,
+        'ruta': f'/vincular/renta/{r.token_vinculo}',
+        'expira': r.token_vinculo_expira,
+    })
+
+
+@api_view(['GET', 'POST'])
+@permission_classes([permissions.IsAuthenticated])
+def vinculo_renta(request, token: str):
+    """GET previsualiza la renta de la liga; POST la liga a la cuenta del usuario (un solo uso)."""
+    r = Renta.objects.select_related('inventario', 'inventario__equipo').filter(token_vinculo=token).first()
+    if not r:
+        return Response({'detalle': 'Enlace no válido o ya utilizado.'}, status=404)
+    if r.token_vinculo_expira and r.token_vinculo_expira < timezone.now():
+        return Response({'detalle': 'Este enlace ya caducó. Pide uno nuevo.'}, status=410)
+
+    concepto = 'Renta de maquinaria'
+    if r.inventario and r.inventario.equipo:
+        concepto = r.inventario.equipo.modelo or concepto
+
+    if request.method == 'GET':
+        return Response({
+            'tipo': 'renta', 'id': r.id, 'total': str(r.total),
+            'fecha_inicio': r.fecha_inicio, 'fecha_fin': r.fecha_fin,
+            'concepto': concepto, 'cliente': r.cliente or '',
+            'ya_ligada': bool(r.usuario_id),
+        })
+
+    # POST → reclamar
+    if r.estado == 'cancelada':
+        return Response({'detalle': 'Esta renta está cancelada; no se puede vincular.'}, status=400)
+    r.usuario = request.user
+    r.token_vinculo = None            # un solo uso
+    r.token_vinculo_expira = None
+    r.save(update_fields=['usuario', 'token_vinculo', 'token_vinculo_expira'])
+    return Response({'detalle': 'Listo: la renta quedó ligada a tu cuenta.', 'id': r.id})
+
+
 @api_view(['GET'])
 @permission_classes([EsOperador])
 def alertas_renta(request):

@@ -157,6 +157,63 @@ def cancelar_venta(request, pk: int):
     return Response({'detalle': 'Venta cancelada', 'venta': {'id': v.id, 'estado': v.estado}})
 
 
+@api_view(['POST'])
+@permission_classes([IsAdminGroupOrStaff])
+def generar_vinculo_venta(request, pk: int):
+    """Genera una liga de un solo uso para que un cliente ligue esta venta a su cuenta."""
+    import secrets
+    from datetime import timedelta
+    from django.utils import timezone
+    try:
+        v = Venta.objects.get(pk=pk)
+    except Venta.DoesNotExist:
+        return Response({'detalle': 'Venta no encontrada'}, status=404)
+    if v.estado == 'cancelada':
+        return Response({'detalle': 'No se puede vincular una venta cancelada.'}, status=400)
+    v.token_vinculo = secrets.token_hex(16)
+    v.token_vinculo_expira = timezone.now() + timedelta(days=30)
+    v.save(update_fields=['token_vinculo', 'token_vinculo_expira'])
+    # Ruta RELATIVA a propósito: el frontend le antepone su propio origen, así el
+    # enlace sirve en dev, en el túnel y en producción sin hardcodear el dominio.
+    return Response({
+        'token': v.token_vinculo,
+        'ruta': f'/vincular/venta/{v.token_vinculo}',
+        'expira': v.token_vinculo_expira,
+    })
+
+
+@api_view(['GET', 'POST'])
+@permission_classes([permissions.IsAuthenticated])
+def vinculo_venta(request, token: str):
+    """GET previsualiza la venta de la liga; POST la liga a la cuenta del usuario (un solo uso)."""
+    from django.utils import timezone
+    v = Venta.objects.select_related('inventario', 'inventario__equipo').filter(token_vinculo=token).first()
+    if not v:
+        return Response({'detalle': 'Enlace no válido o ya utilizado.'}, status=404)
+    if v.token_vinculo_expira and v.token_vinculo_expira < timezone.now():
+        return Response({'detalle': 'Este enlace ya caducó. Pide uno nuevo.'}, status=410)
+
+    concepto = 'Compra de maquinaria'
+    if v.inventario and v.inventario.equipo:
+        concepto = v.inventario.equipo.modelo or concepto
+
+    if request.method == 'GET':
+        return Response({
+            'tipo': 'venta', 'id': v.id, 'fecha': v.fecha, 'total': str(v.total),
+            'cliente': v.nombre_cliente or '', 'concepto': concepto,
+            'ya_ligada': bool(v.usuario_id),
+        })
+
+    # POST → reclamar
+    if v.estado == 'cancelada':
+        return Response({'detalle': 'Esta venta está cancelada; no se puede vincular.'}, status=400)
+    v.usuario = request.user
+    v.token_vinculo = None            # un solo uso: se limpia al reclamar
+    v.token_vinculo_expira = None
+    v.save(update_fields=['usuario', 'token_vinculo', 'token_vinculo_expira'])
+    return Response({'detalle': 'Listo: la venta quedó ligada a tu cuenta.', 'id': v.id})
+
+
 def _get_venta_full(pk):
     return Venta.objects.select_related(
         'inventario', 'inventario__equipo', 'empresa'

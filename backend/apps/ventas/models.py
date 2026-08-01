@@ -44,6 +44,12 @@ class Venta(models.Model):
         related_name='ventas_pos'
     )
 
+    # Liga de vinculación: el admin genera un enlace; el cliente, ya con sesión,
+    # lo abre y la venta queda ligada a SU cuenta. Es de un solo uso (al
+    # reclamarse se limpia el token) y con caducidad.
+    token_vinculo = models.CharField(max_length=32, unique=True, null=True, blank=True, editable=False)
+    token_vinculo_expira = models.DateTimeField(null=True, blank=True, editable=False)
+
     # Venta de maquinaria (unidad única) + su precio como snapshot
     inventario = models.ForeignKey(
         'inventario.Inventario',

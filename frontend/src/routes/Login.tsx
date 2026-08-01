@@ -5,6 +5,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import * as z from 'zod'
 import { Eye, EyeOff, Loader2 } from 'lucide-react'
 
+import api from '../lib/api'
 import { useIrTrasEntrar } from '../lib/sesion'
 import { useAuth } from '../store/auth'
 import { AuthCabecera, AuthItem } from '@/components/ui/auth-split-screen'
@@ -32,8 +33,25 @@ export default function Login() {
   const params = new URLSearchParams(loc.search)
   const next = params.get('next') || ''
   const sesionExpirada = params.get('expired') === '1'
+  // Estados del candado de correo real: ?correo=verificado|invalido los pone el
+  // link del correo; ?confirmar=1&correo=<email> llega desde el registro.
+  const correoQ = params.get('correo') || ''
+  const correoVerificado = correoQ === 'verificado'
+  const linkInvalido = correoQ === 'invalido'
 
   const [error, setError] = useState<string | undefined>(undefined)
+  const [pendiente, setPendiente] = useState<string | null>(
+    params.get('confirmar') === '1' && correoQ.includes('@') ? correoQ : null,
+  )
+  const [reenviado, setReenviado] = useState(false)
+
+  async function reenviarConfirmacion() {
+    const escrito = (document.querySelector('input[name="usuario"]') as HTMLInputElement | null)?.value || ''
+    const email = (pendiente || '').includes('@') ? (pendiente as string) : escrito
+    if (!email.includes('@')) { setError('Escribe tu correo en el campo de arriba y vuelve a tocar Reenviar.'); return }
+    try { await api.post('/auth/reenviar-verificacion-publica/', { email: email.trim().toLowerCase() }) } catch { /* respuesta neutra */ }
+    setReenviado(true)
+  }
   const [verPass, setVerPass] = useState(false)
 
   // El redirect "si ya hay sesión" lo hace el layout: es la misma regla para
@@ -53,6 +71,10 @@ export default function Login() {
       await irTrasEntrar()
     } catch (err: any) {
       const data = err?.response?.data
+      if (data?.codigo === 'correo_sin_verificar') {
+        setPendiente(datos.usuario.includes('@') ? datos.usuario.trim().toLowerCase() : '')
+        return
+      }
       if (data?.detail) {
         const d = String(data.detail).toLowerCase()
         if (d.includes('no active account')) setError('Tu cuenta no está activa. Contacta al administrador.')
@@ -76,6 +98,35 @@ export default function Login() {
         title="Iniciar sesión"
         description="La misma cuenta sirve para el panel y para la tienda."
       />
+
+      {correoVerificado && !error && (
+        <AuthItem>
+          <div className="px-4 py-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-sm text-emerald-600 dark:text-emerald-400 font-semibold">
+            Correo confirmado. Ya puedes entrar.
+          </div>
+        </AuthItem>
+      )}
+
+      {linkInvalido && !error && (
+        <AuthItem>
+          <div className="px-4 py-3 rounded-xl bg-red-500/10 border border-red-500/20 text-sm text-red-600 dark:text-red-400">
+            Ese link de confirmación no es válido o ya se usó. Si tu cuenta sigue sin entrar, pide otro abajo.
+          </div>
+        </AuthItem>
+      )}
+
+      {pendiente !== null && (
+        <AuthItem>
+          <div className="px-4 py-3 rounded-xl bg-gold-soft border border-gold/30 text-sm text-ink">
+            <p className="font-bold mb-0.5">Confirma tu correo para entrar.</p>
+            <p>Te enviamos un link{pendiente ? <> a <b>{pendiente}</b></> : null}. Revisa también Spam o Promociones.</p>
+            <button type="button" onClick={reenviarConfirmacion} disabled={reenviado}
+              className="mt-2 text-sm font-bold text-gold hover:opacity-80 disabled:opacity-60 transition-opacity">
+              {reenviado ? 'Correo reenviado ✓' : 'Reenviar correo'}
+            </button>
+          </div>
+        </AuthItem>
+      )}
 
       {sesionExpirada && !error && (
         <AuthItem>

@@ -40,6 +40,7 @@ urlpatterns = [
     path('auth/password/', views.cambiar_password),
     path('auth/verificar-correo/<str:token>/', views.verificar_correo_usuario),  # público (link del correo)
     path('auth/reenviar-verificacion/', views.reenviar_verificacion),
+    path('auth/reenviar-verificacion-publica/', views.reenviar_verificacion_publica),
     # Obras guardadas del cliente (para reusar al cotizar)
     path('obras-cliente/', views.ObrasClienteList.as_view()),
     path('obras-cliente/<int:pk>/', views.ObraClienteDetail.as_view()),

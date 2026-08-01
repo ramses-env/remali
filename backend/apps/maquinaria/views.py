@@ -528,14 +528,31 @@ def verificar_correo_usuario(request, token):
     from django.utils import timezone
     perfil = PerfilUsuario.objects.filter(email_token=token).exclude(email_token='').first() if token else None
     if not perfil:
-        return redirect('/?correo=invalido')
+        return redirect('/login?correo=invalido')
     if not perfil.email_verificado:
         perfil.email_verificado = True
         perfil.email_verificado_en = timezone.now()
         perfil.save(update_fields=['email_verificado', 'email_verificado_en'])
         enviar_bienvenida(perfil.usuario)   # ahora sí: cuenta confirmada
         revisar_recompensa(perfil)
-    return redirect('/?correo=verificado')
+    return redirect('/login?correo=verificado')
+
+
+@api_view(['POST'])
+@permission_classes([permissions.AllowAny])
+@throttle_classes([RegistroThrottle])
+def reenviar_verificacion_publica(request):
+    """Reenvía la confirmación SIN sesión (quien está bloqueado no puede entrar).
+
+    Respuesta neutra siempre: no revela si el correo tiene cuenta o no."""
+    email = (request.data.get('email') or '').strip().lower()
+    if email:
+        user = get_user_model().objects.filter(email__iexact=email, is_active=True).first()
+        if user:
+            perfil, _ = PerfilUsuario.objects.get_or_create(usuario=user)
+            if not perfil.email_verificado:
+                _enviar_verificacion(user, perfil, request)
+    return Response({'detail': 'Si la cuenta existe, te reenviamos el correo de confirmación.'})
 
 
 @api_view(['POST'])
@@ -699,6 +716,16 @@ def google_login(request):
         # aunque su Google sea válido.
         return Response({'detail': 'Tu cuenta no está activa. Contacta al administrador.'}, status=403)
 
+    # Google ya comprobó ese correo (email_verified): la cuenta queda confirmada,
+    # incluso si antes se registró por contraseña y nunca abrió nuestro link.
+    perfil_g, _ = PerfilUsuario.objects.get_or_create(usuario=user)
+    if not perfil_g.email_verificado:
+        from django.utils import timezone as _tz
+        perfil_g.email_verificado = True
+        perfil_g.email_verificado_en = _tz.now()
+        perfil_g.save(update_fields=['email_verificado', 'email_verificado_en'])
+        revisar_recompensa(perfil_g)
+
     # Google ya verificó el correo: refléjalo en el perfil y premia si ya tiene los
     # datos completos (p. ej. un cliente antiguo que ahora entra por Google).
     perfil, _ = PerfilUsuario.objects.get_or_create(usuario=user)
@@ -734,6 +761,17 @@ def login(request):
     serializer = TokenObtainPairSerializer(data={'username': uname, 'password': password})
     try:
         serializer.is_valid(raise_exception=True)
+        # Candado de correo real: el alta con contraseña queda pendiente hasta
+        # confirmar el link del correo. Solo clientes (nivel 0) — al staff lo da
+        # de alta el admin y Google ya viene verificado. Los usuarios previos a
+        # este candado quedaron eximidos por la migración de datos.
+        user = serializer.user
+        perfil = PerfilUsuario.objects.filter(usuario=user).first()
+        if perfil and not perfil.email_verificado and nivel_de(user) < 1:
+            return Response({
+                'detail': 'Confirma tu correo para entrar: te enviamos un link al registrarte.',
+                'codigo': 'correo_sin_verificar',
+            }, status=403)
         return Response(serializer.validated_data)
     except Exception:
         from django.contrib.auth import authenticate

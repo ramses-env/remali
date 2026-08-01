@@ -7,6 +7,7 @@ import { formatMoney } from '../lib/utils'
 import DialogoHost, { confirmar, pedir, elegir } from '../components/Dialogo'
 
 import TicketModal from '../components/TicketModal'
+import VentaDetalleModal from '../components/VentaDetalleModal'
 import EtiquetaModal from '../components/EtiquetaModal'
 import OrdenCartaModal from '../components/OrdenCartaModal'
 import CotizacionCartaModal from '../components/CotizacionCartaModal'
@@ -580,8 +581,8 @@ export default function Dashboard() {
   const navGroupsTodos: { title?: string; items: { key: Section; label: string; badge?: number; icon: React.ReactNode }[] }[] = [
     {
       items: [
-        { key: 'asistente', label: 'Asistente IA', icon: <><path d="M4 5.5h16a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H9l-4 3.5V16.5H4a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1z" /><path d="M8.5 11h.01M12 11h.01M15.5 11h.01" /></> },
         { key: 'resumen', label: 'Resumen', icon: <><path d="M4 10.5L12 4l8 6.5V20a1.5 1.5 0 0 1-1.5 1.5H5.5A1.5 1.5 0 0 1 4 20z" /><path d="M9.5 21.5v-6.8a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v6.8" /></> },
+        { key: 'asistente', label: 'Asistente IA', icon: <><path d="M4 5.5h16a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H9l-4 3.5V16.5H4a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1z" /><path d="M8.5 11h.01M12 11h.01M15.5 11h.01" /></> },
       ],
     },
     {
@@ -3080,6 +3081,16 @@ function RentaDetalleModal({ renta: r, onClose, onTicket }: { renta: RentaFull; 
   // Cuenta de cliente vinculada; se puede asignar o cambiar aquí mismo,
   // para las rentas que se registraron sin elegirla.
   const [cuenta, setCuenta] = useState<string | null>(r.cuenta ?? null)
+  const [liga, setLiga] = useState('')
+  const [genLiga, setGenLiga] = useState(false)
+  const [copiado, setCopiado] = useState(false)
+  async function generarLiga() {
+    setGenLiga(true)
+    try {
+      const res = await api.post<{ ruta: string }>(`/rentas/${r.id}/vinculo/`, {}, { fondo: true } as never)
+      setLiga(`${window.location.origin}${res.data.ruta}`)
+    } catch { /* el interceptor ya avisa */ } finally { setGenLiga(false) }
+  }
   async function vincularCuenta() {
     try {
       const rc = await api.get<{ clientes: { id: number; nombre: string; empresa?: string }[] }>('/clientes-lookup/')
@@ -3154,14 +3165,27 @@ function RentaDetalleModal({ renta: r, onClose, onTicket }: { renta: RentaFull; 
               {cliente && <Field label="Cliente" value={cliente} />}
               {telefono && <Field label="Teléfono" value={telefono} />}
               <Field label="Ubicación / entrega" value={r.obra?.ubicacion || r.direccion} full />
-              <div className="col-span-2 flex items-center justify-between gap-3 pt-2 border-t border-edge">
-                <div className="min-w-0">
-                  <p className="text-[12px] text-mute">Cuenta en el sistema</p>
-                  <p className={`text-[13.5px] font-bold mt-0.5 truncate ${cuenta ? 'text-ink' : 'text-mute'}`}>{cuenta || 'Sin vincular'}</p>
+              <div className="col-span-2 pt-2 border-t border-edge space-y-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-[12px] text-mute">Cuenta en el sistema</p>
+                    <p className={`text-[13.5px] font-bold mt-0.5 truncate ${cuenta ? 'text-ink' : 'text-mute'}`}>{cuenta || 'Sin vincular'}</p>
+                  </div>
+                  <button onClick={vincularCuenta} className="shrink-0 px-3.5 py-2 rounded-[9px] border border-edge text-[12px] font-bold text-ink hover:border-gold/50 hover:text-gold transition-colors">
+                    {cuenta ? 'Cambiar' : 'Vincular cuenta'}
+                  </button>
                 </div>
-                <button onClick={vincularCuenta} className="shrink-0 px-3.5 py-2 rounded-[9px] border border-edge text-[12px] font-bold text-ink hover:border-gold/50 hover:text-gold transition-colors">
-                  {cuenta ? 'Cambiar' : 'Vincular cuenta'}
-                </button>
+                {/* Liga: el cliente la abre y liga la renta a SU cuenta (un solo uso, 30 días). */}
+                {liga ? (
+                  <div className="flex items-center gap-2">
+                    <input readOnly value={liga} onFocus={e => e.currentTarget.select()} className="flex-1 bg-app border border-edge rounded-[9px] px-3 py-2 text-[11px] text-ink outline-none" />
+                    <button onClick={async () => { try { await navigator.clipboard.writeText(liga); setCopiado(true); setTimeout(() => setCopiado(false), 1500) } catch { /* noop */ } }} className="shrink-0 px-3 py-2 rounded-[9px] bg-gold text-black text-[12px] font-bold">{copiado ? '✓' : 'Copiar'}</button>
+                  </div>
+                ) : (
+                  <button onClick={generarLiga} disabled={genLiga} className="text-[12px] font-semibold text-mute hover:text-gold transition-colors disabled:opacity-50">
+                    {genLiga ? 'Generando…' : '＋ Generar liga para que el cliente la vincule solo'}
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -3236,7 +3260,7 @@ function RentaDetalleModal({ renta: r, onClose, onTicket }: { renta: RentaFull; 
 ════════════════════════════════════════ */
 function VentasAdmin({ ventas, reload, notify }: { ventas: Venta[]; reload: () => void; notify: (m: string, t?: 'ok' | 'err') => void }) {
   const [q, setQ] = useState('')
-  const [ticketId, setTicketId] = useState<number | null>(null)
+  const [detalle, setDetalle] = useState<Venta | null>(null)
 
   function cancelar(v: Venta) {
     if (!confirm(`¿Cancelar la venta #${v.id}? Se devolverá la máquina a inventario y se repondrá el stock.`)) return
@@ -3260,7 +3284,7 @@ function VentasAdmin({ ventas, reload, notify }: { ventas: Venta[]; reload: () =
 
   return (
     <div className="space-y-5">
-      {ticketId !== null && <TicketModal url={`/ventas/${ticketId}/comprobante/`} onClose={() => setTicketId(null)} />}
+      {detalle && <VentaDetalleModal venta={detalle} onClose={() => setDetalle(null)} onChanged={reload} notify={notify} />}
       {/* KPIs */}
       <KpiGrid
         gridClassName="grid-cols-2 lg:grid-cols-4"
@@ -3325,8 +3349,8 @@ function VentasAdmin({ ventas, reload, notify }: { ventas: Venta[]; reload: () =
                         {v.iva && <p className="text-[10px] text-mute">IVA ${Number(v.iva).toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>}
                         {v.estado === 'cancelada' && <p className="text-[10px] text-red-500 font-semibold uppercase">Cancelada</p>}
                       </div>
-                      <button onClick={() => setTicketId(v.id)} title="Ver / imprimir ticket" aria-label="Ver o imprimir ticket" className="w-8 h-8 rounded-lg border border-edge text-mute hover:text-ink hover:border-ink/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/20 transition-colors flex items-center justify-center shrink-0">
-                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+                      <button onClick={() => setDetalle(v)} title="Ver detalle" aria-label="Ver detalle de la venta" className="w-8 h-8 rounded-lg border border-edge text-mute hover:text-ink hover:border-ink/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/20 transition-colors flex items-center justify-center shrink-0">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>
                       </button>
                       {v.estado !== 'cancelada' && (
                         <button onClick={() => cancelar(v)} title="Cancelar venta" aria-label="Cancelar venta" className="w-8 h-8 rounded-lg border border-red-500/30 text-red-600 dark:text-red-400 hover:bg-red-500/10 hover:border-red-500/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/30 transition-colors flex items-center justify-center shrink-0">
@@ -5613,6 +5637,7 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
   }
   async function convertir() {
     if (c.convertida && c.venta_id) { onConvertida(c.venta_id); return }
+    if (c.estado !== 'aceptada') { notify('Marca la cotización como “Aceptada” antes de convertirla en venta', 'err'); return }
     if (!clienteNombre.trim() && !empresaSel) { notify('Agrega el nombre del cliente antes de convertir', 'err'); return }
     if (c.items.length === 0) { notify('Agrega al menos una partida antes de convertir', 'err'); return }
     const aviso = c.tipo === 'mixta'
@@ -6085,6 +6110,10 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
           ) : c.tipo === 'renta' ? (
             <div className="w-full sm:w-auto py-2.5 px-4 rounded-full border border-edge text-mute text-[12px] font-medium flex items-center justify-center text-center" title="Las cotizaciones de renta se concretan creando la renta">
               Concreta esta renta desde Rentas
+            </div>
+          ) : c.estado !== 'aceptada' ? (
+            <div className="w-full sm:w-auto py-2.5 px-4 rounded-full border border-edge text-mute text-[12px] font-medium flex items-center justify-center text-center" title="Marca la cotización como “Aceptada” para poder convertirla en venta">
+              Acéptala para convertir a venta
             </div>
           ) : (
             <button onClick={convertir} disabled={busy} className="w-full sm:w-auto py-2.5 px-5 rounded-full bg-gold text-black text-sm font-bold hover:opacity-90 transition active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-2">

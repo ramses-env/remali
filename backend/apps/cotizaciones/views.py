@@ -450,6 +450,15 @@ def convertir_cotizacion(request, pk: int):
         cot = Cotizacion.objects.prefetch_related('items').get(pk=pk)
     except Cotizacion.DoesNotExist:
         return Response({'detalle': 'Cotización no encontrada'}, status=404)
+    # Solo se convierte lo que el cliente YA aceptó: si no está 'aceptada', no
+    # se vende. (Una cotización ya convertida quedó en 'aceptada', así que el
+    # reintento idempotente de más abajo sigue funcionando.)
+    if cot.estado != 'aceptada':
+        return Response(
+            {'detalle': 'Solo se puede convertir a venta una cotización Aceptada. '
+                        'Márcala como “Aceptada” primero.'},
+            status=400,
+        )
     # Se convierten SOLO las partidas de venta. Las de renta se concretan
     # creando la renta (eligiendo unidad y fechas), así que una cotización mixta
     # genera la venta y deja sus partidas de renta pendientes.
@@ -514,9 +523,6 @@ def convertir_cotizacion(request, pk: int):
         )
         for u in unidades:
             u.marcar_vendido()
-        if cot.estado != 'aceptada':
-            cot.estado = 'aceptada'
-            cot.save(update_fields=['estado', 'actualizada'])
 
     cot.refresh_from_db()
     pendientes = len(cot.items.all()) - len(partidas_venta)

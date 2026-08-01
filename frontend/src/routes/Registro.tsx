@@ -31,7 +31,7 @@ const esquema = z
 type Valores = z.infer<typeof esquema>
 
 export default function Registro() {
-  const { login, entrarConToken } = useAuth()
+  const { entrarConToken } = useAuth()
   const nav = useNavigate()
   const loc = useLocation()
   const next = new URLSearchParams(loc.search).get('next') || ''
@@ -70,15 +70,9 @@ export default function Registro() {
       return
     }
 
-    // Cuenta creada: se entra de una vez. Mandar al login a repetir el correo y
-    // la contraseña recién escritos sería trabajo de más sin ninguna ganancia.
-    try {
-      await login(datos.email, datos.password, true)
-      await irTrasEntrar()
-    } catch {
-      // La cuenta sí quedó creada; solo falló entrar. Que lo intente a mano.
-      nav('/login?creada=1', { replace: true })
-    }
+    // Cuenta creada pero PENDIENTE: el candado de correo real exige confirmar
+    // el link antes de poder entrar. Al login, con el aviso y el reenvío a mano.
+    nav(`/login?confirmar=1&correo=${encodeURIComponent(datos.email.trim().toLowerCase())}`, { replace: true })
   }
 
   return (
