@@ -5378,7 +5378,7 @@ const COT_PAGE_SIZE = 25
 /** Lista de cotizaciones: paginada y filtrada EN EL SERVIDOR, para que aguante
  *  miles sin cargar todo al navegador. Los conteos vienen del endpoint de stats. */
 function CotizacionesAdmin({ empresas, notify }: {
-  empresas: Empresa[]; notify: (m: string, t?: 'ok' | 'err') => void
+  empresas: Empresa[]; notify: (m: string, t?: 'ok' | 'err' | 'info') => void
 }) {
   const [q, setQ] = useState('')
   const [qDebounced, setQDebounced] = useState('')
@@ -5577,7 +5577,7 @@ function Switch({ checked, onChange, disabled, label }: {
 }
 
 function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, onClose, onChanged, onPrint, onConvertida }: {
-  cotizacion: Cotizacion; empresas: Empresa[]; recienCreada?: boolean; notify: (m: string, t?: 'ok' | 'err') => void
+  cotizacion: Cotizacion; empresas: Empresa[]; recienCreada?: boolean; notify: (m: string, t?: 'ok' | 'err' | 'info') => void
   onClose: () => void; onChanged: () => void; onPrint: (c: Cotizacion) => void; onConvertida: (ventaId: number) => void
 }) {
   // Vincular/cambiar la cuenta de la tienda dueña de esta cotización.
