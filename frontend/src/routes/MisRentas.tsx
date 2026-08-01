@@ -36,7 +36,7 @@ const fechaPago = (s: string) => {
 const MOD: Record<string, string> = { dia: 'por día', semana: 'por semana', mes: 'por mes' }
 
 function estiloEstado(estado: string) {
-  if (estado === 'activa') return 'bg-gold/15 text-gold'
+  if (estado === 'activa') return 'bg-libre/10 text-libre'
   if (estado === 'reservada') return 'bg-blue-500/10 text-blue-500'
   if (estado === 'finalizada') return 'bg-libre/10 text-libre'
   if (estado === 'vencida') return 'bg-red-500/10 text-red-500'
