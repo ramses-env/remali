@@ -600,10 +600,19 @@ class CotizacionDetail(generics.RetrieveUpdateDestroyAPIView):
         # Excepción: la logística sigue viva. Cambiar SOLO la entrega prometida
         # no toca montos ni partidas, así que se permite aun convertida.
         solo_logistica = set(request.data.keys()) <= {'entrega_prometida'}
+        cot = self.get_object()
         if not solo_logistica:
-            bloqueo = _bloqueada_si_convertida(self.get_object())
+            bloqueo = _bloqueada_si_convertida(cot)
             if bloqueo:
                 return bloqueo
+        # Máquina de estados: no se regresa a etapas que ya pasaron.
+        nuevo_estado = request.data.get('estado')
+        if nuevo_estado and nuevo_estado != cot.estado:
+            autorizada = bool(cot.autorizada_por) and not cot.autorizacion_rechazo
+            if autorizada and nuevo_estado in ('borrador', 'enviada', 'por_autorizar'):
+                return Response({'detalle': f'Vino autorizada por {cot.autorizada_por}: solo puede estar Aceptada o Rechazada.'}, status=400)
+            if cot.estado != 'borrador' and nuevo_estado == 'borrador':
+                return Response({'detalle': 'Ya tiene folio y el cliente la conoce: no puede regresar a borrador.'}, status=400)
         return super().update(request, *args, **kwargs)
 
     def destroy(self, request, *args, **kwargs):

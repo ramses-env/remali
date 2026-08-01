@@ -5970,7 +5970,13 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
                 </div>
               ) : (
                 <Segmentado
-                  opciones={COT_ESTADOS.map(e => ({ key: e.key, label: e.label }))}
+                  /* Solo etapas alcanzables: autorizada por el jefe = Aceptada/
+                     Rechazada; y una vez con folio enviado, Borrador ya no existe. */
+                  opciones={COT_ESTADOS
+                    .filter(e => (c.autorizada_por && !c.autorizacion_rechazo)
+                      ? ['aceptada', 'rechazada'].includes(e.key)
+                      : (c.estado === 'borrador' || e.key !== 'borrador'))
+                    .map(e => ({ key: e.key, label: e.label }))}
                   valor={c.estado}
                   onChange={(k) => cambiarEstado(k as Cotizacion['estado'])}
                   disabled={bloqueada}
