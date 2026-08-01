@@ -3305,8 +3305,10 @@ function RentaDetalleModal({ renta: r, onClose, onTicket }: { renta: RentaFull; 
                     {cuenta ? 'Cambiar' : 'Vincular cuenta'}
                   </button>
                 </div>
-                {/* Liga: el cliente la abre y liga la renta a SU cuenta (un solo uso, 30 días). */}
-                {liga ? (
+                {/* Liga: el cliente la abre y liga la renta a SU cuenta (un solo
+                    uso, 30 días). Con cuenta YA vinculada no hay nada que ligar:
+                    ni liga vieja ni botón de generar. */}
+                {cuenta ? null : liga ? (
                   <div className="space-y-2">
                     <div className="flex items-center gap-2">
                       <input readOnly value={liga} onFocus={e => e.currentTarget.select()} className="flex-1 bg-app border border-edge rounded-[9px] px-3 py-2 text-[11px] text-ink outline-none" />

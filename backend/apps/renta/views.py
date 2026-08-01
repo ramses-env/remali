@@ -223,7 +223,10 @@ def vincular_cuenta(request, pk):
     if not u:
         return Response({'detalle': 'Cuenta de cliente no encontrada'}, status=404)
     r.usuario = u
-    r.save(update_fields=['usuario'])
+    # Si había una liga compartida por ahí, deja de servir: ya hay dueño.
+    r.token_vinculo = None
+    r.token_vinculo_expira = None
+    r.save(update_fields=['usuario', 'token_vinculo', 'token_vinculo_expira'])
     return Response({'cuenta': f'{u.first_name} {u.last_name}'.strip() or u.username})
 
 
@@ -238,6 +241,8 @@ def generar_vinculo_renta(request, pk: int):
         return Response({'detalle': 'Renta no encontrada'}, status=404)
     if r.estado == 'cancelada':
         return Response({'detalle': 'No se puede vincular una renta cancelada.'}, status=400)
+    if r.usuario_id:
+        return Response({'detalle': 'Ya está vinculada a una cuenta; no hace falta liga.'}, status=400)
     r.token_vinculo = secrets.token_hex(16)
     r.token_vinculo_expira = timezone.now() + timedelta(days=30)
     r.save(update_fields=['token_vinculo', 'token_vinculo_expira'])

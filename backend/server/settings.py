@@ -452,3 +452,36 @@ if EMAIL_USE_SSL:
 #  ESCALACION_EMAILS = correos de los respaldos (separados por coma).
 # ─────────────────────────────────────────────
 ESCALACION_EMAILS = [e.strip() for e in os.environ.get('ESCALACION_EMAILS', '').split(',') if e.strip()]
+
+# ─────────────────────────────────────────────
+#  [TEMPORAL · depuración 500 "Mi jornada"] — ELIMINAR al terminar.
+#  Solo en DEBUG (local): escribe el traceback COMPLETO de cualquier petición que
+#  falle (HTTP 500) a un archivo, para diagnosticar un error que no se reproduce
+#  desde aquí. No afecta producción (allá DEBUG=False, este bloque no corre).
+# ─────────────────────────────────────────────
+if DEBUG:
+    _LOG_500_PATH = '/private/tmp/claude-502/-Users-ramses-Developer-Remali--claude-worktrees-happy-perlman-0fa2fb/257c6485-627f-4430-8ed7-a95a9e3ffe46/scratchpad/remali-500.log'
+    LOGGING = {
+        'version': 1,
+        'disable_existing_loggers': False,
+        'formatters': {
+            'detallado_500': {
+                'format': '\n===== {asctime} · {levelname} · {name} · {message} =====',
+                'style': '{',
+            },
+        },
+        'handlers': {
+            'archivo_500': {
+                'level': 'ERROR',
+                'class': 'logging.FileHandler',
+                'filename': _LOG_500_PATH,
+                'delay': True,  # no abre el archivo hasta el primer error: no rompe el arranque
+                'formatter': 'detallado_500',
+            },
+        },
+        'loggers': {
+            # django.request emite ERROR con exc_info=True en cada 500 no manejado.
+            'django.request': {'handlers': ['archivo_500'], 'level': 'ERROR', 'propagate': False},
+        },
+        'root': {'handlers': ['archivo_500'], 'level': 'ERROR'},
+    }
