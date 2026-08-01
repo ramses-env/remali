@@ -18,6 +18,7 @@ import { AuthSplitScreen } from '@/components/ui/auth-split-screen'
 import Footer from './components/Footer'
 import ErrorBoundary from './components/ErrorBoundary'
 import RequireAdmin from './components/RequireAdmin'
+import AsistenteIA from './components/AsistenteIA' // TEMP preview
 import CargaGlobal from './components/CargaGlobal'
 import { PriceUnitProvider } from './store/priceUnit'
 import { I18nProvider } from './lib/i18n'
@@ -35,7 +36,8 @@ function App() {
   const bare =
     location.pathname.startsWith('/dashboard') ||
     location.pathname === '/login' ||
-    location.pathname === '/registro'
+    location.pathname === '/registro' ||
+    location.pathname === '/preview-asistente'
 
   return (
     <I18nProvider>
@@ -62,6 +64,8 @@ function App() {
                 </RequireAdmin>
               }
             />
+            {/* TEMP preview del asistente (se elimina tras verificar el diseño) */}
+            <Route path="/preview-asistente" element={<div className="min-h-screen bg-app p-6"><AsistenteIA /></div>} />
           </Routes>
         </ErrorBoundary>
       ) : (

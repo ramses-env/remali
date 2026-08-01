@@ -11,6 +11,7 @@ import EtiquetaModal from '../components/EtiquetaModal'
 import OrdenCartaModal from '../components/OrdenCartaModal'
 import CotizacionCartaModal from '../components/CotizacionCartaModal'
 import FichaTecnicaModal from '../components/FichaTecnicaModal'
+import AsistenteIA from '../components/AsistenteIA'
 import AddressAutocomplete from '../components/AddressAutocomplete'
 import Dock, { type DockItem } from '../components/ui/dock'
 import { formatAddress, addressToFields, type AddressResult } from '../lib/geocoding'
@@ -174,10 +175,11 @@ function seccionInicial(): Section {
   }
 }
 
-type Section = 'resumen' | 'equipos' | 'inventario' | 'refacciones' | 'reparaciones' | 'cotizaciones' | 'catalogos' | 'empresas' | 'rentas' | 'ventas' | 'facturacion' | 'cupones' | 'notificaciones' | 'perfil' | 'ubicaciones' | 'usuarios' | 'configuracion'
+type Section = 'resumen' | 'asistente' | 'equipos' | 'inventario' | 'refacciones' | 'reparaciones' | 'cotizaciones' | 'catalogos' | 'empresas' | 'rentas' | 'ventas' | 'facturacion' | 'cupones' | 'notificaciones' | 'perfil' | 'ubicaciones' | 'usuarios' | 'configuracion'
 
 const SECTION_META: Record<Section, { title: string; subtitle: string }> = {
   resumen: { title: 'Resumen', subtitle: 'Monitorea tus métricas y gestiona tu operación.' },
+  asistente: { title: 'Asistente IA', subtitle: 'Pregunta en lenguaje natural sobre tus datos del negocio.' },
   equipos: { title: 'Productos', subtitle: 'Administra tu catálogo de maquinaria.' },
   inventario: { title: 'Inventario', subtitle: 'Controla cada unidad física y su estado.' },
   refacciones: { title: 'Refacciones', subtitle: 'Piezas para mantenimiento (y venta ocasional al público).' },
@@ -514,6 +516,7 @@ export default function Dashboard() {
   useRecurso(['refacciones'], loadRefacciones)
   useRecurso(['reparaciones'], loadOrdenes)
   useRecurso(['facturacion'], loadFacturacion)
+  useRecurso(['notificaciones'], loadNotifs)
   useRecurso(['cotizaciones'], loadCotizaciones)
   // Latido del panel: lo que capturan OTROS (un cliente envía su cotización,
   // otro admin edita un producto o registra una renta) llega solo en ~2 s,
@@ -577,6 +580,7 @@ export default function Dashboard() {
   const navGroupsTodos: { title?: string; items: { key: Section; label: string; badge?: number; icon: React.ReactNode }[] }[] = [
     {
       items: [
+        { key: 'asistente', label: 'Asistente IA', icon: <><path d="M4 5.5h16a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H9l-4 3.5V16.5H4a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1z" /><path d="M8.5 11h.01M12 11h.01M15.5 11h.01" /></> },
         { key: 'resumen', label: 'Resumen', icon: <><path d="M4 10.5L12 4l8 6.5V20a1.5 1.5 0 0 1-1.5 1.5H5.5A1.5 1.5 0 0 1 4 20z" /><path d="M9.5 21.5v-6.8a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v6.8" /></> },
       ],
     },
@@ -999,6 +1003,7 @@ export default function Dashboard() {
               unidades={unidades} ventas={ventas} me={me} go={go} metrics={metrics}
             />
           )}
+          {section === 'asistente' && <AsistenteIA notify={notify} me={me} />}
           {section === 'equipos' && (
             <EquiposAdmin
               equipos={equipos} categorias={categorias} tipos={tipos} marcas={marcas}
