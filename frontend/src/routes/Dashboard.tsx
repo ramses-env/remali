@@ -5582,6 +5582,7 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
 }) {
   // Vincular/cambiar la cuenta de la tienda dueña de esta cotización.
   async function vincularCuentaCot() {
+    if (c.items.length === 0) { notify('Agrega partidas antes de vincular a una cuenta', 'err'); return }
     try {
       const rc = await api.get<{ clientes: { id: number; nombre: string; empresa?: string }[] }>('/clientes-lookup/')
       const lista = rc.data.clientes || []
@@ -5605,6 +5606,7 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
   const [ligaCopiada, setLigaCopiada] = useState(false)
   const [generandoLiga, setGenerandoLiga] = useState(false)
   async function generarLigaVinculo() {
+    if (!cotizacion.id || c.items.length === 0) { notify('Agrega partidas antes de generar la liga: vincular una cotización vacía no sirve de nada', 'err'); return }
     if (ligaVinculo || generandoLiga) return
     setGenerandoLiga(true)
     try {
@@ -6086,7 +6088,8 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
               ) : (
                 <div className="mb-2 flex items-center gap-3">
                   <button onClick={generarLigaVinculo} disabled={generandoLiga}
-                    className="text-[12px] font-bold text-gold hover:opacity-80 transition-opacity disabled:opacity-50">
+                    title={c.items.length === 0 ? 'Primero agrega las partidas' : undefined}
+                    className={`text-[12px] font-bold transition-opacity disabled:opacity-50 ${c.items.length === 0 ? 'text-mute cursor-not-allowed' : 'text-gold hover:opacity-80'}`}>
                     {ligaVinculo ? '✓ Liga generada' : generandoLiga ? 'Generando…' : '+ Vincular por liga'}
                   </button>
                   <button onClick={vincularCuentaCot} className="text-[11px] font-semibold text-mute hover:text-ink transition-colors">

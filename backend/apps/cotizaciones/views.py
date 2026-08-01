@@ -301,6 +301,8 @@ def vincular_cuenta_cotizacion(request, pk):
     if not cot:
         return Response({'detalle': 'Cotización no encontrada'}, status=404)
     uid = request.data.get('usuario_id')
+    if uid and not cot.items.exists():
+        return Response({'detalle': 'La cotización está vacía: agrega partidas antes de vincularla.'}, status=400)
     if not uid:
         cot.usuario = None
         cot.save(update_fields=['usuario'])
@@ -444,6 +446,9 @@ def generar_vinculo_cotizacion(request, pk):
         return Response({'detalle': 'Cotización no encontrada'}, status=404)
     if cot.usuario_id:
         return Response({'detalle': 'Ya está vinculada a una cuenta.'}, status=400)
+    if not cot.items.exists():
+        # Vincular una cotización EN BLANCO no significa nada: primero el pedido.
+        return Response({'detalle': 'La cotización está vacía: agrega partidas antes de vincularla.'}, status=400)
     cot.token_vinculo = secrets.token_hex(16)
     cot.token_vinculo_expira = timezone.now() + timedelta(days=30)
     cot.save(update_fields=['token_vinculo', 'token_vinculo_expira'])
