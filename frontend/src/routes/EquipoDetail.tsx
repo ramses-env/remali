@@ -201,7 +201,14 @@ export default function EquipoDetail() {
 
       <div className="max-w-[1320px] mx-auto px-4 sm:px-8 pt-24">
         {/* Breadcrumb */}
-        <div className="pb-4 text-[13.5px] text-mute flex items-center gap-2 flex-wrap">
+        <div className="pb-4 text-[13.5px] text-mute flex items-center gap-2.5 flex-wrap">
+          <button
+            onClick={() => (window.history.length > 1 ? nav(-1) : nav('/equipos'))}
+            aria-label="Regresar"
+            className="w-8 h-8 rounded-full border border-edge bg-surface grid place-items-center text-mute hover:text-ink hover:border-gold/50 active:scale-95 transition-all shrink-0"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5" /><path d="M12 19l-7-7 7-7" /></svg>
+          </button>
           <Link to="/" className="hover:text-ink transition-colors">Inicio</Link>
           <span>/</span>
           <Link to="/equipos" className="hover:text-ink transition-colors">Equipos</Link>
