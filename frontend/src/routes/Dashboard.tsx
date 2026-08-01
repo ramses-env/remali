@@ -3220,6 +3220,9 @@ function AbonoModal({ saldo, onClose, onRegistrar }: {
 
         <label className="block text-[12px] font-semibold text-mute mt-4 mb-1.5">¿Cuánto entrega?</label>
         <InputDinero valor={monto} onValor={setMonto} autoFocus placeholder="2,000" />
+        {n > saldo && (
+          <p className="text-[12px] text-red-500 font-semibold mt-1.5">El abono no puede ser mayor al saldo ({money(saldo)}).</p>
+        )}
 
         <label className="block text-[12px] font-semibold text-mute mt-4 mb-1.5">Método</label>
         <div className="grid grid-cols-3 gap-2">
@@ -3238,7 +3241,7 @@ function AbonoModal({ saldo, onClose, onRegistrar }: {
 
         <div className="mt-5 flex justify-end gap-2.5">
           <button onClick={onClose} className="px-5 py-2.5 rounded-full border border-edge text-ink text-sm font-semibold hover:bg-surface-2 transition-colors">Cancelar</button>
-          <button disabled={n <= 0 || guardando}
+          <button disabled={n <= 0 || n > saldo || guardando}
             onClick={async () => { setGuardando(true); try { await onRegistrar(n, metodo, fecha) } finally { setGuardando(false) } }}
             className="px-6 py-2.5 rounded-full bg-gold text-black text-sm font-bold hover:opacity-90 transition-opacity disabled:opacity-40">
             {guardando ? 'Guardando…' : n > 0 ? `Registrar ${money(n)}` : 'Registrar'}

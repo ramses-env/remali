@@ -181,6 +181,11 @@ def registrar_abono(request, pk):
     metodo = (request.data.get('metodo') or 'efectivo').strip().lower()
     if metodo not in ('efectivo', 'tarjeta', 'transferencia'):
         return Response({'detalle': 'Método no válido.'}, status=400)
+    # Nadie abona más de lo que debe: el tope es el saldo vivo.
+    pagado_previo = sum((Decimal(str(p.get('monto', 0))) for p in (r.pagos or [])), Decimal('0'))
+    saldo = max((r.total or Decimal('0')) + (r.recargo or Decimal('0')) - pagado_previo, Decimal('0'))
+    if monto > saldo:
+        return Response({'detalle': f'El abono (${monto}) es mayor al saldo (${saldo}).'}, status=400)
     # Fecha del abono: hoy por defecto; editable hacia atrás (se les olvida
     # registrarlo el mismo día) pero nunca futura.
     fecha_txt = (request.data.get('fecha') or '').strip()
