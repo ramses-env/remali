@@ -4817,15 +4817,19 @@ function RefaccionesAdmin({ refacciones, reload, notify }: {
       </Card>
 
       {formOpen && (
-        <div className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm flex items-start justify-center p-0 sm:p-6 overflow-y-auto" onClick={() => setFormOpen(false)}>
-          <div onClick={(e: React.MouseEvent) => e.stopPropagation()} className="w-full sm:max-w-[820px] my-0 sm:my-auto bg-surface border border-edge rounded-none sm:rounded-2xl shadow-[0_20px_50px_rgba(33,29,22,0.18)] min-h-screen sm:min-h-0">
-            <div className="px-6 py-4 border-b border-edge flex items-center justify-between sticky top-0 bg-surface z-10 sm:rounded-t-2xl">
+        <div className="fixed inset-0 z-[60] bg-black/40 backdrop-blur-[2px]" onClick={() => setFormOpen(false)}>
+          <motion.div
+            initial={{ x: '100%' }} animate={{ x: 0 }} transition={{ duration: 0.3, ease: [0.23, 1, 0.32, 1] }}
+            onClick={(e: React.MouseEvent) => e.stopPropagation()}
+            className="fixed inset-y-0 right-0 w-full sm:max-w-[560px] bg-surface border-l border-edge shadow-[-24px_0_60px_rgba(33,29,22,0.22)] flex flex-col"
+          >
+            <div className="px-6 py-4 border-b border-edge flex items-center justify-between shrink-0">
               <h2 className="font-bold text-ink">{editing ? 'Editar refacción' : 'Nueva refacción'}</h2>
               <button onClick={() => setFormOpen(false)} className="text-mute hover:text-ink p-1" aria-label="Cerrar">
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" d="M6 6l12 12M18 6L6 18" /></svg>
               </button>
             </div>
-            <div className="p-6 space-y-4">
+            <div className="p-6 space-y-4 flex-1 overflow-y-auto">
               <div><label className={label}>Nombre *</label><input className={input} value={form.nombre} onChange={e => setForm({ ...form, nombre: e.target.value })} placeholder="Ej. Filtro de aceite" autoFocus /></div>
               <div><label className={label}>Descripción</label><textarea className={`${input} resize-none`} rows={2} value={form.descripcion} onChange={e => setForm({ ...form, descripcion: e.target.value })} placeholder="Detalle / compatibilidad" /></div>
               <div className="grid grid-cols-2 gap-3">
@@ -4847,14 +4851,14 @@ function RefaccionesAdmin({ refacciones, reload, notify }: {
                 </div>
               </label>
             </div>
-            <div className="px-6 py-4 border-t border-edge flex gap-3 sticky bottom-0 bg-surface sm:rounded-b-2xl">
-              <button onClick={() => setFormOpen(false)} className="flex-1 py-2.5 rounded-full border border-edge text-ink text-sm font-semibold hover:bg-surface-2 transition-colors">Cancelar</button>
-              <button onClick={save} disabled={saving} className="flex-1 py-2.5 rounded-full bg-gold text-black font-bold text-sm hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center justify-center gap-2">
+            <div className="px-6 py-4 border-t border-edge flex justify-end gap-3 shrink-0 bg-surface">
+              <button onClick={() => setFormOpen(false)} className="px-6 py-2.5 rounded-full border border-edge text-ink text-sm font-semibold hover:bg-surface-2 transition-colors">Cancelar</button>
+              <button onClick={save} disabled={saving} className="px-7 py-2.5 rounded-full bg-gold text-black font-bold text-sm hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center justify-center gap-2">
                 {saving ? <span className="w-4 h-4 border-2 border-black/30 border-t-black rounded-full animate-spin" /> : null}
                 {editing ? 'Guardar' : 'Agregar'}
               </button>
             </div>
-          </div>
+          </motion.div>
         </div>
       )}
 
