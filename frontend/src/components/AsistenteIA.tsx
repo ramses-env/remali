@@ -35,6 +35,7 @@ function OrbRing({ size = 34 }: { size?: number }) {
 
 const TXT = {
   ES: {
+    hola: 'Qué bueno verte',
     placeholder: 'Pregúntame lo que sea…',
     send: 'Enviar',
     greeting: '¡Hola! Soy tu asistente REMALI. Puedo responderte sobre los datos del negocio. Prueba con:',
@@ -47,6 +48,7 @@ const TXT = {
     error: 'No se pudo consultar al asistente.',
   },
   EN: {
+    hola: 'Good to see you',
     placeholder: 'Ask me anything…',
     send: 'Send',
     greeting: "Hi! I'm your REMALI assistant. I can answer questions about your business data. Try:",
@@ -92,6 +94,56 @@ export default function AsistenteIA({ notify, me }: { notify?: (m: string, t?: '
     } finally {
       setCargando(false)
     }
+  }
+
+  const nombre = ((me?.first_name || me?.username || '').trim().split(' ')[0]) || 'admin'
+
+  const entrada = (
+    <form onSubmit={e => { e.preventDefault(); enviar(texto) }} className="mt-3 shrink-0">
+      <div className="flex items-center gap-2 rounded-full border border-edge bg-surface px-5 py-1.5 shadow-sm focus-within:border-gold/50 transition-colors">
+        <input
+          value={texto}
+          onChange={e => setTexto(e.target.value)}
+          placeholder={L.placeholder}
+          className="flex-1 bg-transparent py-2 text-sm text-ink outline-none placeholder:text-mute"
+        />
+        <button
+          type="submit"
+          disabled={cargando || !texto.trim()}
+          aria-label={L.send}
+          className={cn(
+            'shrink-0 w-9 h-9 rounded-full flex items-center justify-center text-gold transition-colors',
+            'hover:bg-surface-2 disabled:opacity-40 disabled:hover:bg-transparent',
+          )}
+        >
+          <svg viewBox="0 0 24 24" className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M22 2 11 13" />
+            <path d="M22 2 15 22l-4-9-9-4 20-7z" />
+          </svg>
+        </button>
+      </div>
+      <p className="text-center text-[10px] text-mute mt-2">v1.0.0</p>
+    </form>
+  )
+
+  // Sin conversación: héroe centrado (orbe + saludo + ejemplos), como recién llegas.
+  if (mensajes.length === 0 && !cargando) {
+    return (
+      <div className="flex flex-col h-full min-h-[72vh] max-w-3xl mx-auto w-full">
+        <div className="flex-1 flex flex-col items-center justify-center px-4">
+          <div className="w-36 h-36 sm:w-44 sm:h-44"><VoicePoweredOrb enableVoiceControl={false} /></div>
+          <h2 className="mt-4 text-[22px] sm:text-[26px] font-black text-ink text-center">{L.hola}, {nombre}.</h2>
+          <div className="flex flex-wrap justify-center gap-2 mt-5 max-w-lg">
+            {L.examples.map(s => (
+              <button key={s} onClick={() => enviar(s)} className="text-xs px-3 py-1.5 rounded-full border border-edge text-mute hover:text-ink hover:bg-surface-2 hover:border-gold/40 transition-colors">
+                {s}
+              </button>
+            ))}
+          </div>
+        </div>
+        {entrada}
+      </div>
+    )
   }
 
   return (
@@ -153,32 +205,7 @@ export default function AsistenteIA({ notify, me }: { notify?: (m: string, t?: '
         <div ref={finRef} />
       </div>
 
-      {/* Entrada "Ask me anything…" con ícono de enviar */}
-      <form onSubmit={e => { e.preventDefault(); enviar(texto) }} className="mt-3 shrink-0">
-        <div className="flex items-center gap-2 rounded-full border border-edge bg-surface px-5 py-1.5 shadow-sm focus-within:border-gold/50 transition-colors">
-          <input
-            value={texto}
-            onChange={e => setTexto(e.target.value)}
-            placeholder={L.placeholder}
-            className="flex-1 bg-transparent py-2 text-sm text-ink outline-none placeholder:text-mute"
-          />
-          <button
-            type="submit"
-            disabled={cargando || !texto.trim()}
-            aria-label={L.send}
-            className={cn(
-              'shrink-0 w-9 h-9 rounded-full flex items-center justify-center text-gold transition-colors',
-              'hover:bg-surface-2 disabled:opacity-40 disabled:hover:bg-transparent',
-            )}
-          >
-            <svg viewBox="0 0 24 24" className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M22 2 11 13" />
-              <path d="M22 2 15 22l-4-9-9-4 20-7z" />
-            </svg>
-          </button>
-        </div>
-        <p className="text-center text-[10px] text-mute mt-2">v1.0.0</p>
-      </form>
+      {entrada}
     </div>
   )
 }
