@@ -2045,6 +2045,17 @@ function pillCond(v: Unidad['condicion']) {
   return v === 'nueva' ? <Pill tone="emerald" label={condLabel(v)} /> : <Pill tone="blue" label={condLabel(v)} />
 }
 
+function BannerConcretando() {
+  const [p, setP] = useState(leerCotParaRenta())
+  if (!p) return null
+  return (
+    <div className="mx-6 mt-3 flex items-center justify-between gap-3 px-3.5 py-2.5 rounded-xl border border-[color:var(--c-renta)]/40 bg-[color:var(--c-renta)]/10 text-[color:var(--c-renta)] text-[12.5px] font-bold">
+      <span>Concretando {p.folio || 'cotización'} · {p.cliente || 'cliente'} — elige la unidad y tócale Rentar</span>
+      <button onClick={() => { fijarCotParaRenta(null); setP(null) }} aria-label="Cancelar vínculo" className="hover:opacity-70 shrink-0">✕</button>
+    </div>
+  )
+}
+
 function InventoryModal({ equipo, onClose, notify }: {
   equipo: Equipo; onClose: () => void; notify: (m: string, t?: 'ok' | 'err') => void
 }) {
@@ -2135,6 +2146,7 @@ function InventoryModal({ equipo, onClose, notify }: {
             Las unidades <b>nuevas</b> solo se venden. Las <b>seminuevas</b> se rentan y venden.
           </p>
         </div>}
+        <BannerConcretando />
 
         {/* Lista de unidades */}
         <div className="flex-1 overflow-y-auto p-4 space-y-3">
@@ -2330,7 +2342,7 @@ function RentModal({ unit, equipo, onClose, onDone, notify }: {
   const [clientes, setClientes] = useState<{ id: number; nombre: string; empresa?: string }[]>([])
   const [usuarioId, setUsuarioId] = useState('')
   // ¿Venimos de "Concretar renta" de una cotización? Precarga y liga.
-  const [deCot, setDeCot] = useState(cotParaRenta)
+  const [deCot, setDeCot] = useState(leerCotParaRenta())
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
@@ -2338,11 +2350,12 @@ function RentModal({ unit, equipo, onClose, onDone, notify }: {
     // Cuentas de cliente, para vincular la renta a su panel ("Tus rentas").
     api.get<{ clientes: { id: number; nombre: string; empresa?: string }[] }>('/clientes-lookup/').then(r => setClientes(r.data.clientes || [])).catch(() => {})
     // Datos de la cotización que se está concretando (si aplica).
-    if (cotParaRenta) {
-      if (cotParaRenta.cliente) setCliente(cotParaRenta.cliente)
-      if (cotParaRenta.telefono) setTelefono(cotParaRenta.telefono)
-      if (cotParaRenta.direccion) setDireccion(cotParaRenta.direccion)
-      if (cotParaRenta.usuario_id) setUsuarioId(String(cotParaRenta.usuario_id))
+    const puente = leerCotParaRenta()
+    if (puente) {
+      if (puente.cliente) setCliente(puente.cliente)
+      if (puente.telefono) setTelefono(puente.telefono)
+      if (puente.direccion) setDireccion(puente.direccion)
+      if (puente.usuario_id) setUsuarioId(String(puente.usuario_id))
     }
   }, [])
   useEffect(() => {
@@ -2393,7 +2406,7 @@ function RentModal({ unit, equipo, onClose, onDone, notify }: {
     })
       .then(res => {
         const est = res.data?.renta?.estado
-        cotParaRenta = null   // puente consumido: la renta quedó ligada
+        fijarCotParaRenta(null)   // puente consumido: la renta quedó ligada
         notify(est === 'reservada' ? 'Reserva registrada' : 'Renta registrada')
         const id = res.data?.renta?.id
         if (id) abrirOrdenCartaPDF('rentas', id)   // orden carta en PDF (ya no ticket térmico)
@@ -2417,7 +2430,7 @@ function RentModal({ unit, equipo, onClose, onDone, notify }: {
             {deCot && (
               <p className="mt-1.5 inline-flex items-center gap-1.5 text-[11px] font-bold px-2 py-1 rounded-full bg-[color:var(--c-renta)]/10 text-[color:var(--c-renta)]">
                 Concretando {deCot.folio || 'cotización'} · {deCot.cliente || 'cliente'}
-                <button onClick={() => { cotParaRenta = null; setDeCot(null) }} aria-label="Quitar vínculo" className="hover:opacity-70">✕</button>
+                <button onClick={() => { fijarCotParaRenta(null); setDeCot(null) }} aria-label="Quitar vínculo" className="hover:opacity-70">✕</button>
               </p>
             )}
           </div>
@@ -2470,6 +2483,11 @@ function RentModal({ unit, equipo, onClose, onDone, notify }: {
           </div>
           <div><label className={label}>Depósito / garantía ($)</label><input type="number" min={0} className={input} value={deposito} onChange={e => setDeposito(e.target.value)} placeholder="0" /></div>
           <FacturaFields requiere={requiereFactura} onRequiere={setRequiereFactura} factura={factura} onFactura={setFactura} empresaNombre={empresaId ? empresas.find(e => String(e.id) === empresaId)?.nombre : undefined} />
+          {Number(precio) <= 0 && (
+            <p className="text-[11px] text-amber-600 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2">
+              Este equipo no tiene precio {modalidad === 'dia' ? 'por día' : modalidad === 'semana' ? 'por semana' : 'por mes'} configurado: el total sale en $0. Cárgalo en el producto o elige otra modalidad.
+            </p>
+          )}
           {esReserva && <p className="text-[11px] text-blue-400 bg-blue-500/10 border border-blue-500/20 rounded-lg px-3 py-2">Inicia el {fechaInicio}: se guarda como <b>reserva</b> y no ocupa la unidad hasta esa fecha.</p>}
           <div className="px-4 py-3 rounded-xl bg-surface-2 space-y-1">
             {requiereFactura ? (<>
@@ -5461,7 +5479,18 @@ const COT_PAGE_SIZE = 25
 /* Puente cotización→renta: la cotización aceptada que se está concretando.
    Vive a nivel módulo para no enhebrar props por medio panel; el RentModal
    la lee al montar y la limpia al registrar. */
-let cotParaRenta: { id: number; folio: string | null; cliente: string; telefono: string; direccion: string; usuario_id: number | null } | null = null
+type CotParaRenta = { id: number; folio: string | null; cliente: string; telefono: string; direccion: string; usuario_id: number | null }
+let cotParaRenta: CotParaRenta | null = null
+const COT_RENTA_KEY = 'remali_cot_para_renta'
+function leerCotParaRenta(): CotParaRenta | null {
+  if (cotParaRenta) return cotParaRenta
+  try { cotParaRenta = JSON.parse(sessionStorage.getItem(COT_RENTA_KEY) || 'null') } catch { cotParaRenta = null }
+  return cotParaRenta
+}
+function fijarCotParaRenta(v: CotParaRenta | null) {
+  cotParaRenta = v
+  try { v ? sessionStorage.setItem(COT_RENTA_KEY, JSON.stringify(v)) : sessionStorage.removeItem(COT_RENTA_KEY) } catch { /* privado */ }
+}
 
 function CotizacionesAdmin({ empresas, notify, irAInventario }: {
   empresas: Empresa[]; notify: (m: string, t?: 'ok' | 'err' | 'info') => void; irAInventario?: () => void
@@ -5822,13 +5851,13 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
      al puente y se manda al admin a Inventario a elegir la unidad; el
      RentModal llega precargado y liga la renta a esta cotización. */
   function concretarRenta() {
-    cotParaRenta = {
+    fijarCotParaRenta({
       id: c.id, folio: c.folio,
       cliente: clienteNombre || c.cliente_display || '',
       telefono: clienteTel || c.cliente_telefono || '',
       direccion: c.datos_solicitud?.obra?.direccion || '',
       usuario_id: c.usuario ?? null,
-    }
+    })
     notify(`Elige la unidad y tócale Rentar: quedará ligada a la ${c.folio || 'cotización'}`, 'info')
     onClose()
     onConcretarRenta?.()
