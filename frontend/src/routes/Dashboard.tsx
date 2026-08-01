@@ -6973,9 +6973,11 @@ function UsuariosAdmin({ usuarios, reload, notify, yoId }: {
                       {/* Estado: acceso al sistema y, en clientes, si su correo es real */}
                       <td className={`${td} hidden sm:table-cell`}>
                         <div className="flex items-center gap-1.5 flex-nowrap">
-                          {u.activo ? (
+                          {/* En clientes el "Activo" verde sobra (casi todos lo están);
+                              solo se señala la excepción: Inactivo en rojo. */}
+                          {u.activo ? (grupo === 'equipo' && (
                             <span className="inline-flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-600 whitespace-nowrap"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />Activo</span>
-                          ) : (
+                          )) : (
                             <span className="inline-flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1 rounded-full bg-red-500/10 text-red-500 whitespace-nowrap"><span className="w-1.5 h-1.5 rounded-full bg-red-500" />Inactivo</span>
                           )}
                           {esCliente(u) && (
