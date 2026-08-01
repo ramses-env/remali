@@ -402,7 +402,7 @@ export default function Dashboard() {
   const [empresas, setEmpresas] = useState<Empresa[]>([])
   const [conversaciones, setConversaciones] = useState<SoporteConversacion[]>([])
   const [mensajesNoLeidos, setMensajesNoLeidos] = useState(0)
-  const [toast, setToast] = useState<{ msg: string; type: 'ok' | 'err' } | null>(null)
+  const [toast, setToast] = useState<{ msg: string; type: 'ok' | 'err' | 'info' | 'warning' | 'primary' } | null>(null)
 
   const notifBtnRef = useRef<HTMLButtonElement | null>(null)
   const notifPanelRef = useRef<HTMLDivElement | null>(null)
@@ -433,7 +433,7 @@ export default function Dashboard() {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
-  const notify = (msg: string, type: 'ok' | 'err' = 'ok') => {
+  const notify = (msg: string, type: 'ok' | 'err' | 'info' | 'warning' | 'primary' = 'ok') => {
     setToast({ msg, type })
     setTimeout(() => setToast(null), 2600)
   }
@@ -505,6 +505,10 @@ export default function Dashboard() {
         if (notifMaxIdRef.current && maxId > notifMaxIdRef.current) {
           setNotifPulse(true)
           window.setTimeout(() => setNotifPulse(false), 900)
+          // La notificación recién llegada también se asoma como alerta
+          // "primary" (campanita gris), sin esperar a abrir el panel.
+          const nueva = items.find(n => Number(n.id) === maxId)
+          if (nueva) notify(nueva.titulo || 'Nueva notificación', 'primary')
         }
         notifMaxIdRef.current = maxId
       })
@@ -1181,17 +1185,19 @@ export default function Dashboard() {
 
       <DialogoHost />
 
-      {/* ─── TOAST ─── */}
+      {/* ─── ALERTAS (barra gris, círculo de color por tipo, cerrar) ─── */}
       {toast && (
-        <div className={`toast-in fixed top-[76px] right-3 sm:right-5 z-[130] max-w-[calc(100vw-1.5rem)] flex items-center gap-3 pl-3 pr-5 py-2.5 rounded-2xl border border-edge text-sm font-bold shadow-[0_18px_50px_rgba(0,0,0,0.45)] bg-surface ${
-          toast.type === 'ok' ? 'border-emerald-500/40 text-emerald-500' : 'border-red-500/40 text-red-500'
-        }`}>
-          <span className={`w-7 h-7 rounded-full grid place-items-center shrink-0 ${toast.type === 'ok' ? 'bg-emerald-500' : 'bg-red-500'}`}>
-            {toast.type === 'ok'
-              ? <svg viewBox="0 0 24 24" className="w-4 h-4 stroke-white fill-none" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round"><path d="M5 13l4 4L19 7" /></svg>
-              : <svg viewBox="0 0 24 24" className="w-4 h-4 stroke-white fill-none" strokeWidth="2.4" strokeLinecap="round"><path d="M12 7v6" /><circle cx="12" cy="17" r="0.5" className="fill-white" /></svg>}
+        <div className="toast-in fixed top-[76px] right-3 sm:right-5 z-[130] max-w-[calc(100vw-1.5rem)] flex items-center gap-3 pl-3 pr-2.5 py-2.5 rounded-2xl border border-edge bg-surface-2 shadow-[0_18px_50px_rgba(0,0,0,0.35)]">
+          <span className={`w-7 h-7 rounded-full grid place-items-center shrink-0 ${({ ok: 'bg-emerald-500', err: 'bg-red-500', info: 'bg-violet-500', warning: 'bg-amber-500', primary: 'bg-neutral-400' } as Record<string, string>)[toast.type]}`}>
+            {toast.type === 'ok' && <svg viewBox="0 0 24 24" className="w-4 h-4 stroke-white fill-none" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round"><path d="M5 13l4 4L19 7" /></svg>}
+            {(toast.type === 'err' || toast.type === 'info') && <svg viewBox="0 0 24 24" className="w-4 h-4 stroke-white fill-none" strokeWidth="2.4" strokeLinecap="round"><path d="M12 7v6" /><circle cx="12" cy="17" r="0.5" className="fill-white" /></svg>}
+            {toast.type === 'warning' && <svg viewBox="0 0 24 24" className="w-4 h-4 stroke-white fill-none" strokeWidth="2.6" strokeLinecap="round"><path d="M8 12h8" /></svg>}
+            {toast.type === 'primary' && <svg viewBox="0 0 24 24" className="w-4 h-4 stroke-white fill-none" strokeWidth="2"><path d="M15 17h5l-1.3-1.3A2 2 0 0 1 18.1 14V11a6.1 6.1 0 1 0-12.2 0v3a2 2 0 0 1-.6 1.4L4 17h5" /><path d="M9.2 17v.8a2.8 2.8 0 0 0 5.6 0V17" /></svg>}
           </span>
-          {toast.msg}
+          <span className="text-sm font-bold text-ink pr-1">{toast.msg}</span>
+          <button onClick={() => setToast(null)} aria-label="Cerrar" className="w-7 h-7 grid place-items-center rounded-full text-mute hover:text-ink hover:bg-surface transition-colors shrink-0">
+            <svg viewBox="0 0 24 24" className="w-3.5 h-3.5 stroke-current fill-none" strokeWidth="2" strokeLinecap="round"><path d="M6 6l12 12M18 6L6 18" /></svg>
+          </button>
         </div>
       )}
 
