@@ -55,7 +55,7 @@ function Tarjeta({ r, i }: { r: RentaMia; i: number }) {
         <span className="text-sm font-extrabold text-ink">{r.equipo || 'Equipo'}</span>
         <span className={`text-[10.5px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full ${estiloEstado(r.estado)}`}>{r.estado_label}</span>
         <span className="text-[12.5px] text-mute">renta {MOD[r.modalidad] || r.modalidad}</span>
-        <span className="ml-auto flex items-center gap-2.5">
+        <span className="ml-auto w-full sm:w-auto flex items-center justify-end gap-2.5">
           <span className="text-sm font-extrabold text-price tabular-nums">{money(total)}</span>
           {r.estado !== 'cancelada' && total > 0 && (
             saldo > 0
@@ -65,7 +65,7 @@ function Tarjeta({ r, i }: { r: RentaMia; i: number }) {
         </span>
       </div>
       {/* Línea 2: fechas, orden y dirección — con Detalle al final, sin filas extra */}
-      <div className="mt-2 flex items-center gap-2 text-[13px] text-mute min-w-0">
+      <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1.5 text-[13px] text-mute min-w-0">
         <CalendarClock className="h-3.5 w-3.5 shrink-0" />
         <span className="whitespace-nowrap">Del {fecha(r.fecha_inicio)} al {fecha(r.fecha_fin)}</span>
         <button
@@ -76,7 +76,7 @@ function Tarjeta({ r, i }: { r: RentaMia; i: number }) {
             } catch { /* sin permiso o red: el interceptor avisa */ }
           }}
           className="text-gold font-semibold hover:opacity-80 transition-opacity whitespace-nowrap shrink-0">↓ Orden</button>
-        {r.direccion && <span className="truncate min-w-0">· {r.direccion}</span>}
+        {r.direccion && <span className="truncate min-w-0 max-w-full">· {r.direccion}</span>}
         {r.estado !== 'cancelada' && total > 0 && (
           <button onClick={() => setAbierto(v => !v)}
             className="ml-auto shrink-0 inline-flex items-center gap-1 text-[12px] font-bold text-gold hover:opacity-80 transition-opacity">

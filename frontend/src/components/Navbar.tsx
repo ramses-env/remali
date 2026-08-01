@@ -12,6 +12,7 @@ import LogoRemali from '@/components/ui/logo-remali'
 
 export default function Navbar() {
   const { token, logout } = useAuth()
+  const [menuCuenta, setMenuCuenta] = useState(false)
   const nav = useNavigate()
   const location = useLocation()
   const { user } = useProfile()
@@ -52,7 +53,8 @@ export default function Navbar() {
         </Link>
 
         {/* Links */}
-        <nav className="flex-1 flex items-center justify-center gap-6 sm:gap-10">
+        {/* En móvil el dock inferior ya trae Inicio/Equipos: arriba sobran. */}
+        <nav className="flex-1 hidden md:flex items-center justify-center gap-10">
           {[
             { to: '/', label: 'Inicio' },
             { to: '/equipos', label: 'Equipos' },
@@ -81,7 +83,7 @@ export default function Navbar() {
           {esCliente && <CampanaCliente />}
 
           {token ? (
-            <div className="flex items-center gap-2">
+            <div className="relative flex items-center">
               {/* El cliente (nivel 0) no entra al panel: mandarlo ahí solo para que
                   el guard lo rebote es prometerle una puerta que no abre. Su
                   destino es su propio perfil. */}
@@ -89,10 +91,12 @@ export default function Navbar() {
                   forma de ir al perfil/panel desde la barra. Ahora se ve siempre,
                   compacto (solo el avatar) en celular y con etiqueta en pantallas
                   grandes. */}
-              <Link
-                to={esCliente ? '/perfil' : '/dashboard'}
-                aria-label={esCliente ? 'Tu perfil' : 'Ir al panel'}
-                className="flex items-center gap-2 p-1.5 sm:px-3 sm:py-2 rounded-full bg-surface-2 text-ink text-sm font-medium hover:text-gold transition-colors"
+              {/* Un solo control: avatar → menú (Perfil/Panel + Cerrar sesión).
+                  Ahorra espacio en móvil y el logout deja de ocupar la barra. */}
+              <button
+                onClick={() => setMenuCuenta(v => !v)}
+                aria-haspopup="menu" aria-expanded={menuCuenta} aria-label="Tu cuenta"
+                className="flex items-center gap-2 p-1.5 sm:pl-2 sm:pr-3 sm:py-1.5 rounded-full bg-surface-2 text-ink text-sm font-medium hover:text-gold transition-colors"
               >
                 <span className="relative">
                   <AvatarInicial
@@ -100,22 +104,38 @@ export default function Navbar() {
                     correo={user?.email}
                     tamano="sm"
                   />
-                  {/* Punto de aviso: el perfil incompleto se nota sin abrirlo. El
-                      aro del color del fondo lo despega del avatar; sin él los dos
-                      círculos se tocan y se lee como una mancha. */}
                   {esCliente && perfilIncompleto && (
                     <span className="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-gold ring-2 ring-surface" />
                   )}
                 </span>
                 <span className="hidden sm:block max-w-[100px] truncate">{esCliente ? 'Perfil' : 'Panel'}</span>
-              </Link>
-              <button
-                onClick={() => setConfirm(true)}
-                className="w-9 h-9 rounded-full border border-edge bg-surface-2 text-mute hover:text-red-400 transition-colors flex items-center justify-center"
-                aria-label="Cerrar sesión"
-              >
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" /></svg>
+                <svg className="hidden sm:block w-3.5 h-3.5 text-mute" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9l6 6 6-6" /></svg>
               </button>
+
+              {menuCuenta && (
+                <>
+                  <div className="fixed inset-0 z-[80]" onClick={() => setMenuCuenta(false)} />
+                  <div role="menu" className="absolute right-0 top-full mt-2 z-[81] w-64 rounded-2xl border border-edge bg-surface shadow-[0_20px_50px_rgba(17,24,39,0.18)] overflow-hidden">
+                    <div className="px-4 py-3.5 border-b border-edge flex items-center gap-3">
+                      <AvatarInicial nombre={user?.first_name || user?.username} correo={user?.email} tamano="md" />
+                      <div className="min-w-0">
+                        <p className="text-[14px] font-bold text-ink truncate">{user?.first_name || user?.username}</p>
+                        <p className="text-[12px] text-mute truncate">{user?.email}</p>
+                      </div>
+                    </div>
+                    <Link to={esCliente ? '/perfil' : '/dashboard'} onClick={() => setMenuCuenta(false)}
+                      className="flex items-center gap-3 px-4 py-3 text-[14px] font-semibold text-ink hover:bg-surface-2 transition-colors">
+                      <svg className="w-4 h-4 text-mute" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.8"><circle cx="12" cy="8" r="4" /><path d="M4.5 20a7.5 7.5 0 0 1 15 0" /></svg>
+                      {esCliente ? 'Perfil' : 'Panel'}
+                    </Link>
+                    <button onClick={() => { setMenuCuenta(false); setConfirm(true) }}
+                      className="w-full flex items-center gap-3 px-4 py-3 text-[14px] font-semibold text-red-500 hover:bg-red-500/10 transition-colors border-t border-edge">
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" /></svg>
+                      Cerrar sesión
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
           ) : (
             <Link

@@ -6595,7 +6595,7 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
    EL DÍA DEL TÉCNICO: dónde está el equipo y qué hay en taller
 ════════════════════════════════════════ */
 type Urgencia = 'vencida' | 'hoy' | 'reparar' | 'manana' | 'proxima'
-type TipoTarea = 'entregar' | 'recoger' | 'reparar'
+type TipoTarea = 'entregar' | 'recoger' | 'reparar' | 'entrega_prometida'
 
 type Tarea = {
   tipo: TipoTarea; urgencia: Urgencia; etiqueta: string
@@ -6619,6 +6619,10 @@ const TAREA_META: Record<TipoTarea, { label: string; anillo: string; icono: Reac
     icono: <><path d="M12 5v14" /><path d="M6 13l6 6 6-6" /></> },
   reparar: { label: 'Reparar', anillo: 'bg-surface-2 text-mute',
     icono: <><path d="M14.7 6.3a4 4 0 0 0-5.6 5.6l-6 6v3h3l6-6a4 4 0 0 0 5.6-5.6l-2.5 2.5-2.1-2.1z" /></> },
+  // Entrega PROMETIDA: cotización aceptada con fecha de HOY, aún sin convertir a
+  // renta/venta. Es un compromiso informativo (sin renta_id), no una acción.
+  entrega_prometida: { label: 'Prometida', anillo: 'bg-gold-soft text-gold',
+    icono: <><circle cx="12" cy="12" r="9" /><path d="M12 8v4l3 2" /></> },
 }
 // La urgencia tiñe solo la etiqueta de tiempo, no todo el card: el ruido cansa.
 const URGENCIA_TXT: Record<Urgencia, string> = {
@@ -6731,8 +6735,9 @@ function UbicacionesAdmin({ notify }: { notify: (m: string, t?: 'ok' | 'err') =>
 }
 
 function TareaResumenChip({ n, label, tipo }: { n: number; label: string; tipo: TipoTarea }) {
+  const meta = TAREA_META[tipo] ?? TAREA_META.entregar
   return (
-    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[12.5px] font-bold ${TAREA_META[tipo].anillo}`}>
+    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[12.5px] font-bold ${meta.anillo}`}>
       {n} por {label}
     </span>
   )
@@ -6741,9 +6746,12 @@ function TareaResumenChip({ n, label, tipo }: { n: number; label: string; tipo: 
 function TareaCard({ t, atenuada, onEntregar, onReparar }: {
   t: Tarea; atenuada?: boolean; onEntregar: () => void; onReparar: () => void
 }) {
-  const meta = TAREA_META[t.tipo]
+  // Fallback defensivo: si el backend emite un tipo de tarea que este panel aún
+  // no conoce, se degrada con un estilo genérico en vez de tumbar TODO el panel
+  // (un tipo sin entrada aquí reventaba con "undefined.anillo" → pantalla 500).
+  const meta = TAREA_META[t.tipo] ?? TAREA_META.entregar
   const tel = (t.telefono || '').replace(/\D+/g, '')
-  const esCampo = t.tipo === 'entregar' || t.tipo === 'recoger'
+  const esCampo = t.tipo === 'entregar' || t.tipo === 'recoger' || t.tipo === 'entrega_prometida'
   const fotos = t.tipo === 'recoger' ? (t.evidencias?.devolucion ?? 0) : (t.evidencias?.entrega ?? 0)
 
   // Borde rojo tenue solo si está vencida: dirige el ojo a lo urgente sin pintar
@@ -6801,7 +6809,7 @@ function TareaCard({ t, atenuada, onEntregar, onReparar }: {
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.9"><path d="M12 21s7-5.5 7-11a7 7 0 1 0-14 0c0 5.5 7 11 7 11z" /><circle cx="12" cy="10" r="2.5" /></svg>
           </a>
         )}
-        {esCampo && (
+        {esCampo && t.tipo !== 'entrega_prometida' && (
           <span className="text-[11.5px] text-mute pl-1">
             {fotos > 0 ? `${fotos} foto${fotos > 1 ? 's' : ''}` : 'Sin fotos'}
           </span>
@@ -6809,6 +6817,9 @@ function TareaCard({ t, atenuada, onEntregar, onReparar }: {
         <div className="flex-1" />
         {t.tipo === 'reparar' ? (
           <button onClick={onReparar} className="btn-acento h-9 px-4 rounded-full text-[13px] font-bold">Trabajar</button>
+        ) : t.tipo === 'entrega_prometida' ? (
+          // Compromiso informativo: todavía no es renta/venta, no hay nada que "entregar" en el sistema.
+          <span className="text-[12px] text-mute pl-1 font-medium">Compromiso de hoy</span>
         ) : (
           <button onClick={onEntregar} className={`${t.tipo === 'recoger' ? 'btn-renta' : 'btn-acento'} h-9 px-4 rounded-full text-[13px] font-bold`}>
             {t.tipo === 'recoger' ? 'Recoger' : 'Entregar'}

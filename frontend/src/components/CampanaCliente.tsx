@@ -80,7 +80,7 @@ export default function CampanaCliente() {
       </button>
 
       {abierto && (
-        <div className="absolute right-0 mt-2 w-80 max-w-[calc(100vw-2rem)] rounded-2xl border border-edge bg-surface shadow-2xl z-[110] overflow-hidden">
+        <div className="fixed inset-x-3 top-[76px] sm:absolute sm:inset-x-auto sm:top-full sm:right-0 sm:mt-2 sm:w-80 max-w-none sm:max-w-[calc(100vw-2rem)] rounded-2xl border border-edge bg-surface shadow-2xl z-[110] overflow-hidden">
           <div className="px-4 py-3 border-b border-edge">
             <p className="text-sm font-bold text-ink">Notificaciones</p>
           </div>
