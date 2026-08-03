@@ -51,6 +51,10 @@
   --chart-blue:   #6E8CF0;   /* azul aciano */
   --chart-green:  #57BE86;   /* verde menta */
   --chart-gray:   #AEB6C9;   /* gris lavanda */
+  /* Fuente de los NÚMEROS en todo el sitio: su "1" es un trazo limpio y recto
+     (sin la patita del sans). Un solo lugar para cambiarla si algún día se
+     quiere otra. Se aplica vía la regla global de más abajo. */
+  --font-num: 'Helvetica Neue', Helvetica, Arial, sans-serif;
 }
 
 .dark {
@@ -166,6 +170,15 @@
   }
 
   a { color: inherit; text-decoration: none; }
+}
+
+/* NÚMEROS con la fuente de cifras (la del reloj, Helvetica/Arial) en TODO el
+   sitio. Se engancha a las clases que ya llevan los números: tabular-nums
+   (contadores, KPIs, reloj) y text-price (montos de dinero). Regla sin capa a
+   propósito, para que gane sobre el font-family del body. */
+.tabular-nums,
+.text-price {
+  font-family: var(--font-num);
 }
 
 /* Entrada escalonada (stagger) para listas — curva ease-out fuerte */
