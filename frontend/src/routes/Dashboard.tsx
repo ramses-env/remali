@@ -130,7 +130,7 @@ const MODALIDADES: { key: Modalidad; label: string; corto: string }[] = [
 ]
 const TIPO_COT_LABEL: Record<string, string> = { venta: 'Venta', renta: 'Renta', mixta: 'Venta y renta' }
 
-type CotizacionItem = { id: number; descripcion: string; cantidad: number; precio_unitario: string; precio_lista?: string; equipo?: number | null; subtotal: string; modalidad: Modalidad; modalidad_label: string }
+type CotizacionItem = { id: number; descripcion: string; cantidad: number; duracion?: number; precio_unitario: string; precio_lista?: string; equipo?: number | null; subtotal: string; modalidad: Modalidad; modalidad_label: string }
 type CotizacionFoto = { id: number; imagen: string; orden: number }
 type Cotizacion = {
   id: number; folio: string | null; tipo: 'venta' | 'renta' | 'mixta'
@@ -2275,13 +2275,13 @@ function QRModal({ unit, equipo, onClose }: { unit: Unidad; equipo: Equipo; onCl
 type FacturaData = { rfc: string; razon_social: string; codigo_postal: string; regimen_fiscal: string; uso_cfdi: string; email: string }
 const FACTURA_VACIA: FacturaData = { rfc: '', razon_social: '', codigo_postal: '', regimen_fiscal: '', uso_cfdi: '', email: '' }
 
-function FacturaFields({ requiere, onRequiere, factura, onFactura, empresaNombre }: {
+function FacturaFields({ requiere, onRequiere, empresaNombre }: {
   requiere: boolean; onRequiere: (v: boolean) => void
+  // Se reciben por compatibilidad con los 3 usos, pero ya NO se editan aquí:
+  // los datos fiscales se capturan al timbrar (en "Por facturar"), no al crear.
   factura: FacturaData; onFactura: (f: FacturaData) => void
   empresaNombre?: string
 }) {
-  const set = (k: keyof FacturaData, v: string) => onFactura({ ...factura, [k]: v })
-  const flbl = 'block text-[10.5px] font-bold tracking-[0.4px] text-mute mb-1.5'
   return (
     <div className="rounded-xl border border-edge bg-surface p-4">
       <div className="flex items-center justify-between gap-3">
@@ -2302,28 +2302,9 @@ function FacturaFields({ requiere, onRequiere, factura, onFactura, empresaNombre
           {empresaNombre ? (
             <p className="text-[12px] text-emerald-600 bg-emerald-500/10 border border-emerald-500/20 rounded-lg px-3 py-2.5">Se usarán los datos fiscales guardados de <b>{empresaNombre}</b>.</p>
           ) : (
-            <div className="space-y-3">
-              <div className="grid grid-cols-2 gap-3">
-                <div><label className={flbl}>RFC</label><input className={`${input} font-mono`} value={factura.rfc} onChange={e => set('rfc', e.target.value.toUpperCase())} placeholder="XAXX010101000" /></div>
-                <div><label className={flbl}>C.P.</label><input className={input} value={factura.codigo_postal} onChange={e => set('codigo_postal', e.target.value)} placeholder="00000" inputMode="numeric" /></div>
-              </div>
-              <div><label className={flbl}>RAZÓN SOCIAL</label><input className={input} value={factura.razon_social} onChange={e => set('razon_social', e.target.value)} placeholder="Razón social del cliente" /></div>
-              <div>
-                <label className={flbl}>RÉGIMEN FISCAL</label>
-                <select className={input} value={factura.regimen_fiscal} onChange={e => set('regimen_fiscal', e.target.value)}>
-                  <option value="">Selecciona…</option>
-                  {REGIMEN_FISCAL.map(o => <option key={o.code} value={o.code} className="bg-surface">{o.label}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className={flbl}>USO DE CFDI</label>
-                <select className={input} value={factura.uso_cfdi} onChange={e => set('uso_cfdi', e.target.value)}>
-                  <option value="">Selecciona…</option>
-                  {USO_CFDI.map(o => <option key={o.code} value={o.code} className="bg-surface">{o.label}</option>)}
-                </select>
-              </div>
-              <div><label className={flbl}>EMAIL <span className="text-mute/70 font-normal">(opcional)</span></label><input type="email" className={input} value={factura.email} onChange={e => set('email', e.target.value)} placeholder="Para enviar la factura" /></div>
-            </div>
+            <p className="text-[12px] text-mute bg-surface-2 border border-edge rounded-lg px-3 py-2.5 leading-relaxed">
+              Se marcará como <b className="text-ink">Por facturar</b>. Los datos fiscales (RFC, razón social, uso de CFDI…) se capturan al timbrarla en <b className="text-ink">Facturación</b>.
+            </p>
           )}
         </div>
       )}
@@ -2332,15 +2313,12 @@ function FacturaFields({ requiere, onRequiere, factura, onFactura, empresaNombre
 }
 
 // Valida los datos fiscales de mostrador; devuelve mensaje de error o null.
-function validarFactura(requiere: boolean, empresaId: string, f: FacturaData): string | null {
-  if (!requiere || empresaId) return null
-  const faltan: string[] = []
-  if (!f.rfc.trim()) faltan.push('RFC')
-  if (!f.razon_social.trim()) faltan.push('Razón social')
-  if (!f.codigo_postal.trim()) faltan.push('CP')
-  if (!f.regimen_fiscal) faltan.push('Régimen')
-  if (!f.uso_cfdi) faltan.push('Uso CFDI')
-  return faltan.length ? `Para facturar falta: ${faltan.join(', ')}` : null
+// Los datos fiscales YA NO se piden al crear la renta/venta: al activar el switch
+// la solicitud se guarda en "Por facturar" (datos_completos=false) y se completan
+// al timbrarla en Facturación. Se conserva la firma para no tocar los 3 usos; ya
+// nunca bloquea el registro.
+function validarFactura(_requiere: boolean, _empresaId: string, _f: FacturaData): string | null {
+  return null
 }
 
 /* ── Registrar renta ── */
@@ -6275,7 +6253,7 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
       direccion: c.datos_solicitud?.obra?.direccion || '',
       usuario_id: c.usuario ?? null,
       modalidad: (partida?.modalidad as 'dia' | 'semana' | 'mes' | undefined) || null,
-      duracion: partida?.cantidad || null,
+      duracion: partida?.duracion || null,
       equipo_id: partida?.equipo ?? null,
       // El nombre del equipo va limpio (la descripción trae " · renta por día").
       equipo_nombre: partida ? partida.descripcion.split(' · ')[0].split(' (promo')[0] : null,
@@ -6354,7 +6332,7 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
     }
   }
   // Edición en línea de una partida: manda solo el campo que cambió.
-  function editarItem(itemId: number, campo: 'descripcion' | 'cantidad' | 'precio_unitario', valor: string | number) {
+  function editarItem(itemId: number, campo: 'descripcion' | 'cantidad' | 'duracion' | 'precio_unitario', valor: string | number) {
     api.patch<Cotizacion>(`/cotizaciones/${c.id}/items/${itemId}/`, { [campo]: valor })
       .then(r => apply(r.data))
       .catch(err => notify(errorMsg(err, 'No se pudo actualizar la partida'), 'err'))
@@ -6789,12 +6767,13 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
             </div>
             <div className="rounded-xl border border-edge overflow-hidden">
               <div className="overflow-x-auto">
-                <div className="min-w-[560px]">
+                <div className="min-w-[640px]">
                   {/* Encabezado de columnas */}
                   <div className="flex items-center gap-2 px-3 py-2.5 bg-surface-2 border-b border-edge text-[10.5px] font-bold uppercase tracking-[0.06em] text-mute">
                     <div className="flex-1 min-w-0 pl-2">Concepto</div>
                     <div className="w-32 shrink-0">Modalidad</div>
-                    <div className="w-16 shrink-0 text-center">Cant</div>
+                    <div className="w-16 shrink-0 text-center" title="Cuántas máquinas">Equipos</div>
+                    <div className="w-16 shrink-0 text-center" title="Días / semanas / meses (renta)">Dur.</div>
                     <div className="w-28 shrink-0 text-right pr-2">P. Unit</div>
                     <div className="w-6 shrink-0" />
                   </div>
@@ -6814,9 +6793,18 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
                         </select>
                       </div>
                       <div className="w-16 shrink-0 py-1">
-                        <input type="number" min={1} defaultValue={it.cantidad} disabled={conceptosBloqueados}
+                        <input type="number" min={1} defaultValue={it.cantidad} disabled={conceptosBloqueados} title="Cuántas máquinas"
                           onBlur={e => { const v = Math.max(1, Number(e.target.value) || 1); if (v !== it.cantidad) editarItem(it.id, 'cantidad', v) }}
                           className={`${celda} text-center`} />
+                      </div>
+                      <div className="w-16 shrink-0 py-1">
+                        {/* Duración = periodos de renta; en venta no aplica. */}
+                        {it.modalidad === 'venta'
+                          ? <div className={`${celda} text-center text-mute cursor-default`}>—</div>
+                          : <input key={`${it.id}-dur-${it.duracion}`} type="number" min={1} defaultValue={it.duracion || 1} disabled={conceptosBloqueados}
+                              title="Cuántos días / semanas / meses"
+                              onBlur={e => { const v = Math.max(1, Number(e.target.value) || 1); if (v !== (it.duracion || 1)) editarItem(it.id, 'duracion', v) }}
+                              className={`${celda} text-center`} />}
                       </div>
                       <div className="w-28 shrink-0 py-1">
                         <input key={`${it.id}-${it.precio_unitario}`} type="number" min={0} step="0.01" defaultValue={it.precio_unitario} disabled={conceptosBloqueados}

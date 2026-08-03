@@ -270,8 +270,12 @@ class CotizacionItem(models.Model):
 
     cotizacion = models.ForeignKey(Cotizacion, on_delete=models.CASCADE, related_name='items')
     descripcion = models.CharField(max_length=255)
+    # cantidad = cuántas MÁQUINAS; duracion = cuántos PERIODOS (días/semanas/
+    # meses) para renta. Son ejes distintos: 2 máquinas por 4 días = 2 × 4.
+    # En venta la duración es 1 (no aplica).
     cantidad = models.PositiveIntegerField(default=1)
-    precio_unitario = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'), help_text='Precio unitario SIN IVA')
+    duracion = models.PositiveIntegerField(default=1)
+    precio_unitario = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'), help_text='Precio unitario SIN IVA (por periodo, si es renta)')
     # Precio de LISTA (antes de promo). 0 = sin promo → se usa precio_unitario.
     # Sirve para el descuento de contado: se toma el descuento MAYOR (promo vs 5%
     # de contado), nunca la suma de ambos.
@@ -295,14 +299,19 @@ class CotizacionItem(models.Model):
         return dict(self.MODALIDADES).get(self.modalidad, 'Venta')
 
     @property
+    def periodos(self):
+        """Periodos que se cobran: la duración en renta; 1 en venta."""
+        return self.duracion if self.modalidad in ('dia', 'semana', 'mes') else 1
+
+    @property
     def subtotal(self):
-        return (Decimal(self.precio_unitario or 0) * self.cantidad).quantize(Decimal('0.01'))
+        return (Decimal(self.precio_unitario or 0) * self.cantidad * self.periodos).quantize(Decimal('0.01'))
 
     @property
     def subtotal_lista(self):
         """Subtotal a precio de LISTA (antes de promo). Si no hay lista, = subtotal."""
         base = Decimal(self.precio_lista or 0) or Decimal(self.precio_unitario or 0)
-        return (base * self.cantidad).quantize(Decimal('0.01'))
+        return (base * self.cantidad * self.periodos).quantize(Decimal('0.01'))
 
     def __str__(self):
         return f'{self.descripcion} x{self.cantidad}'

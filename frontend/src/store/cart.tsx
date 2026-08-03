@@ -13,7 +13,9 @@ export function tipoCotizacion(items: { unit?: Modalidad }[]): 'venta' | 'renta'
   return esVenta(items[0].unit) ? 'venta' : 'renta'
 }
 
-type Item = { lineId: number; id: number; title: string; price: number; qty: number; image?: string; unit?: Modalidad }
+// qty = cuántas MÁQUINAS; duracion = cuántos PERIODOS (días/semanas/meses) en
+// renta. En venta la duración no aplica (queda en 1).
+type Item = { lineId: number; id: number; title: string; price: number; qty: number; duracion?: number; image?: string; unit?: Modalidad }
 type State = {
   items: Item[]
   coupon?: { code: string; discount: number }
@@ -39,6 +41,7 @@ type Action =
   | { type: 'add'; item: Item }
   | { type: 'remove'; lineId: number }
   | { type: 'qty'; lineId: number; qty: number }
+  | { type: 'duracion'; lineId: number; duracion: number }
   | { type: 'coupon'; code: string; discount: number }
   | { type: 'clear' }
   | { type: 'reemplazar'; items: Item[] }        // nueva cotización con estas líneas
@@ -59,6 +62,8 @@ function reducer(state: State, action: Action): State {
       return { ...state, items: state.items.filter(i => i.lineId !== action.lineId) }
     case 'qty':
       return { ...state, items: state.items.map(i => i.lineId === action.lineId ? { ...i, qty: action.qty } : i) }
+    case 'duracion':
+      return { ...state, items: state.items.map(i => i.lineId === action.lineId ? { ...i, duracion: action.duracion } : i) }
     case 'coupon':
       return { ...state, coupon: { code: action.code, discount: action.discount } }
     case 'clear':

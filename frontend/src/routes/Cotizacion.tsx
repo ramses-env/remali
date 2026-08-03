@@ -15,6 +15,16 @@ import { formatMoney } from '../lib/utils'
 const inputBase = 'w-full bg-surface-2 border rounded-xl px-4 py-2.5 text-sm text-ink placeholder-mute focus:outline-none transition-colors'
 const money = formatMoney
 
+// Periodos que se cobran de una línea: la duración en renta; 1 en venta.
+type LineaMin = { price: number; qty: number; unit?: string; duracion?: number }
+const periodosDe = (i: LineaMin) => (i.unit && i.unit !== 'venta') ? (i.duracion || 1) : 1
+const importeLinea = (i: LineaMin) => i.price * i.qty * periodosDe(i)
+const PERIODO_PLURAL: Record<string, string> = { dia: 'días', semana: 'semanas', mes: 'meses' }
+const periodoTxt = (unit: string | undefined, n: number) => {
+  const base = ((MODALIDAD_LABEL as Record<string, string>)[unit || 'dia'] || '').replace('renta por ', '') || 'día'
+  return n === 1 ? base : (PERIODO_PLURAL[unit || 'dia'] || base + 's')
+}
+
 /** Carga jsPDF bajo demanda y genera el PDF de la cotización. */
 const pedirPdf = async (args: Parameters<typeof downloadCotizacionPdf>[0]) =>
   (await import('../lib/pdf')).downloadCotizacionPdf(args)
@@ -151,7 +161,7 @@ export default function Cotizacion() {
     setSending(true)
     try {
       const r = await api.post<{ folio: string; liga_autorizacion: string }>('/tienda/cotizacion/', {
-        items: items.map(i => ({ equipo_id: i.id, cantidad: i.qty, unit: i.unit || 'venta' })),
+        items: items.map(i => ({ equipo_id: i.id, cantidad: i.qty, duracion: periodosDe(i), unit: i.unit || 'venta' })),
         cliente: { nombre, empresa, email, telefono },
         obra: { responsable, direccion, telefono: obraTelefono, email: obraEmail },
         requiere_factura: factura,
@@ -196,7 +206,7 @@ export default function Cotizacion() {
     setSending(true)
     try {
       const r = await api.post<{ folio: string; liga?: string }>('/tienda/cotizacion/', {
-        items: state.items.map(i => ({ equipo_id: i.id, cantidad: i.qty, unit: i.unit || 'venta' })),
+        items: state.items.map(i => ({ equipo_id: i.id, cantidad: i.qty, duracion: periodosDe(i), unit: i.unit || 'venta' })),
         cliente: { nombre, empresa, email, telefono },
         obra: { responsable, direccion, telefono: obraTelefono, email: obraEmail },
         requiere_factura: factura,
@@ -220,8 +230,8 @@ export default function Cotizacion() {
      incluyen IVA (solo se desglosa, nunca se suma); los de RENTA van sin IVA
      y se les suma 16% únicamente si el cliente pide factura. El descuento se
      reparte proporcional entre ambas porciones. */
-  const subVenta = state.items.reduce((s, i) => s + (i.unit === 'venta' ? i.price * i.qty : 0), 0)
-  const subRenta = state.items.reduce((s, i) => s + (i.unit !== 'venta' ? i.price * i.qty : 0), 0)
+  const subVenta = state.items.reduce((s, i) => s + (i.unit === 'venta' ? importeLinea(i) : 0), 0)
+  const subRenta = state.items.reduce((s, i) => s + (i.unit !== 'venta' ? importeLinea(i) : 0), 0)
   const subtotal = subVenta + subRenta
   const discountAmt = state.coupon ? subtotal * state.coupon.discount : 0
   const factor = subtotal > 0 ? Math.max(0, subtotal - discountAmt) / subtotal : 1
@@ -275,8 +285,8 @@ export default function Cotizacion() {
   // Total de una lista de items con el MISMO espejo del backend (venta con IVA
   // incluido, renta +16% solo con factura); para el resumen al enviar borradores.
   function totalDe(items: Borrador['items'], coupon?: Borrador['coupon']) {
-    const sv = items.reduce((s, i) => s + (i.unit === 'venta' ? i.price * i.qty : 0), 0)
-    const sr = items.reduce((s, i) => s + (i.unit !== 'venta' ? i.price * i.qty : 0), 0)
+    const sv = items.reduce((s, i) => s + (i.unit === 'venta' ? importeLinea(i) : 0), 0)
+    const sr = items.reduce((s, i) => s + (i.unit !== 'venta' ? importeLinea(i) : 0), 0)
     const sub = sv + sr
     const desc = coupon ? sub * coupon.discount : 0
     const f = sub > 0 ? Math.max(0, sub - desc) / sub : 1
@@ -301,7 +311,7 @@ export default function Cotizacion() {
     setSending(true)
     try {
       const r = await api.post<{ folio: string; liga?: string }>('/tienda/cotizacion/', {
-        items: b.items.map(i => ({ equipo_id: i.id, cantidad: i.qty, unit: i.unit || 'venta' })),
+        items: b.items.map(i => ({ equipo_id: i.id, cantidad: i.qty, duracion: periodosDe(i), unit: i.unit || 'venta' })),
         cliente: { nombre, empresa, email, telefono },
         obra: { responsable, direccion, telefono: obraTelefono, email: obraEmail },
         requiere_factura: factura,
@@ -439,9 +449,9 @@ export default function Cotizacion() {
                 <div key={it.lineId} className="px-6 sm:px-8 py-4 border-b border-edge/60 flex items-center gap-4 justify-between">
                   <div className="min-w-0">
                     <p className="text-[15px] font-bold leading-snug line-clamp-1">{it.title}</p>
-                    <p className="text-[13px] text-mute mt-0.5 capitalize">{MODALIDAD_LABEL[it.unit || 'venta']} · {it.qty} equipo{it.qty === 1 ? '' : 's'}</p>
+                    <p className="text-[13px] text-mute mt-0.5 capitalize">{MODALIDAD_LABEL[it.unit || 'venta']} · {it.qty} equipo{it.qty === 1 ? '' : 's'}{it.unit && it.unit !== 'venta' ? ` × ${it.duracion || 1} ${periodoTxt(it.unit, it.duracion || 1)}` : ''}</p>
                   </div>
-                  <span className="text-[15.5px] font-extrabold shrink-0">{money(it.price * it.qty)}</span>
+                  <span className="text-[15.5px] font-extrabold shrink-0">{money(importeLinea(it))}</span>
                 </div>
               ))}
               <p className="px-6 sm:px-8 py-4 text-[12.5px] text-mute">El total definitivo lo confirma REMALI con la disponibilidad — la liga siempre muestra la versión vigente.</p>
@@ -571,16 +581,25 @@ export default function Cotizacion() {
                         <p className={`${monoLabel} mt-1`}>{MODALIDAD_LABEL[it.unit || 'venta']}</p>
                       </div>
                       <div className="flex items-center gap-2.5 flex-wrap">
+                        {/* Máquinas */}
                         <div className="flex items-center border border-edge rounded-[9px] bg-app overflow-hidden">
-                          <button aria-label="Menos" onClick={() => dispatch({ type: 'qty', lineId: it.lineId, qty: Math.max(1, it.qty - 1) })} className="w-8 h-[34px] grid place-items-center text-ink hover:bg-surface-2 transition-colors">−</button>
+                          <button aria-label="Menos equipos" onClick={() => dispatch({ type: 'qty', lineId: it.lineId, qty: Math.max(1, it.qty - 1) })} className="w-8 h-[34px] grid place-items-center text-ink hover:bg-surface-2 transition-colors">−</button>
                           <span className="min-w-[44px] text-center text-[13.5px] font-bold">{it.qty} eq.</span>
-                          <button aria-label="Más" onClick={() => dispatch({ type: 'qty', lineId: it.lineId, qty: it.qty + 1 })} className="w-8 h-[34px] grid place-items-center text-ink hover:bg-surface-2 transition-colors">+</button>
+                          <button aria-label="Más equipos" onClick={() => dispatch({ type: 'qty', lineId: it.lineId, qty: it.qty + 1 })} className="w-8 h-[34px] grid place-items-center text-ink hover:bg-surface-2 transition-colors">+</button>
                         </div>
+                        {/* Duración (solo renta): cuántos días/semanas/meses */}
+                        {it.unit && it.unit !== 'venta' && (
+                          <div className="flex items-center border border-edge rounded-[9px] bg-app overflow-hidden">
+                            <button aria-label="Menos duración" onClick={() => dispatch({ type: 'duracion', lineId: it.lineId, duracion: Math.max(1, (it.duracion || 1) - 1) })} className="w-8 h-[34px] grid place-items-center text-ink hover:bg-surface-2 transition-colors">−</button>
+                            <span className="min-w-[56px] text-center text-[13.5px] font-bold">{it.duracion || 1} {periodoTxt(it.unit, it.duracion || 1)}</span>
+                            <button aria-label="Más duración" onClick={() => dispatch({ type: 'duracion', lineId: it.lineId, duracion: (it.duracion || 1) + 1 })} className="w-8 h-[34px] grid place-items-center text-ink hover:bg-surface-2 transition-colors">+</button>
+                          </div>
+                        )}
                         <span className="text-[13px] text-mute">{money(it.price)} {it.unit === 'venta' ? 'c/u' : `por ${MODALIDAD_LABEL[it.unit || 'dia'].replace('renta por ', '')}`}</span>
                       </div>
                     </div>
                     <div className="text-right flex flex-col items-end gap-2">
-                      <span className="text-[17px] sm:text-[19px] font-extrabold tracking-tight">{money(it.price * it.qty)}</span>
+                      <span className="text-[17px] sm:text-[19px] font-extrabold tracking-tight">{money(importeLinea(it))}</span>
                       <button onClick={() => dispatch({ type: 'remove', lineId: it.lineId })} className="text-[13px] text-mute hover:text-red-500 transition-colors">Quitar</button>
                     </div>
                   </div>

@@ -271,7 +271,12 @@ def render_cotizacion_pdf(cot) -> bytes:
         c.setFillColor(GRIS)
         c.drawString(x_mod, y, _recortar(c, it.modalidad_label, 'Helvetica', 9, 30 * mm))
         c.setFillColor(TINTA)
-        c.drawRightString(x_cant, y, str(it.cantidad))
+        # En renta la cantidad se lee "máquinas×periodos" (2×4) para que el
+        # importe (precio × máquinas × periodos) cuadre a la vista.
+        cant_txt = str(it.cantidad)
+        if it.modalidad in ('dia', 'semana', 'mes') and (it.duracion or 1) > 1:
+            cant_txt = f'{it.cantidad}×{it.duracion}'
+        c.drawRightString(x_cant, y, cant_txt)
         c.drawRightString(x_pu, y, _money(it.precio_unitario))
         c.drawRightString(x_imp, y, _money(it.subtotal))
         y -= 5.0 * mm

@@ -14,7 +14,7 @@ type Cot = {
   folio: string; estado: string; estado_label: string; tipo: string; total: string
   creada?: string; vence_el?: string | null; pdf?: string | null; atendida_por?: string | null; atendida?: boolean; convertida?: boolean; entrega_prometida?: string | null
   items: { descripcion: string; cantidad: number }[]
-  carrito?: { id: number; title: string; qty: number; unit?: string; image?: string }[]
+  carrito?: { id: number; title: string; qty: number; duracion?: number; unit?: string; image?: string }[]
 }
 
 const monoLabel = 'text-[10.5px] font-mono tracking-[0.14em] text-mute uppercase'
@@ -176,7 +176,7 @@ export default function MisCotizacionEstado() {
                   </div>
                   <div className="min-w-0 flex-1">
                     <p className="text-[15px] font-bold leading-snug line-clamp-1">{l.title}</p>
-                    <p className="text-[13px] text-mute mt-0.5">{UNIT_TXT[l.unit || 'venta'] || 'Compra'} · {l.qty} equipo{l.qty === 1 ? '' : 's'}</p>
+                    <p className="text-[13px] text-mute mt-0.5">{UNIT_TXT[l.unit || 'venta'] || 'Compra'} · {l.qty} equipo{l.qty === 1 ? '' : 's'}{l.unit && l.unit !== 'venta' && (l.duracion || 1) > 1 ? ` × ${l.duracion} ${({ dia: 'días', semana: 'semanas', mes: 'meses' } as Record<string, string>)[l.unit] || ''}` : ''}</p>
                   </div>
                 </div>
               )

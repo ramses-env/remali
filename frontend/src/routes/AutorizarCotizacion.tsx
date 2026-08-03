@@ -3,7 +3,7 @@ import { useParams } from 'react-router-dom'
 import api from '../lib/api'
 import { formatMoney } from '../lib/utils'
 
-type Item = { descripcion: string; cantidad: number; precio: string; modalidad: string }
+type Item = { descripcion: string; cantidad: number; duracion?: number; precio: string; subtotal?: string; modalidad: string }
 type Info = {
   folio: string
   cliente: string
@@ -126,9 +126,13 @@ export default function AutorizarCotizacion() {
                 <div key={i} className={`flex items-start justify-between gap-4 ${i > 0 ? 'mt-3 pt-3 border-t border-edge' : ''}`}>
                   <div className="min-w-0">
                     <p className="text-ink font-semibold leading-snug">{it.descripcion}</p>
-                    <p className="text-[12px] text-mute mt-0.5">{MODALIDAD[it.modalidad] || it.modalidad} · {it.cantidad} × {formatMoney(Number(it.precio))}</p>
+                    <p className="text-[12px] text-mute mt-0.5">
+                      {MODALIDAD[it.modalidad] || it.modalidad} · {it.cantidad} {it.cantidad === 1 ? 'equipo' : 'equipos'}
+                      {it.modalidad !== 'venta' && (it.duracion || 1) > 1 ? ` × ${it.duracion} ${({ dia: 'días', semana: 'semanas', mes: 'meses' } as Record<string, string>)[it.modalidad] || ''}` : ''}
+                      {' · '}{formatMoney(Number(it.precio))}
+                    </p>
                   </div>
-                  <span className="text-ink font-bold shrink-0">{formatMoney(Number(it.precio) * it.cantidad)}</span>
+                  <span className="text-ink font-bold shrink-0">{formatMoney(Number(it.subtotal ?? Number(it.precio) * it.cantidad))}</span>
                 </div>
               ))}
               <div className="flex items-baseline justify-between gap-4 border-t border-edge mt-4 pt-4">

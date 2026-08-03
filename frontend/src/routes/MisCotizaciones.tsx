@@ -20,7 +20,7 @@ type CotMia = {
   creada: string
   vence_el: string | null
   items: { descripcion: string; cantidad: number }[]
-  carrito: { id: number; title: string; price: number; qty: number; unit: Modalidad }[]
+  carrito: { id: number; title: string; price: number; qty: number; duracion?: number; unit: Modalidad }[]
   pdf: string | null
   atendida_por?: string | null
 }
@@ -86,7 +86,7 @@ export default function MisCotizaciones() {
 
   function volverACotizar(c: CotMia) {
     if (!c.carrito?.length) return
-    dispatch({ type: 'reemplazar', items: c.carrito.map((l, idx) => ({ lineId: Date.now() + idx, id: l.id, title: l.title, price: l.price, qty: l.qty, unit: l.unit })) })
+    dispatch({ type: 'reemplazar', items: c.carrito.map((l, idx) => ({ lineId: Date.now() + idx, id: l.id, title: l.title, price: l.price, qty: l.qty, duracion: l.duracion, unit: l.unit })) })
     notify('Cotización cargada de nuevo')
     nav('/cotizacion')
   }
@@ -137,7 +137,7 @@ export default function MisCotizaciones() {
                   <span className="text-[13.5px] text-mute">{fechaCorta(c.creada)}</span>
                 </div>
                 <p className="text-[14px] text-mute mt-2.5 line-clamp-1">
-                  {(c.carrito?.length ? c.carrito.map(l => `${l.qty}× ${l.title} · ${UNIT_TXT[l.unit] || 'compra'}`) : c.items.map(i => `${i.cantidad}× ${i.descripcion}`)).join(' · ')}
+                  {(c.carrito?.length ? c.carrito.map(l => `${l.qty}× ${l.title} · ${UNIT_TXT[l.unit] || 'compra'}${l.unit !== 'venta' && (l.duracion || 1) > 1 ? ` (${l.duracion} ${({ dia: 'días', semana: 'semanas', mes: 'meses' } as Record<string, string>)[l.unit] || ''})` : ''}`) : c.items.map(i => `${i.cantidad}× ${i.descripcion}`)).join(' · ')}
                 </p>
                 <p className={`${monoLabel} mt-2.5`}>{LINEA_ESTADO[c.estado] || c.estado_label.toUpperCase()}</p>
               </div>

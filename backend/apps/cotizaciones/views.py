@@ -125,6 +125,11 @@ def crear_cotizacion_publica(request):
         except (ValueError, TypeError):
             cant = 1
         unit = (it.get('unit') or '').lower()
+        # Duración = periodos de renta (días/semanas/meses). En venta es 1.
+        try:
+            dur = max(1, min(int(it.get('duracion') or 1), 999)) if unit in ('dia', 'semana', 'mes') else 1
+        except (ValueError, TypeError):
+            dur = 1
         etiqueta, precio, modalidad = _resolver_partida(eq, unit)
         # Promo del equipo (la controla el admin en el panel): el precio oficial
         # de la cotización sale ya con el descuento aplicado. Guardamos el precio
@@ -135,9 +140,9 @@ def crear_cotizacion_publica(request):
             precio_lista = Decimal(str(precio))
             precio = (Decimal(precio) * (Decimal('100') - promo) / Decimal('100')).quantize(Decimal('0.01'))
             etiqueta = f'{etiqueta} (promo −{promo}%)'
-        partidas.append((etiqueta, cant, Decimal(str(precio or 0)), modalidad, precio_lista or Decimal(str(precio or 0)), eq))
+        partidas.append((etiqueta, cant, dur, Decimal(str(precio or 0)), modalidad, precio_lista or Decimal(str(precio or 0)), eq))
         carrito.append({'id': eq.id, 'title': etiqueta, 'price': float(precio or 0),
-                        'qty': cant, 'unit': unit or 'venta'})
+                        'qty': cant, 'duracion': dur, 'unit': unit or 'venta'})
 
     if not partidas:
         return Response({'detalle': 'No pudimos identificar los equipos de tu solicitud.'}, status=400)
@@ -167,9 +172,9 @@ def crear_cotizacion_publica(request):
                 'carrito': carrito,
             },
         )
-        for etiqueta, cant, precio, modalidad, precio_lista, eq_ref in partidas:
+        for etiqueta, cant, dur, precio, modalidad, precio_lista, eq_ref in partidas:
             CotizacionItem.objects.create(cotizacion=cot, descripcion=etiqueta, cantidad=cant,
-                                          precio_unitario=precio, precio_lista=precio_lista,
+                                          duracion=dur, precio_unitario=precio, precio_lista=precio_lista,
                                           equipo=eq_ref, modalidad=modalidad)
         cot.recalcular_tipo()   # venta, renta o mixta según lo que armó el cliente
         if por_autorizar:
@@ -352,8 +357,8 @@ def autorizacion_cotizacion(request, token):
             'empresa': (cot.datos_solicitud or {}).get('empresa') or '',
             'obra': ((cot.datos_solicitud or {}).get('obra') or {}).get('direccion') or '',
             'tipo': cot.tipo,
-            'items': [{'descripcion': i.descripcion, 'cantidad': i.cantidad,
-                       'precio': str(i.precio_unitario), 'modalidad': i.modalidad} for i in cot.items.all()],
+            'items': [{'descripcion': i.descripcion, 'cantidad': i.cantidad, 'duracion': i.duracion,
+                       'precio': str(i.precio_unitario), 'subtotal': str(i.subtotal), 'modalidad': i.modalidad} for i in cot.items.all()],
             'subtotal': str(cot.subtotal), 'descuento': str(getattr(cot, 'descuento_total', 0) or 0), 'total': str(cot.total),
             'vence_el': cot.vence_el,
             'autorizada': bool(cot.autorizada_en) and not cot.autorizacion_rechazo,
@@ -761,6 +766,11 @@ def cotizacion_agregar_item(request, pk: int):
     modalidad = (d.get('modalidad') or '').lower()
     if modalidad not in _MODALIDADES:
         modalidad = 'dia' if cot.tipo == 'renta' else 'venta'
+    # Duración = periodos (solo renta); en venta es 1.
+    try:
+        dur = max(1, int(d.get('duracion') or 1)) if modalidad in _UNIDADES_RENTA else 1
+    except (ValueError, TypeError):
+        dur = 1
 
     # Partida DEL CATÁLOGO: el precio lo resuelve el servidor (el de la web,
     # con su promo), igual que en la tienda. El admin puede ajustarlo después,
@@ -781,7 +791,7 @@ def cotizacion_agregar_item(request, pk: int):
             etiqueta = f'{etiqueta} (promo −{promo}%)'
         with transaction.atomic():
             CotizacionItem.objects.create(cotizacion=cot, descripcion=etiqueta, cantidad=cant,
-                                          precio_unitario=precio, precio_lista=lista,
+                                          duracion=dur, precio_unitario=precio, precio_lista=lista,
                                           equipo=eq, modalidad=modalidad)
             cot.recalcular_tipo()
         cot.refresh_from_db()
@@ -798,7 +808,7 @@ def cotizacion_agregar_item(request, pk: int):
         precio = Decimal('0')
     with transaction.atomic():
         CotizacionItem.objects.create(cotizacion=cot, descripcion=desc, cantidad=cant,
-                                      precio_unitario=precio, modalidad=modalidad)
+                                      duracion=dur, precio_unitario=precio, modalidad=modalidad)
         cot.recalcular_tipo()
     cot.refresh_from_db()
     return Response(CotizacionSerializer(cot).data, status=201)
@@ -823,6 +833,8 @@ def cotizacion_item_modalidad(request, pk: int, item_id: int):
     with transaction.atomic():
         item.modalidad = modalidad
         campos = ['modalidad']
+        if modalidad == 'venta' and item.duracion != 1:
+            item.duracion = 1; campos.append('duracion')
         # Partida de catálogo: al cambiar la modalidad, el precio de la web de
         # ESA modalidad vuelve a mandar (con su promo). Si el equipo no tiene
         # precio para ella, se conserva el capturado y se suelta la referencia.
@@ -989,6 +1001,11 @@ def cotizacion_item(request, pk: int, item_id: int):
             item.cantidad = max(1, int(d.get('cantidad') or 1))
         except (ValueError, TypeError):
             return Response({'detalle': 'Cantidad inválida'}, status=400)
+    if 'duracion' in d:
+        try:
+            item.duracion = max(1, int(d.get('duracion') or 1)) if item.modalidad in ('dia', 'semana', 'mes') else 1
+        except (ValueError, TypeError):
+            return Response({'detalle': 'Duración inválida'}, status=400)
     if 'precio_unitario' in d:
         try:
             item.precio_unitario = Decimal(str(d.get('precio_unitario') or 0))

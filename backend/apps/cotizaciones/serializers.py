@@ -26,7 +26,7 @@ class CotizacionItemSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = CotizacionItem
-        fields = ['id', 'descripcion', 'cantidad', 'precio_unitario', 'precio_lista', 'equipo', 'subtotal', 'modalidad', 'modalidad_label']
+        fields = ['id', 'descripcion', 'cantidad', 'duracion', 'precio_unitario', 'precio_lista', 'equipo', 'subtotal', 'modalidad', 'modalidad_label']
 
     def get_subtotal(self, obj):
         return str(obj.subtotal)

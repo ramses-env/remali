@@ -37,6 +37,8 @@ type Equipo = {
 }
 
 const UNIT_LABEL: Record<PriceUnit, string> = { dia: 'día', semana: 'semana', mes: 'mes' }
+const periodoLabel = (u: PriceUnit, n: number) =>
+  n === 1 ? UNIT_LABEL[u] : ({ dia: 'días', semana: 'semanas', mes: 'meses' } as Record<PriceUnit, string>)[u]
 // Etiqueta chica estilo monoespaciada (badges, secciones) del diseño nuevo.
 const mono = 'font-mono text-[11px] tracking-[0.14em]'
 
@@ -52,7 +54,8 @@ export default function EquipoDetail() {
   const [relacionados, setRelacionados] = useState<Equipo[]>([])
   const [notFound, setNotFound] = useState(false)
   const [fichaOpen, setFichaOpen] = useState(false)
-  const [qty, setQty] = useState(1)
+  const [qty, setQty] = useState(1)          // cuántas máquinas
+  const [dias, setDias] = useState(1)        // cuántos periodos (día/semana/mes) en renta
   const [tab, setTab] = useState<'specs' | 'incluye' | 'cond'>('specs')
   const [uploadedImages, setUploadedImages] = useState<string[]>([])
   const images = useMemo(() => {
@@ -148,7 +151,7 @@ export default function EquipoDetail() {
 
   function addToCart() {
     if (!e) return
-    dispatch({ type: 'add', item: { lineId: Date.now() + Math.floor(Math.random() * 1000), id: e.id, title: e.modelo, price: displayPrice, qty, image: activeSrc || '', unit: modalidad } })
+    dispatch({ type: 'add', item: { lineId: Date.now() + Math.floor(Math.random() * 1000), id: e.id, title: e.modelo, price: displayPrice, qty, duracion: esRenta ? dias : 1, image: activeSrc || '', unit: modalidad } })
   }
 
   function descargarFicha() {
@@ -376,7 +379,19 @@ export default function EquipoDetail() {
               </div>
             )}
 
-            {/* Cantidad */}
+            {/* Duración (solo renta): cuántos días / semanas / meses */}
+            {esRenta && (
+              <div className="flex items-center justify-between gap-4">
+                <div className={`${mono} text-mute`}>{modalidad === 'dia' ? 'DÍAS' : modalidad === 'semana' ? 'SEMANAS' : 'MESES'}</div>
+                <div className="flex items-center border border-edge rounded-xl bg-app overflow-hidden">
+                  <button onClick={() => setDias(d => Math.max(1, d - 1))} className="w-10 h-10 grid place-items-center text-lg text-ink hover:bg-surface-2 transition-colors">−</button>
+                  <span className="min-w-[38px] text-center text-[15px] font-bold">{dias}</span>
+                  <button onClick={() => setDias(d => Math.min(365, d + 1))} className="w-10 h-10 grid place-items-center text-lg text-ink hover:bg-surface-2 transition-colors">+</button>
+                </div>
+              </div>
+            )}
+
+            {/* Cantidad de máquinas */}
             <div className="flex items-center justify-between gap-4">
               <div className={`${mono} text-mute`}>{esRenta ? 'EQUIPOS' : 'CANTIDAD'}</div>
               <div className="flex items-center border border-edge rounded-xl bg-app overflow-hidden">
@@ -386,10 +401,14 @@ export default function EquipoDetail() {
               </div>
             </div>
 
-            {/* Total */}
+            {/* Total: precio × equipos × duración */}
             <div className="flex items-center justify-between border-y border-edge py-3.5">
-              <span className="text-sm text-mute">{esRenta ? `Total por ${UNIT_LABEL[modalidad as PriceUnit]}` : 'Total'}</span>
-              <span className="text-xl font-extrabold">${formatCurrency(displayPrice * qty)}</span>
+              <span className="text-sm text-mute">
+                {esRenta
+                  ? `Total · ${qty} ${qty === 1 ? 'equipo' : 'equipos'} × ${dias} ${periodoLabel(modalidad as PriceUnit, dias)}`
+                  : 'Total'}
+              </span>
+              <span className="text-xl font-extrabold">${formatCurrency(displayPrice * qty * (esRenta ? dias : 1))}</span>
             </div>
 
             {/* CTAs */}

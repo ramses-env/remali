@@ -248,7 +248,7 @@ export async function downloadEquiposPdf(
   doc.save('equipos.pdf')
 }
 
-type CartItem = { id: number; title: string; price: number; qty: number }
+type CartItem = { id: number; title: string; price: number; qty: number; duracion?: number }
 type ClientInfo = { nombre?: string; empresa?: string; email?: string; telefono?: string; direccion?: string; responsable?: string; obra_telefono?: string; obra_email?: string }
 type Coupon = { code: string; discount: number }
 
@@ -292,8 +292,9 @@ export async function downloadCotizacionPdf(args: {
   const UNIT_TXT: Record<string, string> = { venta: 'Compra', dia: 'Renta por día', semana: 'Renta por semana', mes: 'Renta por mes' }
 
   // ── Espejo del backend: venta IVA incluido (se desglosa); renta + 16% con factura ──
+  const periodos = (i: { unit?: string; duracion?: number }) => (i.unit && i.unit !== 'venta') ? (i.duracion || 1) : 1
   const subVenta = items.reduce((s2, i) => s2 + (i.unit === 'venta' ? i.price * i.qty : 0), 0)
-  const subRenta = items.reduce((s2, i) => s2 + (i.unit !== 'venta' ? i.price * i.qty : 0), 0)
+  const subRenta = items.reduce((s2, i) => s2 + (i.unit !== 'venta' ? i.price * i.qty * periodos(i) : 0), 0)
   const subtotal = subVenta + subRenta
   const discountAmt = coupon ? subtotal * coupon.discount : 0
   const factor = subtotal > 0 ? Math.max(0, subtotal - discountAmt) / subtotal : 1
@@ -349,9 +350,10 @@ export async function downloadCotizacionPdf(args: {
     if (y > pageH - 190) { doc.addPage(); y = margin }
     ink(INK); doc.setFont('helvetica', 'bold'); doc.setFontSize(10.5)
     doc.text(String(it.title).slice(0, 62), margin, y)
-    doc.text(money(it.price * it.qty), pageW - margin, y, { align: 'right' })
+    doc.text(money(it.price * it.qty * periodos(it)), pageW - margin, y, { align: 'right' })
     ink(MUTE); doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5)
-    doc.text(`${UNIT_TXT[it.unit || 'venta'] || 'Compra'} · ${it.qty} × ${money(it.price)}`, margin, y + 11)
+    const perTxt = (it.unit && it.unit !== 'venta') ? ` × ${periodos(it)} ${({ dia: 'día', semana: 'semana', mes: 'mes' } as Record<string, string>)[it.unit] || ''}${periodos(it) === 1 ? '' : 's'}` : ''
+    doc.text(`${UNIT_TXT[it.unit || 'venta'] || 'Compra'} · ${it.qty} eq.${perTxt} × ${money(it.price)}`, margin, y + 11)
     y += 20
     doc.setDrawColor(LINE[0], LINE[1], LINE[2]); doc.setLineWidth(0.5)
     doc.line(margin, y, pageW - margin, y); y += 14
