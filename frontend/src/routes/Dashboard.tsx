@@ -2062,12 +2062,17 @@ function pillCond(v: Unidad['condicion']) {
   return v === 'nueva' ? <Pill tone="emerald" label={condLabel(v)} /> : <Pill tone="blue" label={condLabel(v)} />
 }
 
-function BannerConcretando() {
+function BannerConcretando({ inset = true }: { inset?: boolean }) {
   const [p, setP] = useState(leerCotParaRenta())
   if (!p) return null
   return (
-    <div className="mx-6 mt-3 flex items-center justify-between gap-3 px-3.5 py-2.5 rounded-xl border border-[color:var(--c-renta)]/40 bg-[color:var(--c-renta)]/10 text-[color:var(--c-renta)] text-[12.5px] font-bold">
-      <span>Concretando {p.folio || 'cotización'} · {p.cliente || 'cliente'} — elige la unidad y tócale Rentar</span>
+    <div className={`${inset ? 'mx-6 mt-3' : ''} flex items-center justify-between gap-3 px-3.5 py-2.5 rounded-xl border border-[color:var(--c-renta)]/40 bg-[color:var(--c-renta)]/10 text-[color:var(--c-renta)] text-[12.5px] font-bold`}>
+      <span>
+        Concretando {p.folio || 'cotización'} · {p.cliente || 'cliente'}
+        {p.equipo_nombre
+          ? <> — el cliente pidió <b>{p.equipo_nombre}</b>{p.modalidad ? ` (${({ dia: 'por día', semana: 'por semana', mes: 'por mes' } as Record<string, string>)[p.modalidad]}${p.duracion ? ` × ${p.duracion}` : ''})` : ''}. Elige la unidad y tócale Rentar.</>
+          : ' — elige la unidad y tócale Rentar'}
+      </span>
       <button onClick={() => { fijarCotParaRenta(null); setP(null) }} aria-label="Cancelar vínculo" className="hover:opacity-70 shrink-0">✕</button>
     </div>
   )
@@ -2641,8 +2646,11 @@ function InventarioGlobal({ unidades, equipos, reload, notify, onEnviarTaller }:
   unidades: Unidad[]; equipos: Equipo[]; reload: () => void; notify: (m: string, t?: 'ok' | 'err') => void
   onEnviarTaller: (ordenId: number) => void
 }) {
-  const [estado, setEstado] = useState<'' | 'disponible' | 'rentado' | 'mantenimiento' | 'vendido'>('')
-  const [equipoFiltro, setEquipoFiltro] = useState<string>('')
+  // Si venimos de "Concretar renta", arrancamos filtrados al equipo que pidió
+  // el cliente y a las unidades disponibles: cae directo en lo que hay que rentar.
+  const puente = leerCotParaRenta()
+  const [estado, setEstado] = useState<'' | 'disponible' | 'rentado' | 'mantenimiento' | 'vendido'>(puente?.equipo_id ? 'disponible' : '')
+  const [equipoFiltro, setEquipoFiltro] = useState<string>(puente?.equipo_id ? String(puente.equipo_id) : '')
   const [search, setSearch] = useState('')
   const [labelUnit, setLabelUnit] = useState<Unidad | null>(null)
   const [rentUnit, setRentUnit] = useState<Unidad | null>(null)
@@ -2687,6 +2695,8 @@ function InventarioGlobal({ unidades, equipos, reload, notify, onEnviarTaller }:
 
   return (
     <div className="space-y-5">
+      {/* Si venimos de "Concretar renta", recuerda qué pidió el cliente. */}
+      <BannerConcretando inset={false} />
       {/* KPIs */}
       <KpiGrid
         gridClassName="grid-cols-2 sm:grid-cols-3 lg:grid-cols-5"
@@ -5829,7 +5839,7 @@ const COT_PAGE_SIZE = 25
 /* Puente cotización→renta: la cotización aceptada que se está concretando.
    Vive a nivel módulo para no enhebrar props por medio panel; el RentModal
    la lee al montar y la limpia al registrar. */
-type CotParaRenta = { id: number; folio: string | null; cliente: string; telefono: string; direccion: string; usuario_id: number | null; modalidad?: 'dia' | 'semana' | 'mes' | null; duracion?: number | null }
+type CotParaRenta = { id: number; folio: string | null; cliente: string; telefono: string; direccion: string; usuario_id: number | null; modalidad?: 'dia' | 'semana' | 'mes' | null; duracion?: number | null; equipo_id?: number | null; equipo_nombre?: string | null }
 let cotParaRenta: CotParaRenta | null = null
 const COT_RENTA_KEY = 'remali_cot_para_renta'
 function leerCotParaRenta(): CotParaRenta | null {
@@ -6215,8 +6225,9 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
      al puente y se manda al admin a Inventario a elegir la unidad; el
      RentModal llega precargado y liga la renta a esta cotización. */
   function concretarRenta() {
-    // La partida de renta ya dice modalidad y cuántos periodos: se precargan
-    // para que el RentModal llegue armado y solo falte elegir la unidad.
+    // La partida de renta dice QUÉ equipo pidió el cliente, en qué modalidad y
+    // cuántos periodos: todo se precarga para que el admin caiga en las unidades
+    // de ESE equipo y solo tenga que elegir cuál y tocar Rentar.
     const partida = c.items.find(i => i.modalidad === 'dia' || i.modalidad === 'semana' || i.modalidad === 'mes')
     fijarCotParaRenta({
       id: c.id, folio: c.folio,
@@ -6226,8 +6237,13 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
       usuario_id: c.usuario ?? null,
       modalidad: (partida?.modalidad as 'dia' | 'semana' | 'mes' | undefined) || null,
       duracion: partida?.cantidad || null,
+      equipo_id: partida?.equipo ?? null,
+      // El nombre del equipo va limpio (la descripción trae " · renta por día").
+      equipo_nombre: partida ? partida.descripcion.split(' · ')[0].split(' (promo')[0] : null,
     })
-    notify(`Elige la unidad y tócale Rentar: quedará ligada a la ${c.folio || 'cotización'}`, 'info')
+    notify(partida?.equipo
+      ? `El cliente pidió ${partida.descripcion.split(' · ')[0]}: elige la unidad y tócale Rentar`
+      : `Elige la unidad y tócale Rentar: quedará ligada a la ${c.folio || 'cotización'}`, 'info')
     onClose()
     onConcretarRenta?.()
   }
