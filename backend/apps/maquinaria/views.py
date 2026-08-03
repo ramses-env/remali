@@ -25,6 +25,7 @@ from google.oauth2 import id_token as google_id_token
 from .permissions import EsDueno, EsOperador, EsOperadorEditaAdmin, puede_de, nivel_de, NIVEL_ADMIN
 from .throttling import (
     SolicitudPublicaThrottle, LoginThrottle, RegistroThrottle, CambioPasswordThrottle,
+    RestablecerThrottle,
 )
 
 from django.conf import settings
@@ -32,7 +33,7 @@ from django.conf import settings
 from .models import (
     Equipo, Categoria, Marca, Tipo, ImagenProducto,
     Cupon, Notificacion, PerfilUsuario, crear_notificacion, nombre_propio,
-    ConfiguracionSitio, CorreoAviso, ObraCliente,
+    ConfiguracionSitio, CorreoAviso, ObraCliente, espejar_obra_predeterminada,
 )
 from .permissions import IsAdminGroupOrStaff
 
@@ -379,6 +380,126 @@ def cambiar_password(request):
     usuario.set_password(nueva)
     usuario.save(update_fields=['password'])
     return Response({'detail': 'Contraseña actualizada.', 'tenia_password': tenia_password})
+
+
+# ── Restablecer contraseña ("olvidé mi contraseña") ──────────────────────────
+# Flujo SIN sesión, en tres pasos, con el generador de tokens NATIVO de Django:
+#   1) POST olvide/                  → manda el correo con el enlace (uid+token).
+#   2) GET  restablecer/<uid>/<tok>/ → el front pregunta si el enlace sigue vivo.
+#   3) POST restablecer/             → fija la contraseña con {uid, token, password}.
+# El token NO se guarda en la base: Django lo firma con el hash de la contraseña
+# actual, así que caduca a las PASSWORD_RESET_TIMEOUT horas Y muere en cuanto la
+# contraseña cambia (usar el enlace una vez lo invalida). Ese es el motivo de usar
+# el generador nativo en lugar de inventar un token propio.
+
+def _usuario_de_uidb64(uidb64):
+    """Decodifica el uid del enlace a un usuario activo, o None si no cuadra."""
+    from django.utils.http import urlsafe_base64_decode
+    try:
+        uid = urlsafe_base64_decode(uidb64).decode()
+        return get_user_model().objects.filter(pk=uid, is_active=True).first()
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+@api_view(['POST'])
+@permission_classes([permissions.AllowAny])
+@throttle_classes([RestablecerThrottle])
+def solicitar_restablecer(request):
+    """Paso 1: recibe el correo y, si hay una cuenta CON contraseña, manda el enlace.
+
+    La respuesta es SIEMPRE la misma (200), exista o no la cuenta: si dijera "ese
+    correo no está registrado" convertiría el formulario en un detector de qué
+    correos tienen cuenta aquí.
+    """
+    from django.contrib.auth.tokens import default_token_generator
+    from django.utils.http import urlsafe_base64_encode
+    from django.utils.encoding import force_bytes
+
+    email = (request.data.get('email') or '').strip().lower()
+    neutra = Response({'detail': 'Si hay una cuenta con ese correo, te enviamos un enlace para restablecerla. Revisa también Spam.'})
+    if not email or '@' not in email:
+        return neutra
+
+    User = get_user_model()
+    user = User.objects.filter(email__iexact=email, is_active=True).order_by('id').first()
+    # Las cuentas de solo-Google no tienen contraseña utilizable: no hay nada que
+    # "recuperar", entran con Google. Se ignoran en silencio (respuesta neutra).
+    if not user or not user.has_usable_password():
+        return neutra
+
+    try:
+        uid = urlsafe_base64_encode(force_bytes(user.pk))
+        token = default_token_generator.make_token(user)
+        link = f'{settings.FRONTEND_URL.rstrip("/")}/restablecer/{uid}/{token}'
+        nombre = (getattr(user, 'first_name', '') or '').strip()
+        cfg = ConfiguracionSitio.get_solo()
+        negocio = cfg.negocio_nombre or 'REMALI'
+        horas = max(1, settings.PASSWORD_RESET_TIMEOUT // 3600)
+        import os
+        from .correo import enviar_async, enviar_plantilla_brevo
+        tpl = os.environ.get('BREVO_RESET_TEMPLATE_ID', '').strip()
+        if not enviar_plantilla_brevo(tpl, email, nombre, {'nombre': nombre, 'link': link, 'horas': horas}):
+            cuerpo = (
+                f'Hola {nombre}'.rstrip() + ',\n\n'
+                f'Pediste restablecer tu contraseña en {negocio}. Abre este enlace y '
+                f'elige una nueva (el enlace vence en {horas} horas):\n\n'
+                f'{link}\n\n'
+                f'Si no fuiste tú, ignora este correo: tu contraseña no cambia hasta '
+                f'que alguien abra el enlace y la reemplace.\n'
+            )
+            enviar_async(f'Restablece tu contraseña · {negocio}', cuerpo, [email])
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception('No se pudo enviar el restablecimiento a %s', email)
+
+    return neutra
+
+
+@api_view(['GET'])
+@permission_classes([permissions.AllowAny])
+def verificar_token_restablecer(request, uidb64, token):
+    """Paso 2: ¿el enlace sigue vivo? El front lo consulta ANTES de mostrar el
+    formulario, para avisar de un enlace vencido/usado sin hacer teclear en vano."""
+    from django.contrib.auth.tokens import default_token_generator
+    user = _usuario_de_uidb64(uidb64)
+    valido = bool(user and default_token_generator.check_token(user, token))
+    return Response({
+        'valido': valido,
+        'nombre': (getattr(user, 'first_name', '') or '').strip() if valido else '',
+    })
+
+
+@api_view(['POST'])
+@permission_classes([permissions.AllowAny])
+def restablecer_password(request):
+    """Paso 3: fija la contraseña nueva. Al guardarla cambia el hash de la clave,
+    así que el token queda muerto en el acto (el mismo enlace ya no sirve otra vez).
+
+    No lleva throttle propio: sin un token válido no hace nada, y adivinar un token
+    del generador nativo por fuerza bruta es inviable. Limitarlo aquí solo
+    penalizaría a quien se equivoca al elegir una contraseña que pasa las reglas.
+    """
+    from django.contrib.auth.tokens import default_token_generator
+
+    uidb64 = (request.data.get('uid') or '').strip()
+    token = (request.data.get('token') or '').strip()
+    nueva = request.data.get('password') or ''
+
+    user = _usuario_de_uidb64(uidb64)
+    if not user or not default_token_generator.check_token(user, token):
+        return Response({'detail': 'El enlace no es válido o ya venció. Pide uno nuevo.'}, status=400)
+
+    if not nueva:
+        return Response({'detail': 'Escribe tu contraseña nueva.'}, status=400)
+    try:
+        validate_password(nueva, user)
+    except DjangoValidationError as e:
+        return Response({'detail': ' '.join(e.messages)}, status=400)
+
+    user.set_password(nueva)
+    user.save(update_fields=['password'])
+    return Response({'detail': 'Tu contraseña quedó lista. Ya puedes iniciar sesión.'})
 
 
 def _bienvenida_brevo(email, nombre):
@@ -842,7 +963,14 @@ class ObrasClienteList(generics.ListCreateAPIView):
         return ObraCliente.objects.filter(usuario=self.request.user)
 
     def perform_create(self, serializer):
-        serializer.save(usuario=self.request.user)
+        u = self.request.user
+        # La primera obra del cliente queda como predeterminada sola.
+        obra = serializer.save(usuario=u, predeterminada=(
+            serializer.validated_data.get('predeterminada', False) or not u.obras.exists()
+        ))
+        if obra.predeterminada:
+            u.obras.exclude(pk=obra.pk).update(predeterminada=False)
+        espejar_obra_predeterminada(u)
 
 
 class ObraClienteDetail(generics.RetrieveUpdateDestroyAPIView):
@@ -851,6 +979,23 @@ class ObraClienteDetail(generics.RetrieveUpdateDestroyAPIView):
 
     def get_queryset(self):
         return ObraCliente.objects.filter(usuario=self.request.user)
+
+    def perform_update(self, serializer):
+        obra = serializer.save()
+        if obra.predeterminada:
+            self.request.user.obras.exclude(pk=obra.pk).update(predeterminada=False)
+        espejar_obra_predeterminada(self.request.user)
+
+    def perform_destroy(self, instance):
+        era = instance.predeterminada
+        super().perform_destroy(instance)
+        u = self.request.user
+        if era:
+            sig = u.obras.order_by('nombre').first()
+            if sig:
+                sig.predeterminada = True
+                sig.save(update_fields=['predeterminada'])
+        espejar_obra_predeterminada(u)
 
 
 @api_view(['GET'])

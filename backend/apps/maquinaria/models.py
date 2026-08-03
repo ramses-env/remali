@@ -125,16 +125,36 @@ class ObraCliente(models.Model):
     direccion = models.CharField(max_length=255, blank=True, default='')
     telefono = models.CharField(max_length=30, blank=True, default='')
     email = models.EmailField(blank=True, default='')
+    # La obra que se usa si el cliente no elige otra. Su dirección/responsable
+    # se espejan en el perfil (obra_direccion/obra_responsable), que es de donde
+    # ya leen las cotizaciones y el cálculo de datos_completos (el 5%).
+    predeterminada = models.BooleanField(default=False)
     creada = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         db_table = 'obras_cliente'
         verbose_name = 'Obra de cliente'
         verbose_name_plural = 'Obras de cliente'
-        ordering = ['nombre']
+        ordering = ['-predeterminada', 'nombre']
+
+    def save(self, *args, **kwargs):
+        # Reglas de la casa: nombres como propios, correos en minúsculas.
+        self.nombre = nombre_propio(self.nombre)
+        self.responsable = nombre_propio(self.responsable)
+        self.email = (self.email or '').strip().lower()
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return self.nombre
+
+
+def espejar_obra_predeterminada(usuario):
+    """Copia la obra predeterminada del cliente a los campos planos del perfil."""
+    perfil, _ = PerfilUsuario.objects.get_or_create(usuario=usuario)
+    obra = usuario.obras.order_by('-predeterminada', 'nombre').first()
+    perfil.obra_direccion = (obra.direccion if obra else '') or ''
+    perfil.obra_responsable = ((obra.responsable or obra.nombre) if obra else '') or ''
+    perfil.save(update_fields=['obra_direccion', 'obra_responsable'])
 
 
 class Categoria(models.Model):

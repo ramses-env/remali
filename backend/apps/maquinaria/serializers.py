@@ -13,7 +13,7 @@ class NotificacionSerializer(serializers.ModelSerializer):
 class ObraClienteSerializer(serializers.ModelSerializer):
     class Meta:
         model = ObraCliente
-        fields = ['id', 'nombre', 'responsable', 'direccion', 'telefono', 'email', 'creada']
+        fields = ['id', 'nombre', 'responsable', 'direccion', 'telefono', 'email', 'predeterminada', 'creada']
         read_only_fields = ['creada']
 
 
