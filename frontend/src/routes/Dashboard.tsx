@@ -311,7 +311,7 @@ function CommandPalette({ equipos, unidades, rentas, ventas, go, onClose }: {
   }
 
   return (
-    <div className="fixed inset-0 z-[100] bg-black/30 backdrop-blur-md flex items-start justify-center pt-[12vh] px-4" onClick={onClose}>
+    <div className="modal-in fixed inset-0 z-[100] bg-black/30 backdrop-blur-md flex items-start justify-center pt-[12vh] px-4" onClick={onClose}>
       <div onClick={e => e.stopPropagation()} className="relative w-full max-w-[560px] bg-surface/65 backdrop-blur-2xl backdrop-saturate-150 border border-white/15 rounded-2xl shadow-[0_24px_70px_rgba(17,24,39,0.45)] ring-1 ring-inset ring-white/10 overflow-hidden">
         {/* brillo superior tipo cristal */}
         <div className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-white/12 to-transparent" />
@@ -767,7 +767,7 @@ export default function Dashboard() {
     <div className="flex flex-col h-screen bg-app text-ink font-sans overflow-hidden">
       {/* Overlay móvil */}
       {sidebarOpen && (
-        <div className="fixed inset-0 bg-black/40 z-40 lg:hidden" onClick={() => setSidebarOpen(false)} />
+        <div className="modal-in fixed inset-0 bg-black/40 z-40 lg:hidden" onClick={() => setSidebarOpen(false)} />
       )}
 
       {/* ─── TOPBAR ─── */}
@@ -817,7 +817,7 @@ export default function Dashboard() {
                 <div onClick={closeNotifPanel} aria-hidden="true" className={`fixed inset-0 z-[54] bg-black/40 sm:hidden transition-opacity duration-200 motion-reduce:transition-none ${notifOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'}`} />
                 <div
                   ref={notifPanelRef} role="dialog" aria-label="Notificaciones"
-                  className={`fixed inset-x-3 top-[84px] z-[55] origin-top sm:absolute sm:inset-x-auto sm:right-0 sm:top-full sm:mt-2 sm:w-[380px] sm:max-w-[calc(100vw-2rem)] sm:z-auto sm:origin-top-right rounded-2xl border border-edge bg-surface shadow-[0_20px_50px_rgba(17,24,39,0.18)] overflow-hidden transform-gpu transition-[transform,opacity] duration-200 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none ${notifOpen ? 'opacity-100 scale-100' : 'opacity-0 scale-[0.96] pointer-events-none'}`}
+                  className={`fixed inset-x-3 top-[84px] z-[55] origin-top sm:absolute sm:inset-x-auto sm:right-0 sm:top-full sm:mt-2 sm:w-[380px] sm:max-w-[calc(100vw-2rem)] sm:z-[55] sm:origin-top-right rounded-2xl border border-edge bg-surface shadow-[0_20px_50px_rgba(17,24,39,0.18)] overflow-hidden transform-gpu transition-[transform,opacity] duration-200 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none ${notifOpen ? 'opacity-100 scale-100' : 'opacity-0 scale-[0.96] pointer-events-none'}`}
                 >
                   <div className="px-5 py-4 border-b border-edge flex items-center justify-between gap-3">
                     <div className="text-lg font-extrabold text-ink">Notificaciones</div>
@@ -2114,7 +2114,7 @@ function InventoryModal({ equipo, onClose, notify }: {
   }
 
   return (
-    <div className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm flex items-end sm:items-start justify-center p-0 sm:p-6" onClick={onClose}>
+    <div className="modal-in fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm flex items-end sm:items-start justify-center p-0 sm:p-6" onClick={onClose}>
       <div onClick={e => e.stopPropagation()} className="bg-surface w-full sm:max-w-5xl sm:rounded-3xl rounded-t-3xl border border-edge sm:my-auto max-h-[92vh] flex flex-col overflow-hidden shadow-[0_20px_50px_rgba(33,29,22,0.18)]">
         {/* Header */}
         <div className="px-6 py-5 border-b border-edge flex items-start justify-between gap-4">
@@ -2238,7 +2238,7 @@ function QRModal({ unit, equipo, onClose }: { unit: Unidad; equipo: Equipo; onCl
   }
 
   return (
-    <div className="fixed inset-0 z-[70] bg-black/70 backdrop-blur-sm flex items-center justify-center p-6" onClick={onClose}>
+    <div className="modal-in fixed inset-0 z-[70] bg-black/70 backdrop-blur-sm flex items-center justify-center p-6" onClick={onClose}>
       <div onClick={e => e.stopPropagation()} className="bg-surface border border-edge rounded-3xl p-8 max-w-xs w-full text-center">
         <h3 className="font-black text-ink mb-1">{unit.codigo}</h3>
         <p className="text-xs text-mute mb-5">{equipo.modelo}{unit.numero_serie ? ` · ${unit.numero_serie}` : ''}</p>
@@ -2899,7 +2899,7 @@ function LabelModal({ unit, onClose }: { unit: Unidad; onClose: () => void }) {
   }
 
   return (
-    <div className="fixed inset-0 z-[70] bg-black/70 backdrop-blur-sm flex items-center justify-center p-6" onClick={onClose}>
+    <div className="modal-in fixed inset-0 z-[70] bg-black/70 backdrop-blur-sm flex items-center justify-center p-6" onClick={onClose}>
       <div onClick={e => e.stopPropagation()} className="bg-surface border border-edge rounded-3xl p-7 max-w-sm w-full">
         <p className="text-[11px] font-mono uppercase tracking-[0.2em] text-gold mb-4">Etiqueta de identificación</p>
 
@@ -3162,7 +3162,7 @@ function EvidenciasRenta({ rentaId }: { rentaId: number }) {
       {bloque('devolucion', 'Al recibir de vuelta')}
       {error && <p className="text-[12px] text-red-500">{error}</p>}
       {zoom && createPortal(
-        <div className="fixed inset-0 z-[70] bg-black/75 flex items-center justify-center p-4" onClick={() => setZoom(null)}>
+        <div className="modal-in fixed inset-0 z-[70] bg-black/75 flex items-center justify-center p-4" onClick={() => setZoom(null)}>
           <div className="max-w-3xl w-full" onClick={e => e.stopPropagation()}>
             <img src={resolveMediaUrl(zoom.imagen)} alt={zoom.nota} className="w-full max-h-[80vh] object-contain rounded-xl" />
             <p className="text-center text-[12.5px] text-white/80 mt-3">
@@ -3222,7 +3222,7 @@ function AbonoModal({ saldo, onClose, onRegistrar }: {
   const n = Number(monto) || 0
 
   return createPortal(
-    <div className="fixed inset-0 z-[130] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
+    <div className="modal-in fixed inset-0 z-[130] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
       <div onClick={e => e.stopPropagation()} className="w-full max-w-sm bg-surface border border-edge rounded-2xl shadow-[0_24px_60px_rgba(0,0,0,0.3)] p-6">
         <h3 className="font-black text-ink">Registrar abono</h3>
         <p className="text-[12.5px] text-mute mt-1">Saldo actual: <b className="text-ink">{money(saldo)}</b></p>
@@ -4542,7 +4542,7 @@ function ObrasModal({ empresa, onClose, onChanged, notify }: {
   }
 
   return (
-    <div className="fixed inset-0 z-[65] bg-black/60 backdrop-blur-sm flex items-start justify-center p-0 sm:p-6 overflow-y-auto" onClick={onClose}>
+    <div className="modal-in fixed inset-0 z-[65] bg-black/60 backdrop-blur-sm flex items-start justify-center p-0 sm:p-6 overflow-y-auto" onClick={onClose}>
       <div onClick={e => e.stopPropagation()} className="w-full sm:max-w-[820px] my-0 sm:my-auto bg-surface border border-edge rounded-none sm:rounded-2xl min-h-screen sm:min-h-0 max-h-screen sm:max-h-[88vh] flex flex-col">
         <div className="px-6 py-4 border-b border-edge flex items-center justify-between gap-3">
           <div className="min-w-0">
@@ -4669,7 +4669,7 @@ function VenderRefaccionModal({ refaccion, notify, onClose, onSold }: {
   }
 
   return (
-    <div className="fixed inset-0 z-[70] bg-black/70 backdrop-blur-sm flex items-center justify-center p-6" onClick={onClose}>
+    <div className="modal-in fixed inset-0 z-[70] bg-black/70 backdrop-blur-sm flex items-center justify-center p-6" onClick={onClose}>
       <div onClick={e => e.stopPropagation()} className="bg-surface border border-edge rounded-3xl p-6 max-w-sm w-full shadow-[0_20px_50px_rgba(33,29,22,0.18)]">
         <h3 className="font-black text-ink mb-1">Vender refacción</h3>
         <p className="text-xs text-mute mb-5">{refaccion.nombre} · stock {refaccion.stock} · <span className="font-mono">{refaccion.codigo_barras}</span></p>
@@ -5502,7 +5502,7 @@ function SolicitudFacturaModal({ solicitud, notify, onClose, onChanged }: {
 
   const m = factEstadoMeta(s.estado)
   return (
-    <div className="fixed inset-0 z-[80] bg-black/60 backdrop-blur-sm flex items-start justify-center p-4 sm:p-6 overflow-y-auto" onClick={onClose}>
+    <div className="modal-in fixed inset-0 z-[80] bg-black/60 backdrop-blur-sm flex items-start justify-center p-4 sm:p-6 overflow-y-auto" onClick={onClose}>
       <div onClick={e => e.stopPropagation()} className="w-full sm:max-w-[820px] bg-surface border border-edge rounded-2xl overflow-hidden sm:my-auto max-h-[92vh] flex flex-col shadow-[0_20px_50px_rgba(33,29,22,0.18)]">
         <div className="px-6 py-4 border-b border-edge flex items-center justify-between shrink-0">
           <div>
@@ -6172,7 +6172,7 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
   const celda = 'w-full bg-transparent rounded-md px-2 py-1.5 text-sm text-ink placeholder-mute focus:outline-none focus:bg-surface-2 focus:ring-1 focus:ring-gold/40 transition disabled:opacity-60'
   const labelCot = 'block text-[10.5px] font-bold uppercase tracking-[0.09em] text-mute mb-2'
   return (
-    <div className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm flex items-start justify-center p-0 sm:p-6 overflow-y-auto" onClick={cerrar}>
+    <div className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm flex items-start justify-center p-0 sm:p-6 overflow-y-auto modal-in" onClick={cerrar}>
       <div onClick={(e: React.MouseEvent) => e.stopPropagation()} className="w-full sm:max-w-5xl my-0 sm:my-auto bg-surface border border-edge rounded-none sm:rounded-2xl shadow-[0_20px_50px_rgba(33,29,22,0.18)] min-h-screen sm:min-h-0 sm:max-h-[92vh] flex flex-col sm:overflow-hidden">
         <div className="px-5 sm:px-7 py-4 sm:py-5 border-b border-edge flex items-start justify-between gap-4 bg-surface shrink-0">
           <div className="min-w-0">
@@ -6216,24 +6216,34 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
                   )}
                 </div>
               </div>
-              <div className="grid sm:grid-cols-2 gap-x-6 gap-y-2 text-[13px]">
-                {c.datos_solicitud?.empresa && <div><span className="text-mute">Empresa:</span> <b className="text-ink">{c.datos_solicitud.empresa}</b></div>}
-                {c.cliente_email && <div><span className="text-mute">Email:</span> <b className="text-ink">{c.cliente_email}</b></div>}
-                {c.datos_solicitud?.obra?.responsable && <div><span className="text-mute">Responsable obra:</span> <b className="text-ink">{c.datos_solicitud.obra.responsable}</b></div>}
-                {c.datos_solicitud?.obra?.telefono && <div><span className="text-mute">Tel. obra:</span> <b className="text-ink">{c.datos_solicitud.obra.telefono}</b></div>}
-                {c.datos_solicitud?.obra?.direccion && <div className="sm:col-span-2"><span className="text-mute">Dirección obra:</span> <b className="text-ink">{c.datos_solicitud.obra.direccion}</b></div>}
-                {c.datos_solicitud?.obra?.email && <div className="sm:col-span-2"><span className="text-mute">Email obra:</span> <b className="text-ink">{c.datos_solicitud.obra.email}</b></div>}
+              {/* Ficha en bloques (etiqueta arriba, dato abajo): el "label: valor"
+                  corrido dejaba las dos columnas disparejas y costaba escanear. */}
+              <div className="grid grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-3.5">
+                {([
+                  ['Empresa', c.datos_solicitud?.empresa],
+                  ['Responsable de obra', c.datos_solicitud?.obra?.responsable],
+                  ['Tel. de obra', c.datos_solicitud?.obra?.telefono],
+                  ['Email', c.cliente_email],
+                  ['Dirección de obra', c.datos_solicitud?.obra?.direccion],
+                  ['Email de obra', c.datos_solicitud?.obra?.email],
+                ] as [string, string | undefined][]).filter(([, v]) => v).map(([k, v]) => (
+                  <div key={k} className={k.startsWith('Dirección') || k.startsWith('Email') ? 'col-span-2 lg:col-span-1' : ''}>
+                    <p className="text-[10.5px] font-bold uppercase tracking-[0.08em] text-mute">{k}</p>
+                    <p className="text-[13px] font-bold text-ink mt-0.5 break-words leading-snug">{v}</p>
+                  </div>
+                ))}
               </div>
             </div>
           )}
-          {/* Estado (izquierda) + Tipo (derecha) en una fila */}
-          <div className="flex flex-col sm:flex-row sm:items-start gap-4 sm:gap-6">
-            <div className="flex-1 min-w-0">
+          {/* Estado (ancho) + Entrega y Tipo en columnas parejas. En tableta el
+              estado toma su propia fila; en escritorio los tres van en una. */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_230px_230px] gap-5 lg:gap-6 items-start">
+            <div className="sm:col-span-2 lg:col-span-1 min-w-0">
               <p className={labelCot}>Estado</p>
               {/* SOLO LECTURA: se ven todas las etapas y en cuál va; los cambios
                   ocurren por acciones (botones, autorización del jefe, conversión,
                   aprobación de cancelación) — nunca tocando esta barra. */}
-              <div className="grid w-full rounded-xl border border-edge bg-surface-2 p-1 sm:max-w-[560px]"
+              <div className="grid w-full rounded-xl border border-edge bg-surface-2 p-1"
                 style={{ gridTemplateColumns: 'repeat(4, minmax(0, 1fr))' }}>
                 {[
                   { key: 'borrador', label: 'Borrador' },
@@ -6241,7 +6251,7 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
                   { key: 'aceptada', label: 'Aceptada' },
                   { key: c.estado === 'cancelada' ? 'cancelada' : 'rechazada', label: c.estado === 'cancelada' ? 'Cancelada' : 'Rechazada' },
                 ].map(e => (
-                  <span key={e.key} className={`text-center px-2 py-2 rounded-lg text-[13px] font-bold transition-colors ${
+                  <span key={e.key} className={`text-center px-2 py-1.5 rounded-lg text-[13px] font-bold transition-colors ${
                     c.estado === e.key
                       ? (e.key === 'rechazada' || e.key === 'cancelada' ? 'bg-red-600 text-white' : e.key === 'por_autorizar' ? 'bg-amber-500 text-black' : 'bg-ink text-app')
                       : 'text-mute'
@@ -6251,7 +6261,7 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
 
               {/* Acciones que SÍ mueven el estado, según dónde va */}
               {!bloqueada && c.estado === 'borrador' && (
-                <button onClick={() => cambiarEstado('enviada')} className="mt-2.5 h-10 px-4 rounded-full bg-ink text-app text-[13px] font-bold hover:opacity-90 transition-opacity">
+                <button onClick={() => cambiarEstado('enviada')} className="mt-2.5 h-10 px-4 rounded-full bg-ink text-app text-[13px] font-bold hover:opacity-90 transition active:scale-[0.98]">
                   Marcar como enviada
                 </button>
               )}
@@ -6260,10 +6270,10 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
                    confirma disponibilidad; el aviso a su campanita sale solo y
                    después nada más falta fecha/hora de entrega y convertir. */
                 <div className="mt-2.5 flex gap-2">
-                  <button onClick={() => cambiarEstado('aceptada')} className="h-10 px-4 rounded-full bg-emerald-600 text-white text-[13px] font-bold hover:bg-emerald-700 transition-colors">
+                  <button onClick={() => cambiarEstado('aceptada')} className="h-10 px-4 rounded-full bg-emerald-600 text-white text-[13px] font-bold hover:bg-emerald-700 transition active:scale-[0.98]">
                     Hay disponibilidad — aceptar
                   </button>
-                  <button onClick={() => cambiarEstado('rechazada')} className="h-10 px-4 rounded-full text-red-600 dark:text-red-400 text-[13px] font-bold hover:bg-red-500/10 transition-colors">
+                  <button onClick={() => cambiarEstado('rechazada')} className="h-10 px-4 rounded-full text-red-600 dark:text-red-400 text-[13px] font-bold hover:bg-red-500/10 transition active:scale-[0.98]">
                     Sin disponibilidad
                   </button>
                 </div>
@@ -6271,17 +6281,17 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
                 /* Tubería MANUAL (la capturaste tú para alguien sin cuenta):
                    el estado sigue lo que el cliente diga por teléfono/WhatsApp. */
                 <div className="mt-2.5 flex gap-2">
-                  <button onClick={() => cambiarEstado('aceptada')} className="h-10 px-4 rounded-full bg-emerald-600 text-white text-[13px] font-bold hover:bg-emerald-700 transition-colors">
+                  <button onClick={() => cambiarEstado('aceptada')} className="h-10 px-4 rounded-full bg-emerald-600 text-white text-[13px] font-bold hover:bg-emerald-700 transition active:scale-[0.98]">
                     El cliente la aceptó
                   </button>
-                  <button onClick={() => cambiarEstado('rechazada')} className="h-10 px-4 rounded-full text-red-600 dark:text-red-400 text-[13px] font-bold hover:bg-red-500/10 transition-colors">
+                  <button onClick={() => cambiarEstado('rechazada')} className="h-10 px-4 rounded-full text-red-600 dark:text-red-400 text-[13px] font-bold hover:bg-red-500/10 transition active:scale-[0.98]">
                     Rechazar
                   </button>
                 </div>
               ))}
               {!bloqueada && c.estado === 'aceptada' && (c.tipo === 'renta' || c.tipo === 'mixta') && (
                 <button onClick={concretarRenta}
-                  className="mt-2.5 h-10 px-4 rounded-full btn-renta text-[13px] font-bold">
+                  className="mt-2.5 h-10 px-4 rounded-full btn-renta text-[13px] font-bold transition active:scale-[0.98]">
                   Concretar renta →
                 </button>
               )}
@@ -6293,14 +6303,31 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
                 </div>
               )}
             </div>
-            <div className="sm:w-[230px] shrink-0">
+            <div className="min-w-0">
               <p className={labelCot}>Entrega prometida</p>
-              <input type="datetime-local"
-                value={c.entrega_prometida ? (() => { const d = new Date(c.entrega_prometida); const p = (n: number) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}` })() : ''}
-                onChange={e => guardarEntrega(e.target.value)}
-                className="w-full h-[38px] px-3 rounded-xl border border-edge bg-surface-2 text-[13.5px] text-ink focus:outline-none focus:border-gold/60 transition-colors disabled:opacity-50" />
+              {/* Display propio + input nativo superpuesto (opacity-0): conserva el
+                  selector del sistema pero sin el "mm/dd/yyyy" nativo, que rompía
+                  la línea visual del resto de campos. */}
+              <div className="relative">
+                <input type="datetime-local" aria-label="Fecha y hora de entrega prometida"
+                  value={c.entrega_prometida ? (() => { const d = new Date(c.entrega_prometida); const p = (n: number) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}` })() : ''}
+                  onChange={e => guardarEntrega(e.target.value)}
+                  className="peer absolute inset-0 w-full h-full opacity-0 cursor-pointer [color-scheme:light] dark:[color-scheme:dark]" />
+                <div className={`${input} pointer-events-none flex items-center justify-between gap-2 peer-focus:border-gold/60 ${c.entrega_prometida ? 'text-ink' : 'text-mute'}`}>
+                  <span className="truncate">{c.entrega_prometida
+                    ? new Date(c.entrega_prometida).toLocaleString('es-MX', { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' })
+                    : 'Elegir fecha y hora'}</span>
+                  {!c.entrega_prometida && <svg className="w-4 h-4 shrink-0 text-mute" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.8"><rect x="3" y="4.5" width="18" height="16" rx="2.5" /><path strokeLinecap="round" d="M3 9h18M8 3v3m8-3v3" /></svg>}
+                </div>
+                {c.entrega_prometida && (
+                  <button type="button" onClick={() => guardarEntrega('')} aria-label="Quitar fecha de entrega"
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 w-6 h-6 grid place-items-center rounded-md text-mute hover:text-ink hover:bg-surface transition-colors active:scale-90">
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.2"><path strokeLinecap="round" d="M6 6l12 12M18 6L6 18" /></svg>
+                  </button>
+                )}
+              </div>
             </div>
-            <div className="sm:w-[260px] shrink-0">
+            <div className="min-w-0">
               <p className={labelCot}>Tipo</p>
               <Segmentado
                 opciones={[{ key: 'venta', label: 'Venta' }, { key: 'renta', label: 'Renta' }]}
@@ -6325,7 +6352,7 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
                 <p className="text-[12px] text-mute mt-1.5">Cancelación aprobada: quedó como estado final.</p>
               ) : (
                 <button onClick={aprobarCancelacion}
-                  className="mt-2.5 h-9 px-4 rounded-full bg-red-600 text-white text-[12.5px] font-bold hover:bg-red-700 transition-colors">
+                  className="mt-2.5 h-9 px-4 rounded-full bg-red-600 text-white text-[12.5px] font-bold hover:bg-red-700 transition active:scale-[0.98]">
                   Aprobar cancelación
                 </button>
               )}
@@ -6628,7 +6655,7 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
       </div>
 
       {zoomFoto && createPortal(
-        <div className="fixed inset-0 z-[70] bg-black/75 flex items-center justify-center p-4" onClick={() => setZoomFoto(null)}>
+        <div className="modal-in fixed inset-0 z-[70] bg-black/75 flex items-center justify-center p-4" onClick={() => setZoomFoto(null)}>
           <img src={resolveMediaUrl(zoomFoto.imagen)} alt="Foto de la cotización" onClick={e => e.stopPropagation()}
             className="max-w-3xl w-full max-h-[85vh] object-contain rounded-xl" />
         </div>,
