@@ -622,20 +622,22 @@
   }
 
   /* Glass Radio Group - From Uiverse.io by chase2k25 */
-  .glass-radio-group { 
-    --bg: rgba(0, 0, 0, 0.05); 
-    --text: #000; 
-  
-    display: flex; 
-    position: relative; 
-    background: var(--bg); 
-    border-radius: 9999px; 
-    backdrop-filter: blur(12px); 
-    border: 1px solid rgba(0, 0, 0, 0.05);
-    overflow: hidden; 
-    width: fit-content; 
-  } 
-  
+  .glass-radio-group {
+    /* Theme-aware: en oscuro el fondo negro al 5% y el texto negro se perdían.
+       Ahora la pista y el texto salen de los tokens y se ven en ambos temas. */
+    --bg: var(--c-surface-2);
+    --text: var(--c-mute);
+
+    display: flex;
+    position: relative;
+    background: var(--bg);
+    border-radius: 9999px;
+    backdrop-filter: blur(12px);
+    border: 1px solid var(--c-border);
+    overflow: hidden;
+    width: fit-content;
+  }
+
   .glass-radio-group input { 
     display: none; 
   } 
@@ -696,9 +698,14 @@
     transform: translateX(100%); 
   } 
   
-  #plan-mes:checked ~ .glass-glider { 
-    transform: translateX(200%); 
+  #plan-mes:checked ~ .glass-glider {
+    transform: translateX(200%);
   }
+
+  /* Mismo glider para el filtro Todos / Comprar / Rentar (3 opciones). */
+  #uso-todos:checked ~ .glass-glider { transform: translateX(0%); }
+  #uso-venta:checked ~ .glass-glider { transform: translateX(100%); }
+  #uso-renta:checked ~ .glass-glider { transform: translateX(200%); }
 
   /* Wave Group Input */
   .wave-group { 

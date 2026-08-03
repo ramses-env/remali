@@ -374,17 +374,16 @@ export default function EquiposList() {
 
           {/* Controles derecha */}
           <div className="flex items-center gap-3 flex-wrap">
-            {/* Segmented Comprar / Rentar */}
-            <div className="flex items-center p-1 rounded-full border border-edge bg-surface-2">
-              {([['', 'Todos'], ['venta', 'Comprar'], ['renta', 'Rentar']] as const).map(([val, lbl]) => (
-                <button
-                  key={val}
-                  onClick={() => setUso(val)}
-                  className={`px-3.5 py-1.5 rounded-full text-xs font-semibold transition-colors ${uso === val ? 'bg-gold text-black' : 'text-mute hover:text-ink'}`}
-                >
-                  {lbl}
-                </button>
-              ))}
+            {/* Segmentado Todos / Comprar / Rentar — mismo estilo glass que el
+                selector de periodo (glider deslizante). */}
+            <div className="glass-radio-group" role="radiogroup" aria-label="Tipo">
+              <input type="radio" name="uso" id="uso-todos" checked={uso === ''} onChange={() => setUso('')} />
+              <label htmlFor="uso-todos">Todos</label>
+              <input type="radio" name="uso" id="uso-venta" checked={uso === 'venta'} onChange={() => setUso('venta')} />
+              <label htmlFor="uso-venta">Comprar</label>
+              <input type="radio" name="uso" id="uso-renta" checked={uso === 'renta'} onChange={() => setUso('renta')} />
+              <label htmlFor="uso-renta">Rentar</label>
+              <div className="glass-glider"></div>
             </div>
 
             {/* Filtros mobile */}
@@ -414,8 +413,9 @@ export default function EquiposList() {
               <svg className="w-3.5 h-3.5 absolute right-3.5 top-1/2 -translate-y-1/2 text-mute pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" /></svg>
             </div>
 
-            {/* Toggle precio */}
-            <PriceUnitToggle />
+            {/* Precio por periodo: SOLO aplica a renta. En Comprar no tiene
+                sentido (una venta no se cobra por día/semana/mes). */}
+            {uso !== 'venta' && <PriceUnitToggle />}
 
             {/* PDF con opciones de descarga */}
             <div className="relative" ref={dlRef}>
