@@ -51,10 +51,11 @@
   --chart-blue:   #6E8CF0;   /* azul aciano */
   --chart-green:  #57BE86;   /* verde menta */
   --chart-gray:   #AEB6C9;   /* gris lavanda */
-  /* Fuente de los NÚMEROS en todo el sitio: su "1" es un trazo limpio y recto
-     (sin la patita del sans). Un solo lugar para cambiarla si algún día se
-     quiere otra. Se aplica vía la regla global de más abajo. */
-  --font-num: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  /* Fuente de los NÚMEROS en todo el sitio. Pila de SISTEMA: en cada equipo usa
+     su tipografía nativa —SF Pro en Mac/iPhone, Segoe UI en Windows, Roboto en
+     Android—, todas con cifras limpias y un "1" recto. Cero carga de red. Un
+     solo lugar para cambiarla. Se aplica vía la regla global de más abajo. */
+  --font-num: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
 }
 
 .dark {
@@ -179,6 +180,9 @@
 .tabular-nums,
 .text-price {
   font-family: var(--font-num);
+  /* Los montos venían con tracking apretado (afinado para el sans anterior) y
+     se sentían juntos; un pelín de aire y quedan legibles sin verse sueltos. */
+  letter-spacing: 0.02em;
 }
 
 /* Entrada escalonada (stagger) para listas — curva ease-out fuerte */
