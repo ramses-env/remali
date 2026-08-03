@@ -2951,6 +2951,7 @@ type MovimientoRenta = { entregada?: boolean; recogida?: boolean; en?: string | 
 type RentaFull = RentaActiva & {
   entrega?: MovimientoRenta; recoleccion?: MovimientoRenta
   cuenta?: string | null
+  usuario_id?: number | null
   pagos?: { fecha: string; monto: string; metodo: string; por?: string }[]
   pagado?: string; saldo?: string
   factura_estado?: string | null
@@ -5345,6 +5346,9 @@ type GrupoAdeudo = {
   clave: string
   nombre: string
   tipo: 'cuenta' | 'empresa' | 'mostrador'
+  // La identidad que lo agrupa, para poder fusionar hacia ella en el backend.
+  usuarioId: number | null
+  empresaId: number | null
   telefono: string
   total: number
   rentas: RentaFull[]
@@ -5353,14 +5357,15 @@ function agruparAdeudos(rentas: RentaFull[]): GrupoAdeudo[] {
   const mapa = new Map<string, GrupoAdeudo>()
   for (const r of rentas) {
     let clave: string, nombre: string, tipo: GrupoAdeudo['tipo']
-    if (r.cuenta) { clave = `u:${r.cuenta.toLowerCase()}`; nombre = r.cuenta; tipo = 'cuenta' }
-    else if (r.empresa?.id) { clave = `e:${r.empresa.id}`; nombre = r.empresa.nombre; tipo = 'empresa' }
+    let usuarioId: number | null = null, empresaId: number | null = null
+    if (r.cuenta) { clave = `u:${r.cuenta.toLowerCase()}`; nombre = r.cuenta; tipo = 'cuenta'; usuarioId = r.usuario_id ?? null }
+    else if (r.empresa?.id) { clave = `e:${r.empresa.id}`; nombre = r.empresa.nombre; tipo = 'empresa'; empresaId = r.empresa.id }
     else {
       const n = (r.cliente || r.cliente_nombre || '').trim()
       clave = `n:${n.toLowerCase() || r.id}`; nombre = n || 'Sin nombre'; tipo = 'mostrador'
     }
     let g = mapa.get(clave)
-    if (!g) { g = { clave, nombre, tipo, telefono: '', total: 0, rentas: [] }; mapa.set(clave, g) }
+    if (!g) { g = { clave, nombre, tipo, usuarioId, empresaId, telefono: '', total: 0, rentas: [] }; mapa.set(clave, g) }
     g.rentas.push(r)
     g.total += Number(r.saldo || 0)
     if (!g.telefono && r.telefono_cliente) g.telefono = r.telefono_cliente
@@ -5400,6 +5405,42 @@ function AdeudosAdmin({ datos, reload, notify }: {
       setAbonando(null)
       reload()
     } catch { /* el interceptor avisa */ }
+  }
+
+  // Identidad de un grupo, tal como la espera el backend para fusionar.
+  const spec = (g: GrupoAdeudo) =>
+    g.tipo === 'cuenta' ? { usuario_id: g.usuarioId }
+      : g.tipo === 'empresa' ? { empresa_id: g.empresaId }
+        : { nombre: g.nombre }
+
+  /* Fusionar: "esta tarjeta ES la misma persona que aquella". Se eligen el
+     destino de entre los demás clientes y TODAS las rentas del origen pasan a
+     esa identidad (historial completo, no solo lo que debe). */
+  async function fusionar(origen: GrupoAdeudo) {
+    const otros = grupos.filter(g => g.clave !== origen.clave)
+    if (!otros.length) return
+    const sel = await elegir({
+      titulo: `Fusionar a ${origen.nombre}`,
+      mensaje: 'Elige con quién es la misma persona. Todas sus rentas pasarán a ese cliente.',
+      opciones: otros.map(o => ({ valor: o.clave, label: o.nombre, detalle: `${TIPO_ADEUDO[o.tipo].label} · debe ${money(o.total)}` })),
+    })
+    if (!sel || !sel[0]) return
+    const destino = otros.find(o => o.clave === sel[0])
+    if (!destino) return
+    const ok = await confirmar({
+      titulo: 'Fusionar clientes',
+      mensaje: `Todas las rentas de "${origen.nombre}" pasarán a "${destino.nombre}". Afecta su historial completo, no solo los adeudos. Esto no se deshace solo.`,
+      aceptar: 'Sí, fusionar',
+      tono: 'peligro',
+    })
+    if (!ok) return
+    try {
+      const r = await api.post<{ detalle?: string }>('/rentas/adeudos/fusionar/', { origen: spec(origen), destino: spec(destino) })
+      notify(r.data?.detalle || 'Clientes fusionados')
+      reload()
+    } catch (e) {
+      notify((e as { response?: { data?: { detalle?: string } } })?.response?.data?.detalle || 'No se pudo fusionar', 'err')
+    }
   }
 
   return (
@@ -5478,6 +5519,16 @@ function AdeudosAdmin({ datos, reload, notify }: {
                         </div>
                       )
                     })}
+                    {/* Fusionar: por si el mismo cliente quedó tecleado de dos
+                        formas ("Naomi" vs "Naomí"). Solo tiene sentido con otros
+                        clientes a los cuales fundirlo. */}
+                    {grupos.length > 1 && (
+                      <button onClick={() => fusionar(g)}
+                        className="w-full flex items-center gap-1.5 px-4 sm:px-5 py-2.5 text-[12px] font-semibold text-mute hover:text-ink hover:bg-surface-2 transition-colors">
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M7 8a4 4 0 1 0 0-.01M17 16a4 4 0 1 0 0-.01M7 8h6a4 4 0 0 1 4 4v4" /></svg>
+                        ¿Es la misma persona que otro cliente? Fusionar
+                      </button>
+                    )}
                   </div>
                 )}
               </div>

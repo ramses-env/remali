@@ -60,6 +60,7 @@ def _serialize_renta(r: Renta, ver_dinero: bool = True):
     saldo = max((r.total or _D('0')) + (r.recargo or _D('0')) - pagado, _D('0'))
     datos = {
         'id': r.id,
+        'usuario_id': r.usuario_id,
         # Cuenta de cliente vinculada (para "Tus rentas"); None = sin vincular.
         'cuenta': ((f'{r.usuario.first_name} {r.usuario.last_name}'.strip()
                     or r.usuario.get_username()) if r.usuario_id else None),
@@ -158,6 +159,72 @@ def listar_rentas(request):
         qs = qs.filter(estado=estado)
     data = [_serialize_renta(r) for r in qs.order_by('-creado_en')]
     return Response({'rentas': data})
+
+
+def _rentas_de_identidad(spec):
+    """Todas las rentas de un 'cliente', según la identidad que lo agrupa:
+    cuenta > empresa > nombre de mostrador (mismo orden que la vista)."""
+    from maquinaria.models import nombre_propio
+    if spec.get('usuario_id'):
+        return Renta.objects.filter(usuario_id=spec['usuario_id'])
+    if spec.get('empresa_id'):
+        return Renta.objects.filter(empresa_id=spec['empresa_id'], usuario__isnull=True)
+    nombre = (spec.get('nombre') or '').strip()
+    if nombre:
+        return Renta.objects.filter(usuario__isnull=True, empresa__isnull=True,
+                                    cliente__iexact=nombre_propio(nombre))
+    return Renta.objects.none()
+
+
+@api_view(['POST'])
+@permission_classes([EsOperador])
+def fusionar_cliente_adeudos(request):
+    """Funde dos 'clientes' en uno: reasigna TODAS las rentas del origen a la
+    identidad del destino. Resuelve el caso de un mismo cliente tecleado de
+    dos formas ('Naomi' vs 'Naomí') que salía como dos registros."""
+    from maquinaria.models import nombre_propio
+    d = request.data or {}
+    origen, destino = d.get('origen') or {}, d.get('destino') or {}
+
+    def clave(s):
+        if s.get('usuario_id'): return f"u:{s['usuario_id']}"
+        if s.get('empresa_id'): return f"e:{s['empresa_id']}"
+        return f"n:{nombre_propio((s.get('nombre') or '').strip()).lower()}"
+    if not (origen.get('usuario_id') or origen.get('empresa_id') or (origen.get('nombre') or '').strip()):
+        return Response({'detalle': 'Falta identificar el cliente de origen.'}, status=400)
+    if not (destino.get('usuario_id') or destino.get('empresa_id') or (destino.get('nombre') or '').strip()):
+        return Response({'detalle': 'Falta identificar el cliente de destino.'}, status=400)
+    if clave(origen) == clave(destino):
+        return Response({'detalle': 'El origen y el destino son el mismo cliente.'}, status=400)
+
+    rentas = list(_rentas_de_identidad(origen))
+    if not rentas:
+        return Response({'detalle': 'No se encontraron rentas del cliente de origen.'}, status=400)
+
+    from django.utils import timezone
+    for r in rentas:
+        campos = ['actualizado_en']
+        if destino.get('usuario_id'):
+            r.usuario_id = destino['usuario_id']; campos.append('usuario')
+        elif destino.get('empresa_id'):
+            r.empresa_id = destino['empresa_id']; r.usuario = None; campos += ['empresa', 'usuario']
+        else:
+            r.cliente = nombre_propio(destino['nombre']); r.usuario = None; r.empresa = None
+            campos += ['cliente', 'usuario', 'empresa']
+        r.actualizado_en = timezone.now()
+        # save() normal para disparar señales (el latido repinta la vista).
+        r.save(update_fields=list(set(campos)))
+
+    nombre_dest = (destino.get('nombre') or '').strip()
+    if destino.get('usuario_id'):
+        from django.contrib.auth import get_user_model
+        u = get_user_model().objects.filter(pk=destino['usuario_id']).first()
+        nombre_dest = (u.get_full_name() or u.get_username()) if u else 'la cuenta'
+    elif destino.get('empresa_id'):
+        from empresas.models import Empresa
+        emp = Empresa.objects.filter(pk=destino['empresa_id']).first()
+        nombre_dest = emp.nombre if emp else 'la empresa'
+    return Response({'detalle': f'{len(rentas)} renta(s) quedaron bajo {nombre_propio(nombre_dest)}.', 'movidas': len(rentas)})
 
 
 @api_view(['GET'])

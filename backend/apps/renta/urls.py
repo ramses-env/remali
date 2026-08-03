@@ -12,6 +12,7 @@ urlpatterns = [
     path('rentas/<int:pk>/ticket/', views.ticket_renta, name='ticket_renta'),
     path('rentas/<int:pk>/vincular/', views.vincular_cuenta, name='vincular_cuenta'),
     path('rentas/adeudos/', views.rentas_adeudos, name='rentas_adeudos'),
+    path('rentas/adeudos/fusionar/', views.fusionar_cliente_adeudos, name='fusionar_cliente_adeudos'),
     path('rentas/<int:pk>/cancelar-reserva/', views.cancelar_reserva_cliente, name='cancelar_reserva_cliente'),
     path('rentas/<int:pk>/abonos/', views.registrar_abono, name='registrar_abono'),
     path('rentas/<int:pk>/por-facturar/', views.mandar_por_facturar_renta, name='renta_por_facturar'),
