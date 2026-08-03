@@ -42,7 +42,7 @@ export default function EtiquetaModal({ refaccion, onClose }: { refaccion: Etiqu
   const precio = Number(refaccion.precio_venta) || 0
 
   return createPortal(
-    <div className="lbl-overlay fixed inset-0 z-[95] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
+    <div className="lbl-overlay modal-in fixed inset-0 z-[95] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
       <div className="lbl-card bg-surface border border-edge rounded-2xl overflow-hidden w-full max-w-[320px]" onClick={e => e.stopPropagation()}>
         <div className="lbl-scroll bg-neutral-200 p-5 flex justify-center">
           <div id="etiqueta-print" className="etiqueta">

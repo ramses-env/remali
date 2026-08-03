@@ -128,7 +128,7 @@ export default function VentaDetalleModal({ venta, onClose, onChanged, notify }:
     : (venta.origen ? `Cotización ${venta.origen.folio}` : 'mostrador')
 
   return createPortal(
-    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 sm:p-6 bg-black/45 backdrop-blur-[2px] overflow-y-auto" onClick={onClose}>
+    <div className="modal-in fixed inset-0 z-[60] flex items-center justify-center p-4 sm:p-6 bg-black/45 backdrop-blur-[2px] overflow-y-auto" onClick={onClose}>
       <div className="w-full max-w-[560px] bg-surface rounded-[22px] border border-edge shadow-[0_30px_70px_rgba(0,0,0,0.28)] overflow-hidden my-auto" onClick={e => e.stopPropagation()}>
 
         {/* Encabezado */}

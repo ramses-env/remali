@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
-  BadgePercent, CalendarClock, Check, Copy, Eye, EyeOff, FileText, Loader2,
-  Pencil, Plus, ShoppingBag, Trash2, TriangleAlert,
+  BadgePercent, Check, Copy, Eye, EyeOff, Loader2,
+  Pencil, Plus, Trash2, TriangleAlert,
 } from 'lucide-react'
 
 import api from '../lib/api'
@@ -229,7 +229,7 @@ export default function Perfil() {
   ]
 
   return (
-    <div className="mx-auto max-w-6xl px-4 sm:px-6 pt-28 pb-36">
+    <div className="contenedor pt-28 pb-36">
       <div className="mb-5"><Migas items={[{ label: 'Inicio', to: '/' }, { label: 'Mi perfil' }]} /></div>
 
       {/* ── Hero: quién eres + qué tan completo va el perfil ── */}
@@ -279,16 +279,6 @@ export default function Perfil() {
               )}
             </button>
           ))}
-          <div className="mx-3 my-1.5 hidden border-t border-edge lg:block" />
-          <Link to="/mis-cotizaciones" className="flex shrink-0 items-center gap-2.5 rounded-[13px] px-4 py-3 text-[15px] font-medium text-mute transition-colors hover:text-ink lg:py-3.5">
-            <FileText className="h-4 w-4" /> Mis cotizaciones
-          </Link>
-          <Link to="/mis-rentas" className="flex shrink-0 items-center gap-2.5 rounded-[13px] px-4 py-3 text-[15px] font-medium text-mute transition-colors hover:text-ink lg:py-3.5">
-            <CalendarClock className="h-4 w-4" /> Tus rentas
-          </Link>
-          <Link to="/mis-compras" className="flex shrink-0 items-center gap-2.5 rounded-[13px] px-4 py-3 text-[15px] font-medium text-mute transition-colors hover:text-ink lg:py-3.5">
-            <ShoppingBag className="h-4 w-4" /> Mis compras
-          </Link>
         </aside>
 
         {/* ── Contenido ── */}
@@ -365,7 +355,7 @@ export default function Perfil() {
       {/* ── Barra de guardar: aparece solo cuando hay cambios ── */}
       {(dirty || guardado || errorGuardar) && (
         <div className="fixed inset-x-0 bottom-0 z-[70] border-t border-edge bg-surface/95 backdrop-blur-md">
-          <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-4 py-3.5 sm:px-6">
+          <div className="contenedor flex flex-wrap items-center justify-between gap-3 py-3.5">
             <span className={`text-sm ${errorGuardar ? 'text-red-500 font-semibold' : 'text-mute'}`}>
               {errorGuardar || (guardado && !dirty ? 'Todo guardado.' : 'Tienes cambios sin guardar.')}
             </span>

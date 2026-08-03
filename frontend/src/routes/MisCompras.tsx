@@ -73,7 +73,7 @@ export default function MisCompras() {
   const canceladas = compras.filter(c => c.estado === 'cancelada')
 
   return (
-    <div className="mx-auto max-w-4xl px-6 pt-28 pb-16">
+    <div className="contenedor pt-28 pb-16">
       <header className="mb-8">
         <div className="mb-3"><Migas items={[{ label: 'Inicio', to: '/' }, { label: 'Mis compras' }]} /></div>
         <h1 className="text-2xl font-black tracking-tight text-ink sm:text-3xl">Mis compras</h1>

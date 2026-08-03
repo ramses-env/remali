@@ -10,7 +10,7 @@ export default function Footer() {
   const telHref = tel.replace(/\D+/g, '')
   return (
     <footer className="border-t border-edge bg-surface text-mute">
-      <div className="mx-auto max-w-7xl px-6 lg:px-12 py-16">
+      <div className="contenedor py-16">
         <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-10 mb-12">
           <div className="lg:col-span-2">
             <div className="flex items-center gap-3 mb-4">

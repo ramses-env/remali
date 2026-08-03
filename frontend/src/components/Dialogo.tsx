@@ -47,7 +47,7 @@ export default function DialogoHost() {
   }
 
   return createPortal(
-    <div className="fixed inset-0 z-[130] bg-black/60 backdrop-blur-sm flex items-center justify-center p-6" onClick={cancelar}>
+    <div className="modal-in fixed inset-0 z-[130] bg-black/60 backdrop-blur-sm flex items-center justify-center p-6" onClick={cancelar}>
       <div onClick={e => e.stopPropagation()}
         className="w-full max-w-sm bg-surface border border-edge rounded-2xl p-6 shadow-[0_24px_60px_rgba(0,0,0,0.45)]">
         <h2 className="text-[16.5px] font-extrabold text-ink leading-snug">{actual.titulo}</h2>

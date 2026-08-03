@@ -43,7 +43,7 @@ export default function Navbar() {
           : 'bg-app/70 backdrop-blur-md border-transparent py-5'
       }`}
     >
-      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 flex items-center justify-between">
+      <div className="contenedor flex items-center justify-between">
         {/* Logo */}
         <Link to="/" className="flex items-center gap-3 group">
           <LogoRemali className="w-10 h-10 text-ink group-hover:text-gold transition-colors" />
@@ -128,6 +128,27 @@ export default function Navbar() {
                       <svg className="w-4 h-4 text-mute" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.8"><circle cx="12" cy="8" r="4" /><path d="M4.5 20a7.5 7.5 0 0 1 15 0" /></svg>
                       {esCliente ? 'Perfil' : 'Panel'}
                     </Link>
+                    {/* Lo transaccional del cliente vive aquí, al alcance desde
+                        cualquier página — no enterrado dentro del perfil. */}
+                    {esCliente && (
+                      <div className="border-t border-edge">
+                        <Link to="/mis-cotizaciones" onClick={() => setMenuCuenta(false)}
+                          className="flex items-center gap-3 px-4 py-3 text-[14px] font-semibold text-ink hover:bg-surface-2 transition-colors">
+                          <svg className="w-4 h-4 text-mute" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5" /></svg>
+                          Mis cotizaciones
+                        </Link>
+                        <Link to="/mis-rentas" onClick={() => setMenuCuenta(false)}
+                          className="flex items-center gap-3 px-4 py-3 text-[14px] font-semibold text-ink hover:bg-surface-2 transition-colors">
+                          <svg className="w-4 h-4 text-mute" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4.5" width="18" height="16" rx="2" /><path d="M3 9h18M8 2.5v4m8-4v4" /><path d="M12 13v3l2 1" /></svg>
+                          Tus rentas
+                        </Link>
+                        <Link to="/mis-compras" onClick={() => setMenuCuenta(false)}
+                          className="flex items-center gap-3 px-4 py-3 text-[14px] font-semibold text-ink hover:bg-surface-2 transition-colors">
+                          <svg className="w-4 h-4 text-mute" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z" /><path d="M3 6h18" /><path d="M16 10a4 4 0 0 1-8 0" /></svg>
+                          Mis compras
+                        </Link>
+                      </div>
+                    )}
                     <button onClick={() => { setMenuCuenta(false); setConfirm(true) }}
                       className="w-full flex items-center gap-3 px-4 py-3 text-[14px] font-semibold text-red-500 hover:bg-red-500/10 transition-colors border-t border-edge">
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" /></svg>

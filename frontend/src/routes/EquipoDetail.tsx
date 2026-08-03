@@ -168,7 +168,7 @@ export default function EquipoDetail() {
   if (!e) {
     return (
       <div className="bg-app min-h-screen text-ink">
-        <div className="max-w-[1320px] mx-auto px-4 sm:px-8 pt-24 pb-10 grid grid-cols-1 min-[980px]:grid-cols-[minmax(0,1fr)_400px] gap-10 animate-pulse">
+        <div className="contenedor pt-24 pb-10 grid grid-cols-1 min-[980px]:grid-cols-[minmax(0,1fr)_400px] gap-10 animate-pulse">
           <div><div className="h-[460px] bg-surface-2 rounded-2xl" /><div className="flex gap-2.5 mt-3">{[0, 1, 2].map(i => <div key={i} className="w-20 h-20 bg-surface-2 rounded-xl" />)}</div></div>
           <div className="h-96 bg-surface-2 rounded-[22px]" />
         </div>
@@ -199,7 +199,7 @@ export default function EquipoDetail() {
     <div className="bg-app min-h-screen text-ink">
       <input ref={fileInputRef} type="file" accept="image/*" multiple className="hidden" onChange={subirImagenes} />
 
-      <div className="max-w-[1320px] mx-auto px-4 sm:px-8 pt-24">
+      <div className="contenedor pt-24">
         {/* Breadcrumb */}
         <div className="pb-4 text-[13.5px] text-mute flex items-center gap-2.5 flex-wrap">
           <button
@@ -472,7 +472,7 @@ export default function EquipoDetail() {
       </div>
 
       {fullImage && activeSrc && (
-        <div className="fixed inset-0 z-50 bg-black/60 grid place-items-center p-4" onClick={() => setFullImage(false)}>
+        <div className="modal-in fixed inset-0 z-50 bg-black/60 grid place-items-center p-4" onClick={() => setFullImage(false)}>
           <div className="relative w-[94vw] max-w-5xl h-[82vh] rounded-2xl bg-surface border border-edge p-4 sm:p-6" onClick={ev => ev.stopPropagation()}>
             <img src={activeSrc} alt={e.modelo} className="w-full h-full object-contain" crossOrigin="anonymous" referrerPolicy="no-referrer" />
             <button aria-label="Cerrar" onClick={() => setFullImage(false)} className="absolute top-3 right-3 w-10 h-10 rounded-full bg-surface border border-edge text-ink grid place-items-center">

@@ -377,7 +377,7 @@ export default function Cotizacion() {
     ]
     return (
       <div className="bg-app min-h-screen text-ink">
-        <div className="max-w-[1320px] mx-auto px-4 sm:px-8 pt-24 pb-16 flex flex-col gap-5">
+        <div className="contenedor pt-24 pb-16 flex flex-col gap-5">
 
           {/* Encabezado */}
           <div className="rounded-[20px] border border-edge bg-surface px-6 sm:px-8 py-7 flex flex-col min-[900px]:flex-row min-[900px]:items-center gap-6 justify-between">

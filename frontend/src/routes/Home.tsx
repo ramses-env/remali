@@ -367,7 +367,7 @@ export default function Home() {
       {/* ══════════════════════════════════
           HERO
       ══════════════════════════════════ */}
-      <section className="hero-section relative min-h-screen flex flex-col justify-center px-6 md:px-16 lg:px-24 pt-32 pb-24 overflow-hidden">
+      <section className="hero-section relative min-h-screen flex flex-col justify-center pt-32 pb-24 overflow-hidden">
 
         {/* Grid bg con parallax */}
         <div className="hero-grid absolute inset-[-20%] pointer-events-none will-change-transform">
@@ -387,6 +387,9 @@ export default function Home() {
           <div className="absolute bottom-[-10%] left-[-5%] w-[400px] h-[400px] rounded-full bg-orange-600/8 blur-[110px]" />
         </div>
 
+        {/* Contenido del hero alineado al contenedor estándar; el fondo (rejilla,
+            glows) y el "scroll down" siguen a sangre completa. */}
+        <div className="contenedor relative z-10">
         <p className="relative z-10 text-[11px] font-mono text-mute tracking-[0.35em] mb-10 uppercase">
           Remali — Maquinaria Ligera · Est. 2026
         </p>
@@ -453,6 +456,7 @@ export default function Home() {
             </div>
           ))}
         </div>
+        </div>
 
         {/* Scroll hint */}
         <div className="absolute bottom-10 right-10 hidden md:flex flex-col items-end gap-3 text-mute">
@@ -479,8 +483,8 @@ export default function Home() {
       {/* ══════════════════════════════════
           INTRO — párrafo grande con reveal
       ══════════════════════════════════ */}
-      <section className="intro-section py-28 px-6 md:px-16 lg:px-24">
-        <div className="max-w-screen-xl mx-auto">
+      <section className="intro-section py-28">
+        <div className="contenedor">
           <div className="intro-line h-px bg-gold/40 w-0 mb-14" />
           <div className="overflow-hidden">
             <p className="text-3xl md:text-4xl lg:text-5xl font-black leading-[1.15] text-ink max-w-4xl">
@@ -525,8 +529,8 @@ export default function Home() {
       {/* ══════════════════════════════════
           GALERÍA — imágenes con clipPath expand
       ══════════════════════════════════ */}
-      <section className="pb-28 px-6 md:px-16 lg:px-24">
-        <div className="max-w-screen-xl mx-auto">
+      <section className="pb-28">
+        <div className="contenedor">
           <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-6 mb-16">
             <div>
               <p className="text-gold text-[11px] font-mono uppercase tracking-[0.25em] mb-3">— Nuestro equipo</p>
@@ -614,8 +618,8 @@ export default function Home() {
       {/* ══════════════════════════════════
           STATS — contadores
       ══════════════════════════════════ */}
-      <section className="stats-section py-28 px-6 md:px-16 lg:px-24">
-        <div className="max-w-screen-xl mx-auto">
+      <section className="stats-section py-28">
+        <div className="contenedor">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-8 md:gap-0 md:divide-x divide-edge">
             {[
               { target: 150, suffix: '+', label: 'Proyectos completados' },
@@ -638,8 +642,8 @@ export default function Home() {
       {/* ══════════════════════════════════
           FEATURES — cuadrícula con hover
       ══════════════════════════════════ */}
-      <section className="features-section pb-28 px-6 md:px-16 lg:px-24">
-        <div className="max-w-screen-xl mx-auto">
+      <section className="features-section pb-28">
+        <div className="contenedor">
           <div className="mb-14">
             <p className="text-gold text-[11px] font-mono uppercase tracking-[0.25em] mb-3">— Por qué elegirnos</p>
             <h2 className="text-4xl md:text-5xl font-black mb-6">La diferencia REMALI</h2>
@@ -665,8 +669,8 @@ export default function Home() {
       {/* ══════════════════════════════════
           CTA FINAL
       ══════════════════════════════════ */}
-      <section className="py-20 px-6">
-        <div className="max-w-screen-xl mx-auto">
+      <section className="py-20">
+        <div className="contenedor">
           <div className="cta-box relative rounded-3xl overflow-hidden bg-gold p-12 md:p-20">
             <div
               className="absolute inset-0 opacity-[0.07]"

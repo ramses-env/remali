@@ -97,7 +97,7 @@ export default function MisCotizaciones() {
 
   return (
     <div className="bg-app min-h-screen text-ink">
-      <div className="max-w-[1240px] mx-auto px-4 sm:px-8 pt-24 pb-16 flex flex-col gap-6">
+      <div className="contenedor pt-24 pb-16 flex flex-col gap-6">
 
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div>

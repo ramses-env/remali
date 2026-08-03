@@ -2,6 +2,22 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 /* ─────────────────────────────────────────────
+   CONTENEDOR ESTÁNDAR de toda la web pública.
+   UN solo ancho máximo y UN solo margen lateral en TODAS las páginas (alineado
+   con el navbar y el footer): así el contenido empieza y termina en la misma
+   vertical en cada pantalla, sin saltos al pasar de una página a otra. El
+   padding vertical (arriba/abajo) lo pone cada página según su necesidad.
+───────────────────────────────────────────── */
+.contenedor {
+  margin-inline: auto;
+  width: 100%;
+  max-width: 80rem;            /* = max-w-7xl (1280px), igual que el navbar */
+  padding-inline: 1rem;        /* = px-4 */
+}
+@media (min-width: 640px)  { .contenedor { padding-inline: 1.5rem; } }  /* sm:px-6 */
+@media (min-width: 1024px) { .contenedor { padding-inline: 2rem; } }    /* lg:px-8 */
+
+/* ─────────────────────────────────────────────
    PALETA DE TEMA (claro / oscuro)
    El acento es un dorado cálido, más amable que
    el amber puro (#fbbf24), con mejor contraste.
@@ -789,3 +805,17 @@
 .toast-in { animation: toast-in 0.35s cubic-bezier(0.23, 1, 0.32, 1); }
 /* Barra de vida de una alerta: se vacía en el tiempo que la alerta permanece. */
 @keyframes toast-avance { from { width: 100%; } to { width: 0%; } }
+
+/* Modal: el fondo se funde y el panel (su hijo directo) entra escalando desde
+   0.97 — nada aparece "de la nada". UNA sola clase `modal-in` en el backdrop
+   cubre ambos. Misma curva ease-out del sistema; centrado (transform-origin por
+   defecto), como debe ser un modal no anclado a un botón. */
+@keyframes modal-backdrop-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes modal-panel-in { from { opacity: 0; transform: translateY(10px) scale(0.97); } to { opacity: 1; transform: none; } }
+.modal-in { animation: modal-backdrop-in 180ms ease-out both; }
+.modal-in > * { animation: modal-panel-in 260ms cubic-bezier(0.23, 1, 0.32, 1) both; }
+/* Movimiento reducido: se conserva el fundido (ayuda a ubicar el cambio) pero
+   se quita el desplazamiento/escala. */
+@media (prefers-reduced-motion: reduce) {
+  .modal-in > * { animation: modal-backdrop-in 180ms ease-out both; }
+}

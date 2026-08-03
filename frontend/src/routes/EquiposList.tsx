@@ -253,7 +253,7 @@ export default function EquiposList() {
       <FloatingFilters value={filters} onChange={setFilters} />
 
       {/* ── HEADER ── */}
-      <div className="relative px-6 md:px-16 lg:px-24 pt-28 pb-8 overflow-hidden">
+      <div className="contenedor relative pt-28 pb-8 overflow-hidden">
         {/* Fondo premium: rejilla + glow dorado */}
         <div className="absolute inset-0 pointer-events-none -z-10">
           <div className="absolute inset-0 opacity-[0.04]" style={{ backgroundImage: 'linear-gradient(var(--c-grid) 1px,transparent 1px),linear-gradient(90deg,var(--c-grid) 1px,transparent 1px)', backgroundSize: '64px 64px' }} />
@@ -303,8 +303,8 @@ export default function EquiposList() {
       {/* En móvil NO es fija: apilada (buscador + filtros + precio + conteo) mide
           demasiado y, pegada arriba, tapaba media pantalla y estorbaba para ver
           las máquinas. Se deja fija solo en desktop, donde sí cabe en una fila. */}
-      <div className="catalog-controls relative md:sticky md:top-[64px] z-30 bg-app/90 backdrop-blur-md border-y border-edge px-6 md:px-16 lg:px-24 py-4">
-        <div className="flex flex-col md:flex-row md:items-center gap-4">
+      <div className="catalog-controls relative md:sticky md:top-[64px] z-30 bg-app/90 backdrop-blur-md border-y border-edge py-4">
+        <div className="contenedor flex flex-col md:flex-row md:items-center gap-4">
           {/* Buscador */}
           <div className="relative flex-1 max-w-xl">
             <div className="absolute left-4 top-1/2 -translate-y-1/2 text-mute pointer-events-none">
@@ -496,7 +496,7 @@ export default function EquiposList() {
       </div>
 
       {/* ── LAYOUT PRINCIPAL ── */}
-      <div className="flex gap-0 px-6 md:px-16 lg:px-24 py-10">
+      <div className="contenedor flex gap-0 py-10">
 
         {/* Sidebar filtros desktop */}
         <aside className="hidden md:block w-64 shrink-0 mr-10">
