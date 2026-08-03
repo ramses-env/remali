@@ -54,6 +54,9 @@ class Cotizacion(models.Model):
     # Fecha de vencimiento GUARDADA (creación + vigencia). Se persiste para poder
     # filtrar/paginar "vencidas" en la base de datos, no en memoria.
     vence_el = models.DateField(null=True, blank=True, editable=False)
+    # Cuándo quedó aceptada/autorizada: arranca el reloj de "sin respuesta del
+    # cliente en 15 días, no se hace" (el cierre lo aplica recordar_vigencia).
+    aceptada_en = models.DateTimeField(null=True, blank=True)
     # Token para el link público (compartir la cotización por WhatsApp/correo sin
     # login). No adivinable; solo expone el PDF de ESA cotización.
     token_publico = models.CharField(max_length=32, unique=True, null=True, blank=True, editable=False)
@@ -128,6 +131,12 @@ class Cotizacion(models.Model):
                 kwargs['update_fields'] = list(set(kwargs['update_fields']) | {'folio'})
         if not self.token_publico:
             self.token_publico = secrets.token_hex(16)
+        # Sello de aceptación (una sola vez): por aquí pasan TODOS los caminos
+        # (panel, autorización del jefe), así que nadie se queda sin reloj.
+        if self.estado == 'aceptada' and not self.aceptada_en:
+            self.aceptada_en = timezone.now()
+            if kwargs.get('update_fields') is not None:
+                kwargs['update_fields'] = list(set(kwargs['update_fields']) | {'aceptada_en'})
         # vence_el = alta + vigencia. En el alta `creada` la pone auto_now_add en
         # este mismo save, así que si aún no hay fecha se usa hoy (mismo día).
         base = self.creada.date() if self.creada else timezone.now().date()

@@ -59,7 +59,7 @@ function Tarjeta({ r, i }: { r: RentaMia; i: number }) {
           <span className="text-sm font-extrabold text-price tabular-nums">{money(total)}</span>
           {r.estado !== 'cancelada' && total > 0 && (
             saldo > 0
-              ? <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 whitespace-nowrap">Restan {money(saldo)}</span>
+              ? <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-red-500/10 text-red-600 dark:text-red-400 whitespace-nowrap">Debes {money(saldo)}</span>
               : <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-libre/10 text-libre">Pagada</span>
           )}
         </span>
@@ -85,6 +85,12 @@ function Tarjeta({ r, i }: { r: RentaMia; i: number }) {
           </button>
         )}
       </div>
+      {/* Renta terminada con saldo: el equipo volvió, el pago no — que se lea sin abrir nada. */}
+      {r.estado === 'finalizada' && saldo > 0 && (
+        <p className="mt-2 flex items-center gap-2 rounded-lg bg-red-500/10 border border-red-500/30 px-3 py-2 text-[12.5px] font-bold text-red-600 dark:text-red-400">
+          La renta terminó con un saldo pendiente de {money(saldo)}. Puedes liquidarlo por transferencia o efectivo con REMALI.
+        </p>
+      )}
       {abierto && r.estado !== 'cancelada' && total > 0 && (
         <div className="mt-2 pt-3 border-t border-edge">
           <div className="flex items-center justify-between gap-3">
@@ -95,8 +101,8 @@ function Tarjeta({ r, i }: { r: RentaMia; i: number }) {
                 Pagada
               </span>
             ) : (
-              <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 whitespace-nowrap">
-                Saldo pendiente {money(saldo)}
+              <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-red-500/10 text-red-600 dark:text-red-400 whitespace-nowrap">
+                Debes {money(saldo)}
               </span>
             )}
           </div>

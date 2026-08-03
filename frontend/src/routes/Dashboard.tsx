@@ -6398,12 +6398,12 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
           {c.cancelacion_solicitada && (
             <div className="rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3">
               <p className="text-[13.5px] font-bold text-red-700 dark:text-red-300">
-                El cliente solicitó CANCELAR esta cotización
+                {c.estado === 'cancelada' ? 'El cliente CANCELÓ esta cotización' : 'El cliente solicitó CANCELAR esta cotización'}
                 <span className="font-semibold text-red-600/80 dark:text-red-400/80"> · {new Date(c.cancelacion_solicitada).toLocaleDateString('es-MX', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}</span>
               </p>
               {c.cancelacion_motivo && <p className="text-[13px] text-red-600 dark:text-red-400 mt-1">Motivo: {c.cancelacion_motivo}</p>}
               {c.estado === 'cancelada' ? (
-                <p className="text-[12px] text-mute mt-1.5">Cancelación aprobada: quedó como estado final.</p>
+                <p className="text-[12px] text-mute mt-1.5">Cancelada: estado final. Si el cliente la necesita de nuevo, que vuelva a cotizar.</p>
               ) : (
                 <button onClick={aprobarCancelacion}
                   className="mt-2.5 h-9 px-4 rounded-full bg-red-600 text-white text-[12.5px] font-bold hover:bg-red-700 transition active:scale-[0.98]">

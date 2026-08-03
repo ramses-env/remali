@@ -207,22 +207,22 @@ export default function MisCotizacionEstado() {
               {cfg.negocio_email && <div className="flex justify-between text-[13.5px] py-1.5 gap-3"><span className="text-mute">Correo</span><span className="font-semibold truncate">{cfg.negocio_email}</span></div>}
             </div>
 
-            {/* Solicitar cancelación: el cliente pide, REMALI decide. */}
+            {/* Cancelar: es SU cotización — se cancela al instante, sin aprobación. */}
             {cot && !cot.convertida && !venc && cot.estado !== 'rechazada' && cot.estado !== 'cancelada' && (
               (cot.cancelacion_solicitada || cancelListo) ? (
                 <div className="rounded-[20px] border border-red-500/30 bg-red-500/5 p-6">
-                  <p className="text-[15px] font-extrabold text-red-600 dark:text-red-400">Cancelación solicitada</p>
-                  <p className="text-[13px] text-mute mt-1.5 leading-snug">REMALI está revisando tu solicitud; te contactamos para confirmarla.</p>
+                  <p className="text-[15px] font-extrabold text-red-600 dark:text-red-400">Cotización cancelada</p>
+                  <p className="text-[13px] text-mute mt-1.5 leading-snug">Quedó cancelada y REMALI ya está enterado. Si la necesitas de nuevo, vuelve a cotizar cuando quieras.</p>
                 </div>
               ) : (
                 <div className="rounded-[20px] border border-edge bg-surface p-6">
                   {!cancelando ? (
                     <>
                       <p className="text-[15px] font-extrabold">¿Ya no la necesitas?</p>
-                      <p className="text-[13px] text-mute mt-1.5 leading-snug">Puedes pedir la cancelación y nosotros la confirmamos.</p>
+                      <p className="text-[13px] text-mute mt-1.5 leading-snug">Puedes cancelarla ahora mismo; REMALI queda avisado al instante.</p>
                       <button onClick={() => setCancelando(true)}
                         className="mt-4 px-5 h-[42px] rounded-xl border border-red-500/40 text-red-600 dark:text-red-400 text-[14px] font-bold hover:bg-red-500/10 transition-colors">
-                        Solicitar cancelación
+                        Cancelar cotización
                       </button>
                     </>
                   ) : (
@@ -243,7 +243,7 @@ export default function MisCotizacionEstado() {
                             finally { setCancelEnviando(false) }
                           }}
                           className="h-[42px] rounded-xl bg-red-600 text-white text-[13.5px] font-bold hover:bg-red-700 transition-colors disabled:opacity-50">
-                          {cancelEnviando ? 'Enviando…' : 'Enviar solicitud'}
+                          {cancelEnviando ? 'Cancelando…' : 'Sí, cancelar'}
                         </button>
                       </div>
                     </>

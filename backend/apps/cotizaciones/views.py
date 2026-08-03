@@ -228,30 +228,30 @@ def crear_cotizacion_publica(request):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def solicitar_cancelacion(request, pk):
-    """El CLIENTE dueño pide cancelar su cotización; REMALI decide.
+    """El CLIENTE dueño CANCELA su cotización — directo, sin aprobación.
 
-    No cambia el estado: deja la marca + motivo, avisa al panel con
-    notificación (y el latido la pinta). Si ya se concretó, se le pide
-    hablar con REMALI — eso ya es una venta/renta viva."""
+    Es una cotización, no un trato cerrado: si él ya no la quiere, no hay
+    nada que aprobar. Se cancela al instante, queda su motivo de registro y
+    el panel se entera por notificación (y el latido la pinta). Si ya se
+    concretó, eso es una venta/renta viva: ahí sí, con REMALI."""
     from django.utils import timezone
     cot = Cotizacion.objects.filter(pk=pk, usuario=request.user).first()
     if not cot:
         return Response({'detalle': 'Cotización no encontrada'}, status=404)
     if cot.conversiones.exists() or cot.rentas_convertidas.exists():
         return Response({'detalle': 'Esta cotización ya se concretó; contáctanos por WhatsApp para cualquier cambio.'}, status=400)
-    if cot.estado == 'rechazada':
-        return Response({'detalle': 'Esta cotización ya está cerrada.'}, status=400)
-    if cot.cancelacion_solicitada:
-        return Response({'detalle': 'Ya registramos tu solicitud de cancelación.', 'ya': True})
+    if cot.estado in ('rechazada', 'cancelada'):
+        return Response({'detalle': 'Esta cotización ya está cerrada.', 'ya': True})
     cot.cancelacion_solicitada = timezone.now()
     cot.cancelacion_motivo = (request.data.get('motivo') or '').strip()[:500]
-    cot.save(update_fields=['cancelacion_solicitada', 'cancelacion_motivo'])
+    cot.estado = 'cancelada'
+    cot.save(update_fields=['cancelacion_solicitada', 'cancelacion_motivo', 'estado'])
     try:
         from maquinaria.models import crear_notificacion
         crear_notificacion(
             'sistema',
-            f'El cliente pide CANCELAR la {cot.folio}',
-            f'{cot.cliente_nombre or request.user.get_username()} solicitó cancelarla'
+            f'El cliente CANCELÓ la {cot.folio}',
+            f'{cot.cliente_nombre or request.user.get_username()} la canceló'
             + (f': {cot.cancelacion_motivo}' if cot.cancelacion_motivo else '.'),
             seccion='cotizaciones',
             ref=f'cancelacion-{cot.id}',
@@ -259,7 +259,7 @@ def solicitar_cancelacion(request, pk):
         )
     except Exception:
         pass
-    return Response({'detalle': 'Solicitud registrada: REMALI la revisará.'})
+    return Response({'detalle': 'Tu cotización quedó cancelada.'})
 
 
 @api_view(['POST'])

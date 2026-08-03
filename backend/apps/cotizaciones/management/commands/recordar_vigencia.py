@@ -52,3 +52,43 @@ class Command(BaseCommand):
             except Exception as e:  # un correo caído no debe frenar al resto
                 self.stderr.write(f'{c.folio}: {e}')
         self.stdout.write(self.style.SUCCESS(f'Recordatorios enviados: {enviados} de {qs.count()} candidatas'))
+
+        # ── Cierre por silencio: aceptada que NADIE concretó en 15 días ──
+        # La regla de la casa: si el cliente (o su jefe) autorizó pero después
+        # no hubo respuesta, la cotización no se hace. Se cierra como
+        # rechazada (recuperable por el admin si el cliente reaparece; una
+        # cancelada sería terminal).
+        from django.db.models import Q
+        limite = timezone.now() - timedelta(days=15)
+        hoy2 = timezone.now().date()
+        silenciosas = (Cotizacion.objects
+                       .filter(estado='aceptada', conversiones__isnull=True, rentas_convertidas__isnull=True)
+                       .filter(Q(aceptada_en__lt=limite) | Q(aceptada_en__isnull=True, vence_el__lt=hoy2)))
+        cerradas = 0
+        for cot in silenciosas:
+            cot.estado = 'rechazada'
+            cot.save(update_fields=['estado'])
+            cerradas += 1
+            try:
+                from maquinaria.models import crear_notificacion
+                if cot.usuario_id:
+                    crear_notificacion(
+                        'sistema',
+                        f'Tu cotización {cot.folio} se cerró por falta de respuesta',
+                        'Pasaron 15 días desde que quedó lista sin concretarse. Si aún la necesitas, vuelve a cotizar: los precios pueden variar.',
+                        ref=f'cot-silencio-{cot.id}',
+                        data={'folio': cot.folio, 'cotizacion_id': cot.id},
+                        usuario=cot.usuario,
+                    )
+                crear_notificacion(
+                    'sistema',
+                    f'{cot.folio} se cerró sola: 15 días aceptada sin concretarse',
+                    f'{cot.cliente_nombre or "El cliente"} nunca respondió para concretar. Si reaparece, puedes reabrirla marcándola Aceptada.',
+                    seccion='cotizaciones',
+                    ref=f'cot-silencio-panel-{cot.id}',
+                    data={'cotizacion_id': cot.id, 'folio': cot.folio},
+                )
+            except Exception as e:
+                self.stderr.write(f'{cot.folio} (aviso): {e}')
+        if cerradas:
+            self.stdout.write(self.style.SUCCESS(f'Cerradas por silencio: {cerradas}'))
