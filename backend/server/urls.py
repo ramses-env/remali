@@ -45,7 +45,6 @@ urlpatterns = [
     path('api/', include('geo.urls')),
     path('api/', include('facturacion.urls')),
     path('api/', include('cotizaciones.urls')),
-    path('api/', include('asistente.urls')),
     # 404 JSON para /api/ sin match — SIEMPRE después de los include de arriba.
     re_path(r'^api/(?P<resto>.*)$', api_404),
     re_path(r'^media/(?P<path>.*)$', serve, {'document_root': settings.MEDIA_ROOT}),

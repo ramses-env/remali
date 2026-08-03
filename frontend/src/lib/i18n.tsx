@@ -18,8 +18,6 @@ const ES: Dict = {
   'navgroup.clientes': 'Clientes',
   'navgroup.cuenta': 'Cuenta',
   // Ítems del menú / títulos de sección
-  'sec.asistente.title': 'Asistente IA',
-  'sec.asistente.sub': 'Pregunta en lenguaje natural sobre tus datos del negocio.',
   'sec.resumen.title': 'Resumen',
   'sec.resumen.sub': 'Monitorea tus métricas y gestiona tu operación.',
   'sec.equipos.title': 'Productos',
@@ -82,8 +80,6 @@ const EN: Dict = {
   'navgroup.operacion': 'Operations',
   'navgroup.clientes': 'Clients',
   'navgroup.cuenta': 'Account',
-  'sec.asistente.title': 'AI Assistant',
-  'sec.asistente.sub': 'Ask about your business data in natural language.',
   'sec.resumen.title': 'Overview',
   'sec.resumen.sub': 'Monitor your metrics and run your operation.',
   'sec.equipos.title': 'Products',

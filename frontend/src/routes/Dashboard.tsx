@@ -12,7 +12,6 @@ import EtiquetaModal from '../components/EtiquetaModal'
 import OrdenCartaModal from '../components/OrdenCartaModal'
 import CotizacionCartaModal from '../components/CotizacionCartaModal'
 import FichaTecnicaModal from '../components/FichaTecnicaModal'
-import AsistenteIA from '../components/AsistenteIA'
 import AddressAutocomplete from '../components/AddressAutocomplete'
 import Dock, { type DockItem } from '../components/ui/dock'
 import { formatAddress, addressToFields, type AddressResult } from '../lib/geocoding'
@@ -195,11 +194,10 @@ async function abrirOrdenCartaPDF(base: 'ventas' | 'rentas', id: number) {
   } catch { /* el interceptor global ya avisa el error */ }
 }
 
-type Section = 'resumen' | 'asistente' | 'equipos' | 'inventario' | 'refacciones' | 'reparaciones' | 'cotizaciones' | 'catalogos' | 'empresas' | 'rentas' | 'ventas' | 'facturacion' | 'adeudos' | 'cupones' | 'notificaciones' | 'perfil' | 'ubicaciones' | 'usuarios' | 'configuracion'
+type Section = 'resumen' | 'equipos' | 'inventario' | 'refacciones' | 'reparaciones' | 'cotizaciones' | 'catalogos' | 'empresas' | 'rentas' | 'ventas' | 'facturacion' | 'adeudos' | 'cupones' | 'notificaciones' | 'perfil' | 'ubicaciones' | 'usuarios' | 'configuracion'
 
 const SECTION_META: Record<Section, { title: string; subtitle: string }> = {
   resumen: { title: 'Resumen', subtitle: 'Monitorea tus métricas y gestiona tu operación.' },
-  asistente: { title: 'Asistente IA', subtitle: 'Pregunta en lenguaje natural sobre tus datos del negocio.' },
   equipos: { title: 'Productos', subtitle: 'Administra tu catálogo de maquinaria.' },
   inventario: { title: 'Inventario', subtitle: 'Controla cada unidad física y su estado.' },
   refacciones: { title: 'Refacciones', subtitle: 'Piezas para mantenimiento (y venta ocasional al público).' },
@@ -615,7 +613,6 @@ export default function Dashboard() {
     {
       items: [
         { key: 'resumen', label: 'Resumen', icon: <><path d="M4 10.5L12 4l8 6.5V20a1.5 1.5 0 0 1-1.5 1.5H5.5A1.5 1.5 0 0 1 4 20z" /><path d="M9.5 21.5v-6.8a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v6.8" /></> },
-        { key: 'asistente', label: 'Asistente IA', icon: <><path d="M4 5.5h16a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H9l-4 3.5V16.5H4a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1z" /><path d="M8.5 11h.01M12 11h.01M15.5 11h.01" /></> },
       ],
     },
     {
@@ -1036,9 +1033,9 @@ export default function Dashboard() {
               equipos={equipos} categorias={categorias}
               tipos={tipos} marcas={marcas} coupons={coupons} rentas={rentas}
               unidades={unidades} ventas={ventas} me={me} go={go} metrics={metrics}
+              adeudos={adeudos} solicitudes={solicitudes}
             />
           )}
-          {section === 'asistente' && <AsistenteIA notify={notify} me={me} />}
           {section === 'equipos' && (
             <EquiposAdmin
               equipos={equipos} categorias={categorias} tipos={tipos} marcas={marcas}
@@ -1205,11 +1202,12 @@ function RelojVivo({ now }: { now: Date }) {
   )
 }
 
-function Resumen({ equipos, rentas, unidades, ventas, me, go, metrics }: {
+function Resumen({ equipos, rentas, unidades, ventas, me, go, metrics, adeudos, solicitudes }: {
   equipos: Equipo[]; categorias: Option[]; tipos: Option[]; marcas: Option[]
   coupons: Coupon[]; rentas: RentaActiva[]; unidades: Unidad[]; ventas: Venta[]
   me: { username?: string; email?: string } | null; go: (s: Section) => void
   metrics: DashMetrics | null
+  adeudos: AdeudosDatos; solicitudes: SolicitudFactura[]
 }) {
   const money0 = (n: number) => '$' + Math.round(n).toLocaleString('en-US')
 
@@ -1263,6 +1261,19 @@ function Resumen({ equipos, rentas, unidades, ventas, me, go, metrics }: {
     { label: 'Unidades disponibles', value: String(disp) },
     { label: 'Rentas activas', value: String(rentas.length) },
     { label: 'Ventas del catálogo', value: String(ventasActivas.length) },
+  ]
+
+  // ── Requiere tu atención: los pendientes de dinero/operación de un vistazo,
+  //    cada uno lleva a su módulo. Se pinta "urgente" solo si hay algo. ──
+  const porCobrar = Number(adeudos?.total || 0)
+  const clientesDeben = adeudos?.clientes || 0
+  const porFacturar = solicitudes.filter(s => s.estado === 'pendiente').length
+  const rentasVencidas = rentas.filter(r => r.vencida).length
+  const pendientes: { label: string; value: string; sub: string; urgente: boolean; ir: Section }[] = [
+    { label: 'Por cobrar', value: money0(porCobrar), sub: clientesDeben ? `${clientesDeben} cliente${clientesDeben === 1 ? '' : 's'}` : 'al corriente', urgente: porCobrar > 0, ir: 'adeudos' },
+    { label: 'Por facturar', value: String(porFacturar), sub: porFacturar ? 'sin timbrar' : 'nada pendiente', urgente: porFacturar > 0, ir: 'facturacion' },
+    { label: 'Rentas vencidas', value: String(rentasVencidas), sub: rentasVencidas ? 'por recoger' : 'ninguna', urgente: rentasVencidas > 0, ir: 'rentas' },
+    { label: 'En taller', value: String(mant), sub: mant ? 'en mantenimiento' : 'sin equipos', urgente: false, ir: 'inventario' },
   ]
 
   // Paleta SUAVE solo para la gráfica: la dona y esta leyenda comparten los
@@ -1339,6 +1350,26 @@ function Resumen({ equipos, rentas, unidades, ventas, me, go, metrics }: {
               <div className="text-[22px] font-extrabold text-ink">{s.value}</div>
             </div>
           ))}
+        </div>
+
+        {/* Requiere tu atención: dinero y operación pendientes; cada tarjeta lleva a su módulo */}
+        <div>
+          <div className="flex items-center gap-2 mb-2 px-0.5">
+            <span className="text-[11px] font-bold uppercase tracking-[0.08em] text-mute">Requiere tu atención</span>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+            {pendientes.map((p, i) => (
+              <button key={i} onClick={() => go(p.ir)}
+                className={`${panel} px-4 py-4 text-left transition-all hover:shadow-[0_4px_14px_rgba(33,29,22,0.10)] hover:-translate-y-0.5 active:translate-y-0 ${p.urgente ? '!border-red-500/40 bg-red-500/[0.04]' : ''}`}>
+                <div className="flex items-center justify-between mb-2.5">
+                  <div className="text-[12.5px] font-semibold text-mute">{p.label}</div>
+                  <svg className={`w-3.5 h-3.5 ${p.urgente ? 'text-red-500' : 'text-mute'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M9 6l6 6-6 6" /></svg>
+                </div>
+                <div className={`text-[22px] font-extrabold ${p.urgente ? 'text-red-600 dark:text-red-400' : 'text-ink'}`}>{p.value}</div>
+                <div className="text-[11.5px] text-mute mt-0.5">{p.sub}</div>
+              </button>
+            ))}
+          </div>
         </div>
 
         {/* Tareas rápidas + Calendario */}

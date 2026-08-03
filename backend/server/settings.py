@@ -138,7 +138,6 @@ INSTALLED_APPS = [
     'empresas',
     'facturacion',
     'cotizaciones',
-    'asistente',
 ]
 
 
