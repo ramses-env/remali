@@ -13,6 +13,8 @@ import Perfil from './routes/Perfil'
 import MisCotizaciones from './routes/MisCotizaciones'
 import MisCotizacionEstado from './routes/MisCotizacionEstado'
 import MisRentas from './routes/MisRentas'
+import MisAdeudos from './routes/MisAdeudos'
+import RecordatorioAdeudo from './components/RecordatorioAdeudo'
 import MisCompras from './routes/MisCompras'
 import VincularCuenta from './routes/VincularCuenta'
 import AutorizarCotizacion from './routes/AutorizarCotizacion'
@@ -98,6 +100,7 @@ function App() {
                   <Route path="/mis-cotizaciones" element={<MisCotizaciones />} />
                   <Route path="/mis-cotizaciones/:folio" element={<MisCotizacionEstado />} />
                   <Route path="/mis-rentas" element={<MisRentas />} />
+                  <Route path="/mis-adeudos" element={<MisAdeudos />} />
                   <Route path="/mis-compras" element={<MisCompras />} />
                   <Route path="/vincular/venta/:token" element={<VincularCuenta tipo="venta" />} />
                   <Route path="/vincular/renta/:token" element={<VincularCuenta tipo="renta" />} />
@@ -114,6 +117,8 @@ function App() {
             {/* Recordatorio flotante para clientes con el perfil a medias. Vive
                 aquí, no en cada página, para aparecer en toda la tienda. */}
             <RecordatorioPerfil />
+            {/* Y el de saldos pendientes: 'tienes un adeudo de $X'. */}
+            <RecordatorioAdeudo />
             {/* Pregunta al intentar mezclar venta y renta en una cotización. */}
             <CambioTipoCotizacion />
             {/* Dock inferior (solo móvil): navegación al alcance del pulgar. */}

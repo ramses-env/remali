@@ -195,7 +195,7 @@ async function abrirOrdenCartaPDF(base: 'ventas' | 'rentas', id: number) {
   } catch { /* el interceptor global ya avisa el error */ }
 }
 
-type Section = 'resumen' | 'asistente' | 'equipos' | 'inventario' | 'refacciones' | 'reparaciones' | 'cotizaciones' | 'catalogos' | 'empresas' | 'rentas' | 'ventas' | 'facturacion' | 'cupones' | 'notificaciones' | 'perfil' | 'ubicaciones' | 'usuarios' | 'configuracion'
+type Section = 'resumen' | 'asistente' | 'equipos' | 'inventario' | 'refacciones' | 'reparaciones' | 'cotizaciones' | 'catalogos' | 'empresas' | 'rentas' | 'ventas' | 'facturacion' | 'adeudos' | 'cupones' | 'notificaciones' | 'perfil' | 'ubicaciones' | 'usuarios' | 'configuracion'
 
 const SECTION_META: Record<Section, { title: string; subtitle: string }> = {
   resumen: { title: 'Resumen', subtitle: 'Monitorea tus métricas y gestiona tu operación.' },
@@ -209,6 +209,7 @@ const SECTION_META: Record<Section, { title: string; subtitle: string }> = {
   rentas: { title: 'Rentas', subtitle: 'Gestiona rentas activas, reservas y devoluciones.' },
   ventas: { title: 'Ventas', subtitle: 'Historial de ventas de maquinaria y refacciones.' },
   facturacion: { title: 'Por facturar', subtitle: 'Ventas y rentas que el cliente pidió facturar. Timbra aparte y márcalas.' },
+  adeudos: { title: 'Adeudos', subtitle: 'Rentas con saldo pendiente: quién debe, cuánto y desde cuándo. Registra abonos hasta liquidar.' },
   cupones: { title: 'Cupones', subtitle: 'Crea y administra códigos de descuento.' },
   notificaciones: { title: 'Notificaciones', subtitle: 'Eventos operativos y pendientes por resolver.' },
   empresas: { title: 'Empresas', subtitle: 'Clientes registrados y sus obras.' },
@@ -387,6 +388,7 @@ export default function Dashboard() {
   const [ordenes, setOrdenes] = useState<OrdenReparacion[]>([])
   const [ordenAbrir, setOrdenAbrir] = useState<number | null>(null)
   const [solicitudes, setSolicitudes] = useState<SolicitudFactura[]>([])
+  const [adeudos, setAdeudos] = useState<AdeudosDatos>({ rentas: [], total: '0', clientes: 0 })
   const [cotAbiertas, setCotAbiertas] = useState(0)
   const [ventas, setVentas] = useState<Venta[]>([])
   const [notifs, setNotifs] = useState<Notif[]>([])
@@ -479,6 +481,9 @@ export default function Dashboard() {
   const loadFacturacion = useCallback(() => {
     api.get<SolicitudFactura[]>('/facturacion/solicitudes/').then(r => { setSolicitudes(r.data || []); marcarCarga('facturación', true) }).catch(err => { const st = err?.response?.status; if (st !== 401 && st !== 403) marcarCarga('facturación', false) })
   }, [marcarCarga])
+  const loadAdeudos = useCallback(() => {
+    api.get<AdeudosDatos>('/rentas/adeudos/').then(r => setAdeudos(r.data || { rentas: [], total: '0', clientes: 0 })).catch(() => {})
+  }, [])
   // Solo el conteo de "abiertas" para el badge del menú: la lista completa la
   // pagina el propio módulo de cotizaciones, no el padre.
   const loadCotizaciones = useCallback(() => {
@@ -541,6 +546,7 @@ export default function Dashboard() {
   useRecurso(['refacciones'], loadRefacciones)
   useRecurso(['reparaciones'], loadOrdenes)
   useRecurso(['facturacion'], loadFacturacion)
+  useRecurso(['rentas'], loadAdeudos)   // los abonos tocan Renta: el saldo baja solo
   useRecurso(['notificaciones'], loadNotifs)
   useRecurso(['cotizaciones'], loadCotizaciones)
   // Latido del panel: lo que capturan OTROS (un cliente envía su cotización,
@@ -582,6 +588,7 @@ export default function Dashboard() {
     ventas: 'ver_dinero',   // la LISTA de ventas es historial del negocio
     cotizaciones: 'cotizar',
     facturacion: 'facturar',
+    adeudos: 'ver_dinero',   // cobranza: dinero, no operación de campo
     empresas: 'ver_dinero',
     cupones: 'editar_catalogo',
     catalogos: 'editar_catalogo',
@@ -629,6 +636,7 @@ export default function Dashboard() {
         { key: 'reparaciones', label: 'Reparaciones', badge: ordenesAbiertas, icon: <><path d="M14.7 6.3a4 4 0 0 0-5.6 5.6l-6 6v3h3l6-6a4 4 0 0 0 5.6-5.6l-2.5 2.5-2.1-2.1z" /><path d="M14 14l6 6" /></> },
         { key: 'cotizaciones', label: 'Cotizaciones', badge: cotizacionesAbiertas, icon: <><path d="M6 3.5h9l3.5 3.5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4.5a1 1 0 0 1 1-1z" /><path d="M14 3.5V8h4.5" /><path d="M8.5 12h7M8.5 15.5h7M8.5 18.5h4" /></> },
         { key: 'facturacion', label: 'Por facturar', badge: facturasPendientes, icon: <><path d="M6 3.5h9l3.5 3.5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4.5a1 1 0 0 1 1-1z" /><path d="M14 3.5V8h4.5" /><path d="M8.5 13h7M8.5 16.5h7" /></> },
+        { key: 'adeudos', label: 'Adeudos', badge: adeudos.rentas.length, icon: <><circle cx="12" cy="12" r="8.5" /><path d="M12 7.5v9M14.8 9.2c-.6-.8-1.6-1.2-2.8-1.2-1.7 0-3 .9-3 2.2 0 2.8 6 1.6 6 4.3 0 1.3-1.3 2.2-3 2.2-1.2 0-2.2-.4-2.8-1.2" /></> },
         { key: 'notificaciones', label: 'Notificaciones', badge: noLeidas, icon: <><path d="M15 17h5l-1.3-1.3A2 2 0 0 1 18.1 14V11a6.1 6.1 0 1 0-12.2 0v3a2 2 0 0 1-.6 1.4L4 17h5" /><path d="M9.2 17v.8a2.8 2.8 0 0 0 5.6 0V17" /></> },
         { key: 'cupones', label: 'Cupones', badge: coupons.length, icon: <><path d="M7.5 6.5h9a2 2 0 0 1 2 2V10a1.8 1.8 0 0 0 0 4v1.5a2 2 0 0 1-2 2h-9a2 2 0 0 1-2-2V14a1.8 1.8 0 0 0 0-4V8.5a2 2 0 0 1 2-2z" /><path d="M12 8.8v6.4" /></> },
       ],
@@ -1056,6 +1064,9 @@ export default function Dashboard() {
           )}
           {section === 'facturacion' && (
             <FacturacionAdmin solicitudes={solicitudes} reload={loadFacturacion} notify={notify} />
+          )}
+          {section === 'adeudos' && (
+            <AdeudosAdmin datos={adeudos} reload={loadAdeudos} notify={notify} />
           )}
           {section === 'cotizaciones' && (
             <CotizacionesAdmin empresas={empresas} notify={notify} irAInventario={() => go('inventario')} />
@@ -5318,6 +5329,112 @@ function OrdenDetalleModal({ orden, refacciones, notify, onClose, onChanged, onP
       </div>
     </div>,
     document.body,
+  )
+}
+
+/* ════════════════════════════════════════
+   ADEUDOS — cobranza: rentas con saldo pendiente
+════════════════════════════════════════ */
+type AdeudosDatos = { rentas: RentaFull[]; total: string; clientes: number }
+
+function AdeudosAdmin({ datos, reload, notify }: {
+  datos: AdeudosDatos; reload: () => void; notify: (m: string, t?: 'ok' | 'err') => void
+}) {
+  const money = formatMoney
+  const [ver, setVer] = useState<RentaFull | null>(null)
+  const [abonando, setAbonando] = useState<RentaFull | null>(null)
+
+  async function registrarAbono(monto: number, metodo: string, fecha: string) {
+    if (!abonando) return
+    try {
+      await api.post(`/rentas/${abonando.id}/abonos/`, { monto, metodo, fecha: fecha || undefined })
+      notify(`Abono de ${money(monto)} registrado`)
+      setAbonando(null)
+      reload()
+    } catch { /* el interceptor avisa */ }
+  }
+
+  const CHIP: Record<string, { label: string; cls: string }> = {
+    activa: { label: 'ACTIVA', cls: 'bg-blue-500/10 text-blue-600' },
+    reservada: { label: 'RESERVADA', cls: 'bg-blue-500/10 text-blue-600' },
+    finalizada: { label: 'EQUIPO DEVUELTO', cls: 'bg-surface-2 text-mute' },
+  }
+
+  return (
+    <div className="space-y-5">
+      <KpiGrid
+        gridClassName="grid-cols-2 lg:grid-cols-3"
+        items={[
+          { label: 'Por cobrar', value: money(Number(datos.total)), tone: 'gold' },
+          { label: 'Rentas con adeudo', value: String(datos.rentas.length), tone: 'default' },
+          { label: 'Clientes que deben', value: String(datos.clientes), tone: 'muted' },
+        ]}
+      />
+
+      {datos.rentas.length === 0 ? (
+        <div className="rounded-2xl border border-edge bg-surface px-6 py-14 text-center">
+          <p className="text-[16px] font-bold text-ink">Nadie debe nada</p>
+          <p className="text-[13px] text-mute mt-1">Cuando una renta quede con saldo, aparece aquí hasta liquidarse.</p>
+        </div>
+      ) : (
+        <div className="rounded-2xl border border-edge bg-surface overflow-hidden">
+          <div className="overflow-x-auto">
+            <div className="min-w-[760px]">
+              <div className="flex items-center gap-3 px-5 py-3 bg-surface-2 border-b border-edge text-[10.5px] font-bold uppercase tracking-[0.06em] text-mute">
+                <div className="flex-1 min-w-0">Cliente</div>
+                <div className="w-56 shrink-0">Equipo</div>
+                <div className="w-32 shrink-0">Estado</div>
+                <div className="w-24 shrink-0 text-right">Total</div>
+                <div className="w-24 shrink-0 text-right">Pagado</div>
+                <div className="w-28 shrink-0 text-right">Debe</div>
+                <div className="w-44 shrink-0" />
+              </div>
+              {datos.rentas.map(r => {
+                const chip = CHIP[r.estado || ''] || { label: (r.estado || '—').toUpperCase(), cls: 'bg-surface-2 text-mute' }
+                return (
+                  <div key={r.id} className="flex items-center gap-3 px-5 py-3.5 border-b border-edge last:border-0 hover:bg-surface-2/40 transition-colors">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[13.5px] font-bold text-ink truncate">{r.cliente || r.cliente_nombre || r.empresa?.nombre || '—'}</p>
+                      <p className="text-[11.5px] text-mute truncate mt-0.5">
+                        {r.cuenta ? `Cuenta: ${r.cuenta}` : 'Sin cuenta vinculada'}
+                        {r.telefono_cliente ? ` · ${r.telefono_cliente}` : ''}
+                      </p>
+                    </div>
+                    <div className="w-56 shrink-0 min-w-0">
+                      <p className="text-[13px] font-semibold text-ink truncate">{r.inventario.equipo || 'Equipo'}</p>
+                      <p className="text-[11.5px] font-mono text-mute truncate">{r.inventario.codigo}</p>
+                    </div>
+                    <div className="w-32 shrink-0">
+                      <span className={`text-[10px] font-bold px-2 py-1 rounded-md ${chip.cls}`}>{chip.label}</span>
+                    </div>
+                    <div className="w-24 shrink-0 text-right text-[13px] font-semibold text-ink tabular-nums">{money(Number(r.total || 0))}</div>
+                    <div className="w-24 shrink-0 text-right text-[13px] text-mute tabular-nums">{money(Number(r.pagado || 0))}</div>
+                    <div className="w-28 shrink-0 text-right text-[14px] font-extrabold text-red-600 dark:text-red-400 tabular-nums">{money(Number(r.saldo || 0))}</div>
+                    <div className="w-44 shrink-0 flex justify-end gap-1.5">
+                      <button onClick={() => setAbonando(r)}
+                        className="h-8 px-3 rounded-lg bg-gold text-black text-[12px] font-bold hover:brightness-95 transition-all whitespace-nowrap">
+                        + Abono
+                      </button>
+                      <button onClick={() => setVer(r)}
+                        className="h-8 px-3 rounded-lg border border-edge text-[12px] font-bold text-ink hover:bg-surface-2 transition-colors">
+                        Ver
+                      </button>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {abonando && (
+        <AbonoModal saldo={Number(abonando.saldo || 0)} onClose={() => setAbonando(null)} onRegistrar={registrarAbono} />
+      )}
+      {ver && (
+        <RentaDetalleModal renta={ver} onClose={() => { setVer(null); reload() }} onTicket={() => abrirOrdenCartaPDF('rentas', ver.id)} />
+      )}
+    </div>
   )
 }
 

@@ -160,6 +160,29 @@ def listar_rentas(request):
     return Response({'rentas': data})
 
 
+@api_view(['GET'])
+@permission_classes([EsOperador])
+def rentas_adeudos(request):
+    """COBRANZA: toda renta (viva o terminada) que aún debe dinero.
+
+    La renta finaliza cuando el técnico recoge la máquina; el dinero es un
+    carril aparte. Este es ese carril: nada se mezcla con el historial de
+    ventas ni con las rentas activas."""
+    qs = (Renta.objects.exclude(estado='cancelada')
+          .select_related('inventario', 'inventario__equipo', 'empresa', 'obra', 'usuario')
+          .prefetch_related('evidencias', 'solicitudes_factura'))
+    filas, total = [], Decimal('0')
+    for r in qs:
+        pagado = sum((Decimal(str(p.get('monto', 0))) for p in (r.pagos or [])), Decimal('0'))
+        saldo = (r.total or Decimal('0')) + (r.recargo or Decimal('0')) - pagado
+        if saldo > 0:
+            filas.append(_serialize_renta(r))
+            total += saldo
+    filas.sort(key=lambda f: Decimal(f['saldo']), reverse=True)
+    clientes = len({(f.get('cuenta') or f.get('cliente') or str(f['id'])) for f in filas})
+    return Response({'rentas': filas, 'total': str(total), 'clientes': clientes})
+
+
 @api_view(['POST'])
 @permission_classes([EsOperador])
 def mandar_por_facturar_renta(request, pk):
