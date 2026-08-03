@@ -79,7 +79,7 @@ type OrdenReparacion = {
   unidad?: number | null; unidad_codigo?: string; equipo_descripcion: string; numero_serie: string
   diagnostico: string; trabajo_realizado: string; costo_mano_obra: string; notas: string
   items: OrdenReparacionItem[]; total_refacciones: string; total: string
-  cliente_display: string; equipo_display: string
+  cliente_display: string; equipo_display: string; cuenta?: string | null
   fecha_recibida: string; fecha_entrega?: string | null; actualizado_en?: string
 }
 type Venta = {
@@ -1198,12 +1198,12 @@ function RelojVivo({ now }: { now: Date }) {
   if (h === 0) h = 12
   const chars = [...`${h}:${String(now.getMinutes()).padStart(2, '0')}`]
   const ampm = now.getHours() < 12 ? 'AM' : 'PM'
-  // Números en monoespaciada del sistema (SF Mono en Mac): el "1" y el resto
-  // salen limpios e inequívocos, a diferencia del sans black.
-  const fuenteNum = "ui-monospace, 'SF Mono', 'SFMono-Regular', Menlo, Consolas, monospace"
+  // Helvetica/Arial: su "1" es un trazo simple y recto, sin la patita/serif
+  // que tenían la monoespaciada y el sans black (que no gustaban).
+  const fuenteNum = "'Helvetica Neue', Helvetica, Arial, sans-serif"
   return (
     <div className="flex items-baseline gap-2 mt-5">
-      <div className="flex text-[44px] leading-none font-bold tracking-tight text-ink tabular-nums" style={{ fontFamily: fuenteNum }}>
+      <div className="flex text-[46px] leading-none font-bold tracking-[-0.02em] text-ink tabular-nums" style={{ fontFamily: fuenteNum }}>
         {chars.map((c, i) => c === ':' ? (
           <span key={`sep-${i}`} className="mx-[3px] -translate-y-[3px]">:</span>
         ) : (
@@ -5284,8 +5284,14 @@ function OrdenDetalleModal({ orden, refacciones, notify, onClose, onChanged, onP
   const [diag, setDiag] = useState(orden.diagnostico || '')
   const [mano, setMano] = useState(String(Number(orden.costo_mano_obra) || 0))
   const [notas, setNotas] = useState(orden.notas || '')
+  const [clienteNombre, setClienteNombre] = useState(orden.cliente_nombre || '')
+  const [clienteTel, setClienteTel] = useState(orden.cliente_telefono || '')
   const [savingInfo, setSavingInfo] = useState(false)
   const [busy, setBusy] = useState(false)
+  // Liga de vinculación a la cuenta del cliente (un solo uso).
+  const [liga, setLiga] = useState('')
+  const [ligaCopiada, setLigaCopiada] = useState(false)
+  const [generandoLiga, setGenerandoLiga] = useState(false)
 
   // Alta de refacción
   const [origen, setOrigen] = useState<'stock' | 'externa'>('stock')
@@ -5300,12 +5306,29 @@ function OrdenDetalleModal({ orden, refacciones, notify, onClose, onChanged, onP
 
   function guardarInfo() {
     setSavingInfo(true)
+    // Cliente/teléfono solo aplican a órdenes de equipo de cliente (no a máquina propia).
+    const extra = o.tipo === 'cliente' ? { cliente_nombre: clienteNombre.trim(), cliente_telefono: clienteTel.trim() } : {}
     api.patch<OrdenReparacion>(`/reparaciones/${o.id}/`, {
-      diagnostico: diag, trabajo_realizado: trabajo, costo_mano_obra: Number(mano) || 0, notas,
+      diagnostico: diag, trabajo_realizado: trabajo, costo_mano_obra: Number(mano) || 0, notas, ...extra,
     })
       .then(r => { apply(r.data); notify('Orden actualizada') })
       .catch(() => notify('No se pudo guardar', 'err'))
       .finally(() => setSavingInfo(false))
+  }
+
+  async function generarLiga() {
+    if (liga || generandoLiga) return
+    setGenerandoLiga(true)
+    try {
+      const r = await api.post<{ ruta: string }>(`/reparaciones/${o.id}/vinculo/`, {}, { fondo: true } as never)
+      setLiga(`${window.location.origin}${r.data.ruta}`)
+    } catch (e: any) {
+      notify(e?.response?.data?.detalle || 'No se pudo generar la liga', 'err')
+    } finally { setGenerandoLiga(false) }
+  }
+  async function copiarLiga() {
+    try { await navigator.clipboard.writeText(liga); setLigaCopiada(true); setTimeout(() => setLigaCopiada(false), 1800) }
+    catch { notify('No se pudo copiar; selecciona el texto a mano', 'err') }
   }
 
   function cambiarEstado(estado: OrdenReparacion['estado']) {
@@ -5430,6 +5453,33 @@ function OrdenDetalleModal({ orden, refacciones, notify, onClose, onChanged, onP
 
           {/* Panel lateral */}
           <div className="md:w-[260px] flex-none p-5 bg-surface-2">
+            {o.tipo === 'cliente' && (
+              <div className="mb-5">
+                <div className={`${capLabel} mb-2`}>CLIENTE</div>
+                <input value={clienteNombre} onChange={e => setClienteNombre(e.target.value)} placeholder="Nombre del cliente" className={`${inpSide} mb-2`} />
+                <input value={clienteTel} onChange={e => setClienteTel(e.target.value)} inputMode="numeric" maxLength={10} placeholder="Teléfono (10 dígitos)" className={inpSide} />
+                {/* Vincular a su cuenta: liga de un solo uso, como ventas/rentas. */}
+                {o.cuenta ? (
+                  <p className="mt-2.5 text-[12px] text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-1.5">
+                    <svg className="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.4"><path strokeLinecap="round" d="M5 13l4 4L19 7" /></svg>
+                    En la cuenta de {o.cuenta}
+                  </p>
+                ) : !liga ? (
+                  <button onClick={generarLiga} disabled={generandoLiga}
+                    className="mt-2.5 w-full py-2 rounded-[9px] border border-edge text-ink text-[12.5px] font-bold hover:bg-surface transition-colors disabled:opacity-50">
+                    {generandoLiga ? 'Generando…' : 'Vincular a una cuenta'}
+                  </button>
+                ) : (
+                  <div className="mt-2.5">
+                    <p className="text-[11px] text-mute mb-1.5">Mándale esta liga al cliente; al abrirla con su cuenta, la orden aparece en “Mis reparaciones”.</p>
+                    <div className="flex gap-1.5">
+                      <input readOnly value={liga} onFocus={e => e.currentTarget.select()} className="flex-1 min-w-0 bg-surface border border-edge rounded-[8px] px-2.5 py-1.5 text-[11px] text-ink outline-none" />
+                      <button onClick={copiarLiga} className={`px-2.5 py-1.5 rounded-[8px] text-[12px] font-bold border transition-colors ${ligaCopiada ? 'border-emerald-500/50 text-emerald-600' : 'border-edge text-ink hover:bg-surface'}`}>{ligaCopiada ? '✓' : 'Copiar'}</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
             <div className={`${capLabel} mb-2`}>MANO DE OBRA ($)</div>
             <input type="number" value={mano} onChange={e => setMano(e.target.value)} placeholder="0.00" className={`${inpSide} mb-3.5`} />
             <div className={`${capLabel} mb-2`}>NOTAS INTERNAS</div>
