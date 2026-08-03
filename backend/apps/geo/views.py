@@ -8,6 +8,7 @@ independiente del proveedor. Incluye caché para no repetir llamadas al
 proveedor externo con la misma búsqueda.
 """
 import hashlib
+import logging
 
 import requests
 from django.core.cache import cache
@@ -16,6 +17,8 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from .services import get_provider
+
+log = logging.getLogger(__name__)
 
 # Longitud mínima de la búsqueda (evita consultas ruidosas / costosas).
 MIN_QUERY_LEN = 3
@@ -40,8 +43,11 @@ def address_search(request):
 
     try:
         resultados = provider.search(q)
-    except requests.RequestException:
-        # Falla de red / proveedor caído: no romper el formulario.
+    except (requests.RequestException, RuntimeError, ValueError) as e:
+        # Falla de red, proveedor caído o mal configurado (p.ej. falta la API key,
+        # API sin habilitar o sin facturación): no romper el formulario. Se loguea
+        # el detalle para poder depurar la config sin exponerlo al cliente.
+        log.warning('address_search (%s) falló para %r: %s', provider.slug, q, e)
         return Response(
             {'detalle': 'No se pudo consultar el servicio de direcciones. Intenta de nuevo.'},
             status=502,
