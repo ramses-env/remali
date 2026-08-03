@@ -75,7 +75,7 @@ export default function RecordatorioPerfil() {
           className="fixed top-[76px] left-4 right-4 z-40 md:left-auto md:right-5 md:max-w-[360px]"
         >
           {/* Misma anatomía que las alertas: barra gris, círculo de color, ✕ */}
-          <div className="flex items-center gap-3 pl-3 pr-2 py-2.5 rounded-2xl border border-edge bg-surface-2 shadow-[0_18px_50px_rgba(0,0,0,0.35)]">
+          <div className="flex items-center gap-3 pl-3 pr-2 py-2.5 rounded-2xl border border-edge bg-alert shadow-[0_18px_50px_rgba(0,0,0,0.35)]">
             <span className="w-7 h-7 rounded-full grid place-items-center shrink-0 bg-amber-500 text-white text-[12px] font-black">%</span>
             <Link to="/perfil" className="group min-w-0 flex-1 flex items-center gap-2">
               <span className="min-w-0">

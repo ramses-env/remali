@@ -147,6 +147,11 @@ export default function Navbar() {
                           <svg className="w-4 h-4 text-mute" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z" /><path d="M3 6h18" /><path d="M16 10a4 4 0 0 1-8 0" /></svg>
                           Mis compras
                         </Link>
+                        <Link to="/mis-adeudos" onClick={() => setMenuCuenta(false)}
+                          className="flex items-center gap-3 px-4 py-3 text-[14px] font-semibold text-ink hover:bg-surface-2 transition-colors">
+                          <svg className="w-4 h-4 text-mute" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9" /><path d="M12 7.5v9M14.8 9.2c-.6-.8-1.6-1.2-2.8-1.2-1.7 0-3 .9-3 2.2 0 2.8 6 1.6 6 4.3 0 1.3-1.3 2.2-3 2.2-1.2 0-2.2-.4-2.8-1.2" /></svg>
+                          Mis adeudos
+                        </Link>
                       </div>
                     )}
                     <button onClick={() => { setMenuCuenta(false); setConfirm(true) }}

@@ -27,6 +27,7 @@
   --c-bg:         #F6F7F9;   /* fondo gris muy claro */
   --c-surface:    #FFFFFF;   /* tarjetas / paneles blancos */
   --c-surface-2:  #EFF0F3;   /* chips, hover, superficies secundarias */
+  --c-alert:      #EFF0F3;   /* avisos FLOTANTES: siempre opaco (en claro = surface-2) */
   --c-border:     #E5E7EB;   /* bordes/divisores */
   --c-ink:        #111827;   /* texto principal */
   --c-mute:       #6B7280;   /* metadatos */
@@ -56,6 +57,10 @@
   --c-bg:         #0a0a0b;   /* negro neutro tipo 21st.dev (de la imagen) */
   --c-surface:    #161618;   /* paneles/tarjetas */
   --c-surface-2:  rgba(255, 255, 255, 0.05);
+  /* Los avisos flotan SOBRE el contenido de la página, no dentro de un panel:
+     un fondo translúcido deja ver lo de atrás. Aquí va OPACO (gris un pelo más
+     claro que el panel, para que lea como tarjeta elevada). */
+  --c-alert:      #212127;
   --c-border:     rgba(255, 255, 255, 0.09);
   --c-ink:        #f4f4f5;   /* texto casi blanco, neutro */
   --c-mute:       #9a9aa2;   /* gris frío */
@@ -91,6 +96,7 @@
   --color-app:        var(--c-bg);
   --color-surface:    var(--c-surface);
   --color-surface-2:  var(--c-surface-2);
+  --color-alert:      var(--c-alert);
   --color-edge:       var(--c-border);
   --color-ink:        var(--c-ink);
   --color-mute:       var(--c-mute);

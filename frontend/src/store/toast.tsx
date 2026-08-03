@@ -69,7 +69,7 @@ function ToastView({ toasts, quitar }: { toasts: Toast[]; quitar: (id: number) =
             animate={{ opacity: 1, x: 0, scale: 1 }}
             exit={{ opacity: 0, x: 24, scale: 0.97 }}
             transition={{ duration: 0.28, ease: [0.23, 1, 0.32, 1] }}
-            className="pointer-events-auto relative overflow-hidden flex items-center gap-3 pl-3 pr-2.5 py-2.5 rounded-2xl border border-edge bg-surface-2 text-ink shadow-[0_18px_50px_rgba(0,0,0,0.45)]"
+            className="pointer-events-auto relative overflow-hidden flex items-center gap-3 pl-3 pr-2.5 py-2.5 rounded-2xl border border-edge bg-alert text-ink shadow-[0_18px_50px_rgba(0,0,0,0.45)]"
           >
             <span className={`w-7 h-7 rounded-full grid place-items-center shrink-0 ${CIRCULO[t.kind]}`}>
               <Icono kind={t.kind} />
