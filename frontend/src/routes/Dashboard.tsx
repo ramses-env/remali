@@ -1257,10 +1257,10 @@ function Resumen({ equipos, rentas, unidades, ventas, me, go, metrics, adeudos, 
   ].sort((a, b) => (b.ts || '').localeCompare(a.ts || '')).slice(0, 4)
 
   const overviewStats = [
-    { label: 'Ingreso potencial/día', value: money0(ingresoDia) },
-    { label: 'Unidades disponibles', value: String(disp) },
-    { label: 'Rentas activas', value: String(rentas.length) },
-    { label: 'Ventas del catálogo', value: String(ventasActivas.length) },
+    { label: 'Ingreso potencial/día', value: money0(ingresoDia), icon: <><path d="M12 1v22" /><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" /></> },
+    { label: 'Unidades disponibles', value: String(disp), icon: <><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" /><path d="M3.3 7 12 12l8.7-5M12 22V12" /></> },
+    { label: 'Rentas activas', value: String(rentas.length), icon: <><rect x="3" y="4.5" width="18" height="16" rx="2" /><path d="M3 9h18M8 3v3m8-3v3" /><path d="M12 13v3l2 1" /></> },
+    { label: 'Ventas del catálogo', value: String(ventasActivas.length), icon: <><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z" /><path d="M3 6h18" /><path d="M16 10a4 4 0 0 1-8 0" /></> },
   ]
 
   // ── Requiere tu atención: los pendientes de dinero/operación de un vistazo,
@@ -1339,8 +1339,8 @@ function Resumen({ equipos, rentas, unidades, ventas, me, go, metrics, adeudos, 
           {overviewStats.map((s, i) => (
             <div key={i} className={`${panel} px-4 py-4`}>
               <div className="flex items-center justify-between mb-3.5">
-                <div className="w-[34px] h-[34px] rounded-[9px] bg-app flex items-center justify-center">
-                  <div className="w-[11px] h-[11px] rounded-[3px] bg-gold" />
+                <div className="w-[34px] h-[34px] rounded-[9px] bg-app flex items-center justify-center text-gold">
+                  <svg className="w-[18px] h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">{s.icon}</svg>
                 </div>
                 <div className="flex gap-0.5">
                   <span className="w-[3px] h-[3px] rounded-full bg-[#D1D5DB]" /><span className="w-[3px] h-[3px] rounded-full bg-[#D1D5DB]" /><span className="w-[3px] h-[3px] rounded-full bg-[#D1D5DB]" />
@@ -1441,18 +1441,6 @@ function Resumen({ equipos, rentas, unidades, ventas, me, go, metrics, adeudos, 
             </div>
           ))}
         </div>
-
-        {/* Mapa de actividad */}
-        <div className={`${panel} p-5`}>
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <div className="text-base font-extrabold text-ink">Mapa de actividad</div>
-              <div className="text-[13px] text-mute mt-1">Ubicación de rentas activas</div>
-            </div>
-            <button onClick={() => go('rentas')} className="text-[13px] font-bold text-gold hover:opacity-80">Ver detalle</button>
-          </div>
-          <div className="h-[180px] rounded-[10px] flex items-center justify-center font-mono text-[12.5px] text-mute" style={{ background: 'repeating-linear-gradient(45deg,#EFF0F3,#EFF0F3 10px,#F8F9FB 10px,#F8F9FB 20px)' }}>[ {rentas.length} rentas activas en obra ]</div>
-        </div>
       </div>
 
       {/* ── Columna derecha ── */}
@@ -1522,7 +1510,9 @@ function Resumen({ equipos, rentas, unidades, ventas, me, go, metrics, adeudos, 
           <div className="text-base font-extrabold text-ink">Inventario por estado</div>
           <div className="text-[13px] text-mute mt-1 mb-5">Distribución actual</div>
           <div className="flex items-end gap-1 h-[110px] mb-3.5">
-            {[{ l: 'Disp.', v: disp, c: '#1F7A4D' }, { l: 'Rent.', v: rent, c: '#2B5FAD' }, { l: 'Mant.', v: mant, c: '#B8872E' }, { l: 'Vend.', v: vend, c: '#9CA3AF' }].map((b, i) => {
+            {/* Paleta SUAVE (misma que la dona y las gráficas): pasteles --chart-*,
+                y un ámbar suave para mantenimiento. */}
+            {[{ l: 'Disp.', v: disp, c: 'var(--chart-green)' }, { l: 'Rent.', v: rent, c: 'var(--chart-blue)' }, { l: 'Mant.', v: mant, c: '#E0B457' }, { l: 'Vend.', v: vend, c: 'var(--chart-gray)' }].map((b, i) => {
               const mx = Math.max(1, disp, rent, mant, vend)
               return (
                 <div key={i} className="flex-1 flex flex-col items-center gap-1 h-full justify-end">
