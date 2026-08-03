@@ -14,6 +14,7 @@ urlpatterns = [
     path('rentas/adeudos/', views.rentas_adeudos, name='rentas_adeudos'),
     path('rentas/adeudos/fusionar/', views.fusionar_cliente_adeudos, name='fusionar_cliente_adeudos'),
     path('rentas/<int:pk>/cancelar-reserva/', views.cancelar_reserva_cliente, name='cancelar_reserva_cliente'),
+    path('rentas/<int:pk>/sustituir-unidad/', views.sustituir_unidad_renta, name='sustituir_unidad_renta'),
     path('rentas/<int:pk>/abonos/', views.registrar_abono, name='registrar_abono'),
     path('rentas/<int:pk>/por-facturar/', views.mandar_por_facturar_renta, name='renta_por_facturar'),
     path('rentas/<int:pk>/vinculo/', views.generar_vinculo_renta, name='generar_vinculo_renta'),

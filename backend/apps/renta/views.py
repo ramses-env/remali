@@ -75,6 +75,7 @@ def _serialize_renta(r: Renta, ver_dinero: bool = True):
             'codigo': r.inventario.codigo,
             'numero_serie': r.inventario.numero_serie,
             'equipo': r.inventario.equipo.modelo if r.inventario.equipo else None,
+            'equipo_id': r.inventario.equipo_id,
         },
         'modalidad': r.modalidad,
         'duracion': r.duracion,
@@ -615,6 +616,55 @@ def cancelar_reserva_cliente(request, pk: int):
     except Exception:
         pass
     return Response({'detalle': 'Tu reserva quedó cancelada.', 'renta': _serialize_renta(r)})
+
+
+@api_view(['POST'])
+@permission_classes([EsOperador])
+def sustituir_unidad_renta(request, pk: int):
+    """Cambia la máquina de una renta ACTIVA por otra de repuesto (avería).
+
+    La averiada entra a mantenimiento; el repuesto queda ocupado por la MISMA
+    renta —mismo cliente, fechas y precio—, que sigue su curso. Queda registro
+    del cambio en las observaciones."""
+    r = Renta.objects.select_related('inventario__equipo', 'usuario').filter(pk=pk).first()
+    if not r:
+        return Response({'detalle': 'Renta no encontrada'}, status=404)
+    if r.estado != 'activa':
+        return Response({'detalle': f'Solo se sustituye la unidad de una renta activa (está {r.estado}).'}, status=400)
+    nueva_id = (request.data or {}).get('nueva_unidad_id')
+    motivo = ((request.data or {}).get('motivo') or '').strip()[:300]
+    vieja = r.inventario
+    with transaction.atomic():
+        nueva = (Inventario.objects.select_for_update().select_related('equipo')
+                 .filter(pk=nueva_id).first())
+        if not nueva:
+            return Response({'detalle': 'La unidad de repuesto no existe.'}, status=400)
+        if nueva.pk == vieja.pk:
+            return Response({'detalle': 'Esa ya es la unidad de la renta.'}, status=400)
+        if nueva.equipo_id != vieja.equipo_id:
+            return Response({'detalle': 'El repuesto debe ser del mismo equipo.'}, status=400)
+        if nueva.estado != 'disponible':
+            return Response({'detalle': f'La unidad {nueva.codigo} no está disponible (está {nueva.estado}).'}, status=400)
+        nueva.ocupar_por_renta()                 # disponible -> rentado
+        r.inventario = nueva
+        nota = (f"[{timezone.now():%d/%m %H:%M}] Unidad sustituida por avería: "
+                f"{vieja.codigo} → {nueva.codigo}." + (f" Motivo: {motivo}" if motivo else ""))
+        r.observaciones = ((r.observaciones or '') + "\n" + nota).strip()
+        r.save(update_fields=['inventario', 'observaciones', 'actualizado_en'])
+        vieja.enviar_mantenimiento()             # la averiada al taller
+    try:
+        from maquinaria.models import crear_notificacion
+        equipo = r.inventario.equipo.modelo if r.inventario.equipo else 'Equipo'
+        crear_notificacion(
+            'sistema', f'Repuesto en renta: {vieja.codigo} → {nueva.codigo}',
+            f'{equipo} de {r.cliente or "cliente"} se cambió por avería. '
+            f'{vieja.codigo} entró a mantenimiento; abre una orden de reparación si aplica.',
+            seccion='rentas', ref=f'sustitucion-{r.id}-{nueva.pk}', data={'renta_id': r.id},
+        )
+    except Exception:
+        pass
+    return Response({'renta': _serialize_renta(r),
+                     'detalle': f'Listo: la renta ahora usa {nueva.codigo}; {vieja.codigo} pasó a mantenimiento.'})
 
 
 @api_view(['POST', 'PATCH'])

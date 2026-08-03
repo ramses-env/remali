@@ -101,7 +101,7 @@ type Venta = {
 }
 type RentaActiva = {
   id: number
-  inventario: { id: number; codigo?: string; numero_serie?: string | null; equipo?: string | null }
+  inventario: { id: number; codigo?: string; numero_serie?: string | null; equipo?: string | null; equipo_id?: number | null }
   modalidad: string
   cliente?: string
   telefono_cliente?: string
@@ -3000,7 +3000,7 @@ function RentasAdmin({ reload, notify }: { reload: () => void; notify: (m: strin
 
   return (
     <div className="space-y-5">
-      {verRenta && <RentaDetalleModal renta={verRenta} onClose={() => setVerRenta(null)} onTicket={() => abrirOrdenCartaPDF('rentas', verRenta.id)} />}
+      {verRenta && <RentaDetalleModal renta={verRenta} onClose={() => setVerRenta(null)} onTicket={() => abrirOrdenCartaPDF('rentas', verRenta.id)} notify={notify} onChanged={() => { load(); reload() }} />}
       {/* KPIs */}
       <KpiGrid
         items={[
@@ -3286,8 +3286,36 @@ function AbonoModal({ saldo, onClose, onRegistrar }: {
   )
 }
 
-function RentaDetalleModal({ renta: r, onClose, onTicket }: { renta: RentaFull; onClose: () => void; onTicket: () => void }) {
+function RentaDetalleModal({ renta: r, onClose, onTicket, notify, onChanged }: { renta: RentaFull; onClose: () => void; onTicket: () => void; notify?: (m: string, t?: 'ok' | 'err') => void; onChanged?: () => void }) {
   const money = formatMoney
+  // Sustituir la máquina por avería: la actual entra a mantenimiento y una de
+  // repuesto (del mismo equipo, disponible) toma la renta sin cambiar términos.
+  async function sustituirPorAveria() {
+    const equipoId = r.inventario.equipo_id
+    if (!equipoId) { notify?.('No se pudo identificar el equipo', 'err'); return }
+    try {
+      const resp = await api.get<Unidad[]>(`/equipos/${equipoId}/unidades/`, { fondo: true } as never)
+      const libres = (resp.data || []).filter(u => u.estado === 'disponible' && u.id !== r.inventario.id)
+      if (!libres.length) {
+        await confirmar({ titulo: 'Sin repuesto disponible', mensaje: `No hay otra unidad de ${r.inventario.equipo || 'este equipo'} disponible. Libera o registra una para poder sustituir.`, aceptar: 'Entendido' })
+        return
+      }
+      const sel = await elegir({
+        titulo: 'Unidad de repuesto',
+        mensaje: `La actual (${r.inventario.codigo}) entrará a mantenimiento por avería.`,
+        opciones: libres.map(u => ({ valor: String(u.id), label: u.codigo, detalle: u.numero_serie ? `S/N ${u.numero_serie}` : 'Disponible' })),
+      })
+      if (!sel || !sel[0]) return
+      const motivo = await pedir({ titulo: 'Motivo de la avería (opcional)', placeholder: 'Ej. Se fundió el motor' })
+      if (motivo === null) return   // canceló
+      const res = await api.post<{ detalle?: string }>(`/rentas/${r.id}/sustituir-unidad/`, { nueva_unidad_id: Number(sel[0]), motivo: motivo || '' })
+      notify?.(res.data?.detalle || 'Unidad sustituida', 'ok')
+      onChanged?.()
+      onClose()
+    } catch (e) {
+      notify?.((e as { response?: { data?: { detalle?: string } } })?.response?.data?.detalle || 'No se pudo sustituir', 'err')
+    }
+  }
   // Cuenta de cliente vinculada; se puede asignar o cambiar aquí mismo,
   // para las rentas que se registraron sin elegirla.
   const [cuenta, setCuenta] = useState<string | null>(r.cuenta ?? null)
@@ -3549,6 +3577,17 @@ function RentaDetalleModal({ renta: r, onClose, onTicket }: { renta: RentaFull; 
             <EvidenciasRenta rentaId={r.id} />
           </div>
         </div>
+
+        {/* Avería: cambiar la máquina por una de repuesto sin tocar la renta. */}
+        {r.estado === 'activa' && (
+          <div className="px-6 sm:px-[26px] pt-4 -mb-1">
+            <button onClick={sustituirPorAveria}
+              className="w-full flex items-center justify-center gap-2 h-10 rounded-[9px] border border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-500 text-[13px] font-bold hover:bg-amber-500/20 transition-colors">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M14.7 6.3a4 4 0 0 0-5.6 5.6l-6 6v3h3l6-6a4 4 0 0 0 5.6-5.6l-2.5 2.5-2.1-2.1z" /></svg>
+              Se averió — sustituir por una de repuesto
+            </button>
+          </div>
+        )}
 
         {/* Footer */}
         <div className="px-6 sm:px-[26px] py-5 border-t border-edge flex items-center gap-2.5 shrink-0">
@@ -5551,7 +5590,7 @@ function AdeudosAdmin({ datos, reload, notify }: {
         <AbonoModal saldo={Number(abonando.saldo || 0)} onClose={() => setAbonando(null)} onRegistrar={registrarAbono} />
       )}
       {ver && (
-        <RentaDetalleModal renta={ver} onClose={() => { setVer(null); reload() }} onTicket={() => abrirOrdenCartaPDF('rentas', ver.id)} />
+        <RentaDetalleModal renta={ver} onClose={() => { setVer(null); reload() }} onTicket={() => abrirOrdenCartaPDF('rentas', ver.id)} notify={notify} onChanged={reload} />
       )}
     </div>
   )
