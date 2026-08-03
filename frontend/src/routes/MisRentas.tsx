@@ -22,6 +22,7 @@ type RentaMia = {
   pagos?: { fecha: string; monto: string; metodo: string }[]
   pagado?: string
   saldo?: string
+  cancelable?: boolean
 }
 
 const money = formatMoney
@@ -43,11 +44,23 @@ function estiloEstado(estado: string) {
   return 'bg-ink/10 text-mute'
 }
 
-function Tarjeta({ r, i }: { r: RentaMia; i: number }) {
+function Tarjeta({ r, i, onCambio }: { r: RentaMia; i: number; onCambio: () => void }) {
   // Cerrada por defecto: lo esencial arriba y el desglose de pagos bajo demanda.
   const [abierto, setAbierto] = useState(false)
   const saldo = Number(r.saldo || 0)
   const total = Number(r.total || 0)
+  // Cancelar la reserva: el backend manda (solo reserva a futuro, sin entregar);
+  // aquí solo se muestra cuando él dice que sí se puede.
+  const [cancelando, setCancelando] = useState(false)
+  const [motivo, setMotivo] = useState('')
+  const [enviando, setEnviando] = useState(false)
+  async function cancelarReserva() {
+    setEnviando(true)
+    try {
+      await api.post(`/rentas/${r.id}/cancelar-reserva/`, { motivo: motivo.trim() }, { fondo: true } as never)
+      onCambio()
+    } catch { /* el interceptor avisa */ } finally { setEnviando(false) }
+  }
   return (
     <div style={{ animationDelay: `${i * 40}ms` }} className="stagger-item rounded-2xl border border-edge bg-surface px-5 py-4">
       {/* Línea 1: quién es y cuánto — el restante va EN la misma línea del total */}
@@ -85,6 +98,32 @@ function Tarjeta({ r, i }: { r: RentaMia; i: number }) {
           </button>
         )}
       </div>
+      {/* Cancelar la reserva: solo mientras siga siendo reserva a futuro. Una
+          vez que llega el día o te entregan la máquina, este botón desaparece. */}
+      {r.estado === 'reservada' && r.cancelable && (
+        cancelando ? (
+          <div className="mt-3 pt-3 border-t border-edge">
+            <p className="text-[13px] font-bold text-ink">¿Cancelar tu reserva de {r.equipo || 'este equipo'}?</p>
+            <textarea value={motivo} onChange={e => setMotivo(e.target.value)} rows={2} placeholder="Motivo (opcional)"
+              className="mt-2 w-full bg-surface-2 border border-edge rounded-xl px-3.5 py-2.5 text-[13px] text-ink placeholder-mute focus:outline-none focus:border-red-400/60 transition-colors resize-none" />
+            <div className="mt-2.5 flex gap-2">
+              <button onClick={() => { setCancelando(false); setMotivo('') }} disabled={enviando}
+                className="h-9 px-4 rounded-xl border border-edge text-ink text-[13px] font-semibold hover:bg-surface-2 transition-colors">Mejor no</button>
+              <button onClick={cancelarReserva} disabled={enviando}
+                className="h-9 px-4 rounded-xl bg-red-600 text-white text-[13px] font-bold hover:bg-red-700 transition-colors disabled:opacity-50">
+                {enviando ? 'Cancelando…' : 'Sí, cancelar'}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="mt-2">
+            <button onClick={() => setCancelando(true)}
+              className="text-[12px] font-semibold text-red-600 dark:text-red-400 hover:opacity-80 transition-opacity">
+              Cancelar reserva
+            </button>
+          </div>
+        )
+      )}
       {abierto && r.estado !== 'cancelada' && total > 0 && (
         <div className="mt-2 pt-3 border-t border-edge">
           <div className="flex items-center justify-between gap-3">
@@ -215,13 +254,13 @@ export default function MisRentas() {
                 </div>
               )}
               <h2 className="text-xs font-semibold uppercase tracking-[0.14em] text-mute">Activas</h2>
-              {activas.map((r, i) => <Tarjeta key={r.id} r={r} i={i} />)}
+              {activas.map((r, i) => <Tarjeta key={r.id} r={r} i={i} onCambio={() => recargar.current()} />)}
             </section>
           )}
           {historial.length > 0 && (
             <section className="space-y-3">
               <h2 className="text-xs font-semibold uppercase tracking-[0.14em] text-mute">Historial</h2>
-              {historial.map((r, i) => <Tarjeta key={r.id} r={r} i={i} />)}
+              {historial.map((r, i) => <Tarjeta key={r.id} r={r} i={i} onCambio={() => recargar.current()} />)}
             </section>
           )}
         </div>

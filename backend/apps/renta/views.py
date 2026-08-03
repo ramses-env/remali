@@ -514,6 +514,42 @@ def devolver_renta(request, pk: int):
     return Response({'renta': _serialize_renta(r), 'detalle': detalle})
 
 
+@api_view(['POST'])
+@permission_classes([permissions.IsAuthenticated])
+def cancelar_reserva_cliente(request, pk: int):
+    """El CLIENTE cancela SU reserva — pero solo mientras siga siendo una
+    reserva a futuro. Una vez que llega el día o se le entregó el equipo, ya
+    no puede: ahí REMALI ya movió la máquina y cualquier cambio se habla con
+    ellos."""
+    r = (Renta.objects
+         .select_related('inventario__equipo', 'empresa', 'obra', 'usuario')
+         .filter(pk=pk, usuario=request.user).first())
+    if not r:
+        return Response({'detalle': 'Renta no encontrada'}, status=404)
+    if r.estado != 'reservada' or r.entregada_en:
+        return Response({'detalle': 'Esta renta ya no es una reserva; contáctanos para cualquier cambio.'}, status=400)
+    if r.fecha_inicio and r.fecha_inicio <= timezone.localdate():
+        return Response({'detalle': 'Ya llegó el día de tu reserva; contáctanos por WhatsApp para cualquier cambio.'}, status=400)
+    motivo = (request.data or {}).get('motivo', '').strip()[:500]
+    r.cancelar(motivo=f'Cancelada por el cliente{": " + motivo if motivo else ""}')
+    try:
+        from maquinaria.models import crear_notificacion
+        nombre = (r.usuario.get_full_name() or r.usuario.get_username()) if r.usuario_id else 'El cliente'
+        eq = getattr(getattr(r.inventario, 'equipo', None), 'modelo', 'el equipo') if r.inventario_id else 'el equipo'
+        crear_notificacion(
+            'sistema',
+            f'{nombre} canceló su reserva',
+            f'Reserva de {eq}' + (f' para el {r.fecha_inicio:%d/%m}' if r.fecha_inicio else '')
+            + '. La unidad quedó libre.' + (f' Motivo: {motivo}' if motivo else ''),
+            seccion='rentas',
+            ref=f'reserva-cancel-{r.id}',
+            data={'renta_id': r.id},
+        )
+    except Exception:
+        pass
+    return Response({'detalle': 'Tu reserva quedó cancelada.', 'renta': _serialize_renta(r)})
+
+
 @api_view(['POST', 'PATCH'])
 @permission_classes([IsAdminGroupOrStaff])
 def cancelar_renta(request, pk: int):
@@ -891,5 +927,10 @@ def rentas_mias(request):
             'pagos': [{'fecha': p.get('fecha'), 'monto': p.get('monto'), 'metodo': p.get('metodo')} for p in (r.pagos or [])],
             'pagado': str(pagado),
             'saldo': str(saldo),
+            # El cliente puede cancelar SOLO mientras siga siendo una reserva a
+            # futuro: sin entregar y antes del día. Llegado el día o entregada,
+            # REMALI ya movió la máquina — de ahí en más, se habla con ellos.
+            'cancelable': (r.estado == 'reservada' and not r.entregada_en
+                           and bool(r.fecha_inicio) and r.fecha_inicio > hoy),
         })
     return Response({'rentas': data})
