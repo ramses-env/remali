@@ -1198,11 +1198,14 @@ function RelojVivo({ now }: { now: Date }) {
   if (h === 0) h = 12
   const chars = [...`${h}:${String(now.getMinutes()).padStart(2, '0')}`]
   const ampm = now.getHours() < 12 ? 'AM' : 'PM'
+  // Números en monoespaciada del sistema (SF Mono en Mac): el "1" y el resto
+  // salen limpios e inequívocos, a diferencia del sans black.
+  const fuenteNum = "ui-monospace, 'SF Mono', 'SFMono-Regular', Menlo, Consolas, monospace"
   return (
     <div className="flex items-baseline gap-2 mt-5">
-      <div className="flex text-[46px] leading-none font-black tracking-[-0.04em] text-[#111827] tabular-nums">
+      <div className="flex text-[44px] leading-none font-bold tracking-tight text-ink tabular-nums" style={{ fontFamily: fuenteNum }}>
         {chars.map((c, i) => c === ':' ? (
-          <span key={`sep-${i}`} className="mx-[2px] -translate-y-[3px]">:</span>
+          <span key={`sep-${i}`} className="mx-[3px] -translate-y-[3px]">:</span>
         ) : (
           <span key={`pos-${i}`} className="relative inline-flex overflow-hidden" style={{ height: '1em' }}>
             <AnimatePresence mode="popLayout" initial={false}>
@@ -1220,7 +1223,7 @@ function RelojVivo({ now }: { now: Date }) {
           </span>
         ))}
       </div>
-      <span className="text-[16px] font-bold text-[#9CA3AF]">{ampm}</span>
+      <span className="text-[16px] font-bold text-mute" style={{ fontFamily: fuenteNum }}>{ampm}</span>
     </div>
   )
 }
@@ -1342,18 +1345,19 @@ function Resumen({ equipos, rentas, unidades, ventas, me, go, metrics, adeudos, 
     <div className="grid grid-cols-1 lg:grid-cols-[2fr_1fr] gap-2.5 items-start">
       {/* ── Columna izquierda ── */}
       <div className="flex flex-col gap-2.5 min-w-0">
-        {/* Hero */}
-        <div className="rounded-2xl px-8 py-7 flex items-center justify-between gap-4" style={{ background: 'linear-gradient(120deg,#FFFFFF,#DCE9FB)' }}>
+        {/* Hero — gradiente y textos con tokens de tema (antes eran fijos en
+            claro y el hero se quedaba blanco en modo oscuro). */}
+        <div className="rounded-2xl px-8 py-7 flex items-center justify-between gap-4 bg-[linear-gradient(120deg,#FFFFFF,#DCE9FB)] dark:bg-[linear-gradient(120deg,#161822,#1e2a44)]">
           <div className="min-w-0">
-            <div className="text-[26px] font-extrabold text-[#111827]">Bienvenido, {nombre}</div>
-            <div className="text-[14.5px] text-[#6B7280] mt-1.5">Listo para gestionar tu inventario hoy.</div>
+            <div className="text-[26px] font-extrabold text-ink">Bienvenido, {nombre}</div>
+            <div className="text-[14.5px] text-mute mt-1.5">Listo para gestionar tu inventario hoy.</div>
             <RelojVivo now={now} />
-            <div className="text-[13.5px] text-[#6B7280] mt-1 capitalize">{dateStr}</div>
+            <div className="text-[13.5px] text-mute mt-1 capitalize">{dateStr}</div>
           </div>
           <div className="text-right shrink-0">
             <div className="text-[12.5px] font-bold tracking-wide text-gold">INGRESOS HOY</div>
-            <div className="text-[30px] font-extrabold text-[#111827] mt-2">{money0(ingresosHoy)}</div>
-            <div className="text-[13px] font-bold text-[#1F7A4D] mt-1">{ventasActivas.length} ventas totales</div>
+            <div className="text-[30px] font-extrabold text-ink mt-2 tabular-nums">{money0(ingresosHoy)}</div>
+            <div className="text-[13px] font-bold text-libre mt-1">{ventasActivas.length} ventas totales</div>
           </div>
         </div>
 
@@ -6576,9 +6580,12 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
   }
 
   const m = cotEstadoMeta(c.estado)
-  // Ya convertida en venta: queda de solo lectura. Es el respaldo de esa venta,
-  // y editar partidas/precios desincronizaría su total y su ticket.
-  const bloqueada = Boolean(c.convertida)
+  // Estado final (cancelada/rechazada): es un registro cerrado — no se edita,
+  // ni se envía, ni se convierte; solo se consulta o se imprime.
+  const cotCerrada = c.estado === 'cancelada' || c.estado === 'rechazada'
+  // Ya convertida en venta, o en un estado final: queda de solo lectura. Editar
+  // partidas/precios desincronizaría su total y su ticket, y en una cerrada no aplica.
+  const bloqueada = Boolean(c.convertida) || cotCerrada
   // Los conceptos que armó EL CLIENTE no se tocan: son su pedido, no una
   // captura del panel. El admin solo edita partidas de sus propias cotizaciones.
   const conceptosBloqueados = bloqueada || c.origen === 'cliente'
@@ -6624,11 +6631,19 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
         </div>
 
         <div className="px-5 sm:px-7 py-6 space-y-7 bg-surface flex-1 sm:overflow-y-auto">
-          {bloqueada && (
+          {c.convertida && (
             <div className="flex items-start gap-2.5 rounded-xl border border-emerald-500/25 bg-emerald-500/5 px-4 py-3">
               <svg className="w-4 h-4 mt-0.5 shrink-0 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.9"><path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zM16 11V7a4 4 0 00-8 0v4" /></svg>
               <p className="text-[12.5px] text-ink leading-relaxed">
                 Esta cotización ya se convirtió en {c.renta_id && !c.venta_id ? 'renta' : 'venta'}, así que quedó <b>bloqueada</b>. Es su respaldo; para cambiar algo, hazlo en la {c.renta_id && !c.venta_id ? 'renta' : 'venta'}.
+              </p>
+            </div>
+          )}
+          {cotCerrada && (
+            <div className="flex items-start gap-2.5 rounded-xl border border-red-500/25 bg-red-500/5 px-4 py-3">
+              <svg className="w-4 h-4 mt-0.5 shrink-0 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.9"><path strokeLinecap="round" d="M6 6l12 12M18 6L6 18" /></svg>
+              <p className="text-[12.5px] text-ink leading-relaxed">
+                Esta cotización está <b>{c.estado === 'cancelada' ? 'cancelada' : 'rechazada'}</b>: es un registro cerrado. Solo se puede consultar o imprimir — no se edita, ni se envía, ni se convierte.
               </p>
             </div>
           )}
@@ -7083,8 +7098,8 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
             </button>
           )}
 
-          {/* Acción de negocio */}
-          {c.convertida ? (
+          {/* Acción de negocio: no aplica en estados finales (cancelada/rechazada). */}
+          {!cotCerrada && (c.convertida ? (
             <button onClick={convertir} disabled={busy} className="w-full sm:w-auto py-2.5 px-5 rounded-full text-sm font-bold transition active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-2 border border-emerald-500/40 text-emerald-600 hover:bg-emerald-500/10">
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.9"><path strokeLinecap="round" strokeLinejoin="round" d="M4 12l5 5L20 6" /></svg>
               Ver ticket de venta
@@ -7102,7 +7117,7 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M4 12l5 5L20 6" /></svg>
               {c.tipo === 'mixta' ? `Convertir la venta (${orMoney(c.subtotal_venta)})` : 'Convertir a venta'}
             </button>
-          )}
+          ))}
         </div>
       </div>
 
