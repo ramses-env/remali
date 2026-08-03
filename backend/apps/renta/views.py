@@ -1,5 +1,6 @@
 import logging
 
+import csv
 from datetime import date
 from decimal import Decimal
 
@@ -147,6 +148,101 @@ def _parse_date(value):
         return date.fromisoformat(str(value))
     except (ValueError, TypeError):
         return None
+
+
+def _pagado_saldo(r):
+    """(pagado, saldo) de una renta a partir de sus abonos."""
+    pagado = sum((Decimal(str(p.get('monto', 0))) for p in (r.pagos or [])), Decimal('0'))
+    saldo = max((r.total or Decimal('0')) + (r.recargo or Decimal('0')) - pagado, Decimal('0'))
+    return pagado, saldo
+
+
+def _rango_fechas(params):
+    def _p(v):
+        try:
+            return date.fromisoformat((v or '').strip()) if v else None
+        except ValueError:
+            return None
+    return _p(params.get('desde')), _p(params.get('hasta'))
+
+
+@api_view(['GET'])
+@permission_classes([EsOperador])
+def exportar_rentas_csv(request):
+    """Reporte de rentas en CSV (abre en Excel). Respeta ?estado=&desde=&hasta=."""
+    MOD = {'dia': 'Por día', 'semana': 'Por semana', 'mes': 'Por mes'}
+    estado = (request.query_params.get('estado') or '').strip().lower()
+    desde, hasta = _rango_fechas(request.query_params)
+    qs = (Renta.objects.select_related('inventario__equipo', 'empresa', 'obra', 'usuario')
+          .prefetch_related('evidencias').order_by('-creado_en'))
+    if estado in ('reservada', 'activa', 'finalizada', 'cancelada'):
+        qs = qs.filter(estado=estado)
+    if desde:
+        qs = qs.filter(fecha_inicio__gte=desde)
+    if hasta:
+        qs = qs.filter(fecha_inicio__lte=hasta)
+
+    resp = HttpResponse(content_type='text/csv; charset=utf-8')
+    resp['Content-Disposition'] = 'attachment; filename="reporte_rentas.csv"'
+    resp.write('﻿')
+    w = csv.writer(resp)
+    w.writerow(['Renta #', 'Cliente', 'Empresa', 'Equipo', 'Código', 'Modalidad', 'Duración',
+                'Inicio', 'Fin', 'Total', 'Pagado', 'Saldo', 'Estado'])
+    ttot = tpag = tsal = Decimal('0')
+    for r in qs:
+        pagado, saldo = _pagado_saldo(r)
+        inv = r.inventario
+        if r.estado != 'cancelada':
+            ttot += r.total or 0; tpag += pagado; tsal += saldo
+        w.writerow([
+            r.id, r.cliente or (r.usuario.get_full_name() if r.usuario_id else '') or '',
+            r.empresa.nombre if r.empresa_id else '',
+            (inv.equipo.modelo if inv and inv.equipo else '') if inv else '',
+            inv.codigo if inv else '',
+            MOD.get(r.modalidad, r.modalidad), r.duracion,
+            r.fecha_inicio.strftime('%Y-%m-%d') if r.fecha_inicio else '',
+            r.fecha_fin.strftime('%Y-%m-%d') if r.fecha_fin else '',
+            r.total, str(pagado), str(saldo), r.get_estado_display(),
+        ])
+    w.writerow([])
+    w.writerow(['', '', '', '', '', '', '', '', 'TOTALES (sin canceladas)', str(ttot), str(tpag), str(tsal), ''])
+    return resp
+
+
+@api_view(['GET'])
+@permission_classes([EsOperador])
+def exportar_adeudos_csv(request):
+    """Reporte de cobranza: rentas con saldo pendiente, en CSV (Excel)."""
+    qs = (Renta.objects.exclude(estado='cancelada')
+          .select_related('inventario__equipo', 'empresa', 'usuario'))
+    resp = HttpResponse(content_type='text/csv; charset=utf-8')
+    resp['Content-Disposition'] = 'attachment; filename="reporte_adeudos.csv"'
+    resp.write('﻿')
+    w = csv.writer(resp)
+    w.writerow(['Cliente', 'Cuenta vinculada', 'Teléfono', 'Equipo', 'Código', 'Estado',
+                'Total', 'Pagado', 'Debe'])
+    filas = []
+    tdebe = Decimal('0')
+    for r in qs:
+        pagado, saldo = _pagado_saldo(r)
+        if saldo <= 0:
+            continue
+        cuenta = (f'{r.usuario.first_name} {r.usuario.last_name}'.strip() or r.usuario.get_username()) if r.usuario_id else ''
+        inv = r.inventario
+        filas.append([
+            r.cliente or cuenta or (r.empresa.nombre if r.empresa_id else ''),
+            cuenta, r.telefono_cliente or '',
+            (inv.equipo.modelo if inv and inv.equipo else '') if inv else '',
+            inv.codigo if inv else '',
+            r.get_estado_display(), r.total, str(pagado), str(saldo),
+        ])
+        tdebe += saldo
+    filas.sort(key=lambda f: Decimal(f[-1]), reverse=True)
+    for f in filas:
+        w.writerow(f)
+    w.writerow([])
+    w.writerow(['', '', '', '', '', '', '', 'TOTAL POR COBRAR', str(tdebe)])
+    return resp
 
 
 @api_view(['GET'])

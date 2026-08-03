@@ -3,6 +3,7 @@ from . import views
 
 urlpatterns = [
     path('rentas/', views.listar_rentas, name='listar_rentas'),
+    path('rentas/export/', views.exportar_rentas_csv, name='rentas_export'),
     path('rentas/crear/', views.crear_renta, name='crear_renta'),
     path('rentas/mias/', views.rentas_mias, name='rentas_mias'),   # cliente: sus rentas
     path('rentas/<int:pk>/entregar/', views.confirmar_entrega, name='confirmar_entrega'),
@@ -12,6 +13,7 @@ urlpatterns = [
     path('rentas/<int:pk>/ticket/', views.ticket_renta, name='ticket_renta'),
     path('rentas/<int:pk>/vincular/', views.vincular_cuenta, name='vincular_cuenta'),
     path('rentas/adeudos/', views.rentas_adeudos, name='rentas_adeudos'),
+    path('rentas/adeudos/export/', views.exportar_adeudos_csv, name='rentas_adeudos_export'),
     path('rentas/adeudos/fusionar/', views.fusionar_cliente_adeudos, name='fusionar_cliente_adeudos'),
     path('rentas/<int:pk>/cancelar-reserva/', views.cancelar_reserva_cliente, name='cancelar_reserva_cliente'),
     path('rentas/<int:pk>/sustituir-unidad/', views.sustituir_unidad_renta, name='sustituir_unidad_renta'),

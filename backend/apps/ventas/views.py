@@ -1,3 +1,5 @@
+import csv
+import datetime as _dt
 import logging
 
 from django.db import transaction
@@ -80,6 +82,61 @@ def venta_mostrador(request):
     }, status=201)
 
 
+def _rango_fechas(params):
+    """(desde, hasta) como date desde ?desde=&hasta= (AAAA-MM-DD), o (None, None)."""
+    def _p(v):
+        try:
+            return _dt.date.fromisoformat((v or '').strip()) if v else None
+        except ValueError:
+            return None
+    return _p(params.get('desde')), _p(params.get('hasta'))
+
+
+@api_view(['GET'])
+@permission_classes([IsAdminGroupOrStaff])
+def exportar_ventas_csv(request):
+    """Reporte de ventas en CSV (abre en Excel). Respeta ?estado=&desde=&hasta=."""
+    estado = (request.query_params.get('estado') or '').strip().lower()
+    desde, hasta = _rango_fechas(request.query_params)
+    qs = (Venta.objects.select_related('inventario__equipo', 'empresa', 'usuario', 'cotizacion')
+          .prefetch_related('solicitudes_factura').order_by('-fecha'))
+    if estado in ('activa', 'cancelada'):
+        qs = qs.filter(estado=estado)
+    if desde:
+        qs = qs.filter(fecha__date__gte=desde)
+    if hasta:
+        qs = qs.filter(fecha__date__lte=hasta)
+
+    resp = HttpResponse(content_type='text/csv; charset=utf-8')
+    resp['Content-Disposition'] = 'attachment; filename="reporte_ventas.csv"'
+    resp.write('﻿')  # BOM: Excel abre bien los acentos
+    w = csv.writer(resp)
+    w.writerow(['Fecha', 'Venta #', 'Cliente', 'Teléfono', 'Empresa', 'Equipo', 'Código',
+                'Método de pago', 'Subtotal', 'IVA', 'Total', 'Estado', 'Facturación'])
+    from decimal import Decimal
+    tsub = tiva = ttot = Decimal('0')
+    for v in qs:
+        inv = v.inventario
+        fac = next((s.get_estado_display() for s in v.solicitudes_factura.all() if s.estado != 'cancelada'), '—')
+        if v.estado != 'cancelada':
+            tsub += v.subtotal or 0; tiva += v.iva or 0; ttot += v.total or 0
+        w.writerow([
+            v.fecha.strftime('%Y-%m-%d %H:%M') if v.fecha else '',
+            v.id,
+            v.nombre_cliente or (v.empresa.nombre if v.empresa_id else '') or 'Público general',
+            v.telefono_cliente or '',
+            v.empresa.nombre if v.empresa_id else '',
+            (inv.equipo.modelo if inv and inv.equipo else '') or 'Venta mostrador',
+            inv.codigo if inv else '',
+            v.get_metodo_pago_display(),
+            v.subtotal, v.iva, v.total,
+            v.get_estado_display(), fac,
+        ])
+    w.writerow([])
+    w.writerow(['', '', '', '', '', '', '', 'TOTALES (sin canceladas)', tsub, tiva, ttot, '', ''])
+    return resp
+
+
 @api_view(['GET'])
 @permission_classes([IsAdminGroupOrStaff])
 def listar_ventas(request):
@@ -96,11 +153,23 @@ def listar_ventas(request):
     if estado in ('activa', 'cancelada'):
         qs = qs.filter(estado=estado)
 
+    # Filtro por periodo (año/mes/rango). Sin periodo pedido → el año en curso,
+    # para no arrastrar todo el histórico (ni volver a topar en 200 en silencio).
+    from server.periodos import rango_periodo, anio_actual
+    ini, fin = rango_periodo(request.query_params)
+    if ini is None and fin is None:
+        ini, fin = rango_periodo({'anio': str(anio_actual())})
+    if ini:
+        qs = qs.filter(fecha__gte=ini)
+    if fin:
+        qs = qs.filter(fecha__lt=fin)
+
     data = []
-    for v in qs[:200]:
+    for v in qs:
         inv = v.inventario
         data.append({
             'id': v.id,
+            'folio': v.folio,
             'nombre_cliente': v.nombre_cliente,
             'telefono_cliente': v.telefono_cliente,
             'empresa': v.empresa.nombre if v.empresa_id else None,
@@ -212,7 +281,7 @@ def mandar_por_facturar_venta(request, pk: int):
         subtotal=v.subtotal if v.aplica_iva else (v.total / Decimal('1.16')).quantize(Decimal('0.01')),
         iva=v.iva if v.aplica_iva else v.total - (v.total / Decimal('1.16')).quantize(Decimal('0.01')),
         total=v.total, forma_pago=fp,
-        concepto=f'Venta #{v.id}',
+        concepto=f'Venta {v.folio or ("#" + str(v.id))}',
     )
     return Response({'detalle': 'En la bandeja Por facturar.', 'solicitud_id': s.id}, status=201)
 

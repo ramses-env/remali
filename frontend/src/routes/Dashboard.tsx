@@ -84,6 +84,7 @@ type OrdenReparacion = {
 }
 type Venta = {
   id: number
+  folio?: string | null
   nombre_cliente?: string | null
   empresa?: string | null
   subtotal?: string
@@ -192,6 +193,28 @@ async function abrirOrdenCartaPDF(base: 'ventas' | 'rentas', id: number) {
     const r = await api.get(`/${base}/${id}/ticket/`, { responseType: 'blob', fondo: true } as never)
     descargarBlob(r.data as Blob, base === 'ventas' ? `orden-venta-${id}.pdf` : `orden-renta-${id}.pdf`)
   } catch { /* el interceptor global ya avisa el error */ }
+}
+
+/** Descarga un reporte CSV (abre en Excel) respetando los filtros que se pasen. */
+async function descargarReporte(url: string, params: Record<string, string>, archivo: string, notify: (m: string, t?: 'ok' | 'err') => void) {
+  try {
+    const r = await api.get(url, { params, responseType: 'blob', fondo: true } as never)
+    descargarBlob(r.data as Blob, archivo)
+    notify('Reporte descargado')
+  } catch {
+    notify('No se pudo generar el reporte', 'err')
+  }
+}
+
+/** Botón de exportar, consistente en las vistas de dinero. */
+function BotonExportar({ onClick }: { onClick: () => void }) {
+  return (
+    <button onClick={onClick} title="Descargar reporte (CSV para Excel)"
+      className="inline-flex items-center gap-1.5 h-9 px-3.5 rounded-lg border border-edge text-[13px] font-semibold text-ink hover:bg-surface-2 transition-colors whitespace-nowrap">
+      <svg className="w-4 h-4 text-mute" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="M7 10l5 5 5-5" /><path d="M12 15V3" /></svg>
+      Exportar
+    </button>
+  )
 }
 
 type Section = 'resumen' | 'equipos' | 'inventario' | 'refacciones' | 'reparaciones' | 'cotizaciones' | 'catalogos' | 'empresas' | 'rentas' | 'ventas' | 'facturacion' | 'adeudos' | 'cupones' | 'notificaciones' | 'perfil' | 'ubicaciones' | 'usuarios' | 'configuracion'
@@ -1078,7 +1101,7 @@ export default function Dashboard() {
             <RentasAdmin reload={() => { loadRentas(); loadUnidades() }} notify={notify} />
           )}
           {section === 'ventas' && (
-            <VentasAdmin ventas={ventas} reload={loadVentas} notify={notify} />
+            <VentasAdmin notify={notify} />
           )}
           {section === 'notificaciones' && (
             <NotificacionesAdmin
@@ -3019,11 +3042,14 @@ function RentasAdmin({ reload, notify }: { reload: () => void; notify: (m: strin
               </button>
             ))}
           </div>
-          {estado === 'activa' && vencidas > 0 && (
-            <span className="px-3 py-1.5 rounded-full bg-red-500/10 text-red-500 text-xs font-semibold flex items-center gap-1.5">
-              <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />{vencidas} vencida{vencidas > 1 ? 's' : ''} por recoger
-            </span>
-          )}
+          <div className="flex items-center gap-2 flex-wrap">
+            {estado === 'activa' && vencidas > 0 && (
+              <span className="px-3 py-1.5 rounded-full bg-red-500/10 text-red-500 text-xs font-semibold flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />{vencidas} vencida{vencidas > 1 ? 's' : ''} por recoger
+              </span>
+            )}
+            <BotonExportar onClick={() => descargarReporte('/rentas/export/', { estado }, `reporte_rentas_${estado}.csv`, notify)} />
+          </div>
         </div>
 
         {/* Tabla */}
@@ -3602,13 +3628,49 @@ function RentaDetalleModal({ renta: r, onClose, onTicket, notify, onChanged }: {
 /* ════════════════════════════════════════
    MÓDULO VENTAS
 ════════════════════════════════════════ */
-function VentasAdmin({ ventas, reload, notify }: { ventas: Venta[]; reload: () => void; notify: (m: string, t?: 'ok' | 'err') => void }) {
+const MESES_PERIODO = ['Todo el año', 'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre']
+
+/** Selector de periodo (mes + año) para acotar los listados por ejercicio.
+ *  Manda el filtro al servidor: nunca se trae más de un año a la vez. */
+function SelectorPeriodo({ anio, mes, onAnio, onMes, className = '' }: {
+  anio: number; mes: number; onAnio: (a: number) => void; onMes: (m: number) => void; className?: string
+}) {
+  const actual = new Date().getFullYear()
+  const anios = Array.from({ length: 5 }, (_, i) => actual - i)
+  const sel = 'h-9 rounded-lg border border-edge bg-surface-2 text-ink text-[13px] font-semibold px-2.5 focus:outline-none focus:border-gold/50 transition-colors cursor-pointer'
+  return (
+    <div className={`flex items-center gap-2 shrink-0 ${className}`}>
+      <select value={mes} onChange={e => onMes(Number(e.target.value))} className={sel} aria-label="Mes">
+        {MESES_PERIODO.map((m, i) => <option key={i} value={i}>{m}</option>)}
+      </select>
+      <select value={anio} onChange={e => onAnio(Number(e.target.value))} className={sel} aria-label="Año">
+        {anios.map(a => <option key={a} value={a}>{a}</option>)}
+      </select>
+    </div>
+  )
+}
+
+function VentasAdmin({ notify }: { notify: (m: string, t?: 'ok' | 'err') => void }) {
   const [q, setQ] = useState('')
+  const [anio, setAnio] = useState<number>(new Date().getFullYear())
+  const [mes, setMes] = useState<number>(0)
+  const [ventas, setVentas] = useState<Venta[]>([])
+  const [cargando, setCargando] = useState(false)
   const [detalle, setDetalle] = useState<Venta | null>(null)
 
+  const cargar = useCallback(() => {
+    setCargando(true)
+    const params = new URLSearchParams({ anio: String(anio) })
+    if (mes) params.set('mes', String(mes))
+    api.get<{ ventas: Venta[] }>(`/ventas/lista/?${params.toString()}`)
+      .then(r => setVentas(r.data?.ventas || [])).catch(() => {}).finally(() => setCargando(false))
+  }, [anio, mes])
+  useEffect(() => { cargar() }, [cargar])
+  useRecurso(['ventas'], cargar)   // realtime: si otro registra o cancela una venta
+
   function cancelar(v: Venta) {
-    if (!confirm(`¿Cancelar la venta #${v.id}? Se devolverá la máquina a inventario y se repondrá el stock.`)) return
-    api.post(`/ventas/${v.id}/cancelar/`).then(() => { notify('Venta cancelada'); reload() }).catch(e => notify(e?.response?.data?.detalle || 'Error', 'err'))
+    if (!confirm(`¿Cancelar la venta ${v.folio || '#' + v.id}? Se devolverá la máquina a inventario y se repondrá el stock.`)) return
+    api.post(`/ventas/${v.id}/cancelar/`).then(() => { notify('Venta cancelada'); cargar() }).catch(e => notify(e?.response?.data?.detalle || 'Error', 'err'))
   }
   const totalVendido = ventas.reduce((a, v) => a + (Number(v.total) || 0), 0)
   const maquinaria = ventas.filter(v => v.unidad)
@@ -3616,7 +3678,7 @@ function VentasAdmin({ ventas, reload, notify }: { ventas: Venta[]; reload: () =
 
   const filtradas = ventas.filter(v => {
     if (!q.trim()) return true
-    const t = `${v.nombre_cliente || ''} ${v.unidad?.equipo || ''} ${v.unidad?.codigo || ''}`.toLowerCase()
+    const t = `${v.folio || ''} ${v.nombre_cliente || ''} ${v.unidad?.equipo || ''} ${v.unidad?.codigo || ''}`.toLowerCase()
     return t.includes(q.trim().toLowerCase())
   })
 
@@ -3628,12 +3690,12 @@ function VentasAdmin({ ventas, reload, notify }: { ventas: Venta[]; reload: () =
 
   return (
     <div className="space-y-5">
-      {detalle && <VentaDetalleModal venta={detalle} onClose={() => setDetalle(null)} onChanged={reload} notify={notify} />}
+      {detalle && <VentaDetalleModal venta={detalle} onClose={() => setDetalle(null)} onChanged={cargar} notify={notify} />}
       {/* KPIs */}
       <KpiGrid
         gridClassName="grid-cols-2 lg:grid-cols-4"
         items={[
-          { label: 'Ventas totales', value: String(ventas.length), tone: 'default' },
+          { label: 'Ventas del periodo', value: String(ventas.length), tone: 'default' },
           { label: 'De maquinaria', value: String(maquinaria.length), tone: 'muted' },
           { label: 'Monto total', value: `$${totalVendido.toLocaleString('en-US', { minimumFractionDigits: 2 })}`, tone: 'gold' },
           { label: 'Ticket promedio', value: `$${ticket.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, tone: 'default' },
@@ -3644,12 +3706,21 @@ function VentasAdmin({ ventas, reload, notify }: { ventas: Venta[]; reload: () =
         {/* Toolbar */}
         <div className="px-5 py-4 border-b border-edge flex items-center gap-3 flex-wrap">
           <h3 className="font-bold text-ink shrink-0">Historial de ventas <span className="text-mute font-normal">({filtradas.length})</span></h3>
-          <div className="relative flex-1 sm:max-w-xs sm:ml-auto">
+          <SelectorPeriodo anio={anio} mes={mes} onAnio={setAnio} onMes={setMes} className="sm:ml-auto" />
+          <div className="relative flex-1 sm:max-w-xs">
             <svg className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-mute pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><circle cx="9" cy="9" r="6" /><path d="M15 15l3 3" strokeLinecap="round" /></svg>
-            <input value={q} onChange={e => setQ(e.target.value)} placeholder="Buscar cliente o equipo..."
+            <input value={q} onChange={e => setQ(e.target.value)} placeholder="Buscar folio, cliente o equipo..."
               className="w-full bg-surface-2 border border-edge rounded-full pl-9 pr-3 py-2 text-sm text-ink placeholder-mute focus:outline-none focus:border-gold/50 transition-colors" />
           </div>
-          <button onClick={reload} className="text-xs text-mute hover:text-gold transition-colors shrink-0">Actualizar</button>
+          <button onClick={cargar} className="text-xs text-mute hover:text-gold transition-colors shrink-0">Actualizar</button>
+          <BotonExportar onClick={() => {
+            // El reporte respeta el periodo del selector (mes 0 = todo el año).
+            const mm = String(mes).padStart(2, '0')
+            const p = mes
+              ? { desde: `${anio}-${mm}-01`, hasta: `${anio}-${mm}-${String(new Date(anio, mes, 0).getDate()).padStart(2, '0')}` }
+              : { desde: `${anio}-01-01`, hasta: `${anio}-12-31` }
+            descargarReporte('/ventas/export/', p, `reporte_ventas_${anio}${mes ? '-' + mm : ''}.csv`, notify)
+          }} />
         </div>
 
         {/* Tabla */}
@@ -3672,6 +3743,7 @@ function VentasAdmin({ ventas, reload, notify }: { ventas: Venta[]; reload: () =
                     <div className="flex items-center gap-2.5">
                       <span className="w-8 h-8 rounded-lg bg-gold-soft text-gold flex items-center justify-center shrink-0 font-black text-sm">{(v.nombre_cliente?.[0] || '#').toUpperCase()}</span>
                       <div className="min-w-0">
+                        <span className="font-mono text-[10.5px] text-mute block">{v.folio || `#${v.id}`}</span>
                         <span className="text-sm font-semibold text-ink truncate block">{v.nombre_cliente || 'Cliente general'}</span>
                         {v.cuenta && (
                           <span className="text-[10.5px] text-emerald-600 dark:text-emerald-400 font-medium truncate flex items-center gap-1">
@@ -3715,7 +3787,7 @@ function VentasAdmin({ ventas, reload, notify }: { ventas: Venta[]; reload: () =
               ))}
             </tbody>
           </table>
-          {filtradas.length === 0 && <p className="text-sm text-mute py-14 text-center">{q ? 'Sin resultados.' : 'Sin ventas registradas.'}</p>}
+          {filtradas.length === 0 && <p className="text-sm text-mute py-14 text-center">{cargando ? 'Cargando…' : (q ? 'Sin resultados.' : 'Sin ventas en el periodo.')}</p>}
         </div>
       </Card>
     </div>
@@ -5493,14 +5565,21 @@ function AdeudosAdmin({ datos, reload, notify }: {
 
   return (
     <div className="space-y-5">
-      <KpiGrid
-        gridClassName="grid-cols-2 lg:grid-cols-3"
-        items={[
-          { label: 'Por cobrar', value: money(Number(datos.total)), tone: 'gold' },
-          { label: 'Clientes que deben', value: String(grupos.length), tone: 'default' },
-          { label: 'Rentas con adeudo', value: String(datos.rentas.length), tone: 'muted' },
-        ]}
-      />
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex-1">
+          <KpiGrid
+            gridClassName="grid-cols-2 lg:grid-cols-3"
+            items={[
+              { label: 'Por cobrar', value: money(Number(datos.total)), tone: 'gold' },
+              { label: 'Clientes que deben', value: String(grupos.length), tone: 'default' },
+              { label: 'Rentas con adeudo', value: String(datos.rentas.length), tone: 'muted' },
+            ]}
+          />
+        </div>
+        {grupos.length > 0 && (
+          <BotonExportar onClick={() => descargarReporte('/rentas/adeudos/export/', {}, 'reporte_adeudos.csv', notify)} />
+        )}
+      </div>
 
       {grupos.length === 0 ? (
         <div className="rounded-2xl border border-edge bg-surface px-6 py-14 text-center">
@@ -5896,6 +5975,8 @@ function CotizacionesAdmin({ empresas, notify, irAInventario }: {
   const [q, setQ] = useState('')
   const [qDebounced, setQDebounced] = useState('')
   const [filtro, setFiltro] = useState<'todas' | 'vencida' | Cotizacion['estado']>('todas')
+  const [anio, setAnio] = useState<number>(new Date().getFullYear())
+  const [mes, setMes] = useState<number>(0)
   const [page, setPage] = useState(1)
   const [data, setData] = useState<PaginaCot>({ count: 0, next: null, previous: null, results: [] })
   const [stats, setStats] = useState<CotStats | null>(null)
@@ -5906,16 +5987,19 @@ function CotizacionesAdmin({ empresas, notify, irAInventario }: {
   const [carta, setCarta] = useState<Cotizacion | null>(null)
 
   const cargarStats = useCallback(() => {
-    api.get<CotStats>('/cotizaciones/stats/').then(r => setStats(r.data)).catch(() => {})
-  }, [])
+    const params = new URLSearchParams({ anio: String(anio) })
+    if (mes) params.set('mes', String(mes))
+    api.get<CotStats>(`/cotizaciones/stats/?${params.toString()}`).then(r => setStats(r.data)).catch(() => {})
+  }, [anio, mes])
   const cargarLista = useCallback(() => {
     setCargando(true)
-    const params = new URLSearchParams({ page: String(page) })
+    const params = new URLSearchParams({ page: String(page), anio: String(anio) })
+    if (mes) params.set('mes', String(mes))
     if (qDebounced.trim()) params.set('q', qDebounced.trim())
     if (filtro !== 'todas') params.set('estado', filtro)
     api.get<PaginaCot>(`/cotizaciones/?${params.toString()}`)
       .then(r => setData(r.data)).catch(() => {}).finally(() => setCargando(false))
-  }, [page, qDebounced, filtro])
+  }, [page, qDebounced, filtro, anio, mes])
   const recargar = useCallback(() => { cargarLista(); cargarStats() }, [cargarLista, cargarStats])
 
   // Búsqueda con debounce: al teclear se espera un poco y se vuelve a la página 1.
@@ -5923,7 +6007,7 @@ function CotizacionesAdmin({ empresas, notify, irAInventario }: {
     const t = setTimeout(() => { setQDebounced(q); setPage(1) }, 350)
     return () => clearTimeout(t)
   }, [q])
-  useEffect(() => { setPage(1) }, [filtro])           // cambiar de pestaña → página 1
+  useEffect(() => { setPage(1) }, [filtro, anio, mes])  // cambiar de pestaña/periodo → página 1
   useEffect(() => { cargarLista() }, [cargarLista])   // montaje + cambios de página/búsqueda/filtro
   useEffect(() => { cargarStats() }, [cargarStats])   // conteos al montar
 
@@ -5960,6 +6044,7 @@ function CotizacionesAdmin({ empresas, notify, irAInventario }: {
         <div className="flex items-center gap-3 p-4 border-b border-edge flex-wrap">
           <h3 className="font-bold text-ink shrink-0">Cotizaciones <span className="text-mute font-normal">({data.count})</span></h3>
           <div className="flex-1" />
+          <SelectorPeriodo anio={anio} mes={mes} onAnio={setAnio} onMes={setMes} />
           <div className="relative w-full sm:w-56">
             <svg className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-mute pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><circle cx="9" cy="9" r="6" /><path d="M15 15l3 3" strokeLinecap="round" /></svg>
             <input value={q} onChange={e => setQ(e.target.value)} placeholder="Buscar folio o cliente…" className="w-full bg-surface-2 border border-edge rounded-full pl-9 pr-3 py-2 text-sm text-ink placeholder-mute focus:outline-none focus:border-gold/50 transition-colors" />
