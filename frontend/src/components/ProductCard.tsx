@@ -17,6 +17,7 @@ type Props = {
   linkTo?: string
   tags?: Tag[]
   modo?: 'venta' | 'renta'
+  agotado?: boolean
 }
 
 const tagStyle: Record<Tag['tone'], string> = {
@@ -27,7 +28,7 @@ const tagStyle: Record<Tag['tone'], string> = {
   promo: 'bg-red-600 text-white',
 }
 
-export default function ProductCard({ id, title, price, priceOriginal, image, subtitle, meta, linkTo, tags = [], modo }: Props) {
+export default function ProductCard({ id, title, price, priceOriginal, image, subtitle, meta, linkTo, tags = [], modo, agotado = false }: Props) {
   const { state, dispatch } = useCart()
   // Si el tipo choca, el reducer NO agrega (abre el modal global): no avisar "añadido".
   const chocaTipo = () => { const t = tipoCotizacion(state.items); return !!t && t !== (esVenta(cartUnit) ? 'venta' : 'renta') }
@@ -60,11 +61,16 @@ export default function ProductCard({ id, title, price, priceOriginal, image, su
             ))}
           </div>
         )}
+        {agotado && (
+          <span className="absolute top-3 right-3 z-30 px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wide bg-black/70 text-white/90 backdrop-blur-sm pointer-events-none">
+            Agotado
+          </span>
+        )}
         {resolvedImage ? (
           <img
             src={resolvedImage}
             alt={title}
-            className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+            className={`w-full h-full object-cover transition-transform duration-500 group-hover:scale-105 ${agotado ? 'opacity-50 grayscale' : ''}`}
             loading="lazy"
             crossOrigin="anonymous"
             referrerPolicy="no-referrer"
@@ -84,6 +90,7 @@ export default function ProductCard({ id, title, price, priceOriginal, image, su
         )}
         {/* Overlay al hover: transparente a los clics salvo en los botones, para que el enlace de la imagen siga activo */}
         <div className="absolute inset-0 z-20 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center gap-3 pointer-events-none">
+          {!agotado && (
           <button
             aria-label="Agregar al carrito"
             onClick={() => {
@@ -97,6 +104,7 @@ export default function ProductCard({ id, title, price, priceOriginal, image, su
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
             </svg>
           </button>
+          )}
           <button
             aria-label="Favorito"
             onClick={() => { setFav(v => !v); notify(fav ? 'Eliminado de favoritos' : 'Añadido a favoritos') }}
@@ -120,9 +128,13 @@ export default function ProductCard({ id, title, price, priceOriginal, image, su
             la corta con "…" y el detalle del equipo cuenta el resto. */}
         <p className="text-xs text-mute mb-3 line-clamp-2 min-h-[2rem]">{subtitle || ''}</p>
         <div className="mt-auto flex items-end justify-between gap-3 pt-3 border-t border-edge">
-          {meta
-            ? <span className="text-[11px] text-mute truncate leading-tight pb-0.5">{meta}</span>
-            : <span />}
+          <span className="min-w-0 leading-tight pb-0.5">
+            {meta && <span className="block text-[11px] text-mute truncate">{meta}</span>}
+            <span className={`inline-flex items-center gap-1 text-[10.5px] font-bold ${agotado ? 'text-mute' : 'text-libre'}`}>
+              <span className={`w-1.5 h-1.5 rounded-full ${agotado ? 'bg-mute' : 'bg-libre'}`} />
+              {agotado ? 'Agotado' : 'Disponible'}
+            </span>
+          </span>
           <div className="text-right shrink-0">
             {/* Etiqueta chica sobre el precio: renta = "desde /modalidad"; venta = "Precio venta". */}
             <p className="text-[10px] text-mute font-mono uppercase">{modo === 'venta' ? 'Precio venta' : `desde /${unit}`}{priceOriginal ? <span className="ml-1.5 normal-case line-through text-[10.5px]">${priceOriginal.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span> : null}</p>
@@ -135,12 +147,16 @@ export default function ProductCard({ id, title, price, priceOriginal, image, su
 
       {/* Botones móvil */}
       <div className="md:hidden flex gap-2 px-5 pb-4">
+        {agotado ? (
+          <span className="flex-1 py-2.5 rounded-full bg-surface-2 text-mute text-xs font-bold text-center">Agotado</span>
+        ) : (
         <button
           onClick={() => { const choca = chocaTipo(); dispatch({ type: 'add', item: { lineId: Date.now() + Math.floor(Math.random() * 1000), id, title, price: displayPrice, qty: 1, image: resolvedImage, unit: cartUnit } }); if (!choca) notify('Equipo añadido a tu cotización') }}
           className="flex-1 py-2.5 rounded-full bg-gold text-black text-xs font-bold hover:opacity-90 transition-colors"
         >
           Agregar
         </button>
+        )}
         <Link
           to={linkTo || `/equipo/${id}`}
           className="flex-1 py-2.5 rounded-full border border-edge text-ink text-xs font-medium text-center hover:border-edge transition-colors"

@@ -133,6 +133,10 @@ class EquipoSerializer(serializers.ModelSerializer):
     # Disponibilidad derivada de las unidades de inventario
     disponible_venta = serializers.SerializerMethodField()
     disponible_renta = serializers.SerializerMethodField()
+    ofrece_venta = serializers.SerializerMethodField()
+    ofrece_renta = serializers.SerializerMethodField()
+    venta_disponible = serializers.SerializerMethodField()
+    renta_disponible = serializers.SerializerMethodField()
     condiciones = serializers.SerializerMethodField()
     stock_disponible = serializers.SerializerMethodField()
     unidades_total = serializers.SerializerMethodField()
@@ -204,6 +208,25 @@ class EquipoSerializer(serializers.ModelSerializer):
         return any(u.estado == 'disponible' for u in obj.unidades.all())
 
     def get_disponible_renta(self, obj):
+        return any(u.condicion == 'seminueva' and u.estado == 'disponible' for u in obj.unidades.all())
+
+    # ── Qué MODOS ofrece el producto, según sus unidades + precios ──
+    # Un mismo modelo puede venderse Y rentarse: las unidades nuevas se venden,
+    # las seminuevas se rentan. El catálogo ya no depende de Equipo.condicion
+    # para esto; lo decide el inventario real.
+    def get_ofrece_venta(self, obj):
+        tiene_precio = bool(obj.precio_venta and obj.precio_venta > 0)
+        return tiene_precio and any(u.condicion == 'nueva' and u.estado != 'vendido' for u in obj.unidades.all())
+
+    def get_ofrece_renta(self, obj):
+        tiene_precio = any([obj.precio_dia, obj.precio_semana, obj.precio_mes])
+        return tiene_precio and any(u.condicion == 'seminueva' and u.estado != 'vendido' for u in obj.unidades.all())
+
+    # Disponibilidad por modo (Disponible / Agotado), precisa por condición.
+    def get_venta_disponible(self, obj):
+        return any(u.condicion == 'nueva' and u.estado == 'disponible' for u in obj.unidades.all())
+
+    def get_renta_disponible(self, obj):
         return any(u.condicion == 'seminueva' and u.estado == 'disponible' for u in obj.unidades.all())
 
     def get_condiciones(self, obj):

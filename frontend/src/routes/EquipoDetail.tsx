@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import api from '../lib/api'
 import { toNumber } from '../lib/utils'
 import { useCart, type Modalidad } from '../store/cart'
@@ -95,9 +95,12 @@ export default function EquipoDetail() {
   const precioDia = toNumber(e?.precio_dia)
   const precioSemana = toNumber(e?.precio_semana)
   const precioMes = toNumber(e?.precio_mes)
-  const esEquipoRenta = e?.condicion === 'seminueva'
-  const seRenta = esEquipoRenta
-  const seVende = !esEquipoRenta
+  // Modos que ofrece el producto: si el backend manda las banderas (unidades +
+  // precios), un mismo modelo puede venderse Y rentarse. Si no, se cae a la
+  // condición de siempre (comportamiento anterior).
+  const ext = (e || {}) as { ofrece_venta?: boolean; ofrece_renta?: boolean; venta_disponible?: boolean; renta_disponible?: boolean }
+  const seRenta = ext.ofrece_renta ?? (e ? e.condicion === 'seminueva' : false)
+  const seVende = ext.ofrece_venta ?? (e ? e.condicion !== 'seminueva' : false)
 
   // Modalidades que este equipo realmente ofrece (hay quien solo se vende).
   const modalidades = useMemo<Modalidad[]>(() => {
@@ -107,9 +110,10 @@ export default function EquipoDetail() {
     return m.length ? m : ['venta']
   }, [seVende, seRenta])
 
-  // 'venta' o una unidad de renta. Arranca en la unidad global del catálogo,
-  // y se corrige si este equipo no ofrece esa modalidad.
-  const [modalidad, setModalidad] = useState<Modalidad>(unit)
+  // Si venimos de una card de Venta (?ver=venta), arrancamos en venta; si no,
+  // en la unidad global del catálogo. Se corrige si el equipo no la ofrece.
+  const [searchParams] = useSearchParams()
+  const [modalidad, setModalidad] = useState<Modalidad>(searchParams.get('ver') === 'venta' ? 'venta' : unit)
   useEffect(() => {
     if (!modalidades.includes(modalidad)) setModalidad(modalidades.includes(unit) ? unit : modalidades[0])
   }, [modalidades])           // eslint-disable-line react-hooks/exhaustive-deps
@@ -130,9 +134,9 @@ export default function EquipoDetail() {
     if (m !== 'venta') setUnit(m)   // mantiene sincronizado el selector global del catálogo
   }
 
-  // Para el cliente cada máquina es UNA cosa: se vende o se renta.
-  const availability = esEquipoRenta ? 'Renta' : 'Venta'
-  const hayStock = esEquipoRenta ? (e?.disponible_renta ?? true) : (e?.disponible_venta ?? true)
+  // Según el modo que el cliente está viendo ahora (venta o renta).
+  const availability = esRenta ? 'Renta' : 'Venta'
+  const hayStock = esRenta ? (ext.renta_disponible ?? e?.disponible_renta ?? true) : (ext.venta_disponible ?? e?.disponible_venta ?? true)
 
   async function subirImagenes(ev: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(ev.target.files || [])
@@ -410,6 +414,19 @@ export default function EquipoDetail() {
               </span>
               <span className="text-xl font-extrabold">${formatCurrency(displayPrice * qty * (esRenta ? dias : 1))}</span>
             </div>
+
+            {/* Disponibilidad del modo actual (venta o renta). Es informativo:
+                el cliente puede cotizar igual y REMALI confirma existencias. */}
+            {(() => {
+              const disp = esRenta ? (ext.renta_disponible ?? true) : (ext.venta_disponible ?? true)
+              return (
+                <div className="flex items-center gap-2 text-[13px] font-bold mb-1">
+                  <span className={`w-2 h-2 rounded-full ${disp ? 'bg-libre' : 'bg-mute'}`} />
+                  <span className={disp ? 'text-libre' : 'text-mute'}>{disp ? 'Disponible' : 'Agotado'}</span>
+                  {!disp && <span className="text-mute font-normal">— solicítalo y te avisamos si se libera.</span>}
+                </div>
+              )
+            })()}
 
             {/* CTAs */}
             <div className="flex flex-col gap-2.5">

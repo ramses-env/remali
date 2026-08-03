@@ -33,6 +33,12 @@ type Equipo = {
   marca?: { id: number; nombre: string }
   disponible_venta?: boolean
   disponible_renta?: boolean
+  // Qué modos ofrece el producto según sus unidades + precios (un mismo modelo
+  // puede venderse Y rentarse), y si hay stock disponible de cada uno.
+  ofrece_venta?: boolean
+  ofrece_renta?: boolean
+  venta_disponible?: boolean
+  renta_disponible?: boolean
   condiciones?: string[]
 }
 
@@ -148,8 +154,10 @@ export default function EquiposList() {
     return next
   })
 
-  const asProduct = useMemo(() => (e: Equipo) => {
-    const modo: 'venta' | 'renta' = e.modo || (e.condicion === 'seminueva' ? 'renta' : 'venta')
+  // Una card por MODO ofrecido. Un producto que se vende Y se renta emite dos
+  // (Venta y Renta), reusando la card de siempre; cada una con su precio y su
+  // Disponible/Agotado. Así el cliente ve "los dos", no solo uno.
+  const asProducts = useMemo(() => (e: Equipo) => {
     const d = toNumber(e.precio_dia)
     const s = toNumber(e.precio_semana)
     const m = toNumber(e.precio_mes)
@@ -157,36 +165,37 @@ export default function EquiposList() {
       unit === 'dia' ? (d ?? s ?? m ?? 0) :
       unit === 'semana' ? (s ?? (d ? d * 7 : null) ?? m ?? 0) :
       (m ?? (d ? d * 30 : null) ?? (s ? s * 4 : null) ?? 0)
-    // Venta muestra su precio de venta; renta, el de la modalidad elegida.
-    const bruto = modo === 'venta' ? (toNumber(e.precio_venta) ?? 0) : rentaPrice
-    // Promo del equipo (admin): la card muestra el precio ya con descuento.
     const promo = Math.max(0, Math.min(90, e.promo_pct || 0))
-    const price = promo ? Math.round(bruto * (1 - promo / 100) * 100) / 100 : bruto
-    return {
-      id: e.id,
-      title: e.modelo,
-      price,
-      priceOriginal: promo ? bruto : undefined,
-      promo,
-      modo,
-      // Precios crudos por modalidad: los usa el PDF para ofrecer "los tres precios".
-      precioDia: d,
-      precioSemana: s,
-      precioMes: m,
-      image: resolveMediaUrl(e.imagen || (e.imagenes || [])[0] || '') || '',
-      description: e.descripcion || '',
-      condition: (e as any).condicion || '',
-      brand: (e as any).marca?.nombre || '',
-      category: (e as any).categoria?.nombre || '',
-      type: (e as any).tipo?.nombre || '',
-      ventaOk: e.disponible_venta ?? true,
-      rentaOk: e.disponible_renta ?? false,
-      condiciones: e.condiciones || [],
+    const card = (modo: 'venta' | 'renta') => {
+      const bruto = modo === 'venta' ? (toNumber(e.precio_venta) ?? 0) : rentaPrice
+      const price = promo ? Math.round(bruto * (1 - promo / 100) * 100) / 100 : bruto
+      const disponible = modo === 'venta'
+        ? (e.venta_disponible ?? e.disponible_venta ?? true)
+        : (e.renta_disponible ?? e.disponible_renta ?? false)
+      return {
+        id: e.id, key: `${e.id}-${modo}`, title: e.modelo, price,
+        priceOriginal: promo ? bruto : undefined, promo, modo, disponible,
+        precioDia: d, precioSemana: s, precioMes: m,
+        image: resolveMediaUrl(e.imagen || (e.imagenes || [])[0] || '') || '',
+        description: e.descripcion || '',
+        condition: (e as any).condicion || '',
+        brand: (e as any).marca?.nombre || '',
+        category: (e as any).categoria?.nombre || '',
+        type: (e as any).tipo?.nombre || '',
+        condiciones: e.condiciones || [],
+      }
     }
+    // Modos que ofrece; si el backend aún no manda las banderas, se cae al modo
+    // único de siempre (según la condición) — nada se rompe.
+    const modos: ('venta' | 'renta')[] = []
+    if (e.ofrece_venta) modos.push('venta')
+    if (e.ofrece_renta) modos.push('renta')
+    if (!modos.length) modos.push(e.modo || (e.condicion === 'seminueva' ? 'renta' : 'venta'))
+    return modos.map(card)
   }, [unit])
 
   const filteredAll = useMemo(() => {
-    let out = items.map(asProduct)
+    let out = items.flatMap(asProducts)
     const priceSel = (filters['price'] || [])[0]
     if (priceSel) {
       const [minStr, maxStr] = priceSel.split(':')
@@ -216,7 +225,7 @@ export default function EquiposList() {
     // cada grupo. Con un chip (Comprar/Rentar) activo el grupo ya es único.
     out = [...out.filter(p => p.modo === 'venta'), ...out.filter(p => p.modo !== 'venta')]
     return out
-  }, [items, filters, query, sortKey, unit, asProduct])
+  }, [items, filters, query, sortKey, unit, asProducts])
 
   const shown = useMemo(() => {
     const start = page * pageSize
@@ -241,10 +250,15 @@ export default function EquiposList() {
   const suggestions = useMemo(() => {
     const q = inputValue.trim().toLowerCase()
     if (!q) return []
-    return items.map(asProduct).filter(p =>
-      `${p.title} ${p.description} ${p.brand} ${p.category}`.toLowerCase().includes(q)
-    ).slice(0, 6)
-  }, [items, inputValue, asProduct])
+    // Una sugerencia por MODELO (no por modo): dedup por id para no repetir.
+    const vistos = new Set<number>()
+    return items.flatMap(asProducts).filter(p => {
+      if (vistos.has(p.id)) return false
+      const match = `${p.title} ${p.description} ${p.brand} ${p.category}`.toLowerCase().includes(q)
+      if (match) vistos.add(p.id)
+      return match
+    }).slice(0, 6)
+  }, [items, inputValue, asProducts])
 
   const activeFilterCount = Object.values(filters).flat().filter(Boolean).length
 
@@ -553,16 +567,17 @@ export default function EquiposList() {
             {!loading && shown.map((p, i) => (
               /* h-full: la card llena su celda del grid; sin esto, una card sin
                  descripción queda más corta que su vecina y el precio flota. */
-              <div key={p.id} className="equipo-card h-full" ref={i === 0 ? firstCardRef : undefined}>
+              <div key={p.key} className="equipo-card h-full" ref={i === 0 ? firstCardRef : undefined}>
                 <ProductCard
                   id={p.id}
                   title={p.title}
                   price={p.price}
                   modo={p.modo}
+                  agotado={!p.disponible}
                   image={p.image || ''}
                   subtitle={p.description}
                   meta={[p.category, p.brand].filter(Boolean).join(' · ')}
-                  linkTo={`/equipo/${p.id}`}
+                  linkTo={`/equipo/${p.id}?ver=${p.modo === 'venta' ? 'venta' : 'renta'}`}
                   priceOriginal={p.priceOriginal}
                   tags={[
                     ...(p.promo ? [{ label: `PROMO −${p.promo}%`, tone: 'promo' as const }] : []),
