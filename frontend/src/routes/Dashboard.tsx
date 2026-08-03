@@ -6324,13 +6324,26 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
         mensaje: 'Del catálogo se cotiza con el precio de la web; la partida libre es para conceptos a mano.',
         opciones: [
           ...eqs.map(e => ({ valor: String(e.id), label: e.modelo, detalle: hint(e) })),
+          { valor: 'proveedor', label: 'Máquina bajo pedido (proveedor)', detalle: 'No está en tu inventario · siempre venta' },
           { valor: 'libre', label: 'Partida libre', detalle: 'Concepto y precio a mano (flete, operador…)' },
         ],
       })
       if (!sel || !sel[0]) return
-      const payload = sel[0] === 'libre'
-        ? { descripcion: 'Nueva partida', cantidad: 1, precio_unitario: 0, modalidad: c.tipo === 'renta' ? 'dia' : 'venta' }
-        : { equipo_id: Number(sel[0]), cantidad: 1, modalidad: c.tipo === 'renta' ? 'dia' : '' }
+      let payload: Record<string, unknown>
+      if (sel[0] === 'proveedor') {
+        // Máquina que REMALI no tiene en stock: la cotiza con su proveedor y la
+        // vende bajo pedido. Siempre venta; al convertir, la venta se crea SIN
+        // unidad de inventario (no se toca stock).
+        const nombre = (await pedir({ titulo: 'Máquina bajo pedido', mensaje: 'Nombre/modelo de la máquina que cotizas con tu proveedor.', placeholder: 'Ej. Compactadora Wacker DPU6555' }))?.trim()
+        if (!nombre) return
+        const precioStr = (await pedir({ titulo: 'Precio de venta (sin IVA)', mensaje: `Lo que le cobras al cliente por ${nombre}.`, placeholder: 'Ej. 85000', inputMode: 'decimal' }))?.trim()
+        const precio = Math.round(Number((precioStr || '').replace(/[^0-9.]/g, '')) * 100) / 100
+        payload = { descripcion: `${nombre} (bajo pedido)`, cantidad: 1, precio_unitario: precio || 0, modalidad: 'venta' }
+      } else if (sel[0] === 'libre') {
+        payload = { descripcion: 'Nueva partida', cantidad: 1, precio_unitario: 0, modalidad: c.tipo === 'renta' ? 'dia' : 'venta' }
+      } else {
+        payload = { equipo_id: Number(sel[0]), cantidad: 1, modalidad: c.tipo === 'renta' ? 'dia' : '' }
+      }
       const res = await api.post<Cotizacion>(`/cotizaciones/${c.id}/items/`, payload)
       apply(res.data)
     } catch (err) {
