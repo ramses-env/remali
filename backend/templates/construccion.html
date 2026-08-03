@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{{ negocio_nombre }} — Sitio en construcción</title>
-<meta name="description" content="Estamos preparando nuestro nuevo sitio. Seguimos rentando y vendiendo maquinaria: escríbenos por WhatsApp.">
+<title>{{ negocio_nombre }} — Muy pronto en línea</title>
+<meta name="description" content="Estamos poniendo el sistema en línea y afinando los últimos detalles. Seguimos rentando y vendiendo maquinaria: escríbenos por WhatsApp.">
 <meta name="robots" content="noindex">
 <meta name="theme-color" content="#0a0a0b">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -108,7 +108,31 @@
   @keyframes latido{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.35;transform:scale(.8)}}
   h1{margin:0 0 1rem;font-size:clamp(1.9rem,6vw,2.9rem);font-weight:800;line-height:1.1;letter-spacing:-.03em}
   h1 em{font-style:normal;color:#f2b736}
-  .texto{margin:0 auto 2.5rem;max-width:26rem;color:#9a9aa2;font-size:1rem;line-height:1.65}
+  .texto{margin:0 auto 2.25rem;max-width:27rem;color:#9a9aa2;font-size:1rem;line-height:1.65}
+
+  /* ── Progreso: "casi listo, afinando detalles" ─────────────────────────
+     La barra llena hasta 92% al cargar y un brillo la recorre en bucle: sin
+     dar un número exacto, comunica que falta poco y que se sigue trabajando. */
+  .progreso{max-width:22rem;margin:0 auto 2.5rem;text-align:left}
+  .progreso-cab{
+    display:flex;justify-content:space-between;align-items:baseline;gap:1rem;
+    margin-bottom:.6rem;font-size:.8rem;color:#9a9aa2;
+  }
+  .progreso-cab b{color:#f2b736;font-weight:600;letter-spacing:.03em}
+  .barra{height:6px;border-radius:999px;background:rgba(255,255,255,.09);overflow:hidden}
+  .barra i{
+    display:block;height:100%;width:92%;border-radius:999px;position:relative;
+    background:linear-gradient(90deg,#fbbf24,#f97316);
+    animation:llenar 1.6s cubic-bezier(.23,1,.32,1) both;
+  }
+  .barra i::after{
+    content:'';position:absolute;inset:0;border-radius:999px;
+    background:linear-gradient(90deg,transparent,rgba(255,255,255,.55),transparent);
+    transform:translateX(-110%);animation:brillo 2.4s ease-in-out 1.6s infinite;
+  }
+  @keyframes llenar{from{width:0}to{width:92%}}
+  @keyframes brillo{to{transform:translateX(110%)}}
+
   .acciones{display:flex;flex-wrap:wrap;gap:.75rem;justify-content:center;margin-bottom:2.75rem}
   .btn{
     display:inline-flex;align-items:center;gap:.55rem;padding:.85rem 1.6rem;border-radius:999px;
@@ -164,6 +188,8 @@
     .capa{animation:none}
     .punto{animation:none}
     .btn{transition:none}
+    .barra i{animation:none;width:92%}
+    .barra i::after{animation:none;display:none}
   }
 </style>
 </head>
@@ -181,15 +207,24 @@
       <strong>{{ negocio_nombre }}</strong>
     </div>
 
-    <div class="estado"><i class="punto"></i>Sitio en construcción</div>
+    <div class="estado"><i class="punto"></i>Lanzamiento inminente</div>
 
-    <h1>Estamos preparando<br>algo <em>mejor</em>.</h1>
+    <h1>Afinando los<br><em>últimos detalles</em>.</h1>
 
     <p class="texto">
-      Nuestro nuevo sitio viene en camino. Mientras tanto
+      Ya estamos poniendo el sistema en línea y le damos los toques finales para
+      que puedas cotizar, rentar y dar seguimiento sin fricción. Mientras tanto,
       <strong style="color:#f4f4f5;font-weight:600">seguimos operando normal</strong>:
       escríbenos y te atendemos al momento.
     </p>
+
+    <div class="progreso" role="img" aria-label="Casi listo: afinando los últimos detalles">
+      <div class="progreso-cab">
+        <span>Puliendo los últimos detalles</span>
+        <b>Casi listo</b>
+      </div>
+      <div class="barra"><i></i></div>
+    </div>
 
     <div class="acciones">
       {% if whatsapp %}
