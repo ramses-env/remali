@@ -5957,19 +5957,33 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
       .catch(() => notify('No se pudo guardar', 'err'))
       .finally(() => setSavingInfo(false))
   }
-  function cambiarEstado(estado: Cotizacion['estado']) {
+  function cambiarEstado(estado: Cotizacion['estado'], extra?: Record<string, unknown>) {
     // Para marcarla como Enviada o Aceptada debe tener cliente y conceptos.
     if ((estado === 'enviada' || estado === 'aceptada') && (!(clienteNombre.trim() || empresaSel) || c.items.length === 0)) {
       notify('Agrega el nombre del cliente y al menos un concepto primero', 'err'); return
     }
-    api.patch<Cotizacion>(`/cotizaciones/${c.id}/`, { estado })
+    api.patch<Cotizacion>(`/cotizaciones/${c.id}/`, { estado, ...(extra || {}) })
       .then(r => {
         apply(r.data)
         notify(`Estado: ${cotEstadoMeta(estado).label}`)
         // El siguiente paso natural: comprometer fecha y hora de entrega.
         if (estado === 'aceptada' && !r.data.entrega_prometida) notify('Ahora indica la fecha y hora de entrega prometida', 'info')
       })
-      .catch(() => notify('No se pudo cambiar el estado', 'err'))
+      .catch(async err => {
+        // Venció: los precios ya no están garantizados. Respetarlos es una
+        // decisión humana — se confirma y se reintenta con la marca.
+        if (err?.response?.data?.codigo === 'vencida') {
+          const ok = await confirmar({
+            titulo: 'Cotización vencida',
+            mensaje: `${err.response.data.detalle} ¿Aceptarla respetando esos precios?`,
+            aceptar: 'Sí, respetar precios',
+            cancelar: 'Mejor no',
+          })
+          if (ok) cambiarEstado(estado, { confirmar_vencida: true })
+          return
+        }
+        notify(err?.response?.data?.detalle || 'No se pudo cambiar el estado', 'err')
+      })
   }
   /* Concretar la RENTA de una cotización aceptada: se cuelga la cotización
      al puente y se manda al admin a Inventario a elegir la unidad; el
@@ -6162,6 +6176,8 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
   // Los conceptos que armó EL CLIENTE no se tocan: son su pedido, no una
   // captura del panel. El admin solo edita partidas de sus propias cotizaciones.
   const conceptosBloqueados = bloqueada || c.origen === 'cliente'
+  // Identidad de la solicitud (nombre/tel/correo): también es del cliente.
+  const identidadBloqueada = c.origen === 'cliente'
   const sub = Number(c.subtotal) || 0
   // Venta: el precio ya incluye IVA → se desglosa. Renta: IVA solo si hay factura.
   const esVenta = c.tipo === 'venta'
@@ -6421,21 +6437,24 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
               </div>
             )}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <select disabled={bloqueada || !!c.usuario_nombre} title={c.usuario_nombre ? 'Vino de una cuenta de la tienda: la identidad no se cambia por una empresa' : undefined} value={empresaSel} onChange={e => cambiarEmpresa(e.target.value)} className={`${input} sm:col-span-2 disabled:opacity-60`}>
+              <select disabled={bloqueada || identidadBloqueada || !!c.usuario_nombre} title={c.usuario_nombre || identidadBloqueada ? 'La identidad la puso el cliente: no se cambia por una empresa' : undefined} value={empresaSel} onChange={e => cambiarEmpresa(e.target.value)} className={`${input} sm:col-span-2 disabled:opacity-60`}>
                 <option value="">— Cliente particular —</option>
                 {empresasActivas(empresas).map(e => <option key={e.id} value={e.id}>{e.nombre}</option>)}
               </select>
-              <input disabled={bloqueada || !!empresaSel || !!c.usuario_nombre} value={clienteNombre} onChange={e => setClienteNombre(e.target.value)}
+              <input disabled={bloqueada || identidadBloqueada || !!empresaSel || !!c.usuario_nombre} value={clienteNombre} onChange={e => setClienteNombre(e.target.value)}
                 title={empresaSel ? 'El nombre lo define la empresa seleccionada' : undefined}
                 className={`${input} disabled:opacity-60`} placeholder="Nombre del cliente" />
               <div>
-                <input type="tel" inputMode="numeric" maxLength={10} disabled={bloqueada} value={clienteTel}
+                <input type="tel" inputMode="numeric" maxLength={10} disabled={bloqueada || identidadBloqueada} value={clienteTel}
                   onChange={e => setClienteTel(e.target.value.replace(/\D/g, '').slice(0, 10))}
                   className={`${input} disabled:opacity-60`} placeholder="Teléfono (10 dígitos)" />
                 {clienteTel.length > 0 && clienteTel.length < 10 && <p className="text-[11px] text-red-600 dark:text-red-500 mt-1">Deben ser 10 dígitos.</p>}
               </div>
-              <input type="email" disabled={bloqueada} value={email} onChange={e => setEmail(e.target.value)} className={`${input} sm:col-span-2 disabled:opacity-60`} placeholder="Correo (cliente@correo.com)" />
+              <input type="email" disabled={bloqueada || identidadBloqueada} value={email} onChange={e => setEmail(e.target.value)} className={`${input} sm:col-span-2 disabled:opacity-60`} placeholder="Correo (cliente@correo.com)" />
             </div>
+            {identidadBloqueada && !bloqueada && (
+              <p className="text-[11.5px] text-mute mt-2">El nombre, teléfono y correo los puso el cliente en su solicitud — se corrigen desde su cuenta.</p>
+            )}
           </div>
 
           {/* Partidas: tabla editable en línea */}

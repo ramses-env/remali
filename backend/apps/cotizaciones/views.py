@@ -394,6 +394,8 @@ def autorizacion_cotizacion(request, token):
 
     # El jefe ya aprobó el dinero: entra ACEPTADA — a REMALI solo le queda
     # concretar la venta o renta (convertir), sin pasos intermedios.
+    if cot.vence_el and cot.vence_el < timezone.now().date():
+        return Response({'detalle': f'Esta cotización venció el {cot.vence_el.strftime("%d/%m/%Y")}. Pide una versión nueva a quien la armó.'}, status=400)
     cot.estado = 'aceptada'
     cot.autorizada_por = _np(nombre_aut)[:120]
     cot.autorizada_en = timezone.now()
@@ -663,6 +665,22 @@ class CotizacionDetail(generics.RetrieveUpdateDestroyAPIView):
                 return Response({'detalle': f'Vino autorizada por {cot.autorizada_por}: solo puede estar Aceptada, Rechazada o Cancelada.'}, status=400)
             if cot.estado != 'borrador' and nuevo_estado == 'borrador':
                 return Response({'detalle': 'Ya tiene folio y el cliente la conoce: no puede regresar a borrador.'}, status=400)
+            # La vigencia protege los PRECIOS: aceptar una vencida solo con
+            # confirmación explícita de que se respetan (queda a decisión
+            # humana, no pasa de largo).
+            if nuevo_estado == 'aceptada' and cot.vence_el and cot.vence_el < timezone.now().date() \
+                    and not request.data.get('confirmar_vencida'):
+                return Response({
+                    'detalle': f'Esta cotización venció el {cot.vence_el.strftime("%d/%m/%Y")}: sus precios ya no están garantizados.',
+                    'codigo': 'vencida',
+                }, status=400)
+        # Identidad del cliente en solicitudes de la tienda: la puso ÉL, igual
+        # que sus partidas. Se corrige desde su cuenta, no desde el panel.
+        if cot.origen == 'cliente':
+            tocados = [k for k in ('cliente_nombre', 'cliente_telefono', 'cliente_email')
+                       if k in request.data and (request.data.get(k) or '').strip() != (getattr(cot, k) or '')]
+            if tocados:
+                return Response({'detalle': 'El nombre, teléfono y correo los puso el cliente en su solicitud: no se editan desde el panel.'}, status=400)
         return super().update(request, *args, **kwargs)
 
     def destroy(self, request, *args, **kwargs):

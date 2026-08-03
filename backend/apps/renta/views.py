@@ -410,7 +410,7 @@ def crear_renta(request):
                 from cotizaciones.models import Cotizacion as _Cot
                 cot = None
                 if cotizacion_id:
-                    cot = _Cot.objects.filter(id=cotizacion_id, tipo__in=('renta', 'mixta')).first()
+                    cot = _Cot.objects.filter(id=cotizacion_id, tipo__in=('renta', 'mixta'), estado='aceptada').first()
                 elif r.usuario_id:
                     cands = list(_Cot.objects.filter(usuario_id=r.usuario_id, tipo__in=('renta', 'mixta'), estado='aceptada', rentas_convertidas__isnull=True)[:2])
                     cot = cands[0] if len(cands) == 1 else None
