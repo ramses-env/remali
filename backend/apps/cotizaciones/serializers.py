@@ -23,13 +23,24 @@ class CotizacionFotoSerializer(serializers.ModelSerializer):
 class CotizacionItemSerializer(serializers.ModelSerializer):
     subtotal = serializers.SerializerMethodField()
     modalidad_label = serializers.CharField(read_only=True)
+    equipo_imagen = serializers.SerializerMethodField()
 
     class Meta:
         model = CotizacionItem
-        fields = ['id', 'descripcion', 'cantidad', 'duracion', 'precio_unitario', 'precio_lista', 'equipo', 'subtotal', 'modalidad', 'modalidad_label']
+        fields = ['id', 'descripcion', 'cantidad', 'duracion', 'precio_unitario', 'precio_lista', 'equipo', 'equipo_imagen', 'subtotal', 'modalidad', 'modalidad_label']
 
     def get_subtotal(self, obj):
         return str(obj.subtotal)
+
+    def get_equipo_imagen(self, obj):
+        # Imagen del equipo cotizado: sirve de respaldo en la carta/PDF cuando la
+        # cotización no trae fotos subidas a mano (típico si la armó el cliente).
+        eq = obj.equipo
+        if not eq or not getattr(eq, 'imagen', None):
+            return None
+        url = eq.imagen.url
+        request = self.context.get('request')
+        return request.build_absolute_uri(url) if request else url
 
 
 class CotizacionSerializer(serializers.ModelSerializer):

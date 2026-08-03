@@ -7,7 +7,7 @@ import api from '../lib/api'
 import { descargarBlob } from '../lib/descargar'
 import LogoRemali from './ui/logo-remali'
 
-type Item = { id: number; descripcion: string; cantidad: number; precio_unitario: string; subtotal: string; modalidad_label?: string }
+type Item = { id: number; descripcion: string; cantidad: number; precio_unitario: string; subtotal: string; modalidad_label?: string; equipo?: number | null; equipo_imagen?: string | null }
 type Foto = { id: number; imagen: string; orden: number }
 type Cotizacion = {
   id: number; folio: string | null; estado: string; tipo: string
@@ -57,6 +57,22 @@ export default function CotizacionCartaModal({ cotizacion, onClose }: { cotizaci
   const pw = a4 ? 210 : 216, ph = a4 ? 297 : 279, pageName = a4 ? 'A4' : 'Letter'
   const neg = ps.negocio
   const acento = ACENTO_TIPO[cotizacion.tipo] || '#B8872E'
+
+  // Fotos de la carta: primero las que el admin subió a mano; si no hay ninguna
+  // (típico si la cotización la armó el cliente desde la tienda), se respalda con
+  // la imagen de cada equipo cotizado —sin repetir— para que la de venta también
+  // salga con fotos. Coincide con lo que hace el PDF de reportlab.
+  const fotosCarta: { id: string; src: string }[] =
+    cotizacion.fotos && cotizacion.fotos.length > 0
+      ? cotizacion.fotos.map(f => ({ id: `f${f.id}`, src: resolveMediaUrl(f.imagen) }))
+      : [...new Map(
+          cotizacion.items
+            .filter(it => it.equipo_imagen)
+            .map(it => {
+              const k = it.equipo ?? `i${it.id}`
+              return [k, { id: `e${k}`, src: resolveMediaUrl(it.equipo_imagen as string) }] as const
+            })
+        ).values()]
 
   // Baja el PDF de reportlab (idéntico al del correo), no una captura del HTML.
   function descargarPDF() {
@@ -139,11 +155,11 @@ export default function CotizacionCartaModal({ cotizacion, onClose }: { cotizaci
               <div style={{ whiteSpace: 'pre-wrap', fontSize: '10pt' }}>{cotizacion.notas}</div>
             </>)}
 
-            {cotizacion.fotos && cotizacion.fotos.length > 0 && (<>
+            {fotosCarta.length > 0 && (<>
               <div className="sect-title">Fotos</div>
               <div className="cot-fotos">
-                {cotizacion.fotos.map(f => (
-                  <img key={f.id} src={resolveMediaUrl(f.imagen)} alt="Equipo cotizado" />
+                {fotosCarta.map(f => (
+                  <img key={f.id} src={f.src} alt="Equipo cotizado" />
                 ))}
               </div>
             </>)}
@@ -161,9 +177,17 @@ export default function CotizacionCartaModal({ cotizacion, onClose }: { cotizaci
 
             <p className="cot-fine">
               {[
-                cotizacion.tipo === 'renta' ? neg.condicionesRenta : neg.condiciones,
+                // Cada tipo con SUS condiciones; una cotización mixta lleva los dos
+                // bloques rotulados por separado, para que no se mezclen las de
+                // venta con las de renta.
+                ...(cotizacion.tipo === 'mixta'
+                  ? [
+                      neg.condiciones && `CONDICIONES DE VENTA\n${neg.condiciones}`,
+                      neg.condicionesRenta && `CONDICIONES DE RENTA\n${neg.condicionesRenta}`,
+                    ]
+                  : [cotizacion.tipo === 'renta' ? neg.condicionesRenta : neg.condiciones]),
                 `Precios en pesos mexicanos (MXN)${Number(cotizacion.iva) > 0 ? ', IVA incluido en el total' : ', más IVA si aplica'}. Cotización válida por ${cotizacion.vigencia_dias} días. Sujeta a disponibilidad.`,
-              ].filter(Boolean).join('\n')}
+              ].filter(Boolean).join('\n\n')}
             </p>
           </div>
         </div>

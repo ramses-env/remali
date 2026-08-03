@@ -81,22 +81,39 @@ def _dibujar_datos_bancarios(c, cfg, ancho, alto, m, y, acento):
 
 def _dibujar_condiciones_fina(c, cfg, tipo, ancho, alto, m, y):
     """Condiciones como letra chica gris, antes del pie (mismo tono que el pie).
-    El texto depende del tipo: renta usa sus condiciones; venta (o mixta), las suyas."""
-    fuente = cfg.cotizacion_condiciones_renta if tipo == 'renta' else cfg.cotizacion_condiciones
-    cond = (fuente or '').strip()
-    if not cond:
-        return y
 
-    lineas = _wrap(cond, 'Helvetica', 8, ancho - 2 * m)
-    if y - (len(lineas) * 4 * mm) < m + 24 * mm:
-        c.showPage()
-        y = alto - m
+    Cada tipo usa SOLO sus condiciones: venta las de venta, renta las de renta.
+    Una cotización mixta pinta los dos bloques por separado y rotulados, para
+    que las condiciones de un tipo nunca se apliquen a las partidas del otro.
+    """
+    if tipo == 'renta':
+        bloques = [(None, cfg.cotizacion_condiciones_renta)]
+    elif tipo == 'mixta':
+        bloques = [
+            ('CONDICIONES DE VENTA', cfg.cotizacion_condiciones),
+            ('CONDICIONES DE RENTA', cfg.cotizacion_condiciones_renta),
+        ]
+    else:
+        bloques = [(None, cfg.cotizacion_condiciones)]
 
-    y -= 4 * mm
-    c.setFillColor(GRIS); c.setFont('Helvetica', 8)
-    for ln in lineas:
-        c.drawString(m, y, ln)
+    for titulo, fuente in bloques:
+        cond = (fuente or '').strip()
+        if not cond:
+            continue
+        lineas = _wrap(cond, 'Helvetica', 8, ancho - 2 * m)
+        alto_bloque = (len(lineas) + (1 if titulo else 0)) * 4 * mm
+        if y - alto_bloque < m + 24 * mm:
+            c.showPage()
+            y = alto - m
         y -= 4 * mm
+        if titulo:
+            c.setFillColor(GRIS); c.setFont('Helvetica-Bold', 8)
+            c.drawString(m, y, titulo)
+            y -= 4 * mm
+        c.setFillColor(GRIS); c.setFont('Helvetica', 8)
+        for ln in lineas:
+            c.drawString(m, y, ln)
+            y -= 4 * mm
     return y
 
 
@@ -106,8 +123,19 @@ def _dibujar_fotos(c, cot, ancho, alto, m, y, acento):
     Va después de los totales y se pagina sola: si no cabe una fila, salta de
     página. Deja siempre aire abajo para que el pie no se encime con una foto.
     """
-    fotos = [f for f in cot.fotos.all() if f.imagen]
-    if not fotos:
+    # Primero las fotos que el admin subió a mano; si no hay ninguna (caso típico
+    # de una cotización que armó el propio cliente desde la tienda), se respalda
+    # con la imagen de cada equipo cotizado —sin repetir— para que la cotización
+    # de venta salga con fotos igual que la de renta.
+    imagenes = [f.imagen for f in cot.fotos.all() if f.imagen]
+    if not imagenes:
+        vistos = set()
+        for it in cot.items.all():
+            eq = it.equipo
+            if eq and getattr(eq, 'imagen', None) and eq.id not in vistos:
+                vistos.add(eq.id)
+                imagenes.append(eq.imagen)
+    if not imagenes:
         return y
 
     from reportlab.lib.utils import ImageReader
@@ -129,12 +157,12 @@ def _dibujar_fotos(c, cot, ancho, alto, m, y, acento):
     c.drawString(m, y, 'FOTOS')
     y -= 6 * mm
 
-    for idx in range(0, len(fotos), 2):
+    for idx in range(0, len(imagenes), 2):
         if y - cell_h < m + RESERVA_PIE:
             y = nueva_pagina()
-        for col, foto in enumerate(fotos[idx:idx + 2]):
+        for col, imagen in enumerate(imagenes[idx:idx + 2]):
             try:
-                img = ImageReader(foto.imagen.path)
+                img = ImageReader(imagen.path)
                 iw, ih = img.getSize()
             except Exception:
                 continue           # una foto ilegible no debe tumbar el PDF
