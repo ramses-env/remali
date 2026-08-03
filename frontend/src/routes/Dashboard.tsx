@@ -130,7 +130,7 @@ const MODALIDADES: { key: Modalidad; label: string; corto: string }[] = [
 ]
 const TIPO_COT_LABEL: Record<string, string> = { venta: 'Venta', renta: 'Renta', mixta: 'Venta y renta' }
 
-type CotizacionItem = { id: number; descripcion: string; cantidad: number; precio_unitario: string; subtotal: string; modalidad: Modalidad; modalidad_label: string }
+type CotizacionItem = { id: number; descripcion: string; cantidad: number; precio_unitario: string; precio_lista?: string; equipo?: number | null; subtotal: string; modalidad: Modalidad; modalidad_label: string }
 type CotizacionFoto = { id: number; imagen: string; orden: number }
 type Cotizacion = {
   id: number; folio: string | null; tipo: 'venta' | 'renta' | 'mixta'
@@ -6023,13 +6023,41 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
       .then(r => { apply(r.data.cotizacion); notify('La estás atendiendo') })
       .catch(err => notify(err?.response?.data?.detalle || 'No se pudo tomar', 'err'))
   }
-  // "+ Agregar partida": crea una fila en blanco que luego se edita en línea.
-  function agregarItem() {
+  // "+ Agregar partida": del CATÁLOGO (el servidor pone el precio de la web,
+  // con su promo) o LIBRE (flete, operador, un servicio — a mano).
+  async function agregarItem() {
     setBusy(true)
-    api.post<Cotizacion>(`/cotizaciones/${c.id}/items/`, { descripcion: 'Nueva partida', cantidad: 1, precio_unitario: 0, modalidad: c.tipo === 'renta' ? 'dia' : 'venta' })
-      .then(r => apply(r.data))
-      .catch(err => notify(err?.response?.data?.detalle || 'No se pudo agregar', 'err'))
-      .finally(() => setBusy(false))
+    try {
+      type EqMin = { id: number; modelo: string; precio_venta?: string | number | null; precio_dia?: string | number | null; precio_semana?: string | number | null; precio_mes?: string | number | null }
+      const r = await api.get<EqMin[]>('/equipos/', { fondo: true } as never)
+      const eqs = Array.isArray(r.data) ? r.data : []
+      const hint = (e: EqMin) => {
+        const partes: string[] = []
+        if (Number(e.precio_venta)) partes.push(`Venta ${orMoney(Number(e.precio_venta))}`)
+        if (Number(e.precio_dia)) partes.push(`Día ${orMoney(Number(e.precio_dia))}`)
+        else if (Number(e.precio_semana)) partes.push(`Semana ${orMoney(Number(e.precio_semana))}`)
+        return partes.join(' · ') || 'Sin precio en la web'
+      }
+      const sel = await elegir({
+        titulo: 'Agregar partida',
+        mensaje: 'Del catálogo se cotiza con el precio de la web; la partida libre es para conceptos a mano.',
+        opciones: [
+          ...eqs.map(e => ({ valor: String(e.id), label: e.modelo, detalle: hint(e) })),
+          { valor: 'libre', label: 'Partida libre', detalle: 'Concepto y precio a mano (flete, operador…)' },
+        ],
+      })
+      if (!sel || !sel[0]) return
+      const payload = sel[0] === 'libre'
+        ? { descripcion: 'Nueva partida', cantidad: 1, precio_unitario: 0, modalidad: c.tipo === 'renta' ? 'dia' : 'venta' }
+        : { equipo_id: Number(sel[0]), cantidad: 1, modalidad: c.tipo === 'renta' ? 'dia' : '' }
+      const res = await api.post<Cotizacion>(`/cotizaciones/${c.id}/items/`, payload)
+      apply(res.data)
+    } catch (err) {
+      const d = (err as { response?: { data?: { detalle?: string } } })?.response?.data?.detalle
+      if (d) notify(d, 'err')
+    } finally {
+      setBusy(false)
+    }
   }
   // Edición en línea de una partida: manda solo el campo que cambió.
   function editarItem(itemId: number, campo: 'descripcion' | 'cantidad' | 'precio_unitario', valor: string | number) {
@@ -6480,7 +6508,7 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
                   {c.items.map(it => (
                     <div key={it.id} className="flex items-center gap-2 px-3 border-b border-edge last:border-0">
                       <div className="flex-1 min-w-0 py-1">
-                        <input defaultValue={it.descripcion} disabled={conceptosBloqueados} placeholder="Concepto"
+                        <input key={`${it.id}-${it.descripcion}`} defaultValue={it.descripcion} disabled={conceptosBloqueados} placeholder="Concepto"
                           onBlur={e => { const v = e.target.value.trim(); if (v && v !== it.descripcion) editarItem(it.id, 'descripcion', v) }}
                           className={celda} />
                       </div>
@@ -6497,9 +6525,16 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
                           className={`${celda} text-center`} />
                       </div>
                       <div className="w-28 shrink-0 py-1">
-                        <input type="number" min={0} step="0.01" defaultValue={it.precio_unitario} disabled={conceptosBloqueados}
+                        <input key={`${it.id}-${it.precio_unitario}`} type="number" min={0} step="0.01" defaultValue={it.precio_unitario} disabled={conceptosBloqueados}
                           onBlur={e => { const v = Number(e.target.value) || 0; if (v !== Number(it.precio_unitario)) editarItem(it.id, 'precio_unitario', v) }}
                           className={`${celda} text-right font-bold tabular-nums`} />
+                        {Number(it.precio_lista) > 0 && Number(it.precio_unitario) !== Number(it.precio_lista) && (
+                          /* Se capturó un precio distinto al de la web: la
+                             desviación se ve, no se esconde. */
+                          <p className={`text-[10px] text-right pr-2 pb-1 font-bold ${Number(it.precio_unitario) < Number(it.precio_lista) ? 'text-amber-600' : 'text-blue-600'}`}>
+                            lista {orMoney(Number(it.precio_lista))} · {Number(it.precio_unitario) < Number(it.precio_lista) ? '−' : '+'}{Math.abs(Math.round((Number(it.precio_unitario) - Number(it.precio_lista)) / Number(it.precio_lista) * 100))}%
+                          </p>
+                        )}
                       </div>
                       <div className="w-6 shrink-0 flex justify-center">
                         {!conceptosBloqueados && (

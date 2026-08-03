@@ -135,7 +135,7 @@ def crear_cotizacion_publica(request):
             precio_lista = Decimal(str(precio))
             precio = (Decimal(precio) * (Decimal('100') - promo) / Decimal('100')).quantize(Decimal('0.01'))
             etiqueta = f'{etiqueta} (promo −{promo}%)'
-        partidas.append((etiqueta, cant, Decimal(str(precio or 0)), modalidad, precio_lista))
+        partidas.append((etiqueta, cant, Decimal(str(precio or 0)), modalidad, precio_lista or Decimal(str(precio or 0)), eq))
         carrito.append({'id': eq.id, 'title': etiqueta, 'price': float(precio or 0),
                         'qty': cant, 'unit': unit or 'venta'})
 
@@ -167,9 +167,10 @@ def crear_cotizacion_publica(request):
                 'carrito': carrito,
             },
         )
-        for etiqueta, cant, precio, modalidad, precio_lista in partidas:
+        for etiqueta, cant, precio, modalidad, precio_lista, eq_ref in partidas:
             CotizacionItem.objects.create(cotizacion=cot, descripcion=etiqueta, cantidad=cant,
-                                          precio_unitario=precio, precio_lista=precio_lista, modalidad=modalidad)
+                                          precio_unitario=precio, precio_lista=precio_lista,
+                                          equipo=eq_ref, modalidad=modalidad)
         cot.recalcular_tipo()   # venta, renta o mixta según lo que armó el cliente
         if por_autorizar:
             import secrets
@@ -751,22 +752,50 @@ def cotizacion_agregar_item(request, pk: int):
         # panel. El admin solo edita partidas de sus propias capturas.
         return Response({'detalle': 'Los conceptos los armó el cliente: no se modifican desde el panel.'}, status=400)
     d = request.data or {}
-    desc = (d.get('descripcion') or '').strip()
-    if not desc:
-        return Response({'detalle': 'La descripción es requerida'}, status=400)
     try:
         cant = max(1, int(d.get('cantidad') or 1))
     except (ValueError, TypeError):
         cant = 1
-    try:
-        precio = Decimal(str(d.get('precio_unitario') or 0))
-    except Exception:
-        precio = Decimal('0')
     # Si no la mandan, se hereda del tipo de la cotización (una de renta sin
     # unidad se cotiza por día, que es la más común).
     modalidad = (d.get('modalidad') or '').lower()
     if modalidad not in _MODALIDADES:
         modalidad = 'dia' if cot.tipo == 'renta' else 'venta'
+
+    # Partida DEL CATÁLOGO: el precio lo resuelve el servidor (el de la web,
+    # con su promo), igual que en la tienda. El admin puede ajustarlo después,
+    # pero la desviación contra lista queda a la vista.
+    equipo_id = d.get('equipo_id')
+    if equipo_id:
+        from maquinaria.models import Equipo
+        try:
+            eq = Equipo.objects.get(pk=equipo_id)
+        except (Equipo.DoesNotExist, ValueError, TypeError):
+            return Response({'detalle': 'Equipo no encontrado'}, status=404)
+        etiqueta, precio, modalidad = _resolver_partida(eq, modalidad if modalidad in _UNIDADES_RENTA else '')
+        precio = Decimal(str(precio or 0))
+        lista = precio
+        promo = min(90, max(0, getattr(eq, 'promo_pct', 0) or 0))
+        if precio and promo:
+            precio = (precio * (Decimal('100') - promo) / Decimal('100')).quantize(Decimal('0.01'))
+            etiqueta = f'{etiqueta} (promo −{promo}%)'
+        with transaction.atomic():
+            CotizacionItem.objects.create(cotizacion=cot, descripcion=etiqueta, cantidad=cant,
+                                          precio_unitario=precio, precio_lista=lista,
+                                          equipo=eq, modalidad=modalidad)
+            cot.recalcular_tipo()
+        cot.refresh_from_db()
+        return Response(CotizacionSerializer(cot).data, status=201)
+
+    # Partida LIBRE (flete, operador, un servicio): concepto y precio a mano,
+    # sin referencia de lista.
+    desc = (d.get('descripcion') or '').strip()
+    if not desc:
+        return Response({'detalle': 'La descripción es requerida'}, status=400)
+    try:
+        precio = Decimal(str(d.get('precio_unitario') or 0))
+    except Exception:
+        precio = Decimal('0')
     with transaction.atomic():
         CotizacionItem.objects.create(cotizacion=cot, descripcion=desc, cantidad=cant,
                                       precio_unitario=precio, modalidad=modalidad)
@@ -793,7 +822,26 @@ def cotizacion_item_modalidad(request, pk: int, item_id: int):
         return Response({'detalle': 'Modalidad inválida. Usa venta, dia, semana o mes.'}, status=400)
     with transaction.atomic():
         item.modalidad = modalidad
-        item.save(update_fields=['modalidad'])
+        campos = ['modalidad']
+        # Partida de catálogo: al cambiar la modalidad, el precio de la web de
+        # ESA modalidad vuelve a mandar (con su promo). Si el equipo no tiene
+        # precio para ella, se conserva el capturado y se suelta la referencia.
+        if item.equipo_id:
+            eq = item.equipo
+            precio = eq.precio_venta if modalidad == 'venta' else eq.get_precio_por_unidad(modalidad)
+            if precio:
+                lista = Decimal(str(precio))
+                promo = min(90, max(0, getattr(eq, 'promo_pct', 0) or 0))
+                final = (lista * (Decimal('100') - promo) / Decimal('100')).quantize(Decimal('0.01')) if promo else lista
+                sufijo = 'venta' if modalidad == 'venta' else f'renta por {CotizacionItem.UNIDADES_RENTA[modalidad]}'
+                item.precio_unitario = final
+                item.precio_lista = lista
+                item.descripcion = f'{eq.modelo} · {sufijo}' + (f' (promo −{promo}%)' if promo else '')
+                campos += ['precio_unitario', 'precio_lista', 'descripcion']
+            else:
+                item.precio_lista = Decimal('0')
+                campos += ['precio_lista']
+        item.save(update_fields=campos)
         item.cotizacion.recalcular_tipo()
     return Response(CotizacionSerializer(Cotizacion.objects.get(pk=pk)).data)
 

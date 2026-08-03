@@ -267,6 +267,10 @@ class CotizacionItem(models.Model):
     # Sirve para el descuento de contado: se toma el descuento MAYOR (promo vs 5%
     # de contado), nunca la suma de ambos.
     precio_lista = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'))
+    # De qué equipo del catálogo nació (si nació de uno): permite re-resolver
+    # el precio de la web al cambiar la modalidad y mostrar la desviación
+    # cuando el admin captura un precio distinto al de lista.
+    equipo = models.ForeignKey('maquinaria.Equipo', null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
     modalidad = models.CharField(max_length=8, choices=MODALIDADES, default='venta')
 
     class Meta:
