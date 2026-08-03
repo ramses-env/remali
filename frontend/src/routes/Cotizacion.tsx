@@ -379,11 +379,13 @@ export default function Cotizacion() {
 
   if (sentFolio) {
     const wa = waLink(cfg.whatsapp_principal, sentWaMsg)
+    // La autorización ya ocurrió antes de llegar (por la liga o el propio
+    // cliente); aquí el flujo es recibida → existencia → fecha/hora → entrega.
     const pasos = [
       { t: 'Cotización recibida', d: `Folio ${sentFolio} generado.`, e: 'HOY', estado: 'ok' },
-      { t: 'Revisión de disponibilidad', d: 'Confirmamos existencias y fechas de entrega.', e: 'EN CURSO', estado: 'activo' },
-      { t: 'Autorización', d: 'Quien autoriza aprueba desde la liga o por WhatsApp.', e: 'PENDIENTE', estado: 'pendiente' },
-      { t: 'Entrega en obra', d: 'Agendamos día y hora; llevamos el equipo probado.', e: 'AL CONFIRMAR', estado: 'pendiente' },
+      { t: 'Revisión de disponibilidad', d: 'Confirmamos que hay existencias en inventario.', e: 'EN CURSO', estado: 'activo' },
+      { t: 'Fecha y hora de entrega', d: 'Al confirmar existencias, coordinamos día y hora contigo.', e: 'PENDIENTE', estado: 'pendiente' },
+      { t: 'Entrega en obra', d: 'Llevamos el equipo probado a tu obra.', e: 'AL CONFIRMAR', estado: 'pendiente' },
     ]
     return (
       <div className="bg-app min-h-screen text-ink">

@@ -13,6 +13,7 @@ type Cot = {
   cancelacion_solicitada?: string | null
   folio: string; estado: string; estado_label: string; tipo: string; total: string
   creada?: string; vence_el?: string | null; pdf?: string | null; atendida_por?: string | null; atendida?: boolean; convertida?: boolean; entrega_prometida?: string | null
+  renta_id?: number | null; venta_id?: number | null; entregada_en?: string | null
   items: { descripcion: string; cantidad: number }[]
   carrito?: { id: number; title: string; qty: number; duracion?: number; unit?: string; image?: string }[]
 }
@@ -75,31 +76,48 @@ export default function MisCotizacionEstado() {
 
   // Mapa estado → progreso del stepper (0-index del paso activo; -1 = terminado)
   const rech = cot.estado === 'rechazada'
+  const canc = cot.estado === 'cancelada'
+  // Cancelada o rechazada: el flujo se detuvo; no hay "qué sigue" ni palomita.
+  const terminalNeg = rech || canc
   const venc = cot.estado === 'vencida'
   const acep = cot.estado === 'aceptada'
-  const compl = !!cot.convertida            // ya es venta/renta: flujo terminado
-  // Señales reales: atendida (un admin ya la revisó) empuja a autorización;
-  // aceptada empuja a entrega; convertida completa todo.
-  const activo = compl ? 4 : acep ? 3 : cot.atendida ? 2 : 1
+  // "Entregado" = el técnico marcó la salida del equipo (entregada_en), NO que la
+  // cotización se convirtió en renta. Una venta convertida sí es entrega inmediata.
+  const entregado = !!cot.entregada_en
+  const ventaConv = !!cot.venta_id && !cot.renta_id
+  const rentaPorEntregar = !!cot.renta_id && !entregado   // renta creada, sin entregar aún
+  const compl = entregado || ventaConv        // equipo entregado (renta) o vendido (venta)
+  // La autorización YA ocurrió antes de que la cotización llegue a REMALI (por
+  // la liga del jefe, o el propio cliente cuando no hay a quién pedirle). Por
+  // eso el flujo real es: recibida (autorizada) → existencia → fecha/hora →
+  // entrega. No hay un paso de "autorización" a media revisión.
+  const porAutorizar = cot.estado === 'por_autorizar'
+  const activo = compl ? 4 : rentaPorEntregar ? 3 : acep ? 2 : porAutorizar ? 0 : 1
   const entrega = cot.entrega_prometida
     ? new Date(cot.entrega_prometida).toLocaleString('es-MX', { weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
     : null
+  const entregadoTxt = cot.entregada_en
+    ? new Date(cot.entregada_en).toLocaleString('es-MX', { weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
+    : ''
   const pasos = [
-    { t: 'Cotización recibida', d: `Folio ${cot.folio} generado.` },
-    { t: 'Revisión de disponibilidad', d: 'Confirmamos existencias y fechas de entrega.' },
-    { t: 'Autorización', d: 'Quien autoriza aprueba desde la liga o por WhatsApp.' },
-    { t: 'Entrega en obra', d: entrega ? `Programada: ${entrega}. Llevamos el equipo probado.` : compl ? 'Tu fecha de entrega ya aparece en "Mis cotizaciones → Próximas entregas" y en Tus rentas.' : 'Al aceptar, coordinamos día y hora contigo por WhatsApp; llevamos el equipo probado.' },
+    { t: 'Cotización recibida', d: porAutorizar ? 'Falta que tu autorizador la apruebe para que llegue a REMALI.' : `Autorizada · folio ${cot.folio}.` },
+    { t: 'Revisión de disponibilidad', d: 'Confirmamos que hay existencias en inventario.' },
+    { t: 'Fecha y hora de entrega', d: entrega ? `Programada: ${entrega}.` : acep ? 'Coordinamos contigo el día y la hora por WhatsApp.' : 'Al confirmar existencias, agendamos la entrega.' },
+    { t: 'Entrega en obra', d: entregado ? `Entregado el ${entregadoTxt}.` : ventaConv ? 'Compra completada.' : rentaPorEntregar ? (entrega ? `Programada: ${entrega}. Aún no sale; te avisamos al entregarlo.` : 'Pendiente de entrega; te avisamos al salir.') : 'Llevamos el equipo probado a tu obra.' },
   ]
-  const chip = rech ? { txt: 'No procedió', cls: 'text-red-500 border-red-500/40' }
+  const chip = canc ? { txt: 'Cancelada', cls: 'text-red-500 border-red-500/40' }
+    : rech ? { txt: 'No procedió', cls: 'text-red-500 border-red-500/40' }
     : venc ? { txt: 'Vencida — vuelve a cotizar', cls: 'text-mute border-edge' }
-    : compl ? { txt: 'Completada · equipo entregado', cls: 'text-emerald-500 border-emerald-500/40' }
-    : acep ? { txt: 'Paso 4 de 4 · aceptada, agendando entrega', cls: 'text-emerald-500 border-emerald-500/40' }
-    : cot.atendida ? { txt: 'Paso 3 de 4 · esperando autorización', cls: 'text-gold border-gold/40' }
-    : { txt: 'Paso 2 de 4 · en revisión ahora', cls: 'text-gold border-gold/40' }
+    : entregado ? { txt: `Entregado · ${entregadoTxt}`, cls: 'text-emerald-500 border-emerald-500/40' }
+    : ventaConv ? { txt: 'Completada · compra lista', cls: 'text-emerald-500 border-emerald-500/40' }
+    : rentaPorEntregar ? { txt: 'Paso 4 de 4 · pendiente de entrega', cls: 'text-gold border-gold/40' }
+    : acep ? { txt: 'Paso 3 de 4 · agendando fecha y hora', cls: 'text-gold border-gold/40' }
+    : porAutorizar ? { txt: 'Paso 1 de 4 · esperando autorización', cls: 'text-gold border-gold/40' }
+    : { txt: 'Paso 2 de 4 · revisando existencias', cls: 'text-gold border-gold/40' }
 
   const wa = waLink(cfg.whatsapp_principal, `Hola REMALI, quiero seguimiento de mi cotización ${cot.folio}.`)
   const diasRestantes = cot.vence_el ? Math.ceil((new Date(cot.vence_el + 'T23:59:59').getTime() - Date.now()) / 86400000) : null
-  const porVencer = !venc && !rech && !acep && diasRestantes !== null && diasRestantes <= 3
+  const porVencer = !venc && !rech && !canc && !acep && diasRestantes !== null && diasRestantes <= 3
   const UNIT_TXT: Record<string, string> = { venta: 'Compra', dia: 'Renta por día', semana: 'Renta por semana', mes: 'Renta por mes' }
 
   async function copiar() {
@@ -114,8 +132,8 @@ export default function MisCotizacionEstado() {
 
         <div className="rounded-[20px] border border-edge bg-surface px-6 sm:px-8 py-7 flex flex-col min-[800px]:flex-row min-[800px]:items-center gap-5 justify-between">
           <div className="flex items-start gap-4">
-            <div className={`w-12 h-12 rounded-full grid place-items-center shrink-0 ${rech ? 'bg-red-500/12' : 'bg-emerald-500/12'}`}>
-              {rech
+            <div className={`w-12 h-12 rounded-full grid place-items-center shrink-0 ${terminalNeg ? 'bg-red-500/12' : 'bg-emerald-500/12'}`}>
+              {terminalNeg
                 ? <svg className="w-6 h-6 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.2"><path strokeLinecap="round" d="M6 6l12 12M18 6L6 18" /></svg>
                 : <svg className="w-6 h-6 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.2"><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>}
             </div>
@@ -131,30 +149,47 @@ export default function MisCotizacionEstado() {
           </div>
         </div>
 
-        <div className="rounded-[20px] border border-edge bg-surface px-6 sm:px-8 py-7">
-          <div className="flex items-center justify-between gap-4 flex-wrap mb-6">
-            <h2 className="text-[18px] font-extrabold">Qué sigue</h2>
-            <span className={`text-[12.5px] font-semibold border rounded-full px-3.5 py-1.5 ${chip.cls}`}>{chip.txt}</span>
+        {terminalNeg ? (
+          <div className="rounded-[20px] border border-red-500/25 bg-red-500/5 px-6 sm:px-8 py-7 flex items-start gap-4">
+            <div className="w-11 h-11 rounded-full bg-red-500/12 grid place-items-center shrink-0">
+              <svg className="w-5 h-5 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.2"><path strokeLinecap="round" d="M6 6l12 12M18 6L6 18" /></svg>
+            </div>
+            <div className="min-w-0">
+              <h2 className="text-[18px] font-extrabold">{canc ? 'Esta cotización fue cancelada' : 'Esta cotización no procedió'}</h2>
+              <p className="text-[13.5px] text-mute mt-1.5 leading-relaxed max-w-[560px]">
+                {canc
+                  ? 'El proceso se detuvo aquí: no hay autorización ni entrega pendientes. Si la necesitas otra vez, vuelve a cotizar cuando quieras.'
+                  : 'No hubo disponibilidad para lo que pediste. Puedes armar otra cotización cuando quieras.'}
+              </p>
+              <Link to="/equipos" className="inline-block mt-4 px-5 h-[42px] leading-[42px] rounded-xl bg-gold text-black text-[14px] font-bold btn-acento">Volver a cotizar</Link>
+            </div>
           </div>
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-x-6 gap-y-6">
-            {pasos.map((p, i) => {
-              const ok = !venc && !rech ? i < activo : i === 0
-              const act = !venc && !rech && i === activo
-              return (
-                <div key={i} className={venc || (rech && i > 1) ? 'opacity-50' : ''}>
-                  <div className="flex items-center gap-2.5 mb-3">
-                    <span className={`w-6 h-6 rounded-full grid place-items-center border-2 shrink-0 ${ok ? 'border-emerald-500 bg-emerald-500/12' : act ? 'border-gold' : 'border-edge'}`}>
-                      {ok && <svg className="w-3.5 h-3.5 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.6"><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>}
-                    </span>
-                    {i < pasos.length - 1 && <span className={`flex-1 h-px ${ok ? 'bg-emerald-500/40' : act ? 'bg-gold/40' : 'bg-edge'}`} />}
+        ) : (
+          <div className="rounded-[20px] border border-edge bg-surface px-6 sm:px-8 py-7">
+            <div className="flex items-center justify-between gap-4 flex-wrap mb-6">
+              <h2 className="text-[18px] font-extrabold">Qué sigue</h2>
+              <span className={`text-[12.5px] font-semibold border rounded-full px-3.5 py-1.5 ${chip.cls}`}>{chip.txt}</span>
+            </div>
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-x-6 gap-y-6">
+              {pasos.map((p, i) => {
+                const ok = !venc ? i < activo : i === 0
+                const act = !venc && i === activo
+                return (
+                  <div key={i} className={venc ? 'opacity-50' : ''}>
+                    <div className="flex items-center gap-2.5 mb-3">
+                      <span className={`w-6 h-6 rounded-full grid place-items-center border-2 shrink-0 ${ok ? 'border-emerald-500 bg-emerald-500/12' : act ? 'border-gold' : 'border-edge'}`}>
+                        {ok && <svg className="w-3.5 h-3.5 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.6"><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>}
+                      </span>
+                      {i < pasos.length - 1 && <span className={`flex-1 h-px ${ok ? 'bg-emerald-500/40' : act ? 'bg-gold/40' : 'bg-edge'}`} />}
+                    </div>
+                    <p className={`text-[15px] font-bold ${act ? 'text-gold' : ''}`}>{p.t}</p>
+                    <p className="text-[13px] text-mute mt-1 leading-snug">{p.d}</p>
                   </div>
-                  <p className={`text-[15px] font-bold ${act ? 'text-gold' : ''}`}>{p.t}</p>
-                  <p className="text-[13px] text-mute mt-1 leading-snug">{p.d}</p>
-                </div>
-              )
-            })}
+                )
+              })}
+            </div>
           </div>
-        </div>
+        )}
 
         <div className="grid min-[980px]:grid-cols-[minmax(0,1fr)_360px] gap-5 items-start">
           <div className="rounded-[20px] border border-edge bg-surface overflow-hidden">
