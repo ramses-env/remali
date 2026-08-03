@@ -577,6 +577,8 @@ def cotizaciones_mias(request):
             'entrega_prometida': c.entrega_prometida,
             'atendida': bool(c.atendida_en or c.atendida_por_id),
             'convertida': bool(len(c.conversiones.all()) or len(c.rentas_convertidas.all())),
+            'venta_id': next((x.id for x in c.conversiones.all()), None),
+            'renta_id': next((x.id for x in c.rentas_convertidas.all()), None),
             'atendida_por': (
                 (c.atendida_por.get_full_name() or c.atendida_por.username)
                 if c.atendida_por_id and c.atendida_por else None

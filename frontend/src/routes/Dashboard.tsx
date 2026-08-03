@@ -141,7 +141,7 @@ type Cotizacion = {
   items: CotizacionItem[]; fotos?: CotizacionFoto[]; subtotal: string; subtotal_venta: string; subtotal_renta: string; base: string; iva: string; total: string
   cliente_display: string; vigencia_hasta?: string | null; vencida?: boolean; creada: string
   token_publico?: string
-  convertida?: boolean; venta_id?: number | null
+  convertida?: boolean; venta_id?: number | null; renta_id?: number | null
   usuario_nombre?: string | null
   autorizada_por?: string | null
   autorizada_en?: string | null
@@ -2363,6 +2363,8 @@ function RentModal({ unit, equipo, onClose, onDone, notify }: {
       if (puente.telefono) setTelefono(puente.telefono)
       if (puente.direccion) setDireccion(puente.direccion)
       if (puente.usuario_id) setUsuarioId(String(puente.usuario_id))
+      if (puente.modalidad) setModalidad(puente.modalidad)
+      if (puente.duracion) setDuracion(String(puente.duracion))
     }
   }, [])
   useEffect(() => {
@@ -5601,7 +5603,7 @@ const COT_PAGE_SIZE = 25
 /* Puente cotización→renta: la cotización aceptada que se está concretando.
    Vive a nivel módulo para no enhebrar props por medio panel; el RentModal
    la lee al montar y la limpia al registrar. */
-type CotParaRenta = { id: number; folio: string | null; cliente: string; telefono: string; direccion: string; usuario_id: number | null }
+type CotParaRenta = { id: number; folio: string | null; cliente: string; telefono: string; direccion: string; usuario_id: number | null; modalidad?: 'dia' | 'semana' | 'mes' | null; duracion?: number | null }
 let cotParaRenta: CotParaRenta | null = null
 const COT_RENTA_KEY = 'remali_cot_para_renta'
 function leerCotParaRenta(): CotParaRenta | null {
@@ -5973,12 +5975,17 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
      al puente y se manda al admin a Inventario a elegir la unidad; el
      RentModal llega precargado y liga la renta a esta cotización. */
   function concretarRenta() {
+    // La partida de renta ya dice modalidad y cuántos periodos: se precargan
+    // para que el RentModal llegue armado y solo falte elegir la unidad.
+    const partida = c.items.find(i => i.modalidad === 'dia' || i.modalidad === 'semana' || i.modalidad === 'mes')
     fijarCotParaRenta({
       id: c.id, folio: c.folio,
       cliente: clienteNombre || c.cliente_display || '',
       telefono: clienteTel || c.cliente_telefono || '',
       direccion: c.datos_solicitud?.obra?.direccion || '',
       usuario_id: c.usuario ?? null,
+      modalidad: (partida?.modalidad as 'dia' | 'semana' | 'mes' | undefined) || null,
+      duracion: partida?.cantidad || null,
     })
     notify(`Elige la unidad y tócale Rentar: quedará ligada a la ${c.folio || 'cotización'}`, 'info')
     onClose()
@@ -6171,6 +6178,9 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
   // Celda editable en línea: parece texto, muestra fondo/anillo al enfocar.
   const celda = 'w-full bg-transparent rounded-md px-2 py-1.5 text-sm text-ink placeholder-mute focus:outline-none focus:bg-surface-2 focus:ring-1 focus:ring-gold/40 transition disabled:opacity-60'
   const labelCot = 'block text-[10.5px] font-bold uppercase tracking-[0.09em] text-mute mb-2'
+  // La fecha de entrega existe hasta que hay trato: aceptada (o autorizada,
+  // que cae directo en aceptada). Antes de eso no hay nada que prometer.
+  const verEntrega = c.estado === 'aceptada' || Boolean(c.entrega_prometida)
   return (
     <div className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm flex items-start justify-center p-0 sm:p-6 overflow-y-auto modal-in" onClick={cerrar}>
       <div onClick={(e: React.MouseEvent) => e.stopPropagation()} className="w-full sm:max-w-5xl my-0 sm:my-auto bg-surface border border-edge rounded-none sm:rounded-2xl shadow-[0_20px_50px_rgba(33,29,22,0.18)] min-h-screen sm:min-h-0 sm:max-h-[92vh] flex flex-col sm:overflow-hidden">
@@ -6196,7 +6206,7 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
             <div className="flex items-start gap-2.5 rounded-xl border border-emerald-500/25 bg-emerald-500/5 px-4 py-3">
               <svg className="w-4 h-4 mt-0.5 shrink-0 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.9"><path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zM16 11V7a4 4 0 00-8 0v4" /></svg>
               <p className="text-[12.5px] text-ink leading-relaxed">
-                Esta cotización ya se convirtió en venta, así que quedó <b>bloqueada</b>. Es el respaldo de esa venta; para cambiar algo, hazlo en la venta.
+                Esta cotización ya se convirtió en {c.renta_id && !c.venta_id ? 'renta' : 'venta'}, así que quedó <b>bloqueada</b>. Es su respaldo; para cambiar algo, hazlo en la {c.renta_id && !c.venta_id ? 'renta' : 'venta'}.
               </p>
             </div>
           )}
@@ -6237,7 +6247,7 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
           )}
           {/* Estado (ancho) + Entrega y Tipo en columnas parejas. En tableta el
               estado toma su propia fila; en escritorio los tres van en una. */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_230px_230px] gap-5 lg:gap-6 items-start">
+          <div className={`grid grid-cols-1 sm:grid-cols-2 ${verEntrega ? 'lg:grid-cols-[minmax(0,1fr)_230px_230px]' : 'lg:grid-cols-[minmax(0,1fr)_230px]'} gap-5 lg:gap-6 items-start`}>
             <div className="sm:col-span-2 lg:col-span-1 min-w-0">
               <p className={labelCot}>Estado</p>
               {/* SOLO LECTURA: se ven todas las etapas y en cuál va; los cambios
@@ -6303,7 +6313,7 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
                 </div>
               )}
             </div>
-            <div className="min-w-0">
+            {verEntrega && <div className="min-w-0">
               <p className={labelCot}>Entrega prometida</p>
               {/* Display propio + input nativo superpuesto (opacity-0): conserva el
                   selector del sistema pero sin el "mm/dd/yyyy" nativo, que rompía
@@ -6326,7 +6336,7 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
                   </button>
                 )}
               </div>
-            </div>
+            </div>}
             <div className="min-w-0">
               <p className={labelCot}>Tipo</p>
               <Segmentado
