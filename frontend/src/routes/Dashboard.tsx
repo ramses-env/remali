@@ -5337,12 +5337,60 @@ function OrdenDetalleModal({ orden, refacciones, notify, onClose, onChanged, onP
 ════════════════════════════════════════ */
 type AdeudosDatos = { rentas: RentaFull[]; total: string; clientes: number }
 
+/* La deuda se agrupa por la identidad MÁS FUERTE que tenga la renta: cuenta
+   vinculada primero, empresa después, y el nombre de mostrador al final. Así
+   un cliente sin cuenta con tres rentas es UNA fila con su total, no tres
+   sueltas — que es de lo que se trata "llevar el control de su deuda". */
+type GrupoAdeudo = {
+  clave: string
+  nombre: string
+  tipo: 'cuenta' | 'empresa' | 'mostrador'
+  telefono: string
+  total: number
+  rentas: RentaFull[]
+}
+function agruparAdeudos(rentas: RentaFull[]): GrupoAdeudo[] {
+  const mapa = new Map<string, GrupoAdeudo>()
+  for (const r of rentas) {
+    let clave: string, nombre: string, tipo: GrupoAdeudo['tipo']
+    if (r.cuenta) { clave = `u:${r.cuenta.toLowerCase()}`; nombre = r.cuenta; tipo = 'cuenta' }
+    else if (r.empresa?.id) { clave = `e:${r.empresa.id}`; nombre = r.empresa.nombre; tipo = 'empresa' }
+    else {
+      const n = (r.cliente || r.cliente_nombre || '').trim()
+      clave = `n:${n.toLowerCase() || r.id}`; nombre = n || 'Sin nombre'; tipo = 'mostrador'
+    }
+    let g = mapa.get(clave)
+    if (!g) { g = { clave, nombre, tipo, telefono: '', total: 0, rentas: [] }; mapa.set(clave, g) }
+    g.rentas.push(r)
+    g.total += Number(r.saldo || 0)
+    if (!g.telefono && r.telefono_cliente) g.telefono = r.telefono_cliente
+  }
+  return [...mapa.values()].sort((a, b) => b.total - a.total)
+}
+
+const TIPO_ADEUDO: Record<GrupoAdeudo['tipo'], { label: string; cls: string }> = {
+  cuenta: { label: 'Cuenta', cls: 'bg-gold-soft text-gold' },
+  empresa: { label: 'Empresa', cls: 'bg-blue-500/10 text-blue-600' },
+  mostrador: { label: 'Sin cuenta', cls: 'bg-surface-2 text-mute' },
+}
+const CHIP_RENTA_ADEUDO: Record<string, { label: string; cls: string }> = {
+  activa: { label: 'ACTIVA', cls: 'bg-blue-500/10 text-blue-600' },
+  reservada: { label: 'RESERVADA', cls: 'bg-blue-500/10 text-blue-600' },
+  finalizada: { label: 'EQUIPO DEVUELTO', cls: 'bg-surface-2 text-mute' },
+}
+
 function AdeudosAdmin({ datos, reload, notify }: {
   datos: AdeudosDatos; reload: () => void; notify: (m: string, t?: 'ok' | 'err') => void
 }) {
   const money = formatMoney
   const [ver, setVer] = useState<RentaFull | null>(null)
   const [abonando, setAbonando] = useState<RentaFull | null>(null)
+  const [abiertos, setAbiertos] = useState<Set<string>>(new Set())
+
+  const grupos = useMemo(() => agruparAdeudos(datos.rentas), [datos.rentas])
+  const toggle = (clave: string) => setAbiertos(s => {
+    const n = new Set(s); n.has(clave) ? n.delete(clave) : n.add(clave); return n
+  })
 
   async function registrarAbono(monto: number, metodo: string, fecha: string) {
     if (!abonando) return
@@ -5354,77 +5402,87 @@ function AdeudosAdmin({ datos, reload, notify }: {
     } catch { /* el interceptor avisa */ }
   }
 
-  const CHIP: Record<string, { label: string; cls: string }> = {
-    activa: { label: 'ACTIVA', cls: 'bg-blue-500/10 text-blue-600' },
-    reservada: { label: 'RESERVADA', cls: 'bg-blue-500/10 text-blue-600' },
-    finalizada: { label: 'EQUIPO DEVUELTO', cls: 'bg-surface-2 text-mute' },
-  }
-
   return (
     <div className="space-y-5">
       <KpiGrid
         gridClassName="grid-cols-2 lg:grid-cols-3"
         items={[
           { label: 'Por cobrar', value: money(Number(datos.total)), tone: 'gold' },
-          { label: 'Rentas con adeudo', value: String(datos.rentas.length), tone: 'default' },
-          { label: 'Clientes que deben', value: String(datos.clientes), tone: 'muted' },
+          { label: 'Clientes que deben', value: String(grupos.length), tone: 'default' },
+          { label: 'Rentas con adeudo', value: String(datos.rentas.length), tone: 'muted' },
         ]}
       />
 
-      {datos.rentas.length === 0 ? (
+      {grupos.length === 0 ? (
         <div className="rounded-2xl border border-edge bg-surface px-6 py-14 text-center">
           <p className="text-[16px] font-bold text-ink">Nadie debe nada</p>
           <p className="text-[13px] text-mute mt-1">Cuando una renta quede con saldo, aparece aquí hasta liquidarse.</p>
         </div>
       ) : (
-        <div className="rounded-2xl border border-edge bg-surface overflow-hidden">
-          <div className="overflow-x-auto">
-            <div className="min-w-[760px]">
-              <div className="flex items-center gap-3 px-5 py-3 bg-surface-2 border-b border-edge text-[10.5px] font-bold uppercase tracking-[0.06em] text-mute">
-                <div className="flex-1 min-w-0">Cliente</div>
-                <div className="w-56 shrink-0">Equipo</div>
-                <div className="w-32 shrink-0">Estado</div>
-                <div className="w-24 shrink-0 text-right">Total</div>
-                <div className="w-24 shrink-0 text-right">Pagado</div>
-                <div className="w-28 shrink-0 text-right">Debe</div>
-                <div className="w-44 shrink-0" />
-              </div>
-              {datos.rentas.map(r => {
-                const chip = CHIP[r.estado || ''] || { label: (r.estado || '—').toUpperCase(), cls: 'bg-surface-2 text-mute' }
-                return (
-                  <div key={r.id} className="flex items-center gap-3 px-5 py-3.5 border-b border-edge last:border-0 hover:bg-surface-2/40 transition-colors">
-                    <div className="flex-1 min-w-0">
-                      <p className="text-[13.5px] font-bold text-ink truncate">{r.cliente || r.cliente_nombre || r.empresa?.nombre || '—'}</p>
-                      <p className="text-[11.5px] text-mute truncate mt-0.5">
-                        {r.cuenta ? `Cuenta: ${r.cuenta}` : 'Sin cuenta vinculada'}
-                        {r.telefono_cliente ? ` · ${r.telefono_cliente}` : ''}
-                      </p>
+        <div className="space-y-3">
+          {grupos.map(g => {
+            const abierto = abiertos.has(g.clave)
+            const tipo = TIPO_ADEUDO[g.tipo]
+            const inicial = (g.nombre.trim()[0] || '?').toUpperCase()
+            return (
+              <div key={g.clave} className="rounded-2xl border border-edge bg-surface overflow-hidden">
+                {/* Cabecera de la PERSONA: su total de deuda de un vistazo. */}
+                <button onClick={() => toggle(g.clave)}
+                  className="w-full flex items-center gap-3.5 px-4 sm:px-5 py-4 text-left hover:bg-surface-2/40 transition-colors">
+                  <span className="w-10 h-10 shrink-0 rounded-full bg-surface-2 grid place-items-center text-[15px] font-black text-ink">{inicial}</span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-[15px] font-extrabold text-ink truncate">{g.nombre}</span>
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${tipo.cls}`}>{tipo.label}</span>
                     </div>
-                    <div className="w-56 shrink-0 min-w-0">
-                      <p className="text-[13px] font-semibold text-ink truncate">{r.inventario.equipo || 'Equipo'}</p>
-                      <p className="text-[11.5px] font-mono text-mute truncate">{r.inventario.codigo}</p>
-                    </div>
-                    <div className="w-32 shrink-0">
-                      <span className={`text-[10px] font-bold px-2 py-1 rounded-md ${chip.cls}`}>{chip.label}</span>
-                    </div>
-                    <div className="w-24 shrink-0 text-right text-[13px] font-semibold text-ink tabular-nums">{money(Number(r.total || 0))}</div>
-                    <div className="w-24 shrink-0 text-right text-[13px] text-mute tabular-nums">{money(Number(r.pagado || 0))}</div>
-                    <div className="w-28 shrink-0 text-right text-[14px] font-extrabold text-red-600 dark:text-red-400 tabular-nums">{money(Number(r.saldo || 0))}</div>
-                    <div className="w-44 shrink-0 flex justify-end gap-1.5">
-                      <button onClick={() => setAbonando(r)}
-                        className="h-8 px-3 rounded-lg bg-gold text-black text-[12px] font-bold hover:brightness-95 transition-all whitespace-nowrap">
-                        + Abono
-                      </button>
-                      <button onClick={() => setVer(r)}
-                        className="h-8 px-3 rounded-lg border border-edge text-[12px] font-bold text-ink hover:bg-surface-2 transition-colors">
-                        Ver
-                      </button>
-                    </div>
+                    <p className="text-[12px] text-mute mt-0.5 truncate">
+                      {g.rentas.length} {g.rentas.length === 1 ? 'renta' : 'rentas'} con saldo
+                      {g.telefono ? ` · ${g.telefono}` : ''}
+                    </p>
                   </div>
-                )
-              })}
-            </div>
-          </div>
+                  <div className="text-right shrink-0">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.08em] text-mute">Debe</p>
+                    <p className="text-[19px] font-black text-red-600 dark:text-red-400 tabular-nums leading-tight">{money(g.total)}</p>
+                  </div>
+                  <svg className={`w-4 h-4 shrink-0 text-mute transition-transform ${abierto ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9l6 6 6-6" /></svg>
+                </button>
+
+                {/* Desglose: cada renta suya, con su acción de abono. */}
+                {abierto && (
+                  <div className="border-t border-edge divide-y divide-edge">
+                    {g.rentas.map(r => {
+                      const chip = CHIP_RENTA_ADEUDO[r.estado || ''] || { label: (r.estado || '—').toUpperCase(), cls: 'bg-surface-2 text-mute' }
+                      return (
+                        <div key={r.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 sm:px-5 py-3.5 bg-surface-2/30">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="text-[13.5px] font-bold text-ink truncate">{r.inventario.equipo || 'Equipo'}</span>
+                              <span className={`text-[9.5px] font-bold px-1.5 py-0.5 rounded ${chip.cls}`}>{chip.label}</span>
+                            </div>
+                            <p className="text-[11.5px] font-mono text-mute mt-0.5 truncate">{r.inventario.codigo}</p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-[10px] text-mute">Pagó {money(Number(r.pagado || 0))} de {money(Number(r.total || 0))}</p>
+                            <p className="text-[15px] font-extrabold text-red-600 dark:text-red-400 tabular-nums leading-tight">{money(Number(r.saldo || 0))}</p>
+                          </div>
+                          <div className="flex gap-1.5 shrink-0">
+                            <button onClick={() => setAbonando(r)}
+                              className="h-8 px-3 rounded-lg bg-gold text-black text-[12px] font-bold hover:brightness-95 transition-all whitespace-nowrap">
+                              + Abono
+                            </button>
+                            <button onClick={() => setVer(r)}
+                              className="h-8 px-3 rounded-lg border border-edge text-[12px] font-bold text-ink hover:bg-surface-2 transition-colors">
+                              Ver
+                            </button>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            )
+          })}
         </div>
       )}
 
