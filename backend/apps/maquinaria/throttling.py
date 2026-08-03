@@ -70,3 +70,14 @@ class LoginThrottle(AnonRateThrottle):
     el tope es holgado para el uso normal y aun así frena el barrido automatizado.
     """
     scope = 'login'
+
+
+class RestablecerThrottle(AnonRateThrottle):
+    """Freno a la solicitud de restablecer contraseña, por IP.
+
+    El formulario dispara un correo a la dirección que le escriban: sin tope se
+    convierte en una herramienta para bombardear de correos a un tercero (y para
+    gastar la cuota de envío). Cinco por hora por IP es de sobra para quien de
+    verdad olvidó su clave, y ridículo para un bot.
+    """
+    scope = 'restablecer'

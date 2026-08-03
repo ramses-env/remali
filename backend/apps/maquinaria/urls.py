@@ -38,6 +38,10 @@ urlpatterns = [
     path('auth/me/', views.me),
     path('auth/perfil/', views.PerfilDetail.as_view()),
     path('auth/password/', views.cambiar_password),
+    # Restablecer contraseña ("olvidé mi contraseña") — todo público (sin sesión)
+    path('auth/password/olvide/', views.solicitar_restablecer),
+    path('auth/password/restablecer/', views.restablecer_password),
+    path('auth/password/restablecer/<str:uidb64>/<str:token>/', views.verificar_token_restablecer),
     path('auth/verificar-correo/<str:token>/', views.verificar_correo_usuario),  # público (link del correo)
     path('auth/reenviar-verificacion/', views.reenviar_verificacion),
     path('auth/reenviar-verificacion-publica/', views.reenviar_verificacion_publica),

@@ -346,6 +346,7 @@ REST_FRAMEWORK = {
         'login': '10/min',                # intentos de login por IP (anti fuerza bruta)
         'registro': '5/hour',             # altas de cuenta de cliente por IP
         'cambio_password': '10/hour',     # cambios de contraseña propia, por cuenta
+        'restablecer': '5/hour',          # solicitudes de "olvidé mi contraseña" por IP
     },
 }
 

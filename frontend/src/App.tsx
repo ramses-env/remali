@@ -7,6 +7,8 @@ import EquipoDetail from './routes/EquipoDetail'
 import Cotizacion from './routes/Cotizacion'
 import Login from './routes/Login'
 import Registro from './routes/Registro'
+import Recuperar from './routes/Recuperar'
+import Restablecer from './routes/Restablecer'
 import Perfil from './routes/Perfil'
 import MisCotizaciones from './routes/MisCotizaciones'
 import MisCotizacionEstado from './routes/MisCotizacionEstado'
@@ -39,7 +41,9 @@ function App() {
   const bare =
     location.pathname.startsWith('/dashboard') ||
     location.pathname === '/login' ||
-    location.pathname === '/registro'
+    location.pathname === '/registro' ||
+    location.pathname === '/recuperar' ||
+    location.pathname.startsWith('/restablecer')
 
   return (
     <I18nProvider>
@@ -53,6 +57,8 @@ function App() {
             <Route element={<AuthSplitScreen />}>
               <Route path="/login" element={<Login />} />
               <Route path="/registro" element={<Registro />} />
+              <Route path="/recuperar" element={<Recuperar />} />
+              <Route path="/restablecer/:uid/:token" element={<Restablecer />} />
             </Route>
             {/* /dashboard/* : cualquier subruta (bookmark viejo, refresh) cae al
                 panel en vez de renderizar una página en blanco. */}

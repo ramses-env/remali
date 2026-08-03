@@ -33,6 +33,7 @@ export default function Login() {
   const params = new URLSearchParams(loc.search)
   const next = params.get('next') || ''
   const sesionExpirada = params.get('expired') === '1'
+  const restablecida = params.get('restablecida') === '1'
   // Estados del candado de correo real: ?correo=verificado|invalido los pone el
   // link del correo; ?confirmar=1&correo=<email> llega desde el registro.
   const correoQ = params.get('correo') || ''
@@ -103,6 +104,14 @@ export default function Login() {
         <AuthItem>
           <div className="px-4 py-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-sm text-emerald-600 dark:text-emerald-400 font-semibold">
             Correo confirmado. Ya puedes entrar.
+          </div>
+        </AuthItem>
+      )}
+
+      {restablecida && !error && (
+        <AuthItem>
+          <div className="px-4 py-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-sm text-emerald-600 dark:text-emerald-400 font-semibold">
+            Tu contraseña quedó lista. Ya puedes iniciar sesión.
           </div>
         </AuthItem>
       )}
@@ -197,13 +206,11 @@ export default function Login() {
                     </div>
                   </FormControl>
                   <FormMessage />
-                  {/* Antes esto era un enlace "¿Olvidaste tu contraseña?" que
-                      llevaba a la portada: prometía recuperarla y no hacía nada.
-                      No existe flujo de restablecimiento, así que aquí va la ruta
-                      real, y donde surge la duda: junto al campo. */}
-                  <p className="text-xs text-mute">
-                    ¿La olvidaste? Pídele al administrador que te la restablezca.
-                  </p>
+                  {/* Enlace al flujo real de restablecimiento (correo → nueva).
+                      Va junto al campo, que es donde surge la duda. */}
+                  <Link to="/recuperar" className="inline-block text-xs font-semibold text-gold hover:underline">
+                    ¿Olvidaste tu contraseña?
+                  </Link>
                 </FormItem>
               )}
             />
