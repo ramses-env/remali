@@ -1284,3 +1284,20 @@ def notificaciones_mias(request):
 def marcar_mias_leidas(request):
     Notificacion.objects.filter(usuario=request.user, leida=False).update(leida=True)
     return Response({'ok': True, 'no_leidas': 0})
+
+
+@api_view(['POST', 'DELETE'])
+@permission_classes([permissions.IsAuthenticated])
+def eliminar_mia(request, pk: int):
+    """El cliente quita UNA de sus notificaciones (son transitorias; se acumulan)."""
+    Notificacion.objects.filter(usuario=request.user, pk=pk).delete()
+    qs = Notificacion.objects.filter(usuario=request.user)
+    return Response({'ok': True, 'no_leidas': qs.filter(leida=False).count()})
+
+
+@api_view(['POST'])
+@permission_classes([permissions.IsAuthenticated])
+def limpiar_mias(request):
+    """Borra TODAS las notificaciones del cliente en sesión."""
+    Notificacion.objects.filter(usuario=request.user).delete()
+    return Response({'ok': True, 'no_leidas': 0})

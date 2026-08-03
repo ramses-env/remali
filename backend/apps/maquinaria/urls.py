@@ -59,6 +59,8 @@ urlpatterns = [
     path('notificaciones/', views.NotificacionesList.as_view()),
     path('notificaciones/mias/', views.notificaciones_mias),
     path('notificaciones/mias/leer/', views.marcar_mias_leidas),
+    path('notificaciones/mias/limpiar/', views.limpiar_mias),
+    path('notificaciones/mias/<int:pk>/eliminar/', views.eliminar_mia),
     path('notificaciones/<int:pk>/leer/', views.marcar_notificacion_leida),
     path('notificaciones/leer-todas/', views.marcar_todas_leidas),
 

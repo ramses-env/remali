@@ -68,6 +68,16 @@ export default function CampanaCliente() {
     }
   }
 
+  // Quitar una (se acumulan): borra en el server y de la lista al instante.
+  const eliminar = (id: number) => {
+    setItems(prev => prev.filter(n => n.id !== id))
+    api.post(`/notificaciones/mias/${id}/eliminar/`, {}, { fondo: true } as never).catch(() => {})
+  }
+  const limpiarTodas = () => {
+    setItems([]); setNoLeidas(0)
+    api.post('/notificaciones/mias/limpiar/', {}, { fondo: true } as never).catch(() => {})
+  }
+
   return (
     <div ref={box} className="relative">
       <button onClick={toggle} aria-label="Notificaciones" className="relative w-9 h-9 rounded-full border border-edge bg-surface-2 text-mute hover:text-gold transition-colors flex items-center justify-center">
@@ -80,21 +90,32 @@ export default function CampanaCliente() {
       </button>
 
       {abierto && (
-        <div className="fixed inset-x-3 top-[76px] sm:absolute sm:inset-x-auto sm:top-full sm:right-0 sm:mt-2 sm:w-80 max-w-none sm:max-w-[calc(100vw-2rem)] rounded-2xl border border-edge bg-surface shadow-2xl z-[110] overflow-hidden">
-          <div className="px-4 py-3 border-b border-edge">
-            <p className="text-sm font-bold text-ink">Notificaciones</p>
+        <div className="fixed inset-x-3 top-[76px] sm:absolute sm:inset-x-auto sm:top-full sm:right-0 sm:mt-2 sm:w-[380px] max-w-none sm:max-w-[calc(100vw-2rem)] rounded-2xl border border-edge bg-surface shadow-[0_20px_50px_rgba(17,24,39,0.18)] z-[110] overflow-hidden">
+          <div className="px-5 py-4 border-b border-edge flex items-center justify-between gap-3">
+            <div className="text-lg font-extrabold text-ink">Notificaciones</div>
+            {items.length > 0 && (
+              <button onClick={limpiarTodas} className="text-[13px] font-bold text-ink hover:text-gold transition-colors">Limpiar todas</button>
+            )}
           </div>
-          <div className="max-h-80 overflow-y-auto">
+          <div className="max-h-[min(55vh,360px)] overflow-y-auto">
             {items.length === 0 ? (
-              <p className="text-sm text-mute text-center py-10">Sin notificaciones.</p>
+              <div className="py-12 text-center px-6">
+                <div className="w-12 h-12 rounded-full bg-surface-2 flex items-center justify-center mx-auto mb-3 text-mute">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.5"><path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.4-1.4A2 2 0 0118 14.2V11a6 6 0 10-12 0v3.2c0 .5-.2 1-.6 1.4L4 17h5" /></svg>
+                </div>
+                <p className="text-sm text-mute">No tienes notificaciones.</p>
+              </div>
             ) : (
               items.map(n => (
-                <div key={n.id} className={`px-4 py-3 border-b border-edge last:border-0 ${!n.leida ? 'bg-gold-soft/40' : ''}`}>
-                  <p className="text-sm font-semibold text-ink">{n.titulo}</p>
-                  {n.mensaje && <p className="text-xs text-mute mt-0.5">{n.mensaje}</p>}
-                  <p className="text-[10px] text-mute mt-1">
-                    {new Date(n.creada).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
-                  </p>
+                <div key={n.id} className={`flex gap-2.5 px-5 py-4 border-b border-edge/60 last:border-b-0 ${!n.leida ? 'bg-gold-soft/30' : ''}`}>
+                  <span className="w-[7px] h-[7px] rounded-full shrink-0 mt-[7px]" style={{ background: !n.leida ? 'var(--c-gold)' : 'var(--c-mute)' }} />
+                  <div className="flex-1 min-w-0">
+                    <div className="font-extrabold text-[14.5px] text-ink">{n.titulo}</div>
+                    {n.mensaje && <div className="text-[13.5px] text-mute mt-1 leading-snug line-clamp-2">{n.mensaje}</div>}
+                    <div className="text-[12.5px] text-mute mt-1.5">{tiempoRelativo(n.creada)}</div>
+                  </div>
+                  <button onClick={() => eliminar(n.id)} title="Quitar" aria-label="Quitar notificación"
+                    className="w-[26px] h-[26px] rounded-full bg-surface-2 hover:bg-surface text-mute hover:text-ink shrink-0 flex items-center justify-center text-xs transition-colors">✕</button>
                 </div>
               ))
             )}
@@ -103,4 +124,19 @@ export default function CampanaCliente() {
       )}
     </div>
   )
+}
+
+/** Tiempo relativo corto (igual que el panel del admin): "hace 5 min", "ayer". */
+function tiempoRelativo(iso: string): string {
+  const d = new Date(iso)
+  const seg = Math.floor((Date.now() - d.getTime()) / 1000)
+  if (seg < 60) return 'hace un momento'
+  const min = Math.floor(seg / 60)
+  if (min < 60) return `hace ${min} min`
+  const h = Math.floor(min / 60)
+  if (h < 24) return `hace ${h} h`
+  const dias = Math.floor(h / 24)
+  if (dias === 1) return 'ayer'
+  if (dias < 7) return `hace ${dias} días`
+  return d.toLocaleDateString('es-MX', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
 }
