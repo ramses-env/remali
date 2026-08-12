@@ -66,6 +66,14 @@ const ARRASTRA: Record<Tema, Tema[]> = {
   usuarios: ['usuarios'],
 }
 
+export function expandTemas(temas: Tema[]): Tema[] {
+  const out = new Set<Tema>()
+  for (const tema of temas) {
+    for (const arrastra of ARRASTRA[tema] || [tema]) out.add(arrastra)
+  }
+  return Array.from(out)
+}
+
 const suscriptores = new Map<Tema, Set<() => void>>()
 
 /** Temas pendientes de avisar. Se juntan para que una ráfaga no dispare N refetch. */
@@ -101,7 +109,7 @@ export function notificarMutacion(url: string, metodo: string) {
   const m = (metodo || '').toUpperCase()
   if (m === 'GET' || m === 'HEAD' || m === 'OPTIONS') return
   const tema = temaDeRuta(url)
-  if (tema) invalidar(...ARRASTRA[tema])
+  if (tema) invalidar(...expandTemas([tema]))
 }
 
 export function suscribir(temas: Tema[], fn: () => void): () => void {

@@ -3,7 +3,7 @@ from rest_framework.filters import SearchFilter
 from rest_framework.response import Response
 from django.shortcuts import get_object_or_404
 
-from maquinaria.permissions import IsAdminGroupOrStaff
+from maquinaria.permissions import IsAdminGroupOrStaff, PuedeCotizar
 from .models import Empresa, Obra
 from .serializers import EmpresaSerializer, ObraSerializer
 
@@ -11,7 +11,9 @@ from .serializers import EmpresaSerializer, ObraSerializer
 class EmpresaListCreate(generics.ListCreateAPIView):
     queryset = Empresa.objects.all().prefetch_related('obras').order_by('nombre')
     serializer_class = EmpresaSerializer
-    permission_classes = [IsAdminGroupOrStaff]
+    # El asesor necesita elegir cliente para cotizar y puede dar de alta uno
+    # nuevo; editar o borrar clientes sigue siendo de administración (EmpresaDetail).
+    permission_classes = [PuedeCotizar]
     filter_backends = [SearchFilter]
     search_fields = ['nombre', 'rfc', 'contacto', 'email']
 

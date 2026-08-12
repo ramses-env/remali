@@ -81,3 +81,27 @@ class RestablecerThrottle(AnonRateThrottle):
     verdad olvidó su clave, y ridículo para un bot.
     """
     scope = 'restablecer'
+
+
+class GoogleLoginThrottle(AnonRateThrottle):
+    """Freno al inicio de sesión con Google, por IP (igual que el login normal:
+    acota fuerza bruta y credential stuffing con el token de Google)."""
+    scope = 'google_login'
+
+
+class CuponThrottle(AnonRateThrottle):
+    """Freno a validar/aplicar cupón, por cuenta: sin tope, una sesión podría
+    probar códigos de cupón a fuerza bruta."""
+    scope = 'cupon'
+
+    def get_cache_key(self, request, view):
+        if request.user and request.user.is_authenticated:
+            return self.cache_format % {'scope': self.scope, 'ident': request.user.pk}
+        return None   # sin sesión no llega aquí; lo frena el permiso
+
+
+class TokenPublicoThrottle(AnonRateThrottle):
+    """Freno al acceso por LIGA/TOKEN público (QR de unidad, PDF público, ligas de
+    seguimiento), por IP: la liga es de un solo dato pero adivinable a fuerza bruta
+    sin tope. Holgado para el uso real, ridículo para un barrido automatizado."""
+    scope = 'token_publico'

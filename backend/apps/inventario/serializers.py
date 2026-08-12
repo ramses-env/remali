@@ -38,8 +38,10 @@ class InventarioSerializer(serializers.ModelSerializer):
             'precio_semana': str(e.precio_semana) if e.precio_semana is not None else None,
             'precio_mes': str(e.precio_mes) if e.precio_mes is not None else None,
             'precio_venta': str(e.precio_venta) if e.precio_venta is not None else None,
-            'condicion': e.condicion,
-            'modo': e.modo,   # 'venta' (nueva) o 'renta' (seminueva)
+            'condiciones': e.condiciones_catalogo,
+            'modos': e.modos_catalogo,
+            'ofrece_venta': e.ofrece_venta_catalogo,
+            'ofrece_renta': e.ofrece_renta_catalogo,
         }
 
     def get_renta_activa(self, obj):
@@ -90,6 +92,7 @@ class OrdenReparacionSerializer(serializers.ModelSerializer):
     equipo_display = serializers.CharField(read_only=True)
     unidad_codigo = serializers.CharField(source='unidad.codigo', read_only=True)
     empresa_nombre = serializers.CharField(source='empresa.nombre', read_only=True)
+    cuenta = serializers.SerializerMethodField()
 
     class Meta:
         model = OrdenReparacion
@@ -99,9 +102,13 @@ class OrdenReparacionSerializer(serializers.ModelSerializer):
             'unidad', 'unidad_codigo', 'equipo_descripcion', 'numero_serie',
             'diagnostico', 'trabajo_realizado', 'costo_mano_obra', 'notas',
             'items', 'total_refacciones', 'total', 'cliente_display', 'equipo_display',
-            'fecha_recibida', 'fecha_entrega', 'actualizado_en',
+            'cuenta', 'token_publico', 'fecha_recibida', 'fecha_entrega', 'actualizado_en',
         ]
         read_only_fields = ['folio', 'fecha_recibida', 'actualizado_en']
+
+    def get_cuenta(self, obj):
+        u = obj.usuario if obj.usuario_id else None
+        return (u.get_full_name() or u.username) if u else None
 
     def get_total_refacciones(self, obj):
         return str(obj.total_refacciones)

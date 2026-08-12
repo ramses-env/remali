@@ -44,10 +44,10 @@ export default function Footer() {
         <div className="pt-8 border-t border-edge flex flex-col sm:flex-row items-center justify-between gap-4">
           <p className="text-xs text-mute">© {new Date().getFullYear()} REMALI. Todos los derechos reservados.</p>
           <div className="flex items-center gap-4">
-            <a href="#" aria-label="Instagram" className="p-2 rounded-full border border-edge hover:border-gold hover:text-gold transition-colors">
+            <a href="https://www.instagram.com/remali.mx" target="_blank" rel="noopener noreferrer" aria-label="Instagram" className="p-2 rounded-full border border-edge hover:border-gold hover:text-gold transition-colors">
               <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="5" /><circle cx="12" cy="12" r="4" /><circle cx="17.5" cy="6.5" r="1.5" /></svg>
             </a>
-            <a href="#" aria-label="Facebook" className="p-2 rounded-full border border-edge hover:border-gold hover:text-gold transition-colors">
+            <a href="https://www.facebook.com/share/17zvByPJMn/" target="_blank" rel="noopener noreferrer" aria-label="Facebook" className="p-2 rounded-full border border-edge hover:border-gold hover:text-gold transition-colors">
               <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 8h3V6a3 3 0 013-3h2v3h-2a1 1 0 00-1 1v2h3l-1 3h-2v7h-3v-7H9V8z" /></svg>
             </a>
           </div>

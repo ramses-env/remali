@@ -2,14 +2,16 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   BadgePercent, Check, Copy, Eye, EyeOff, Loader2,
-  Pencil, Plus, Trash2, TriangleAlert,
+  Pencil, Plus, RotateCcw, Trash2, TriangleAlert,
 } from 'lucide-react'
 
 import api from '../lib/api'
+import { soloTelefono, normalizarEmail } from '../lib/utils'
 import Migas from '../components/Migas'
 import { useAuth } from '../store/auth'
 import { useProfile } from '../store/profile'
-import { AvatarInicial } from '@/components/ui/avatar-inicial'
+import { useOnboarding } from '../store/onboarding'
+import { AvatarUsuario } from '@/components/ui/avatar-usuario'
 
 /* ── Tipos ── */
 
@@ -27,13 +29,16 @@ type Perfil = {
   email?: string
   username?: string
   first_name?: string
+  avatar_url?: string | null
+  /** Segunda capa: avatar POR ROL (no toma en cuenta avatar subido). */
+  avatar_url_rol?: string | null
   telefono?: string
   empresa?: string
   datos_completos?: boolean
   tiene_password?: boolean
   email_verificado?: boolean
   perfil_verificado?: boolean
-  cupon?: { codigo: string; descuento: number } | null
+  cupon?: { codigo: string; descuento: number; usado?: boolean } | null
   fiscal_razon_social?: string
   fiscal_rfc?: string
   fiscal_regimen?: string
@@ -88,7 +93,8 @@ export default function Perfil() {
   const { token, logout } = useAuth()
   const nav = useNavigate()
   const [params] = useSearchParams()
-  const { refresh } = useProfile()
+  const { user, refresh } = useProfile()
+  const { reiniciar: reiniciarOnboarding } = useOnboarding()
 
   const [cargando, setCargando] = useState(true)
   const [perfil, setPerfil] = useState<Perfil | null>(null)
@@ -114,6 +120,12 @@ export default function Perfil() {
     api.get<Obra[]>('/obras-cliente/', { fondo: true } as never)
       .then(r => setObras(r.data || []))
       .catch(() => {})
+
+  // El perfil (datos de cliente y facturación) es SOLO para clientes. Admin y
+  // técnico administran en el panel; si caen aquí (por URL), se les manda ahí.
+  useEffect(() => {
+    if (user && Number(user?.puede?.nivel ?? 0) > 0) nav('/dashboard', { replace: true })
+  }, [user, nav])
 
   useEffect(() => {
     if (!token) {
@@ -161,14 +173,15 @@ export default function Perfil() {
     return () => obs.disconnect()
   }, [cargando])
 
-  /* ── Avance del perfil (los 5 datos del diseño) ── */
+  /* ── Avance del perfil ──
+     El 5% de bienvenida se activa con lo ESENCIAL: nombre + teléfono (igual que
+     el backend). La empresa, las obras y el RFC son opcionales —no todo cliente
+     los necesita ni los quiere—, así que NO bloquean el descuento; el cliente
+     los llena cuando le sirven (su obra, o el RFC si pide factura). */
   const checks = useMemo(() => ([
     { ok: form.first_name.trim() !== '', msg: 'agrega tu nombre completo', id: 'datos' },
     { ok: form.telefono.replace(/\D/g, '').length === 10, msg: 'agrega tu teléfono para avisarte de las entregas', id: 'datos' },
-    { ok: form.empresa.trim() !== '', msg: 'agrega la empresa donde trabajas', id: 'datos' },
-    { ok: obras.length > 0, msg: 'guarda la obra adónde llevamos la maquinaria', id: 'obras' },
-    { ok: !factura || form.fiscal_rfc.trim() !== '', msg: 'agrega tu RFC para poder facturar', id: 'facturacion' },
-  ]), [form, obras.length, factura])
+  ]), [form])
   const listos = checks.filter(c => c.ok).length
   const pct = Math.round((listos / checks.length) * 100)
   const falta = checks.find(c => !c.ok)
@@ -234,7 +247,13 @@ export default function Perfil() {
 
       {/* ── Hero: quién eres + qué tan completo va el perfil ── */}
       <header className="flex flex-wrap items-center gap-6 rounded-[22px] border border-edge bg-surface px-6 py-6 sm:px-8">
-        <AvatarInicial nombre={perfil?.first_name} correo={perfil?.email} tamano="lg" />
+        <AvatarUsuario
+          nombre={perfil?.first_name || perfil?.username}
+          correo={perfil?.email}
+          avatarUrl={perfil?.avatar_url}
+          fallbackUrl={perfil?.avatar_url_rol}
+          tamano="lg"
+        />
         <div className="min-w-[200px] flex-1">
           <h1 className="text-[26px] font-black leading-tight tracking-tight text-ink sm:text-[30px]">
             {perfil?.first_name?.trim() || 'Tu cuenta'}
@@ -243,7 +262,7 @@ export default function Perfil() {
             {perfil?.email || perfil?.username}{form.empresa.trim() ? ` · ${form.empresa.trim()}` : ''}
           </p>
         </div>
-        <div className="w-full sm:w-auto sm:min-w-[250px]">
+        <div data-onboarding="perfil-avance" className="w-full sm:w-auto sm:min-w-[250px]">
           <div className="flex items-baseline justify-between gap-3">
             <span className="text-[13.5px] text-mute">Perfil completo</span>
             <span className="text-[20px] font-extrabold tracking-tight text-ink">{pct}%</span>
@@ -252,7 +271,7 @@ export default function Perfil() {
             <div className="h-full rounded-full bg-gold transition-[width] duration-500" style={{ width: `${pct}%` }} />
           </div>
           <p className="mt-2 text-[13px] text-mute">
-            {falta ? `${listos} de ${checks.length} datos listos` : 'Todo listo — ya tienes el 5% aplicado.'}
+            {falta ? `${listos} de ${checks.length} datos listos` : 'Todo listo — tu 5% de bienvenida te espera en tu próxima compra.'}
           </p>
         </div>
       </header>
@@ -295,13 +314,13 @@ export default function Perfil() {
                 autoComplete="name" onChange={v => setForm({ ...form, first_name: v })} />
               <CampoTexto label="Teléfono / WhatsApp" value={form.telefono} placeholder="10 dígitos" type="tel"
                 inputMode="numeric" autoComplete="tel" error={errores.telefono}
-                onChange={v => setForm({ ...form, telefono: v })} />
+                onChange={v => setForm({ ...form, telefono: soloTelefono(v) })} />
               <label className="flex flex-col gap-2">
                 <span className="text-[13.5px] font-semibold text-ink/80">Correo</span>
                 <input value={perfil?.email || ''} disabled title="Es tu correo de acceso; no se cambia desde aquí."
                   className={`${CAMPO} cursor-not-allowed opacity-60`} />
               </label>
-              <CampoTexto label="Empresa donde trabajas" value={form.empresa} placeholder="Constructora o nombre propio"
+              <CampoTexto label="Empresa (opcional)" value={form.empresa} placeholder="Constructora o nombre propio"
                 autoComplete="organization" onChange={v => setForm({ ...form, empresa: v })} />
             </div>
           </section>
@@ -340,7 +359,7 @@ export default function Perfil() {
                 <div className="sm:col-span-2">
                   <CampoTexto label="Correo para recibir facturas" value={form.fiscal_email}
                     placeholder="facturas@tuempresa.mx" type="email" error={errores.fiscal_email}
-                    onChange={v => setForm({ ...form, fiscal_email: v })} />
+                    onChange={v => setForm({ ...form, fiscal_email: normalizarEmail(v) })} />
                 </div>
               </div>
             )}
@@ -348,7 +367,8 @@ export default function Perfil() {
 
           {/* ── Seguridad ── */}
           <SeccionSeguridad perfil={perfil} onGuardado={p => setPerfil(p)}
-            onCerrarSesion={() => { logout(); nav('/') }} />
+            onCerrarSesion={() => { logout(); nav('/') }}
+            onReiniciarGuia={() => reiniciarOnboarding()} />
         </div>
       </div>
 
@@ -436,7 +456,7 @@ function AvisoArriba({ perfil, falta, oculto, onOcultar, onIr, pctCompleto }: {
         <button type="button" onClick={() => onIr(falta.id)} className="min-w-[200px] flex-1 text-left">
           <p className="text-[16px] font-bold text-ink">Completa tu perfil y obtén 5%</p>
           <p className="mt-0.5 text-sm leading-relaxed text-mute">
-            Te falta un dato: {falta.msg}. Con el perfil completo cotizamos más rápido y aplicamos el 5%.
+            Te falta un dato: {falta.msg}. Al completarlo activas tu 5% de bienvenida, para usar una sola vez.
           </p>
         </button>
         <button type="button" onClick={onOcultar}
@@ -447,8 +467,20 @@ function AvisoArriba({ perfil, falta, oculto, onOcultar, onIr, pctCompleto }: {
     )
   }
 
-  // 3) Todo listo y con cupón: enséñalo para copiar.
+  // 3) Todo listo y con cupón. Si ya lo gastó, se lo recordamos sin código para
+  //    copiar (es de único uso); si sigue disponible, lo enseñamos para copiar.
   if (pctCompleto && cupon) {
+    if (cupon.usado) {
+      return (
+        <div className="rounded-[20px] border border-edge bg-surface px-5 py-5 sm:px-6">
+          <div className="flex items-center gap-2 text-ink">
+            <BadgePercent className="h-5 w-5 text-mute" />
+            <p className="text-sm font-bold">Ya usaste tu {Math.round(cupon.descuento * 100)}% de bienvenida</p>
+          </div>
+          <p className="mt-1 text-sm text-mute">Tu descuento de único uso ya se aplicó. ¡Gracias por tu compra!</p>
+        </div>
+      )
+    }
     const copiar = () => {
       navigator.clipboard?.writeText(cupon.codigo).then(() => {
         setCopiado(true)
@@ -459,9 +491,9 @@ function AvisoArriba({ perfil, falta, oculto, onOcultar, onIr, pctCompleto }: {
       <div className="rounded-[20px] border border-gold/40 bg-gold-soft px-5 py-5 sm:px-6">
         <div className="flex items-center gap-2 text-ink">
           <BadgePercent className="h-5 w-5 text-gold" />
-          <p className="text-sm font-bold">¡Ganaste {Math.round(cupon.descuento * 100)}% por completar tu perfil!</p>
+          <p className="text-sm font-bold">¡Ganaste {Math.round(cupon.descuento * 100)}% de bienvenida por completar tu perfil!</p>
         </div>
-        <p className="mt-1 text-sm text-mute">Usa este código en tu próxima cotización:</p>
+        <p className="mt-1 text-sm text-mute">Aplícalo una sola vez, en la compra o renta que tú elijas. Usa este código:</p>
         <div className="mt-3 flex items-center gap-2">
           <code className="rounded-lg border border-gold/40 bg-surface px-3 py-2 font-mono text-base font-bold tracking-wider text-ink">
             {cupon.codigo}
@@ -626,8 +658,8 @@ function FormObra({ f, setF, error, ocupado, onGuardar, onCancelar, onEliminar }
         <div className="grid grid-cols-2 gap-3">
           <input className={mini} value={f.responsable} placeholder="Quién recibe"
             onChange={e => setF({ ...f, responsable: e.target.value })} />
-          <input className={mini} value={f.telefono} placeholder="Teléfono" type="tel" inputMode="numeric"
-            onChange={e => setF({ ...f, telefono: e.target.value })} />
+          <input className={mini} value={f.telefono} placeholder="Teléfono" type="tel" inputMode="numeric" maxLength={10}
+            onChange={e => setF({ ...f, telefono: soloTelefono(e.target.value) })} />
         </div>
       </div>
       {error && <p className="mt-2 text-[12.5px] font-semibold text-red-500">{error}</p>}
@@ -654,10 +686,11 @@ function FormObra({ f, setF, error, ocupado, onGuardar, onCancelar, onEliminar }
 
 /* ── Seguridad: contraseña (expandible) + cerrar sesión ── */
 
-function SeccionSeguridad({ perfil, onGuardado, onCerrarSesion }: {
+function SeccionSeguridad({ perfil, onGuardado, onCerrarSesion, onReiniciarGuia }: {
   perfil: Perfil | null
   onGuardado: (p: Perfil) => void
   onCerrarSesion: () => void
+  onReiniciarGuia: () => void
 }) {
   const [abierto, setAbierto] = useState(false)
   const [actual, setActual] = useState('')
@@ -760,6 +793,19 @@ function SeccionSeguridad({ perfil, onGuardado, onCerrarSesion }: {
             </div>
           </div>
         )}
+      </div>
+
+      {/* Guía de uso */}
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-edge pt-4">
+        <div>
+          <p className="text-[15px] font-semibold text-ink">Volver a ver la guía</p>
+          <p className="mt-0.5 text-[13.5px] text-mute">Repetir el tour interactivo para recordar el sistema.</p>
+        </div>
+        <button type="button" onClick={onReiniciarGuia}
+          className="inline-flex h-[42px] items-center gap-2 rounded-[12px] border border-gold/60 bg-gold/10 px-4 text-sm font-bold text-gold transition-colors hover:bg-gold/20">
+          <RotateCcw className="h-4 w-4" />
+          Repetir guía
+        </button>
       </div>
 
       {/* Cerrar sesión */}

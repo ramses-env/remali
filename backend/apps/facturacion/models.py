@@ -67,7 +67,10 @@ class SolicitudFactura(models.Model):
     @property
     def folio_origen(self):
         if self.venta_id:
-            return f'V-{self.venta_id}'
+            # Folio de la venta (VEN-AAAA-NNNN) si lo tiene; los históricos sin
+            # folio caen al identificador corto de siempre.
+            folio = getattr(self.venta, 'folio', None) if self.venta else None
+            return folio or f'V-{self.venta_id}'
         if self.renta_id:
             return f'R-{self.renta_id}'
         return '—'

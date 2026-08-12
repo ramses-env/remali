@@ -26,12 +26,34 @@ def _es_admin(u: User):
     return nivel_de(u) >= NIVEL_ADMIN
 
 
-def _serialize(u: User):
+def _es_cliente(u: User):
+    """Cliente de la tienda: sin rol de personal (ni staff, ni superusuario, ni
+    grupo distinto de 'Cliente'). El panel NO le cambia la contraseña —la
+    recupera él desde el login— ni le marca la verificación de correo —la hace
+    él al confirmar su correo—. El personal interno sí lo administra el admin."""
+    return not u.is_staff and not u.is_superuser and _rol(u) in (None, 'Cliente')
+
+
+def _serialize(u: User, request=None):
+    from .models import avatar_por_rol
     perfil = getattr(u, 'perfil', None)
+    avatar_url = None
+    if getattr(perfil, 'avatar', None):
+        try:
+            avatar_url = perfil.avatar.url
+            if request is not None:
+                avatar_url = request.build_absolute_uri(avatar_url)
+        except Exception:
+            avatar_url = None
+    if not avatar_url:
+        avatar_url = avatar_por_rol(u, absoluta=True, request=request)
+    avatar_url_rol = avatar_por_rol(u, absoluta=True, request=request)
+
+    nombre_completo = (f'{u.first_name} {u.last_name}'.strip() or u.username)
     return {
         'id': u.id,
         'username': u.username,
-        'nombre': (f'{u.first_name} {u.last_name}'.strip() or u.username),
+        'nombre': nombre_completo,
         'first_name': u.first_name,
         'last_name': u.last_name,
         'email': u.email,
@@ -41,12 +63,18 @@ def _serialize(u: User):
         'activo': u.is_active,
         'telefono': getattr(perfil, 'telefono', '') or '',
         'puesto': getattr(perfil, 'puesto', '') or '',
-        # Estado de verificación del cliente (para ver/filtrar quién completó perfil)
         'email_verificado': bool(getattr(perfil, 'email_verificado', False)),
         'datos_completos': bool(perfil and perfil.datos_completos),
         'perfil_verificado': bool(perfil and perfil.perfil_verificado),
+        # ¿Ya tiene su código de seguridad (PIN para autorizar acciones sensibles)?
+        'tiene_codigo': bool(getattr(perfil, 'codigo_seguridad', '')),
         'ultimo_acceso': u.last_login,
         'creado': u.date_joined,
+        'avatar_url': avatar_url,
+        'avatar_url_rol': avatar_url_rol,
+        # Para el AvatarUsuario del frontend: nombre visible + email / username
+        'display_nombre': (u.get_full_name() or u.username or u.email or '').strip(),
+        'display_correo': (u.email or u.username or '').strip(),
     }
 
 
@@ -82,7 +110,7 @@ def roles_disponibles(request):
 def usuarios(request):
     if request.method == 'GET':
         qs = User.objects.all().select_related('perfil').prefetch_related('groups').order_by('-is_active', 'username')
-        return Response({'usuarios': [_serialize(u) for u in qs]})
+        return Response({'usuarios': [_serialize(u, request=request) for u in qs]})
 
     d = request.data or {}
     username = (d.get('username') or '').strip()
@@ -101,20 +129,38 @@ def usuarios(request):
     if (d.get('rol') or '').strip() == 'Cliente':
         return Response({'detalle': 'Desde el panel solo se crea equipo de trabajo; los clientes se registran en la tienda.'}, status=400)
 
+    # Código de seguridad: SOLO para roles de AUTORIDAD (Administrador / Gerente).
+    # Es el PIN con el que AUTORIZAN acciones sensibles (cancelar venta/renta,
+    # ajustar precio, anticipo bajo el mínimo, resolver depósito). Un operador
+    # (cajero/asesor/técnico) NO autoriza nada —eso lo aprueba un superior—, así
+    # que no se le pide ni se le guarda PIN (si el formulario lo mandara, se ignora).
+    from .seguridad import formato_valido, hash_codigo
+    from .permissions import ROL_ADMIN, ROL_GERENTE
+    rol = (d.get('rol') or '').strip()
+    es_autoridad = rol in (ROL_ADMIN, ROL_GERENTE)
+    codigo = str(d.get('codigo_seguridad') or '').strip()
+    if es_autoridad and not formato_valido(codigo):
+        return Response({'detalle': 'Define el código de seguridad (6 dígitos): el administrador o gerente lo usa para autorizar acciones sensibles.'}, status=400)
+
     with transaction.atomic():
         u = User.objects.create_user(
             username=username, password=password, email=email,
             first_name=(d.get('first_name') or '').strip(),
             last_name=(d.get('last_name') or '').strip(),
         )
-        _asignar_rol(u, (d.get('rol') or '').strip() or None)
-        telefono, puesto = (d.get('telefono') or '').strip(), (d.get('puesto') or '').strip()
-        if telefono or puesto:
-            from .models import PerfilUsuario
-            PerfilUsuario.objects.update_or_create(usuario=u, defaults={'telefono': telefono, 'puesto': puesto})
+        _asignar_rol(u, rol or None)
+        from .models import PerfilUsuario
+        defaults = {
+            'telefono': (d.get('telefono') or '').strip(),
+            'puesto': (d.get('puesto') or '').strip(),
+        }
+        # Solo la autoridad guarda PIN; el operador nunca (ni siquiera vacío).
+        if es_autoridad:
+            defaults['codigo_seguridad'] = hash_codigo(codigo)
+        PerfilUsuario.objects.update_or_create(usuario=u, defaults=defaults)
 
     u = User.objects.select_related('perfil').prefetch_related('groups').get(pk=u.pk)
-    return Response(_serialize(u), status=201)
+    return Response(_serialize(u, request=request), status=201)
 
 
 @api_view(['PATCH', 'DELETE'])
@@ -135,29 +181,52 @@ def usuario_detalle(request, pk: int):
             return Response({'detalle': 'Es la última cuenta con acceso de administrador; el sistema quedaría sin quién lo administre.'}, status=400)
         u.is_active = False
         u.save(update_fields=['is_active'])
-        return Response(_serialize(u))
+        return Response(_serialize(u, request=request))
 
     d = request.data or {}
 
     # Cambio de contraseña (el admin la define; el usuario la cambia luego en su perfil).
     nueva = d.get('password')
     if nueva is not None:
+        # A un CLIENTE no se le cambia la contraseña desde el panel: la recupera
+        # él mismo desde el login. Solo aplica al personal interno.
+        if _es_cliente(u):
+            return Response({'detalle': 'La contraseña de un cliente no se cambia desde el panel; el cliente la recupera desde el login.'}, status=403)
         if len(nueva) < 8:
             return Response({'detalle': 'La contraseña debe tener al menos 8 caracteres.'}, status=400)
         u.set_password(nueva)
         u.save(update_fields=['password'])
-        return Response({'detalle': f'Contraseña actualizada para {u.username}.', 'usuario': _serialize(u)})
+        return Response({'detalle': f'Contraseña actualizada para {u.username}.', 'usuario': _serialize(u, request=request)})
 
-    # Verificación del correo (solo clientes): marcarlo como NO verificado lo
-    # obliga a confirmar de nuevo antes de poder entrar (candado del login).
+    # Reset del código de seguridad (por si el operador lo olvidó). El propio
+    # usuario también puede cambiarlo desde su perfil (con su contraseña).
+    nuevo_codigo = d.get('codigo_seguridad')
+    if nuevo_codigo is not None:
+        if _es_cliente(u):
+            return Response({'detalle': 'Los clientes no usan código de seguridad.'}, status=403)
+        # Solo la autoridad (Administrador/Gerente) tiene PIN: no se le asigna uno
+        # a un operador, porque su PIN jamás autoriza nada (lo gatea verificar_codigo).
+        from .permissions import nivel_de, NIVEL_ADMIN
+        if nivel_de(u) < NIVEL_ADMIN:
+            return Response({'detalle': 'Solo Administrador o Gerente usa código de seguridad; un operador (cajero, asesor, técnico) no autoriza acciones.'}, status=400)
+        from .seguridad import formato_valido, definir_codigo
+        if not formato_valido(nuevo_codigo):
+            return Response({'detalle': 'El código de seguridad debe ser de 6 dígitos.'}, status=400)
+        definir_codigo(u, str(nuevo_codigo).strip())
+        return Response({'detalle': f'Código de seguridad actualizado para {u.username}.', 'usuario': _serialize(u, request=request)})
+
+    # Verificación del correo: la hace el propio cliente al confirmar su correo.
+    # El admin NO lo marca desde el panel (ni verificado ni no verificado).
     if 'email_verificado' in d:
+        if _es_cliente(u):
+            return Response({'detalle': 'La verificación de correo la hace el propio cliente; no se marca desde el panel.'}, status=403)
         from django.utils import timezone
         from .models import PerfilUsuario
         perfil, _ = PerfilUsuario.objects.get_or_create(usuario=u)
         perfil.email_verificado = bool(d.get('email_verificado'))
         perfil.email_verificado_en = timezone.now() if perfil.email_verificado else None
         perfil.save(update_fields=['email_verificado', 'email_verificado_en'])
-        return Response(_serialize(u))
+        return Response(_serialize(u, request=request))
 
     campos = []
     for campo, clave in (('first_name', 'first_name'), ('last_name', 'last_name'), ('email', 'email')):
@@ -190,7 +259,17 @@ def usuario_detalle(request, pk: int):
     if campos:
         u.save(update_fields=campos)
     if 'rol' in d:
-        _asignar_rol(u, (d.get('rol') or '').strip() or None)
+        _asignar_rol(u, nuevo_rol)
+        # Al DEGRADAR (deja de ser autoridad: ya no admin/gerente/staff/superuser)
+        # se borra su PIN. Un operador no autoriza nada; no debe quedar un código
+        # colgando (aunque verificar_codigo ya lo neutraliza por rol).
+        from .permissions import ROL_GERENTE
+        es_autoridad_final = u.is_superuser or u.is_staff or nuevo_rol in (ROL_ADMIN, ROL_GERENTE)
+        if not es_autoridad_final:
+            from .models import PerfilUsuario
+            PerfilUsuario.objects.filter(usuario=u).exclude(codigo_seguridad='').update(
+                codigo_seguridad='', codigo_intentos=0, codigo_bloqueado_hasta=None,
+            )
 
     telefono, puesto = d.get('telefono'), d.get('puesto')
     if telefono is not None or puesto is not None:
@@ -203,4 +282,4 @@ def usuario_detalle(request, pk: int):
         perfil.save()
 
     u = User.objects.select_related('perfil').prefetch_related('groups').get(pk=u.pk)
-    return Response(_serialize(u))
+    return Response(_serialize(u, request=request))

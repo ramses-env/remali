@@ -1,11 +1,13 @@
 import { useLocation } from 'react-router-dom'
-import { LayoutGrid, Heart, ClipboardList, User, LogIn, LayoutDashboard } from 'lucide-react'
+import { LayoutGrid, Heart, ClipboardList, CalendarClock, LogIn, LayoutDashboard, MessageCircle } from 'lucide-react'
 
 import Dock, { type DockItem } from '@/components/ui/dock'
 import { useAuth } from '../store/auth'
 import { useProfile } from '../store/profile'
 import { useCart } from '../store/cart'
 import { useFavoritos } from '../store/favoritos'
+import { useConfigPublica } from '../lib/configPublica'
+import { waLink } from '../lib/whatsapp'
 
 /**
  * Dock de la tienda pública, para el pulgar en móvil.
@@ -25,10 +27,10 @@ export default function DockTienda() {
   const { user } = useProfile()
   const { state } = useCart()
   const { count: favoritos } = useFavoritos()
+  const cfg = useConfigPublica()
 
   const enCotizacion = state.items.reduce((n, i) => n + i.qty, 0)
   const esCliente = Boolean(token) && (user?.puede?.nivel ?? 0) === 0
-  const perfilIncompleto = esCliente && user?.datos_completos === false
 
   const ruta = loc.pathname
   const catalogoActivo = ruta === '/equipos' || ruta.startsWith('/equipo/')
@@ -37,13 +39,18 @@ export default function DockTienda() {
     { key: 'catalogo', label: 'Catálogo', to: '/equipos', activo: catalogoActivo, icon: <LayoutGrid className="h-[22px] w-[22px]" /> },
     { key: 'favoritos', label: 'Favoritos', to: '/favoritos', activo: ruta === '/favoritos', badge: favoritos, icon: <Heart className="h-[22px] w-[22px]" /> },
     { key: 'cotizacion', label: 'Cotización', to: '/cotizacion', activo: ruta === '/cotizacion', badge: enCotizacion, icon: <ClipboardList className="h-[22px] w-[22px]" /> },
+    // WhatsApp directo al negocio: lo que un cliente de renta más repite
+    // (preguntar disponibilidad, cerrar el trato). Abre el chat con un mensaje listo.
+    { key: 'whatsapp', label: 'WhatsApp', 'data-onboarding': 'dock-whatsapp' as any, onClick: () => { const w = waLink(cfg.whatsapp_principal, 'Hola REMALI, quiero información sobre un equipo.'); if (w) window.open(w, '_blank', 'noopener') }, icon: <MessageCircle className="h-[22px] w-[22px]" /> },
     // El último item depende de quién eres: sin sesión, a entrar; cliente (nivel 0),
     // a su perfil; admin o técnico, al panel. Antes mandaba a /perfil a todos, así
     // que en móvil el staff se quedaba sin forma de volver al panel.
+    // El perfil ahora se abre desde el encabezado del menú (avatar → nombre),
+    // así que el dock aprovecha ese lugar para lo transaccional del cliente.
     !token
       ? { key: 'entrar', label: 'Entrar', to: '/login', activo: ruta === '/login', icon: <LogIn className="h-[22px] w-[22px]" /> }
       : esCliente
-        ? { key: 'perfil', label: 'Perfil', to: '/perfil', activo: ruta === '/perfil', punto: perfilIncompleto, icon: <User className="h-[22px] w-[22px]" /> }
+        ? { key: 'mis-rentas', label: 'Mis rentas', to: '/mis-rentas', activo: ruta === '/mis-rentas', icon: <CalendarClock className="h-[22px] w-[22px]" /> }
         : { key: 'panel', label: 'Panel', to: '/dashboard', activo: ruta === '/dashboard', icon: <LayoutDashboard className="h-[22px] w-[22px]" /> },
   ]
 

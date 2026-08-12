@@ -16,6 +16,7 @@ type Equipo = {
   tipo?: { nombre?: string } | null
   marca?: { nombre?: string } | null
   condicion?: string
+  condiciones?: string[]
   que_incluye?: string[]
 }
 
@@ -124,7 +125,10 @@ export default function FichaTecnicaModal({ equipo, onClose }: { equipo: Equipo;
   const descCorta = descripcion.length > 320 ? descripcion.slice(0, 317).trimEnd() + '…' : descripcion
   // "Incluye": el campo capturado en el producto ("Título: detalle" por línea).
   const incluye = (equipo.que_incluye || []).map(l => l.trim()).filter(Boolean)
-  const condicion = equipo.condicion === 'nueva' ? 'Nueva' : equipo.condicion === 'seminueva' ? 'Seminueva' : ''
+  const condiciones = (equipo.condiciones || []).filter(Boolean)
+  const condicion = condiciones.length
+    ? condiciones.map(c => c === 'nueva' ? 'Nueva' : c === 'seminueva' ? 'Seminueva' : c).join(' y ')
+    : (equipo.condicion === 'nueva' ? 'Nueva' : equipo.condicion === 'seminueva' ? 'Seminueva' : '')
   const clasif = [
     { k: 'Categoría', v: equipo.categoria?.nombre },
     { k: 'Tipo', v: equipo.tipo?.nombre },

@@ -70,6 +70,14 @@ class Renta(models.Model):
     token_vinculo = models.CharField(max_length=32, unique=True, null=True, blank=True, editable=False)
     token_vinculo_expira = models.DateTimeField(null=True, blank=True, editable=False)
 
+    # Renovación: si esta renta nació al renovar otra (el cliente pidió otro
+    # día/semana/mes), apunta a la anterior. `renovaciones` da la cadena de
+    # continuidad de una misma unidad/cliente.
+    renta_origen = models.ForeignKey(
+        'self', null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='renovaciones',
+        help_text='Renta anterior de la que ésta es continuación (renovación).')
+
     modalidad = models.CharField(max_length=10, choices=MODALIDADES)
     duracion = models.PositiveIntegerField(
         default=1,
@@ -112,6 +120,27 @@ class Renta(models.Model):
     # pagan DESPUÉS de la renta; aquí vive cuánto ha entregado y cuánto debe.
     pagos = models.JSONField(default=list, blank=True)
     observaciones = models.TextField(blank=True, null=True)
+
+    # ── 🔐 Liquidación del DEPÓSITO en garantía ──
+    # El depósito se RETIENE durante la renta. Al devolver, el técnico valida la
+    # máquina y decide su destino: devolverlo, dejarlo a favor (crédito), aplicarlo
+    # a la deuda/daño, o —si no hubo efectivo— marcarlo "por devolver" para que la
+    # empresa sepa cuánto le debe a cada cliente.
+    deposito_estado = models.CharField(max_length=14, default='retenido', choices=[
+        ('retenido', 'Retenido'),           # renta en curso, aún no se resuelve
+        ('devuelto', 'Devuelto'),           # se le regresó al cliente (efectivo/transf.)
+        ('a_favor', 'A favor del cliente'),  # crédito para su próxima renta
+        ('por_devolver', 'Por devolver'),    # la empresa se lo debe (no hubo efectivo)
+        ('aplicado', 'Aplicado'),           # se usó todo (deuda/daño), nada que regresar
+    ])
+    deposito_aplicado = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'),
+        help_text='Parte del depósito usada para cubrir deuda de renta o daños.')
+    deposito_reembolso = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'),
+        help_text='Parte del depósito que se le regresa/acredita al cliente.')
+    deposito_nota = models.CharField(max_length=255, blank=True, default='')
+    deposito_resuelto_en = models.DateTimeField(null=True, blank=True)
+    deposito_resuelto_por = models.ForeignKey(
+        'auth.User', null=True, blank=True, on_delete=models.SET_NULL, related_name='depositos_resueltos')
 
     # ── Confirmación en campo ──
     # Una renta se crea "activa", pero el equipo puede tardar en salir. Estas
@@ -189,13 +218,29 @@ class Renta(models.Model):
         if self.estado in ('activa', 'reservada'):
             if not self.inventario_id:
                 raise ValidationError("La renta necesita una unidad de inventario.")
-            if self.inventario.condicion == 'nueva':
-                raise ValidationError("Las unidades nuevas no se rentan, solo se venden.")
-            if self.inventario.estado in ('vendido', 'mantenimiento'):
-                raise ValidationError(
-                    f"La unidad {self.inventario.codigo} está "
-                    f"{self.inventario.get_estado_display().lower()} y no puede rentarse."
-                )
+            # La DISPONIBILIDAD de la unidad se valida SOLO al crear la renta. Una
+            # renta ya persistida ES la ocupante legítima de su unidad: re-guardarla
+            # (pagos, liga de cotización, transiciones de estado) no debe fallar
+            # "no disponible" contra su PROPIA ocupación. El traslape de más abajo
+            # excluye self y sigue blindando contra doble-reserva.
+            if self._state.adding:
+                # Regla flexible: 'seminueva' siempre se renta; 'nueva' SOLO si fue
+                # autorizada (autorizada_para_renta=True) por sustitución/demanda.
+                if not self.inventario.puede_rentarse():
+                    if self.inventario.condicion == 'nueva':
+                        raise ValidationError(
+                            "Unidad NUEVA no autorizada para renta. "
+                            "Autorícela primero (sustitución de unidad dañada o demanda extraordinaria)."
+                        )
+                    raise ValidationError(
+                        f"La unidad {self.inventario.codigo} no está disponible para renta "
+                        f"(estado actual: {self.inventario.get_estado_display()})."
+                    )
+                if self.inventario.estado in ('vendido', 'mantenimiento'):
+                    raise ValidationError(
+                        f"La unidad {self.inventario.codigo} está "
+                        f"{self.inventario.get_estado_display().lower()} y no puede rentarse."
+                    )
             if self.estado == 'reservada' and self.fecha_inicio and self.fecha_inicio < timezone.localdate():
                 raise ValidationError("Una reserva no puede iniciar en una fecha pasada.")
 
@@ -281,6 +326,75 @@ class Renta(models.Model):
             ])
         if era_activa:
             self.inventario.liberar('Bodega')
+
+    def saldo_pendiente(self):
+        """Lo que el cliente aún debe de la renta (total + recargo − abonos)."""
+        pagado = sum((Decimal(str(p.get('monto', 0))) for p in (self.pagos or [])), Decimal('0'))
+        return max((self.total or Decimal('0')) + (self.recargo or Decimal('0')) - pagado, Decimal('0'))
+
+    @transaction.atomic
+    def resolver_deposito(self, *, aplicar_deuda=Decimal('0'), aplicar_dano=Decimal('0'),
+                          reembolso_tipo='devuelto', nota='', user=None):
+        """Cierre del depósito al devolver (lo hace el técnico).
+
+        El depósito se parte en lo que se APLICA (a la deuda de renta y/o a daños)
+        y lo que se REEMBOLSA al cliente. Aplicar a la deuda se registra como un
+        abono desde la garantía (baja el saldo). El reembolso se marca según cómo
+        se entregó: 'devuelto' (efectivo), 'a_favor' (crédito) o 'por_devolver'
+        (la empresa se lo queda debiendo).
+        """
+        if self.deposito_estado != 'retenido':
+            return  # ya se resolvió una vez; no re-aplicar (evitaría doble abono)
+        dep = Decimal(self.deposito or 0)
+        aplicar_deuda = max(Decimal('0'), min(Decimal(str(aplicar_deuda or 0)), dep))
+        aplicar_dano = max(Decimal('0'), min(Decimal(str(aplicar_dano or 0)), dep - aplicar_deuda))
+        aplicado = (aplicar_deuda + aplicar_dano).quantize(Decimal('0.01'))
+        reembolso = (dep - aplicado).quantize(Decimal('0.01'))
+
+        # Aplicar a la deuda = abono desde la garantía (baja el saldo del cliente).
+        if aplicar_deuda > 0:
+            pagos = list(self.pagos or [])
+            pagos.append({
+                'fecha': timezone.now().isoformat(),
+                'monto': str(aplicar_deuda.quantize(Decimal('0.01'))),
+                'metodo': 'deposito',
+                'nota': 'Aplicado de la garantía',
+            })
+            self.pagos = pagos
+
+        if reembolso <= 0:
+            estado = 'aplicado'
+        elif reembolso_tipo in ('devuelto', 'a_favor', 'por_devolver'):
+            estado = reembolso_tipo
+        else:
+            estado = 'devuelto'
+
+        self.deposito_aplicado = aplicado
+        self.deposito_reembolso = reembolso
+        self.deposito_estado = estado
+        self.deposito_nota = (nota or '')[:255]
+        self.deposito_resuelto_en = timezone.now()
+        self.deposito_resuelto_por = user
+        self.save(update_fields=[
+            'pagos', 'deposito_aplicado', 'deposito_reembolso', 'deposito_estado',
+            'deposito_nota', 'deposito_resuelto_en', 'deposito_resuelto_por', 'actualizado_en',
+        ])
+
+    @transaction.atomic
+    def marcar_deposito_saldado(self, *, user=None, nota=''):
+        """La empresa por fin le REGRESÓ al cliente el depósito que le debía:
+        pasa de 'por_devolver' (o 'a_favor') a 'devuelto'."""
+        if self.deposito_estado not in ('por_devolver', 'a_favor'):
+            return
+        self.deposito_estado = 'devuelto'
+        if nota:
+            self.deposito_nota = f'{self.deposito_nota} · {nota}'.strip(' ·')[:255]
+        self.deposito_resuelto_en = timezone.now()
+        self.deposito_resuelto_por = user
+        self.save(update_fields=[
+            'deposito_estado', 'deposito_nota', 'deposito_resuelto_en',
+            'deposito_resuelto_por', 'actualizado_en',
+        ])
 
     @transaction.atomic
     def cancelar(self, motivo=''):

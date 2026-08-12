@@ -34,7 +34,11 @@ export function normalizeBase(url?: string) {
   return u
 }
 
-const api = axios.create({ baseURL: normalizeBase(import.meta.env.VITE_API_URL) })
+// timeout: sin esto, una subida que se cuelga (Cloudinary lento, la red móvil
+// que se cae a media petición) deja el botón en "Guardando…" para siempre. 60 s
+// da margen a una foto grande, pero corta lo que de verdad se atoró y deja que
+// el formulario muestre el error y se libere.
+const api = axios.create({ baseURL: normalizeBase(import.meta.env.VITE_API_URL), timeout: 60_000 })
 
 api.interceptors.request.use(config => {
   const token = leerToken()

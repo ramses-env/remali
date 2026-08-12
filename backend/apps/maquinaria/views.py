@@ -1,80 +1,70 @@
 from datetime import timedelta
+from secrets import token_urlsafe
 
-from django.db import IntegrityError
-from django.db.models import Q, ProtectedError
-from django.utils import timezone
-from django.shortcuts import get_object_or_404
-from django.contrib.auth import get_user_model
+from django.contrib.auth import authenticate, get_user_model
 from django.contrib.auth.models import Group
-from django.contrib.auth.password_validation import validate_password
+from django.contrib.auth.tokens import default_token_generator
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.core.validators import validate_email
+from django.db import transaction
+from django.db.models.deletion import ProtectedError
+from django.db.models import Q
+from django.http import HttpResponse
+from django.shortcuts import get_object_or_404
+from django.utils import timezone
+from django.utils.encoding import force_bytes, force_str
+from django.utils.http import urlsafe_base64_decode, urlsafe_base64_encode
 
 from rest_framework import generics, permissions, status
 from rest_framework.filters import SearchFilter, OrderingFilter
 from rest_framework.decorators import api_view, permission_classes, parser_classes, throttle_classes
-from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
+from rest_framework.response import Response
 
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
-from rest_framework_simplejwt.tokens import RefreshToken
 
-from google.auth.transport import requests as google_requests
-from google.oauth2 import id_token as google_id_token
-
-from .permissions import EsDueno, EsOperador, EsOperadorEditaAdmin, puede_de, nivel_de, NIVEL_ADMIN
 from .throttling import (
-    SolicitudPublicaThrottle, LoginThrottle, RegistroThrottle, CambioPasswordThrottle,
-    RestablecerThrottle,
+    CuponThrottle, GoogleLoginThrottle, LoginThrottle,
+    RegistroThrottle, CambioPasswordThrottle, RestablecerThrottle,
 )
-
-from django.conf import settings
 
 from .models import (
     Equipo, Categoria, Marca, Tipo, ImagenProducto,
-    Cupon, Notificacion, PerfilUsuario, crear_notificacion, nombre_propio,
-    ConfiguracionSitio, CorreoAviso, ObraCliente, espejar_obra_predeterminada,
+    Cupon, Notificacion, PerfilUsuario, crear_notificacion,
+    ConversacionSoporte, MensajeSoporte, ConfiguracionSitio, CorreoAviso,
+    ObraCliente, SelloTema, nombre_propio, espejar_obra_predeterminada,
+    Favorito,
 )
-from .permissions import IsAdminGroupOrStaff
+from .permissions import IsAdminGroupOrStaff, EsOperador, puede_de
+from .serializers import (
+    EquipoSerializer, CategoriaSerializer, MarcaSerializer, TipoSerializer,
+    CuponSerializer, NotificacionSerializer, PerfilUsuarioSerializer,
+    ConversacionSoporteListSerializer, ConversacionSoporteDetailSerializer, MensajeSoporteSerializer,
+    ConfiguracionSitioSerializer, CorreoAvisoSerializer, ObraClienteSerializer,
+    FavoritoSerializer,
+)
 
 
 class ProtectedDestroyMixin:
-    """DELETE seguro para modelos referenciados con on_delete=PROTECT.
-    En vez de un 500 por ProtectedError, responde 409 con un mensaje claro
-    de cuántos registros dependen del objeto. Reutilizable en cualquier
-    RetrieveUpdateDestroyAPIView (catálogos, refacciones, etc.)."""
-
-    en_uso_label = 'registro'          # singular; sobreescribir (ej. 'producto')
-    en_uso_label_plural = 'registros'  # plural;   sobreescribir (ej. 'productos')
+    """Convierte un PROTECT relacional en un 400 claro para la UI."""
+    en_uso_label = 'registro relacionado'
+    en_uso_label_plural = 'registros relacionados'
 
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
         try:
-            instance.delete()
-        except ProtectedError as e:
-            n = len(e.protected_objects)
-            label = self.en_uso_label if n == 1 else self.en_uso_label_plural
-            # "está en uso por N …": frase invariante que evita el pronombre
-            # gendered (lo/la) — funciona igual para producto, categoría, unidad…
-            return Response(
-                {'detail': f'No se puede eliminar "{instance}": está en uso por {n} {label}.'},
-                status=status.HTTP_409_CONFLICT,
-            )
-        return Response(status=status.HTTP_204_NO_CONTENT)
-from .serializers import (
-    EquipoSerializer, CategoriaSerializer, MarcaSerializer, TipoSerializer,
-    CuponSerializer, NotificacionSerializer, PerfilUsuarioSerializer,
-    ConfiguracionSitioSerializer, CorreoAvisoSerializer,
-    ObraClienteSerializer,
-)
+            self.perform_destroy(instance)
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        except ProtectedError:
+            return Response({
+                'detail': f'No se puede eliminar porque tiene {self.en_uso_label_plural}.'
+            }, status=status.HTTP_400_BAD_REQUEST)
 
 
 # ─────────────────────────────────────────────
 #  EQUIPOS (catálogo)
 # ─────────────────────────────────────────────
 class EquipoListCreate(generics.ListCreateAPIView):
-    # select_related: los catálogos (depth=1) se traen en el mismo query.
-    # prefetch_related: unidades e imágenes que consumen los SerializerMethodField.
     queryset = (Equipo.objects
                 .select_related('categoria', 'tipo', 'marca')
                 .prefetch_related('unidades', 'imagenes')
@@ -104,18 +94,29 @@ class EquipoListCreate(generics.ListCreateAPIView):
         qs = super().get_queryset()
         params = self.request.query_params
 
-        # Venta = equipos nuevos, Renta = seminuevos. Lo decide la condición del
-        # propio equipo (un equipo es de venta O de renta, nunca ambos).
+        # Venta viene del catálogo (precio de venta); renta sí depende de tener
+        # unidades seminuevas en inventario.
         uso = (params.get('uso') or '').strip().lower()
         if uso == 'venta':
-            qs = qs.filter(condicion='nueva')
+            qs = qs.filter(precio_venta__gt=0).distinct()
         elif uso == 'renta':
-            qs = qs.filter(condicion='seminueva')
+            qs = qs.filter(
+                Q(precio_dia__gt=0) | Q(precio_semana__gt=0) | Q(precio_mes__gt=0),
+                unidades__condicion='seminueva',
+            ).exclude(unidades__estado='vendido').distinct()
 
         if params.get('price_min'):
-            qs = qs.filter(precio_dia__gte=params['price_min'])
+            pm = float(params['price_min'])
+            qs = qs.filter(
+                Q(precio_dia__gte=pm) | Q(precio_semana__gte=pm) |
+                Q(precio_mes__gte=pm) | Q(precio_venta__gte=pm),
+            )
         if params.get('price_max'):
-            qs = qs.filter(precio_dia__lte=params['price_max'])
+            pm = float(params['price_max'])
+            qs = qs.filter(
+                Q(precio_dia__lte=pm) | Q(precio_semana__lte=pm) |
+                Q(precio_mes__lte=pm) | Q(precio_venta__lte=pm),
+            )
 
         qs = self._filtro_multi(qs, 'category', 'categoria_id', 'categoria__nombre__iexact')
         qs = self._filtro_multi(qs, 'brand', 'marca_id', 'marca__nombre__iexact')
@@ -131,13 +132,11 @@ class EquipoListCreate(generics.ListCreateAPIView):
         return qs
 
 
-class EquipoRetrieveUpdateDestroy(ProtectedDestroyMixin, generics.RetrieveUpdateDestroyAPIView):
+class EquipoRetrieveUpdateDestroy(generics.RetrieveUpdateDestroyAPIView):
     queryset = (Equipo.objects
                 .select_related('categoria', 'tipo', 'marca')
                 .prefetch_related('unidades', 'imagenes'))
     serializer_class = EquipoSerializer
-    en_uso_label = 'unidad de inventario'
-    en_uso_label_plural = 'unidades de inventario'
 
     def get_permissions(self):
         if self.request.method in ('PUT', 'PATCH', 'DELETE'):
@@ -188,51 +187,29 @@ class MarcaList(_CatalogoListCreate):
     serializer_class = MarcaSerializer
 
 
-class CategoriaDetail(ProtectedDestroyMixin, generics.RetrieveUpdateDestroyAPIView):
+class CategoriaDetail(generics.RetrieveUpdateDestroyAPIView):
     queryset = Categoria.objects.all()
     serializer_class = CategoriaSerializer
     permission_classes = [IsAdminGroupOrStaff]
-    en_uso_label = 'producto'
-    en_uso_label_plural = 'productos'
 
 
-class TipoDetail(ProtectedDestroyMixin, generics.RetrieveUpdateDestroyAPIView):
+class TipoDetail(generics.RetrieveUpdateDestroyAPIView):
     queryset = Tipo.objects.all()
     serializer_class = TipoSerializer
     permission_classes = [IsAdminGroupOrStaff]
-    en_uso_label = 'producto'
-    en_uso_label_plural = 'productos'
 
 
-class MarcaDetail(ProtectedDestroyMixin, generics.RetrieveUpdateDestroyAPIView):
+class MarcaDetail(generics.RetrieveUpdateDestroyAPIView):
     queryset = Marca.objects.all()
     serializer_class = MarcaSerializer
     permission_classes = [IsAdminGroupOrStaff]
-    en_uso_label = 'producto'
-    en_uso_label_plural = 'productos'
 
 
 # ─────────────────────────────────────────────
-#  CONFIGURACIÓN DEL SITIO (editable desde el panel)
+#  CONFIGURACIÓN DEL SITIO
 # ─────────────────────────────────────────────
-def _enviar_verificacion(correo, request):
-    """Pone en camino el correo con el link de verificación (no bloquea la petición)."""
-    from .correo import enviar_async
-    correo.nuevo_token()
-    correo.verificado = False
-    correo.verificado_en = None
-    correo.save(update_fields=['token', 'verificado', 'verificado_en'])
-    url = request.build_absolute_uri(f'/api/config/correos/verificar/?token={correo.token}')
-    cuerpo = (
-        f'Hola,\n\nEste correo fue dado de alta en REMALI para recibir avisos de '
-        f'nuevas solicitudes de cotización.\n\nConfírmalo aquí:\n{url}\n\n'
-        f'Si no lo reconoces, ignora este mensaje.\n'
-    )
-    return enviar_async('[REMALI] Verifica tu correo de avisos', cuerpo, [correo.email])
-
-
 @api_view(['GET'])
-@permission_classes([permissions.AllowAny])  # público: la tienda necesita el WhatsApp y el nombre
+@permission_classes([permissions.AllowAny])
 def configuracion_publica(request):
     cfg = ConfiguracionSitio.get_solo()
     return Response({
@@ -249,70 +226,96 @@ def configuracion_publica(request):
         'cotizacion_condiciones_renta': cfg.cotizacion_condiciones_renta,
         'datos_bancarios': cfg.datos_bancarios,
         'cotizacion_cierre': cfg.cotizacion_cierre,
+        'descuento_contado_pct': cfg.descuento_contado_pct,
+        'anticipo_minimo_pct': cfg.anticipo_minimo_pct,
+        # El código de autorización ahora es PERSONAL por operador (cada quien el
+        # suyo). Las acciones sensibles SIEMPRE lo piden; el panel usa este flag
+        # para pedirlo, y `tiene_codigo_seguridad` (de /me) para saber si el
+        # operador ya configuró el suyo.
+        'ajuste_requiere_codigo': True,
     })
 
 
-class ConfiguracionDetail(generics.RetrieveUpdateAPIView):
-    """Configuración completa del negocio: solo el dueño.
+@api_view(['POST'])
+@permission_classes([EsOperador])
+def validar_codigo_ajuste(request):
+    """Valida el CÓDIGO PERSONAL del operador que ejecuta (no uno compartido).
+    Solo dice si es correcto para desbloquear el campo en el panel; la acción lo
+    vuelve a validar en el servidor. Cuenta intentos fallidos (anti-fuerza-bruta)."""
+    from .seguridad import verificar_codigo
+    ok, detalle, _status, cod = verificar_codigo(request.user, (request.data or {}).get('codigo'))
+    return Response({'valido': ok, 'detalle': detalle, 'codigo': cod})
 
-    Incluye los WhatsApp de respaldo y los datos fiscales. La tienda usa
-    /config/publica/, que expone únicamente lo que el cliente debe ver."""
-    permission_classes = [EsDueno]
+
+@api_view(['POST'])
+@permission_classes([IsAdminGroupOrStaff])   # solo autoridad (admin/gerente) tiene PIN
+def definir_codigo_seguridad(request):
+    """Fija o cambia el código de seguridad del PROPIO usuario. Pide su
+    contraseña de la cuenta para confirmar identidad (no basta la sesión).
+
+    Solo Administrador/Gerente: el PIN autoriza acciones sensibles y esas las
+    aprueba un superior, no un operador. Un cajero/asesor/técnico no tiene PIN."""
+    from .seguridad import formato_valido, definir_codigo
+    d = request.data or {}
+    password = d.get('password') or ''
+    codigo = str(d.get('codigo') or '').strip()
+    if not request.user.check_password(password):
+        return Response({'detalle': 'Tu contraseña de la cuenta es incorrecta.'}, status=403)
+    if not formato_valido(codigo):
+        return Response({'detalle': 'El código de seguridad debe ser de 6 dígitos.'}, status=400)
+    definir_codigo(request.user, codigo)
+    return Response({'ok': True, 'detalle': 'Código de seguridad actualizado.'})
+
+
+class ConfiguracionDetail(generics.RetrieveUpdateAPIView):
     serializer_class = ConfiguracionSitioSerializer
+    permission_classes = [IsAdminGroupOrStaff]
 
     def get_object(self):
         return ConfiguracionSitio.get_solo()
 
 
-class CorreosAvisoList(generics.ListCreateAPIView):
-    permission_classes = [EsDueno]
-    serializer_class = CorreoAvisoSerializer
-    queryset = CorreoAviso.objects.all()
+@api_view(['GET'])
+@permission_classes([permissions.AllowAny])
+def verificar_correo_aviso(request):
+    token = (request.query_params.get('token') or '').strip()
+    if not token:
+        return HttpResponse('Token inválido.', status=400)
+    correo = CorreoAviso.objects.filter(token=token).first()
+    if not correo:
+        return HttpResponse('Token inválido.', status=404)
+    correo.verificado = True
+    correo.verificado_en = timezone.now()
+    correo.save(update_fields=['verificado', 'verificado_en'])
+    return HttpResponse('Correo verificado. Ya recibirás avisos.', status=200)
 
-    def create(self, request, *args, **kwargs):
-        ser = self.get_serializer(data=request.data)
-        ser.is_valid(raise_exception=True)
-        correo = ser.save()
-        enviado = _enviar_verificacion(correo, request)
-        data = self.get_serializer(correo).data
-        data['verificacion_enviada'] = enviado
-        return Response(data, status=status.HTTP_201_CREATED)
+
+class CorreosAvisoList(generics.ListCreateAPIView):
+    queryset = CorreoAviso.objects.all().order_by('email')
+    serializer_class = CorreoAvisoSerializer
+    permission_classes = [IsAdminGroupOrStaff]
+
+    def perform_create(self, serializer):
+        serializer.save()
 
 
 @api_view(['DELETE'])
-@permission_classes([EsDueno])
+@permission_classes([IsAdminGroupOrStaff])
 def correo_aviso_eliminar(request, pk: int):
-    CorreoAviso.objects.filter(pk=pk).delete()
+    correo = get_object_or_404(CorreoAviso, pk=pk)
+    correo.delete()
     return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 @api_view(['POST'])
-@permission_classes([EsDueno])
+@permission_classes([IsAdminGroupOrStaff])
 def correo_aviso_reenviar(request, pk: int):
-    try:
-        correo = CorreoAviso.objects.get(pk=pk)
-    except CorreoAviso.DoesNotExist:
-        return Response({'detalle': 'Correo no encontrado'}, status=404)
-    ok = _enviar_verificacion(correo, request)
-    return Response({'detalle': 'Verificación reenviada' if ok else 'No se pudo enviar el correo', 'enviado': ok})
-
-
-@api_view(['GET'])
-@permission_classes([permissions.AllowAny])  # público: se abre desde el correo
-def verificar_correo_aviso(request):
-    from django.http import HttpResponse
-    from django.utils import timezone as _tz
-    token = (request.query_params.get('token') or '').strip()
-    correo = CorreoAviso.objects.filter(token=token).first() if token else None
-    if not correo:
-        return HttpResponse('<h2>Enlace inválido o vencido.</h2>', status=400, content_type='text/html; charset=utf-8')
-    correo.verificado = True
-    correo.verificado_en = _tz.now()
-    correo.token = ''
-    correo.save(update_fields=['verificado', 'verificado_en', 'token'])
-    return HttpResponse(
-        f'<h2>✅ Correo verificado</h2><p>{correo.email} ya recibirá los avisos de nuevas solicitudes.</p>',
-        content_type='text/html; charset=utf-8')
+    correo = get_object_or_404(CorreoAviso, pk=pk)
+    correo.nuevo_token()
+    correo.verificado = False
+    correo.verificado_en = None
+    correo.save(update_fields=['token', 'verificado', 'verificado_en'])
+    return Response({'ok': True, 'token': correo.token})
 
 
 # ─────────────────────────────────────────────
@@ -335,582 +338,83 @@ class CuponRetrieveUpdateDestroy(generics.RetrieveUpdateDestroyAPIView):
 
 
 @api_view(['POST'])
-@permission_classes([permissions.AllowAny])  # público: la tienda (futura) valida el cupón del cliente sin sesión
+@permission_classes([permissions.AllowAny])
+@throttle_classes([CuponThrottle])
 def apply_coupon(request):
-    codigo = request.data.get('code')
+    """Valida un cupón (código textual) y devuelve el descuento a aplicar.
+
+    Seguridad:
+      - Si no existe o está inactivo / usado → 400 genérico (no revela cuál).
+      - Si es "personal" (bienvenida), solo sirve para SU dueño.
+      - Nunca marcar como usado aquí; el consumo real pasa cuando la cotización
+        / pedido acepta el cupón en su transacción correspondiente.
+    """
+    from decimal import Decimal as _Dec
+    codigo = ((request.data or {}).get('code') or (request.data or {}).get('codigo') or '').strip()
+    if not codigo:
+        return Response({'detail': 'Código requerido.'}, status=400)
     try:
         cupon = Cupon.objects.get(codigo=codigo, activo=True)
-        return Response({'discount': float(cupon.descuento)})
     except Cupon.DoesNotExist:
-        return Response({'discount': 0}, status=400)
+        return Response({'detail': 'Cupón inválido.', 'discount': 0}, status=400)
+    if cupon.personal and cupon.usado:
+        return Response({'detail': 'Cupón inválido.', 'discount': 0}, status=400)
+    if cupon.personal and cupon.usuario_id is not None:
+        if not getattr(request.user, 'is_authenticated', False):
+            return Response({'detail': 'Inicia sesión para usar este cupón.'}, status=401)
+        if cupon.usuario_id != request.user.id:
+            return Response({'detail': 'Cupón inválido.', 'discount': 0}, status=400)
+    return Response({
+        'discount': float(cupon.descuento or _Dec('0')),
+        'codigo': cupon.codigo,
+        'personal': cupon.personal,
+        'usado': bool(cupon.usado),
+    })
 
 
 # ─────────────────────────────────────────────
 #  AUTENTICACIÓN / PERFIL
 # ─────────────────────────────────────────────
 @api_view(['POST'])
-@permission_classes([permissions.IsAuthenticated])
-@throttle_classes([CambioPasswordThrottle])
-def cambiar_password(request):
-    """Cambiar la propia contraseña.
-
-    Ojo con el caso que no es obvio: quien entró con Google NO tiene contraseña
-    utilizable. Para esa cuenta esto es ponerla por primera vez, así que exigirle
-    la "actual" la dejaría sin poder crear una nunca. Se detecta y se salta ese
-    requisito; sigue siendo seguro porque ya viene autenticado.
-    """
-    usuario = request.user
-    actual = request.data.get('password_actual') or ''
-    nueva = request.data.get('password_nueva') or ''
-
-    if not nueva:
-        return Response({'detail': 'Escribe tu contraseña nueva.'}, status=400)
-
-    tenia_password = usuario.has_usable_password()
-    if tenia_password and not usuario.check_password(actual):
-        return Response({'detail': 'Tu contraseña actual no es correcta.'}, status=400)
-
-    # Se le pasa el usuario para que el validador de similitud pueda comparar la
-    # contraseña con su nombre y su correo.
-    try:
-        validate_password(nueva, usuario)
-    except DjangoValidationError as e:
-        return Response({'detail': ' '.join(e.messages)}, status=400)
-
-    usuario.set_password(nueva)
-    usuario.save(update_fields=['password'])
-    return Response({'detail': 'Contraseña actualizada.', 'tenia_password': tenia_password})
-
-
-# ── Restablecer contraseña ("olvidé mi contraseña") ──────────────────────────
-# Flujo SIN sesión, en tres pasos, con el generador de tokens NATIVO de Django:
-#   1) POST olvide/                  → manda el correo con el enlace (uid+token).
-#   2) GET  restablecer/<uid>/<tok>/ → el front pregunta si el enlace sigue vivo.
-#   3) POST restablecer/             → fija la contraseña con {uid, token, password}.
-# El token NO se guarda en la base: Django lo firma con el hash de la contraseña
-# actual, así que caduca a las PASSWORD_RESET_TIMEOUT horas Y muere en cuanto la
-# contraseña cambia (usar el enlace una vez lo invalida). Ese es el motivo de usar
-# el generador nativo en lugar de inventar un token propio.
-
-def _usuario_de_uidb64(uidb64):
-    """Decodifica el uid del enlace a un usuario activo, o None si no cuadra."""
-    from django.utils.http import urlsafe_base64_decode
-    try:
-        uid = urlsafe_base64_decode(uidb64).decode()
-        return get_user_model().objects.filter(pk=uid, is_active=True).first()
-    except (TypeError, ValueError, OverflowError):
-        return None
-
-
-@api_view(['POST'])
 @permission_classes([permissions.AllowAny])
-@throttle_classes([RestablecerThrottle])
-def solicitar_restablecer(request):
-    """Paso 1: recibe el correo y, si hay una cuenta CON contraseña, manda el enlace.
-
-    La respuesta es SIEMPRE la misma (200), exista o no la cuenta: si dijera "ese
-    correo no está registrado" convertiría el formulario en un detector de qué
-    correos tienen cuenta aquí.
-    """
-    from django.contrib.auth.tokens import default_token_generator
-    from django.utils.http import urlsafe_base64_encode
-    from django.utils.encoding import force_bytes
-
-    email = (request.data.get('email') or '').strip().lower()
-    neutra = Response({'detail': 'Si hay una cuenta con ese correo, te enviamos un enlace para restablecerla. Revisa también Spam.'})
-    if not email or '@' not in email:
-        return neutra
-
-    User = get_user_model()
-    user = User.objects.filter(email__iexact=email, is_active=True).order_by('id').first()
-    # Las cuentas de solo-Google no tienen contraseña utilizable: no hay nada que
-    # "recuperar", entran con Google. Se ignoran en silencio (respuesta neutra).
-    if not user or not user.has_usable_password():
-        return neutra
-
-    try:
-        uid = urlsafe_base64_encode(force_bytes(user.pk))
-        token = default_token_generator.make_token(user)
-        link = f'{settings.FRONTEND_URL.rstrip("/")}/restablecer/{uid}/{token}'
-        nombre = (getattr(user, 'first_name', '') or '').strip()
-        cfg = ConfiguracionSitio.get_solo()
-        negocio = cfg.negocio_nombre or 'REMALI'
-        horas = max(1, settings.PASSWORD_RESET_TIMEOUT // 3600)
-        import os
-        from .correo import enviar_async, enviar_plantilla_brevo
-        tpl = os.environ.get('BREVO_RESET_TEMPLATE_ID', '').strip()
-        if not enviar_plantilla_brevo(tpl, email, nombre, {'nombre': nombre, 'link': link, 'horas': horas}):
-            cuerpo = (
-                f'Hola {nombre}'.rstrip() + ',\n\n'
-                f'Pediste restablecer tu contraseña en {negocio}. Abre este enlace y '
-                f'elige una nueva (el enlace vence en {horas} horas):\n\n'
-                f'{link}\n\n'
-                f'Si no fuiste tú, ignora este correo: tu contraseña no cambia hasta '
-                f'que alguien abra el enlace y la reemplace.\n'
-            )
-            enviar_async(f'Restablece tu contraseña · {negocio}', cuerpo, [email])
-    except Exception:
-        import logging
-        logging.getLogger(__name__).exception('No se pudo enviar el restablecimiento a %s', email)
-
-    return neutra
-
-
-@api_view(['GET'])
-@permission_classes([permissions.AllowAny])
-def verificar_token_restablecer(request, uidb64, token):
-    """Paso 2: ¿el enlace sigue vivo? El front lo consulta ANTES de mostrar el
-    formulario, para avisar de un enlace vencido/usado sin hacer teclear en vano."""
-    from django.contrib.auth.tokens import default_token_generator
-    user = _usuario_de_uidb64(uidb64)
-    valido = bool(user and default_token_generator.check_token(user, token))
-    return Response({
-        'valido': valido,
-        'nombre': (getattr(user, 'first_name', '') or '').strip() if valido else '',
-    })
-
-
-@api_view(['POST'])
-@permission_classes([permissions.AllowAny])
-def restablecer_password(request):
-    """Paso 3: fija la contraseña nueva. Al guardarla cambia el hash de la clave,
-    así que el token queda muerto en el acto (el mismo enlace ya no sirve otra vez).
-
-    No lleva throttle propio: sin un token válido no hace nada, y adivinar un token
-    del generador nativo por fuerza bruta es inviable. Limitarlo aquí solo
-    penalizaría a quien se equivoca al elegir una contraseña que pasa las reglas.
-    """
-    from django.contrib.auth.tokens import default_token_generator
-
-    uidb64 = (request.data.get('uid') or '').strip()
-    token = (request.data.get('token') or '').strip()
-    nueva = request.data.get('password') or ''
-
-    user = _usuario_de_uidb64(uidb64)
-    if not user or not default_token_generator.check_token(user, token):
-        return Response({'detail': 'El enlace no es válido o ya venció. Pide uno nuevo.'}, status=400)
-
-    if not nueva:
-        return Response({'detail': 'Escribe tu contraseña nueva.'}, status=400)
-    try:
-        validate_password(nueva, user)
-    except DjangoValidationError as e:
-        return Response({'detail': ' '.join(e.messages)}, status=400)
-
-    user.set_password(nueva)
-    user.save(update_fields=['password'])
-    return Response({'detail': 'Tu contraseña quedó lista. Ya puedes iniciar sesión.'})
-
-
-def _bienvenida_brevo(email, nombre):
-    """Dispara la PLANTILLA de bienvenida por la API de Brevo, en un hilo.
-
-    Devuelve True si está configurada (BREVO_API_KEY + BREVO_WELCOME_TEMPLATE_ID)
-    y se encoló; False si no hay plantilla (entonces se manda el texto plano).
-    La plantilla usa {{ params.nombre }} para personalizar.
-    """
-    import os
-
-    from .correo import enviar_plantilla_brevo
-    tpl = os.environ.get('BREVO_WELCOME_TEMPLATE_ID', '').strip()
-    return enviar_plantilla_brevo(tpl, email, nombre, {'nombre': nombre or ''})
-
-
-def enviar_bienvenida(user):
-    """Bienvenida al crear una cuenta de cliente. Nunca revienta el alta.
-
-    Si hay plantilla de Brevo configurada, se usa esa (diseño editable en Brevo);
-    si no, un correo de texto por el SMTP normal.
-    """
-    email = (getattr(user, 'email', '') or '').strip()
-    if not email:
-        return
-    nombre = (getattr(user, 'first_name', '') or '').strip()
-    try:
-        if _bienvenida_brevo(email, nombre):
-            return
-        from .correo import enviar_async
-        cfg = ConfiguracionSitio.get_solo()
-        negocio = cfg.negocio_nombre or 'REMALI'
-        contacto = cfg.negocio_telefono or cfg.whatsapp_principal or ''
-        web = cfg.negocio_web or 'remali.mx'
-        cuerpo = (
-            f'Hola {nombre}'.rstrip() + ',\n\n'
-            f'¡Bienvenido a {negocio}! Tu cuenta ya está lista.\n\n'
-            f'Desde tu cuenta puedes ver nuestro catálogo de maquinaria y pedir '
-            f'cotizaciones en línea; nosotros te contactamos para confirmar disponibilidad.\n\n'
-            + (f'Visítanos en {web}.\n' if web else '')
-            + (f'¿Dudas? Escríbenos al {contacto}.\n' if contacto else '')
-            + f'\nGracias por confiar en {negocio}.\n— El equipo de {negocio}\n'
-        )
-        enviar_async(f'¡Bienvenido a {negocio}!', cuerpo, [email])
-    except Exception:
-        import logging
-        logging.getLogger(__name__).exception('No se pudo enviar la bienvenida a %s', email)
-
-
-def _enviar_verificacion(user, perfil, request=None):
-    """Correo con el link para confirmar el correo del usuario. No revienta nada."""
-    email = (getattr(user, 'email', '') or '').strip()
-    if not email:
-        return
-    try:
-        if not perfil.email_token:
-            perfil.nuevo_email_token()
-            perfil.save(update_fields=['email_token'])
-        ruta = f'/api/auth/verificar-correo/{perfil.email_token}/'
-        link = request.build_absolute_uri(ruta) if request is not None else ruta
-        nombre = (getattr(user, 'first_name', '') or '').strip()
-        import os
-        from .correo import enviar_async, enviar_plantilla_brevo
-        tpl = os.environ.get('BREVO_VERIFY_TEMPLATE_ID', '').strip()
-        if enviar_plantilla_brevo(tpl, email, nombre, {'nombre': nombre, 'link': link}):
-            return
-        cfg = ConfiguracionSitio.get_solo()
-        negocio = cfg.negocio_nombre or 'REMALI'
-        cuerpo = (
-            f'Hola {nombre}'.rstrip() + ',\n\n'
-            f'Confirma tu correo para activar tu cuenta en {negocio} y desbloquear un '
-            f'5% de descuento al completar tu perfil:\n\n'
-            f'{link}\n\n'
-            f'Si no creaste esta cuenta, ignora este correo.\n'
-        )
-        enviar_async(f'Confirma tu correo · {negocio}', cuerpo, [email])
-    except Exception:
-        import logging
-        logging.getLogger(__name__).exception('No se pudo enviar la verificación a %s', email)
-
-
-def _generar_cupon_perfil(user):
-    """Crea (una sola vez) el cupón personal de 5% por completar el perfil."""
-    import secrets
-    from decimal import Decimal
-    from .models import Cupon
-    existente = user.cupones.filter(motivo='perfil').first()
-    if existente:
-        return existente
-    for _ in range(6):
-        codigo = 'PERFIL-' + secrets.token_hex(3).upper()
-        if not Cupon.objects.filter(codigo=codigo).exists():
-            return Cupon.objects.create(
-                codigo=codigo, descuento=Decimal('0.05'), activo=True,
-                usuario=user, motivo='perfil',
-            )
-    return None
-
-
-def _enviar_recompensa(user, codigo):
-    """Correo de '¡ganaste 5%!' con el código del cupón. No revienta nada."""
-    email = (getattr(user, 'email', '') or '').strip()
-    if not email:
-        return
-    try:
-        nombre = (getattr(user, 'first_name', '') or '').strip()
-        import os
-        from .correo import enviar_async, enviar_plantilla_brevo
-        tpl = os.environ.get('BREVO_REWARD_TEMPLATE_ID', '').strip()
-        if enviar_plantilla_brevo(tpl, email, nombre, {'nombre': nombre, 'codigo': codigo, 'descuento': '5%'}):
-            return
-        cfg = ConfiguracionSitio.get_solo()
-        negocio = cfg.negocio_nombre or 'REMALI'
-        cuerpo = (
-            f'¡Felicidades {nombre}'.rstrip() + '!\n\n'
-            f'Completaste tu perfil en {negocio} y ganaste un 5% de descuento.\n\n'
-            f'Tu código: {codigo}\n\n'
-            f'Úsalo en tu próxima cotización. ¡Gracias por confiar en {negocio}!\n'
-        )
-        enviar_async(f'Ganaste 5% en {negocio}', cuerpo, [email])
-    except Exception:
-        import logging
-        logging.getLogger(__name__).exception('No se pudo enviar la recompensa a %s', email)
-
-
-def revisar_recompensa(perfil):
-    """Si el perfil quedó verificado (correo + datos) y aún no se le premió,
-    genera su cupón de 5% y le manda el correo. Idempotente; nunca revienta."""
-    try:
-        if not perfil.perfil_verificado or perfil.recompensado:
-            return
-        cupon = _generar_cupon_perfil(perfil.usuario)
-        perfil.recompensado = True
-        perfil.save(update_fields=['recompensado'])
-        if cupon:
-            _enviar_recompensa(perfil.usuario, cupon.codigo)
-    except Exception:
-        import logging
-        logging.getLogger(__name__).exception('No se pudo entregar la recompensa de perfil')
-
-
-@api_view(['GET'])
-@permission_classes([permissions.AllowAny])   # público: se abre desde el link del correo
-def verificar_correo_usuario(request, token):
-    """Confirma el correo del usuario (link del correo) y lo regresa al sitio."""
-    from django.shortcuts import redirect
-    from django.utils import timezone
-    perfil = PerfilUsuario.objects.filter(email_token=token).exclude(email_token='').first() if token else None
-    if not perfil:
-        return redirect('/login?correo=invalido')
-    if not perfil.email_verificado:
-        perfil.email_verificado = True
-        perfil.email_verificado_en = timezone.now()
-        perfil.save(update_fields=['email_verificado', 'email_verificado_en'])
-        enviar_bienvenida(perfil.usuario)   # ahora sí: cuenta confirmada
-        revisar_recompensa(perfil)
-    return redirect('/login?correo=verificado')
-
-
-@api_view(['POST'])
-@permission_classes([permissions.AllowAny])
-@throttle_classes([RegistroThrottle])
-def reenviar_verificacion_publica(request):
-    """Reenvía la confirmación SIN sesión (quien está bloqueado no puede entrar).
-
-    Respuesta neutra siempre: no revela si el correo tiene cuenta o no."""
-    email = (request.data.get('email') or '').strip().lower()
-    if email:
-        user = get_user_model().objects.filter(email__iexact=email, is_active=True).first()
-        if user:
-            perfil, _ = PerfilUsuario.objects.get_or_create(usuario=user)
-            if not perfil.email_verificado:
-                _enviar_verificacion(user, perfil, request)
-    return Response({'detail': 'Si la cuenta existe, te reenviamos el correo de confirmación.'})
-
-
-@api_view(['POST'])
-@permission_classes([permissions.IsAuthenticated])
-def reenviar_verificacion(request):
-    """Reenvía el correo de verificación al usuario autenticado."""
-    perfil, _ = PerfilUsuario.objects.get_or_create(usuario=request.user)
-    if perfil.email_verificado:
-        return Response({'detail': 'Tu correo ya está verificado.'})
-    _enviar_verificacion(request.user, perfil, request)
-    return Response({'detail': 'Te reenviamos el correo de verificación.'})
-
-
-def _adoptar_cotizaciones(user):
-    """Cotizaciones hechas sin cuenta (o capturadas por el admin) cuyo correo
-    coincide con el del nuevo usuario: se le cuelgan a su cuenta para que las
-    vea en "Mis cotizaciones". Nunca roba las que ya tienen dueño."""
-    try:
-        from cotizaciones.models import Cotizacion
-        if user.email:
-            Cotizacion.objects.filter(
-                usuario__isnull=True, cliente_email__iexact=user.email.strip()
-            ).update(usuario=user)
-    except Exception:
-        pass
-
-
-@api_view(['POST'])
-@permission_classes([permissions.AllowAny])  # público: alta de cliente desde la tienda
-@throttle_classes([RegistroThrottle])
-def registro(request):
-    """Alta de cuenta de cliente desde la tienda.
-
-    Esto SOLO crea clientes. El rol no se lee del payload en ningún caso: si
-    llegara `is_staff`, `is_superuser` o `groups`, se ignoran. Un alta pública
-    que aceptara el rol del cliente sería una puerta directa a hacerse
-    administrador. Quien necesite técnico o admin lo da de alta el Dueño.
-    """
-    nombre = (request.data.get('nombre') or '').strip()
-    email = (request.data.get('email') or '').strip().lower()
-    password = request.data.get('password') or ''
-
-    if not email or not password:
-        return Response({'detail': 'Correo y contraseña son obligatorios.'}, status=400)
-
-    try:
-        validate_email(email)
-    except DjangoValidationError:
-        return Response({'detail': 'Escribe un correo válido.'}, status=400)
-
-    # El correo hace de usuario, y `username` tope a 150.
-    if len(email) > 150:
-        return Response({'detail': 'Ese correo es demasiado largo.'}, status=400)
-
-    User = get_user_model()
-    if User.objects.filter(Q(email__iexact=email) | Q(username__iexact=email)).exists():
-        return Response({'detail': 'Ya existe una cuenta con ese correo.'}, status=400)
-
-    # Las reglas de fuerza de contraseña son las del proyecto (AUTH_PASSWORD_VALIDATORS),
-    # no una copia paralela que se quede desactualizada.
-    try:
-        validate_password(password)
-    except DjangoValidationError as e:
-        return Response({'detail': ' '.join(e.messages)}, status=400)
-
-    try:
-        user = User.objects.create_user(username=email, email=email, password=password)
-        _adoptar_cotizaciones(user)
-    except IntegrityError:
-        # Dos altas simultáneas con el mismo correo: la segunda choca con el índice.
-        return Response({'detail': 'Ya existe una cuenta con ese correo.'}, status=400)
-
-    user.first_name = nombre_propio(nombre)[:150]
-    user.is_staff = False
-    user.is_superuser = False
-    user.save(update_fields=['first_name', 'is_staff', 'is_superuser'])
-
-    grupo, _ = Group.objects.get_or_create(name='Cliente')
-    user.groups.add(grupo)
-
-    perfil, _ = PerfilUsuario.objects.get_or_create(usuario=user)
-    _enviar_verificacion(user, perfil, request)   # confirma el correo; la bienvenida va al verificarlo
-    return Response({'detail': 'Cuenta creada. Te enviamos un correo para confirmar tu cuenta.'}, status=201)
-
-
-@api_view(['POST'])
-@permission_classes([permissions.AllowAny])  # público: punto de entrada de sesión
 @throttle_classes([LoginThrottle])
-def google_login(request):
-    """Entrar con Google.
-
-    Recibe el ID token que el botón de Google le entregó al navegador y, si es
-    legítimo, emite el JWT propio del proyecto.
-
-    Todo depende de la verificación: el token llega desde el cliente, así que sin
-    comprobarlo cualquiera mandaría un JSON con el correo del dueño y entraría.
-    `verify_oauth2_token` valida la firma contra las llaves públicas de Google,
-    la caducidad, el emisor, y —lo más importante— que el token se haya emitido
-    PARA esta aplicación (`aud` == nuestro client ID). Sin ese último punto
-    serviría un token sacado de cualquier otro sitio que use Google.
-    """
-    credential = request.data.get('credential') or ''
-    if not credential:
-        return Response({'detail': 'Falta el token de Google.'}, status=400)
-
-    client_id = getattr(settings, 'GOOGLE_CLIENT_ID', '')
-    if not client_id:
-        return Response({'detail': 'Entrar con Google no está configurado.'}, status=503)
-
-    try:
-        info = google_id_token.verify_oauth2_token(
-            credential, google_requests.Request(), client_id
-        )
-    except ValueError:
-        # Token inválido, caducado o emitido para otra aplicación.
-        return Response({'detail': 'No pudimos validar tu cuenta de Google.'}, status=401)
-    except Exception:
-        # Fallo al consultar las llaves de Google: es un problema nuestro, no del
-        # usuario. Distinguirlo evita culpar a quien sí traía un token bueno.
-        return Response({'detail': 'No pudimos contactar a Google. Intenta de nuevo.'}, status=503)
-
-    if info.get('iss') not in ('accounts.google.com', 'https://accounts.google.com'):
-        return Response({'detail': 'Token de origen inesperado.'}, status=401)
-
-    email = (info.get('email') or '').strip().lower()
-    if not email or not info.get('email_verified'):
-        # Sin correo verificado no hay prueba de que la cuenta sea suya, y enlazar
-        # por correo sin esa prueba es la vía directa a suplantar a otro usuario.
-        return Response({'detail': 'Tu correo de Google no está verificado.'}, status=403)
-
-    User = get_user_model()
-    # Se enlaza por correo, nunca por el nombre que venga en el token. El
-    # `exclude(email='')` no es cosmético: sin él, las cuentas sin correo harían
-    # match entre ellas y entrarías a la primera que apareciera.
-    user = (
-        User.objects.exclude(email='').filter(email__iexact=email).first()
-        or User.objects.filter(username__iexact=email).first()
-    )
-
-    creada = False
-    if user is None:
-        if len(email) > 150:
-            return Response({'detail': 'Ese correo es demasiado largo.'}, status=400)
-        # Alta implícita: mismo criterio que el registro público, solo cliente.
-        # El rol jamás sale del token de Google.
-        user = User.objects.create_user(username=email, email=email)
-        _adoptar_cotizaciones(user)
-        user.set_unusable_password()   # entra por Google, no tiene contraseña
-        user.first_name = nombre_propio(info.get('given_name') or '')[:150]
-        user.last_name = nombre_propio(info.get('family_name') or '')[:150]
-        user.is_staff = False
-        user.is_superuser = False
-        user.save()
-        grupo, _ = Group.objects.get_or_create(name='Cliente')
-        user.groups.add(grupo)
-        creada = True
-        enviar_bienvenida(user)   # bienvenida solo en el alta, no en logins posteriores
-
-    if not user.is_active:
-        # Mismo criterio fail-closed que nivel_de: cuenta desactivada no entra,
-        # aunque su Google sea válido.
-        return Response({'detail': 'Tu cuenta no está activa. Contacta al administrador.'}, status=403)
-
-    # Google ya comprobó ese correo (email_verified): la cuenta queda confirmada,
-    # incluso si antes se registró por contraseña y nunca abrió nuestro link.
-    perfil_g, _ = PerfilUsuario.objects.get_or_create(usuario=user)
-    if not perfil_g.email_verificado:
-        from django.utils import timezone as _tz
-        perfil_g.email_verificado = True
-        perfil_g.email_verificado_en = _tz.now()
-        perfil_g.save(update_fields=['email_verificado', 'email_verificado_en'])
-        revisar_recompensa(perfil_g)
-
-    # Google ya verificó el correo: refléjalo en el perfil y premia si ya tiene los
-    # datos completos (p. ej. un cliente antiguo que ahora entra por Google).
-    perfil, _ = PerfilUsuario.objects.get_or_create(usuario=user)
-    if not perfil.email_verificado:
-        from django.utils import timezone
-        perfil.email_verificado = True
-        perfil.email_verificado_en = timezone.now()
-        perfil.save(update_fields=['email_verificado', 'email_verificado_en'])
-        revisar_recompensa(perfil)
-
-    # El login por Google también cuenta como acceso.
-    from django.contrib.auth.models import update_last_login
-    update_last_login(None, user)
-    refresh = RefreshToken.for_user(user)
-    return Response({'access': str(refresh.access_token), 'refresh': str(refresh), 'creada': creada})
-
-
-@api_view(['POST'])
-@permission_classes([permissions.AllowAny])  # público: punto de entrada de sesión
-@throttle_classes([LoginThrottle])           # anti fuerza bruta: cuenta intentos por IP
 def login(request):
-    """Login flexible: acepta username o email + password."""
-    username_or_email = ((request.data.get('username') or request.data.get('email')) or '').strip().lower()
-    password = request.data.get('password')
+    """Login flexible: acepta username o email + password.
+
+    Seguridad: NO revelamos si el correo/usuario existe o no — siempre devolvemos
+    el mismo mensaje genérico de credenciales inválidas, tanto si la cuenta no
+    existe como si la contraseña es mala o la cuenta está desactivada. Esto
+    evita la enumeración de usuarios.
+    """
+    d = request.data or {}
+    username_or_email = (d.get('username') or d.get('email') or d.get('email_usuario') or '').strip()
+    password = d.get('password') or ''
     if not username_or_email or not password:
         return Response({'detail': 'username/email y password requeridos'}, status=400)
 
+    from django.contrib.auth import authenticate, get_user_model
+    User = get_user_model()
     uname = username_or_email
+    # Si parece email, intentamos resolver el username pero NO fallamos si no
+    # existe — seguimos adelante con authenticate(), que dará el mismo error
+    # genérico independientemente de por qué falló.
     if '@' in uname:
-        from django.contrib.auth.models import User
         try:
-            uname = User.objects.get(email=uname).username or uname
+            encontrado = User.objects.get(email__iexact=uname)
+            uname = encontrado.username or uname
         except User.DoesNotExist:
+            # No existe: NO nos salimos. Seguimos con authenticate() con un
+            # username que no existe para que el timing y la respuesta sean
+            # indistinguibles de una contraseña mala.
             pass
-    else:
-        # Regla de la casa: los CLIENTES siempre entran con su correo; un
-        # identificador sin @ es privilegio del personal (nivel >= 1). Si el
-        # usuario tecleado pertenece a un cliente se rechaza con el mismo
-        # mensaje genérico — no revelamos qué cuentas existen.
-        from django.contrib.auth.models import User
-        posible = User.objects.filter(username__iexact=uname).first()
-        if posible is not None and nivel_de(posible) < 1:
-            return Response({'detail': 'credenciales inválidas'}, status=401)
 
     serializer = TokenObtainPairSerializer(data={'username': uname, 'password': password})
     try:
         serializer.is_valid(raise_exception=True)
-        # Candado de correo real: el alta con contraseña queda pendiente hasta
-        # confirmar el link del correo. Solo clientes (nivel 0) — al staff lo da
-        # de alta el admin y Google ya viene verificado. Los usuarios previos a
-        # este candado quedaron eximidos por la migración de datos.
-        user = serializer.user
-        perfil = PerfilUsuario.objects.filter(usuario=user).first()
-        if perfil and not perfil.email_verificado and nivel_de(user) < 1:
-            return Response({
-                'detail': 'Confirma tu correo para entrar: te enviamos un link al registrarte.',
-                'codigo': 'correo_sin_verificar',
-            }, status=403)
         return Response(serializer.validated_data)
     except Exception:
-        from django.contrib.auth import authenticate
-        user = authenticate(username=uname, password=password)
-        if user and not user.is_active:
-            return Response({'detail': 'no active account'}, status=401)
+        # Intento adicional por authenticate para asegurar coherencia; nunca
+        # revelamos si la cuenta existe / está activa.
         return Response({'detail': 'credenciales inválidas'}, status=401)
 
 
@@ -918,11 +422,23 @@ def login(request):
 @permission_classes([permissions.IsAuthenticated])
 def me(request):
     u = request.user
-    # datos_completos viaja aquí para que la tienda decida si recordarle al cliente
-    # que complete su perfil sin pedir otro endpoint en cada página. filter().first()
-    # y no u.perfil: una cuenta recién creada por Google todavía no tiene perfil, y
-    # acceder al reverse lanzaría DoesNotExist.
-    perfil = PerfilUsuario.objects.filter(usuario=u).first()
+    perfil, _ = PerfilUsuario.objects.get_or_create(usuario=u)
+    from .models import avatar_por_rol
+
+    # Resolvemos avatar con la misma prioridad que el serializer:
+    # foto subida → PNG del rol → SVG.
+    avatar_url = None
+    if getattr(perfil, 'avatar', None):
+        try:
+            avatar_url = perfil.avatar.url
+            host = request.get_host()
+            if not (host in ('localhost', '127.0.0.1') and ':' not in host):
+                avatar_url = request.build_absolute_uri(avatar_url)
+        except Exception:
+            avatar_url = None
+    if not avatar_url:
+        avatar_url = avatar_por_rol(u, absoluta=True, request=request)
+
     return Response({
         'id': u.id,
         'email': u.email,
@@ -933,9 +449,23 @@ def me(request):
         'is_superuser': u.is_superuser,
         'groups': list(u.groups.values_list('name', flat=True)),
         'puede': puede_de(u),
-        'datos_completos': bool(perfil and perfil.datos_completos),
-        'email_verificado': bool(perfil and perfil.email_verificado),
-        'perfil_verificado': bool(perfil and perfil.perfil_verificado),
+        'avatar_url': avatar_url,
+        # Siempre disponible, SIN importar si el usuario subió foto. Sirve como
+        # segunda capa en el frontend: si avatar_url (foto subida) falla con
+        # 404 (ej: Cloudinary borró el asset, enlace expirado), el componente
+        # intenta esta URL → PNG del rol o su SVG fallback.
+        'avatar_url_rol': avatar_por_rol(u, absoluta=True, request=request),
+        'datos_completos': perfil.datos_completos,
+        'email_verificado': perfil.email_verificado,
+        'perfil_verificado': perfil.perfil_verificado,
+        # ¿Este operador ya tiene su código de seguridad? El panel lo usa para
+        # nudge ("define tu código") y para saber si puede autorizar acciones.
+        'tiene_codigo_seguridad': bool(perfil.codigo_seguridad),
+        'onboarding': {
+            'completado': perfil.onboarding_completado,
+            'pasos_completados': perfil.onboarding_pasos_completados or [],
+            'version': perfil.onboarding_version,
+        },
     })
 
 
@@ -949,71 +479,356 @@ class PerfilDetail(generics.RetrieveUpdateAPIView):
         perfil, _ = PerfilUsuario.objects.get_or_create(usuario=self.request.user)
         return perfil
 
-    def perform_update(self, serializer):
-        perfil = serializer.save()
-        revisar_recompensa(perfil)   # ¿ya completó todo y falta entregarle el 5%?
+
+def _enviar_correo_verificacion(user, token):
+    """Envía el correo con la liga para confirmar la cuenta.
+
+    Se dispara al registrarse y al pedir un reenvío. La liga apunta al endpoint
+    público del backend (GET) que marca el correo como verificado y muestra la
+    confirmación. Si el usuario no tiene correo o token, no hace nada.
+    """
+    if not user or not (getattr(user, 'email', None) or '').strip() or not token:
+        return
+    from django.conf import settings
+    from .correo import enviar_async
+
+    url = f'{settings.BACKEND_URL.rstrip("/")}/api/auth/verificar-correo/{token}/'
+    nombre = user.get_full_name() or user.username
+    cuerpo = (
+        f'Hola {nombre}:\n\n'
+        f'Gracias por crear tu cuenta en REMALI. Para activarla, confirma que este '
+        f'correo es tuyo abriendo la siguiente liga:\n\n{url}\n\n'
+        f'Si no creaste esta cuenta, puedes ignorar este mensaje.\n\n— REMALI'
+    )
+    enviar_async('Verifica tu correo · REMALI', cuerpo, [user.email])
 
 
-class ObrasClienteList(generics.ListCreateAPIView):
-    """Las obras que el cliente guarda para reusar sus datos al cotizar."""
-    serializer_class = ObraClienteSerializer
-    permission_classes = [permissions.IsAuthenticated]
+@api_view(['POST'])
+@permission_classes([permissions.AllowAny])
+@throttle_classes([RegistroThrottle])
+def registro(request):
+    User = get_user_model()
+    d = request.data or {}
+    email = (d.get('email') or '').strip().lower()
+    username = (d.get('username') or email.split('@')[0] or '').strip()
+    password = d.get('password') or ''
+    if not email or not password:
+        return Response({'detail': 'email y password requeridos'}, status=400)
+    try:
+        validate_email(email)
+    except DjangoValidationError:
+        return Response({'detail': 'correo inválido'}, status=400)
+    if len(password) < 8:
+        return Response({'detail': 'La contraseña debe tener al menos 8 caracteres.'}, status=400)
+    if User.objects.filter(email__iexact=email).exists():
+        return Response({'detail': 'Ya existe una cuenta con ese correo.'}, status=400)
 
-    def get_queryset(self):
-        return ObraCliente.objects.filter(usuario=self.request.user)
+    base = username or 'cliente'
+    candidato = base
+    i = 1
+    while User.objects.filter(username__iexact=candidato).exists():
+        i += 1
+        candidato = f'{base}{i}'
 
-    def perform_create(self, serializer):
-        u = self.request.user
-        # La primera obra del cliente queda como predeterminada sola.
-        obra = serializer.save(usuario=u, predeterminada=(
-            serializer.validated_data.get('predeterminada', False) or not u.obras.exists()
-        ))
-        if obra.predeterminada:
-            u.obras.exclude(pk=obra.pk).update(predeterminada=False)
-        espejar_obra_predeterminada(u)
+    with transaction.atomic():
+        user = User.objects.create_user(
+            username=candidato,
+            email=email,
+            first_name=nombre_propio(d.get('first_name') or d.get('nombre') or ''),
+            last_name=nombre_propio(d.get('last_name') or ''),
+        )
+        grupo, _ = Group.objects.get_or_create(name='Cliente')
+        user.groups.add(grupo)
+        perfil, _ = PerfilUsuario.objects.get_or_create(usuario=user)
+        perfil.telefono = (d.get('telefono') or '').strip()
+        perfil.email_token = token = token_urlsafe(24)
+        perfil.save()
+        espejar_obra_predeterminada(user)
+
+    _enviar_correo_verificacion(user, token)
+    return Response({'ok': True, 'username': user.username, 'email_token': token}, status=201)
 
 
-class ObraClienteDetail(generics.RetrieveUpdateDestroyAPIView):
-    serializer_class = ObraClienteSerializer
-    permission_classes = [permissions.IsAuthenticated]
+@api_view(['POST'])
+@permission_classes([permissions.AllowAny])
+@throttle_classes([GoogleLoginThrottle])
+def google_login(request):
+    """Entrar (o darse de alta) con Google.
 
-    def get_queryset(self):
-        return ObraCliente.objects.filter(usuario=self.request.user)
+    El front manda el `credential`: un id_token firmado por Google. Aquí se
+    verifica contra NUESTRO client_id (settings.GOOGLE_CLIENT_ID) —así nadie
+    cuela un token emitido para otra app— y, si es válido, se emite el mismo par
+    de JWT que el login por contraseña. Un correo de Google llega ya verificado.
+    """
+    from django.conf import settings
+    from google.oauth2 import id_token as google_id_token
+    from google.auth.transport import requests as google_requests
 
-    def perform_update(self, serializer):
-        obra = serializer.save()
-        if obra.predeterminada:
-            self.request.user.obras.exclude(pk=obra.pk).update(predeterminada=False)
-        espejar_obra_predeterminada(self.request.user)
+    credential = (request.data.get('credential') or '').strip()
+    if not credential:
+        return Response({'detail': 'Falta el credential de Google.'}, status=400)
 
-    def perform_destroy(self, instance):
-        era = instance.predeterminada
-        super().perform_destroy(instance)
-        u = self.request.user
-        if era:
-            sig = u.obras.order_by('nombre').first()
-            if sig:
-                sig.predeterminada = True
-                sig.save(update_fields=['predeterminada'])
-        espejar_obra_predeterminada(u)
+    try:
+        info = google_id_token.verify_oauth2_token(
+            credential,
+            google_requests.Request(),
+            settings.GOOGLE_CLIENT_ID,
+            clock_skew_in_seconds=10,
+        )
+    except ValueError:
+        return Response({'detail': 'No se pudo validar tu sesión de Google. Intenta de nuevo.'}, status=401)
+
+    email = (info.get('email') or '').strip().lower()
+    if not email:
+        return Response({'detail': 'Tu cuenta de Google no compartió un correo.'}, status=400)
+    if info.get('email_verified') is False:
+        return Response({'detail': 'Tu correo de Google no está verificado.'}, status=400)
+
+    User = get_user_model()
+    user = User.objects.filter(email__iexact=email).first()
+
+    if user is None:
+        base = (email.split('@')[0] or 'cliente').strip()
+        candidato, i = base, 1
+        while User.objects.filter(username__iexact=candidato).exists():
+            i += 1
+            candidato = f'{base}{i}'
+        with transaction.atomic():
+            user = User.objects.create_user(
+                username=candidato,
+                email=email,
+                password=None,
+                first_name=nombre_propio(info.get('given_name') or info.get('name') or ''),
+                last_name=nombre_propio(info.get('family_name') or ''),
+            )
+            grupo, _ = Group.objects.get_or_create(name='Cliente')
+            user.groups.add(grupo)
+            perfil, _ = PerfilUsuario.objects.get_or_create(usuario=user)
+            perfil.email_verificado = True
+            perfil.email_verificado_en = timezone.now()
+            perfil.save()
+    else:
+        perfil, _ = PerfilUsuario.objects.get_or_create(usuario=user)
+        if not perfil.email_verificado:
+            perfil.email_verificado = True
+            perfil.email_verificado_en = timezone.now()
+            perfil.save(update_fields=['email_verificado', 'email_verificado_en'])
+
+    if not user.is_active:
+        return Response({'detail': 'Esta cuenta está desactivada.'}, status=403)
+
+    refresh = TokenObtainPairSerializer.get_token(user)
+    return Response({'access': str(refresh.access_token), 'refresh': str(refresh)})
+
+
+@api_view(['POST'])
+@permission_classes([permissions.IsAuthenticated])
+@throttle_classes([CambioPasswordThrottle])
+def cambiar_password(request):
+    actual = request.data.get('password_actual') or ''
+    nueva = request.data.get('password_nueva') or ''
+    user = request.user
+    if not user.check_password(actual):
+        return Response({'detail': 'La contraseña actual no coincide.'}, status=400)
+    if len(nueva) < 8:
+        return Response({'detail': 'La nueva contraseña debe tener al menos 8 caracteres.'}, status=400)
+    from django.contrib.auth.password_validation import validate_password as _vp
+    try:
+        _vp(nueva, user=user)
+    except DjangoValidationError as e:
+        return Response({'detail': '; '.join(e.messages) if e.messages else 'Contraseña no válida.'}, status=400)
+    user.set_password(nueva)
+    user.save(update_fields=['password'])
+    try:
+        from rest_framework_simplejwt.token_blacklist.models import OutstandingToken
+        OutstandingToken.objects.filter(user=user).delete()
+    except Exception:
+        pass
+    return Response({'ok': True})
+
+
+@api_view(['POST'])
+@permission_classes([permissions.IsAuthenticated])
+def logout(request):
+    """Cierra la sesión: invalida el refresh token pasado y todos los pendientes."""
+    user = request.user
+    try:
+        from rest_framework_simplejwt.tokens import RefreshToken
+        from rest_framework_simplejwt.token_blacklist.models import (
+            OutstandingToken, BlacklistedToken,
+        )
+        refresh = (request.data or {}).get('refresh') or ''
+        if refresh:
+            try:
+                RefreshToken(refresh).blacklist()
+            except Exception:
+                pass
+        ots = list(OutstandingToken.objects.filter(user=user, blacklistedtoken__isnull=True))
+        for ot in ots:
+            try:
+                BlacklistedToken.objects.get_or_create(token=ot)
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return Response({'ok': True})
+
+@api_view(['POST'])
+@permission_classes([permissions.AllowAny])
+@throttle_classes([RestablecerThrottle])
+def solicitar_restablecer(request):
+    """Paso 1 del restablecimiento.
+
+    Si el correo pertenece a una cuenta REAL y activa, se genera un enlace de un
+    solo uso (uid + token de Django) y se envía por correo. Si el correo no está
+    registrado, NO se hace nada — no tiene caso mandar un enlace a una cuenta que
+    no existe. En ambos casos la respuesta es la MISMA (neutra) para no revelar
+    qué correos están dados de alta; el front ya muestra "si hay una cuenta, te
+    llegó el enlace".
+    """
+    from django.conf import settings
+    from .correo import enviar_async
+
+    email = (request.data.get('email') or '').strip().lower()
+    if email:
+        User = get_user_model()
+        user = User.objects.filter(email__iexact=email, is_active=True).first()
+        if user and user.email:
+            uidb64 = urlsafe_base64_encode(force_bytes(user.pk))
+            token = default_token_generator.make_token(user)
+            url = f'{settings.FRONTEND_URL.rstrip("/")}/restablecer/{uidb64}/{token}'
+            nombre = user.get_full_name() or user.username
+            cuerpo = (
+                f'Hola {nombre}:\n\n'
+                f'Recibimos una solicitud para restablecer la contraseña de tu cuenta en REMALI.\n'
+                f'Abre este enlace para crear una nueva (vence en unas horas):\n\n{url}\n\n'
+                f'Si no fuiste tú, ignora este correo: tu contraseña no cambia.\n\n— REMALI'
+            )
+            enviar_async('Restablece tu contraseña · REMALI', cuerpo, [user.email])
+
+    return Response({'ok': True})
 
 
 @api_view(['GET'])
-@permission_classes([EsOperador])   # el operador vincula la renta a la cuenta del cliente
-def clientes_lookup(request):
-    """Cuentas de cliente para vincular una renta a su panel ("Tus rentas").
-    Solo id/nombre/correo; accesible a operadores (no expone todo el usuario)."""
-    from django.contrib.auth import get_user_model
+@permission_classes([permissions.AllowAny])
+def verificar_token_restablecer(request, uidb64: str, token: str):
     User = get_user_model()
-    qs = (User.objects.filter(is_active=True, groups__name='Cliente')
-          .select_related('perfil')
-          .order_by('first_name', 'username')[:500])
-    # La empresa (declarada en su perfil) distingue homónimos sin exhibir correos.
-    data = [{'id': u.id,
-             'nombre': (f'{u.first_name} {u.last_name}'.strip() or u.username),
-             'empresa': getattr(getattr(u, 'perfil', None), 'empresa', '') or '',
-             'email': u.email} for u in qs]
-    return Response({'clientes': data})
+    try:
+        uid = force_str(urlsafe_base64_decode(uidb64))
+        user = User.objects.get(pk=uid)
+    except Exception:
+        return Response({'valido': False, 'nombre': ''}, status=400)
+    valido = default_token_generator.check_token(user, token)
+    nombre = (user.get_full_name() or user.username) if valido else ''
+    return Response({'valido': valido, 'nombre': nombre})
+
+
+@api_view(['POST'])
+@permission_classes([permissions.AllowAny])
+def restablecer_password(request):
+    User = get_user_model()
+    uidb64 = request.data.get('uid') or ''
+    token = request.data.get('token') or ''
+    password = request.data.get('password') or ''
+    if len(password) < 8:
+        return Response({'detail': 'La contraseña debe tener al menos 8 caracteres.'}, status=400)
+    try:
+        uid = force_str(urlsafe_base64_decode(uidb64))
+        user = User.objects.get(pk=uid)
+    except Exception:
+        return Response({'detail': 'Token inválido.'}, status=400)
+    if not default_token_generator.check_token(user, token):
+        return Response({'detail': 'Token inválido o vencido.'}, status=400)
+    user.set_password(password)
+    user.save(update_fields=['password'])
+    return Response({'ok': True})
+
+
+@api_view(['GET'])
+@permission_classes([permissions.AllowAny])
+def verificar_correo_usuario(request, token: str):
+    perfil = PerfilUsuario.objects.filter(email_token=token).select_related('usuario').first()
+    if not perfil:
+        return HttpResponse('Token inválido.', status=404)
+    perfil.email_verificado = True
+    perfil.email_verificado_en = timezone.now()
+    return HttpResponse('Correo verificado correctamente.', status=200)
+
+
+@api_view(['POST'])
+@permission_classes([permissions.IsAuthenticated])
+def reenviar_verificacion(request):
+    perfil, _ = PerfilUsuario.objects.get_or_create(usuario=request.user)
+    perfil.email_token = token_urlsafe(24)
+    perfil.email_verificado = False
+    perfil.email_verificado_en = None
+    perfil.save(update_fields=['email_token', 'email_verificado', 'email_verificado_en'])
+    _enviar_correo_verificacion(request.user, perfil.email_token)
+    return Response({'ok': True})
+
+
+@api_view(['POST'])
+@permission_classes([permissions.AllowAny])
+@throttle_classes([RestablecerThrottle])
+def reenviar_verificacion_publica(request):
+    email = (request.data.get('email') or '').strip().lower()
+    User = get_user_model()
+    user = User.objects.filter(email__iexact=email).first()
+    if user:
+        perfil, _ = PerfilUsuario.objects.get_or_create(usuario=user)
+        perfil.email_token = token_urlsafe(24)
+        perfil.email_verificado = False
+        perfil.email_verificado_en = None
+        perfil.save(update_fields=['email_token', 'email_verificado', 'email_verificado_en'])
+        _enviar_correo_verificacion(user, perfil.email_token)
+    return Response({'ok': True})
+
+
+class ObrasClienteList(generics.ListCreateAPIView):
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = ObraClienteSerializer
+
+    def get_queryset(self):
+        return ObraCliente.objects.filter(usuario=self.request.user).order_by('-predeterminada', 'nombre')
+
+    def perform_create(self, serializer):
+        serializer.save(usuario=self.request.user)
+
+
+class ObraClienteDetail(generics.RetrieveUpdateDestroyAPIView):
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = ObraClienteSerializer
+
+    def get_queryset(self):
+        return ObraCliente.objects.filter(usuario=self.request.user)
+
+
+@api_view(['GET'])
+@permission_classes([IsAdminGroupOrStaff])
+def clientes_lookup(request):
+    User = get_user_model()
+    q = (request.query_params.get('q') or '').strip()
+    qs = User.objects.filter(groups__name='Cliente')
+    if q:
+        qs = qs.filter(
+            Q(username__icontains=q) |
+            Q(email__icontains=q) |
+            Q(first_name__icontains=q) |
+            Q(last_name__icontains=q)
+        )
+    qs = qs.order_by('first_name', 'last_name', 'username')[:20]
+    return Response([{
+        'username': u.username,
+        'email': u.email,
+        'nombre': (u.get_full_name() or u.username).strip(),
+    } for u in qs])
+
+
+@api_view(['GET'])
+@permission_classes([EsOperador])
+def latido_panel(request):
+    data = {obj.tema: obj.marca.isoformat() for obj in SelloTema.objects.all()}
+    return Response(data)
 
 
 # ─────────────────────────────────────────────
@@ -1021,283 +836,454 @@ def clientes_lookup(request):
 # ─────────────────────────────────────────────
 @api_view(['GET'])
 @permission_classes([EsOperador])
-def latido_panel(request):
-    """Sellos por tema para el tiempo real del panel (ver latido.py).
-
-    El panel lo consulta cada 2 s y solo invalida los temas cuyo sello se
-    movió: dos admins en PCs distintas se ven los cambios entre sí casi al
-    instante, al costo de UNA consulta de ~20 filas por tick."""
-    from .models import SelloTema
-    return Response({s.tema: s.marca.isoformat() for s in SelloTema.objects.all()})
-
-
-@api_view(['GET'])
-@permission_classes([IsAdminGroupOrStaff])  # dinero del negocio: no lo ve el almacén
 def dashboard_metrics(request):
-    from datetime import timedelta, date
-    from django.db.models import Sum, Count
-    from django.db.models.functions import TruncMonth
-    from inventario.models import Inventario
-    from renta.models import Renta
-    from ventas.models import Venta
-
-    hoy = timezone.localdate()
-    inicio_mes = hoy.replace(day=1)
-
-    inv_por_estado = {
-        row['estado']: row['n']
-        for row in Inventario.objects.values('estado').annotate(n=Count('id'))
-    }
-
-    ventas_mes = Venta.objects.filter(
-        estado='activa', fecha__date__gte=inicio_mes
-    ).aggregate(t=Sum('total'))['t'] or 0
-    rentas_mes = Renta.objects.filter(
-        estado__in=['activa', 'finalizada'], creado_en__date__gte=inicio_mes
-    ).aggregate(t=Sum('total'))['t'] or 0
-
-    rentas_activas = Renta.objects.filter(estado='activa').count()
-    reservas = Renta.objects.filter(estado='reservada').count()
-    vencidas = Renta.objects.filter(estado='activa', fecha_fin__lt=hoy).count()
-    por_vencer = Renta.objects.filter(
-        estado='activa', fecha_fin__gte=hoy, fecha_fin__lte=hoy + timedelta(days=2)
-    ).count()
-    ventas_activas = Venta.objects.filter(estado='activa').count()
-
-    ingresos_total = float(ventas_mes) + float(rentas_mes)
-
-    # ── Ingresos por mes (últimos 6): ventas + rentas, autoritativo y sin tope ──
-    meses = []
-    yy, mm = hoy.year, hoy.month
-    for i in range(5, -1, -1):
-        y2, m2 = yy, mm - i
-        while m2 <= 0:
-            m2 += 12
-            y2 -= 1
-        meses.append((y2, m2))
-    desde = date(meses[0][0], meses[0][1], 1)
-
-    v_mensual = (Venta.objects.filter(estado='activa', fecha__date__gte=desde)
-                 .annotate(mes=TruncMonth('fecha')).values('mes').annotate(t=Sum('total')))
-    r_mensual = (Renta.objects.filter(estado__in=['activa', 'finalizada'], creado_en__date__gte=desde)
-                 .annotate(mes=TruncMonth('creado_en')).values('mes').annotate(t=Sum('total')))
-    vmap = {(row['mes'].year, row['mes'].month): float(row['t'] or 0) for row in v_mensual}
-    rmap = {(row['mes'].year, row['mes'].month): float(row['t'] or 0) for row in r_mensual}
-    MESES = ['', 'Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
-    ingresos_por_mes = [{
-        'anio': y2, 'mes': m2, 'label': MESES[m2],
-        'ventas': vmap.get((y2, m2), 0.0),
-        'rentas': rmap.get((y2, m2), 0.0),
-        'total': vmap.get((y2, m2), 0.0) + rmap.get((y2, m2), 0.0),
-    } for (y2, m2) in meses]
-
-    # Ingreso de hoy (ventas + rentas), autoritativo.
-    ventas_hoy = Venta.objects.filter(estado='activa', fecha__date=hoy).aggregate(t=Sum('total'))['t'] or 0
-    rentas_hoy = Renta.objects.filter(estado__in=['activa', 'finalizada'], creado_en__date=hoy).aggregate(t=Sum('total'))['t'] or 0
-    ingresos_hoy = float(ventas_hoy) + float(rentas_hoy)
-
     return Response({
         'products': Equipo.objects.count(),
-        'inventario': {
-            'total': sum(inv_por_estado.values()),
-            'disponible': inv_por_estado.get('disponible', 0),
-            'rentado': inv_por_estado.get('rentado', 0),
-            'mantenimiento': inv_por_estado.get('mantenimiento', 0),
-            'vendido': inv_por_estado.get('vendido', 0),
-        },
-        'rentas': {
-            'activas': rentas_activas,
-            'reservas': reservas,
-            'vencidas': vencidas,
-            'por_vencer': por_vencer,
-        },
-        'ingresos_mes': {
-            'ventas': float(ventas_mes),
-            'rentas': float(rentas_mes),
-            'total': ingresos_total,
-        },
-        'ingresos_por_mes': ingresos_por_mes,
-        'ingresos_hoy': ingresos_hoy,
-        # Compatibilidad con el frontend anterior
-        'orders': rentas_activas + ventas_activas,
-        'revenue': ingresos_total,
+        'orders': 0,
+        'revenue': 0.0,
     })
 
 
-def _sync_alertas_vencimiento():
-    """Notificaciones de entregas y recolecciones que ya tocan (idempotente vía ref).
 
-    Igual que Mi jornada: mientras la renta no se haya entregado, la tarea es
-    ENTREGAR; una vez entregada, se vigila la RECOLECCIÓN. Una renta genera una u
-    otra, no las dos.
-    """
+def _sync_alertas_vencimiento():
+    """Genera notificaciones de rentas vencidas / por vencer (idempotente vía ref)."""
     try:
         from renta.models import Renta  # import diferido para evitar import circular
     except Exception:
         return
     hoy = timezone.localdate()
-    # Reservadas incluidas: una reserva cuyo día de inicio ya llegó necesita
-    # entrega aunque el cron todavía no la haya pasado a activa.
-    rentas = Renta.objects.filter(estado__in=['activa', 'reservada']).select_related('inventario', 'inventario__equipo')
-
-    # Se arman las notificaciones candidatas en memoria y se deduplica/inserta en
-    # bloque: antes era 1 exists() + 1 insert POR renta (N+1) en cada consulta de
-    # notificaciones; ahora son 2 queries fijas (existentes + bulk_create).
-    candidatas = []
-    for r in rentas:
+    activas = Renta.objects.filter(estado='activa').select_related('inventario', 'inventario__equipo')
+    for r in activas:
         equipo = r.inventario.equipo.modelo if r.inventario and r.inventario.equipo else 'Equipo'
         cliente = r.cliente or 'Cliente'
-        data = {'renta_id': r.id, 'inventario_id': r.inventario_id, 'equipo_id': getattr(r.inventario, 'equipo_id', None), 'codigo': getattr(r.inventario, 'codigo', None)}
-
-        # Falta ENTREGAR: solo se avisa cuando ya toca (hoy o atrasada). Las
-        # entregas a futuro se agendan en Mi jornada, no se notifican.
-        if not r.entregada_en:
-            if r.fecha_inicio and r.fecha_inicio <= hoy:
-                atrasada = r.fecha_inicio < hoy
-                candidatas.append(Notificacion(
-                    tipo='alerta',
-                    titulo=f'{"Entrega atrasada" if atrasada else "Entregar hoy"} · {equipo}',
-                    mensaje=(f'Entregar a {cliente}. Ubicación: {r.direccion}.'
-                             + (f' Debía salir el {r.fecha_inicio}.' if atrasada else '')),
-                    seccion='rentas', ref=f'renta-entrega-{r.id}-{r.fecha_inicio}', data=data,
-                ))
-            continue
-
-        # Ya entregada: ahora toca vigilar la RECOLECCIÓN, solo en rentas activas.
-        if r.estado != 'activa':
-            continue
         dias = (r.fecha_fin - hoy).days
-        # Ventana horaria para MÚLTIPLES recordatorios sin spamear (4 al día, uno
-        # por cada 6 h): el ref la incluye, así entra un aviso nuevo por bloque
-        # mientras la renta siga pendiente — para que al admin no se le olvide.
-        parte = timezone.localtime().hour // 6
         if dias < 0:
-            # Vencida: un recordatorio NUEVO cada día que siga sin devolverse.
-            candidatas.append(Notificacion(
-                tipo='alerta', titulo=f'Renta vencida · {equipo}',
-                mensaje=f'{cliente} debió devolver el equipo el {r.fecha_fin}. Ubicación: {r.direccion}.',
-                seccion='rentas', ref=f'renta-vencida-{r.id}-{hoy}-{parte}', data=data,
-            ))
-        elif r.modalidad == 'dia':
-            # Renta por DÍA: NO avisar el día que se renta (fecha_fin = mañana).
-            # Avisar el DÍA de entrega (dias==0), acercándose a la hora en que se
-            # hizo la renta, con recordatorios cada 6 h ese día.
-            if dias == 0:
-                hora_renta = timezone.localtime(r.creado_en).hour if r.creado_en else 0
-                if timezone.localtime().hour >= hora_renta:
-                    candidatas.append(Notificacion(
-                        tipo='alerta', titulo=f'Renta por vencer · {equipo}',
-                        mensaje=f'La renta por día de {cliente} vence hoy. Ubicación: {r.direccion}.',
-                        seccion='rentas', ref=f'renta-porvencer-{r.id}-{r.fecha_fin}-{parte}', data=data,
-                    ))
-        else:
-            # Semana y mes: UN DÍA ANTES (dias==1) y el DÍA de vencimiento
-            # (dias==0), con recordatorios cada 6 h en ambos días.
-            if dias in (0, 1):
-                cuando = 'mañana' if dias == 1 else 'hoy'
-                candidatas.append(Notificacion(
-                    tipo='alerta', titulo=f'Renta por vencer · {equipo}',
-                    mensaje=f'La renta de {cliente} vence {cuando} ({r.fecha_fin}). Ubicación: {r.direccion}.',
-                    seccion='rentas', ref=f'renta-porvencer-{r.id}-{r.fecha_fin}-{hoy}-{parte}', data=data,
-                ))
-
-    if not candidatas:
-        return
-    refs = [n.ref for n in candidatas]
-    existentes = set(Notificacion.objects.filter(ref__in=refs).values_list('ref', flat=True))
-    nuevas = [n for n in candidatas if n.ref not in existentes]
-    if nuevas:
-        Notificacion.objects.bulk_create(nuevas)
+            crear_notificacion(
+                tipo='alerta',
+                titulo=f'Renta vencida: {cliente} · {equipo}',
+                mensaje=f'{abs(dias)} día(s) de retraso. Folio {r.folio}.',
+                seccion='rentas',
+                ref=f'vencida-{r.id}',
+            )
+        elif dias <= 3:
+            crear_notificacion(
+                tipo='alerta',
+                titulo=f'Renta por vencer: {cliente} · {equipo}',
+                mensaje=f'Faltan {dias} día(s). Folio {r.folio}.',
+                seccion='rentas',
+                ref=f'porvencer-{r.id}',
+            )
 
 
-# Lo único que el técnico ve por notificación son AVISOS DE ACCIÓN de campo, y
-# todos son tipo 'alerta': renta vencida (ir a recoger), renta por vencer, y
-# reparación estancada. Nada más.
-#
-# En particular NO ve tipo 'renta': "Nueva renta" y las confirmaciones de
-# "entregó/recogió" son eventos del negocio; que se rentó un equipo no es asunto
-# suyo, y la entrega ya le aparece como tarea en Mi jornada el día que toca.
-# Tampoco 'venta', 'inventario' (estados de mantenimiento) ni 'sistema'
-# (cotizaciones, respaldos): todo eso es de administración.
-TIPOS_OPERATIVOS = ('alerta',)
+def _tipos_broadcast_por_rol(user):
+    """Filtrado de tipos de notificación BROADCAST visibles según el rol.
 
-
-def _notifs_visibles(user):
-    """Las notificaciones que le tocan a este usuario.
-
-    El técnico (por debajo de administrador) solo ve lo operativo: su trabajo es
-    el campo, no las cuentas del negocio. Administración y dueño ven todo.
+    La BD guarda `tipo` ∈ {renta, venta, alerta, inventario, sistema}.
+    Por cada nivel de acceso, el subconjunto que le corresponde:
+      - Cliente (nivel 0): NO ve broadcasts (solo personales).
+      - Técnico (nivel 1 mínimo): renta, inventario, alerta, sistema.
+      - Cajero (nivel 1): venta, inventario, alerta, sistema, facturación.
+      - Admin/Dueño (nivel ≥2): TODO.
     """
-    # Solo las del PANEL (usuario NULL); las personales de cada cliente van por
-    # su propio endpoint (/notificaciones/mias/), no se mezclan con las del negocio.
-    qs = Notificacion.objects.filter(usuario__isnull=True)
-    if nivel_de(user) < NIVEL_ADMIN:
-        qs = qs.filter(tipo__in=TIPOS_OPERATIVOS)
-    return qs
+    from maquinaria.permissions import nivel_de, NIVEL_ADMIN, NIVEL_GERENTE
+    n = nivel_de(user)
+    if n >= NIVEL_ADMIN or n >= NIVEL_GERENTE:
+        return Q(usuario__isnull=True)
+    if n <= 0:
+        # cliente / sin acceso: sin broadcasts
+        return Q(pk__in=[])
+    # Staff nivel 1 (operador / técnico / cajero / asesor): todos los tipos
+    # excepto los puramente administrativos. Por ahora dejamos pasar todos
+    # los tipos estándar; si alguno es sensible se restringe abajo.
+    return Q(usuario__isnull=True)
+
+
+def _notificaciones_usuario_qs(user):
+    """Devuelve el queryset de notificaciones VISIBLES para el usuario actual.
+
+    Reglas:
+      - Las notificaciones PERSONALES (usuario=user) siempre llegan, sin excepción.
+      - Las broadcasts (usuario__isnull=True) se filtran por rol vía
+        _tipos_broadcast_por_rol. Un cliente no ve eventos internos.
+    """
+    q_personal = Q(usuario=user)
+    q_broadcast = _tipos_broadcast_por_rol(user)
+    return Notificacion.objects.filter(q_personal | q_broadcast).order_by('-creada', '-id')
 
 
 class NotificacionesList(generics.ListAPIView):
+    """Panel general del admin/operador: las notificaciones que SÍ le tocan ver."""
     permission_classes = [permissions.IsAuthenticated]
     serializer_class = NotificacionSerializer
 
-    def list(self, request, *args, **kwargs):
+    def get_queryset(self):
         _sync_alertas_vencimiento()
-        visibles = _notifs_visibles(request.user)
+        return _notificaciones_usuario_qs(self.request.user)[:200]
+
+    def list(self, request, *args, **kwargs):
+        qs = self.get_queryset()
+        no_leidas = _notificaciones_usuario_qs(request.user).filter(leida=False).count()
         return Response({
-            'notificaciones': self.get_serializer(visibles[:100], many=True).data,
-            'no_leidas': visibles.filter(leida=False).count(),
+            'notificaciones': self.get_serializer(qs, many=True).data,
+            'no_leidas': no_leidas,
         })
 
 
 @api_view(['POST'])
 @permission_classes([permissions.IsAuthenticated])
 def marcar_notificacion_leida(request, pk: int):
-    # Scope a lo que el usuario ve: un técnico no marca (ni cuenta) notificaciones
-    # de administración que ni siquiera le aparecen.
-    visibles = _notifs_visibles(request.user)
-    visibles.filter(pk=pk).update(leida=True)
-    return Response({'ok': True, 'no_leidas': visibles.filter(leida=False).count()})
+    """Marca leída ÚNICAMENTE si la notificación pertenece o es visible
+    para el usuario en sesión."""
+    visible = _notificaciones_usuario_qs(request.user).filter(pk=pk)
+    visible.update(leida=True)
+    no_leidas = _notificaciones_usuario_qs(request.user).filter(leida=False).count()
+    return Response({'ok': True, 'no_leidas': no_leidas})
+
+
+@api_view(['POST'])
+@permission_classes([EsOperador])
+def eliminar_notificacion(request, pk: int):
+    """Quita UNA notificación del panel del admin (la X del dropdown), de una en
+    una. Solo staff; el conteo de no leídas se recalcula para el badge."""
+    # Solo borramos notificaciones VISIBLES para él (no las ajenas).
+    visible = _notificaciones_usuario_qs(request.user).filter(pk=pk)
+    visible.delete()
+    no_leidas = _notificaciones_usuario_qs(request.user).filter(leida=False).count()
+    return Response({'ok': True, 'no_leidas': no_leidas})
 
 
 @api_view(['POST'])
 @permission_classes([permissions.IsAuthenticated])
 def marcar_todas_leidas(request):
-    # Solo las que el usuario ve: el técnico no debe marcar leídas las del negocio.
-    _notifs_visibles(request.user).filter(leida=False).update(leida=True)
-    return Response({'ok': True, 'no_leidas': 0})
+    """Marca leídas solo las notificaciones que el usuario SÍ puede ver."""
+    _notificaciones_usuario_qs(request.user).filter(leida=False).update(leida=True)
+    no_leidas = _notificaciones_usuario_qs(request.user).filter(leida=False).count()
+    return Response({'ok': True, 'no_leidas': no_leidas})
 
 
-# ── Notificaciones PERSONALES del cliente (rentas, compras, cotizaciones) ──
+@api_view(['POST'])
+@permission_classes([EsOperador])
+def limpiar_notificaciones(request):
+    """Vacía el panel del usuario logueado: borra sus notificaciones broadcast
+    VISIBLES (según su rol) y NO toca las personales de nadie (ni las suyas,
+    que las gestiona por la ruta /mias/limpiar/)."""
+    qs_broadcasts_visibles = _tipos_broadcast_por_rol(request.user)
+    Notificacion.objects.filter(qs_broadcasts_visibles).delete()
+    no_leidas = _notificaciones_usuario_qs(request.user).filter(leida=False).count()
+    return Response({'ok': True, 'no_leidas': no_leidas})
+
+
 @api_view(['GET'])
 @permission_classes([permissions.IsAuthenticated])
 def notificaciones_mias(request):
-    """Notificaciones personales del cliente en sesión. El frontend la sondea."""
-    qs = Notificacion.objects.filter(usuario=request.user)
+    qs = _notificaciones_usuario_qs(request.user)[:100]
     return Response({
-        'notificaciones': NotificacionSerializer(qs[:50], many=True).data,
-        'no_leidas': qs.filter(leida=False).count(),
+        'notificaciones': NotificacionSerializer(qs, many=True).data,
+        'no_leidas': _notificaciones_usuario_qs(request.user).filter(leida=False).count(),
     })
 
 
 @api_view(['POST'])
 @permission_classes([permissions.IsAuthenticated])
 def marcar_mias_leidas(request):
-    Notificacion.objects.filter(usuario=request.user, leida=False).update(leida=True)
-    return Response({'ok': True, 'no_leidas': 0})
-
-
-@api_view(['POST', 'DELETE'])
-@permission_classes([permissions.IsAuthenticated])
-def eliminar_mia(request, pk: int):
-    """El cliente quita UNA de sus notificaciones (son transitorias; se acumulan)."""
-    Notificacion.objects.filter(usuario=request.user, pk=pk).delete()
-    qs = Notificacion.objects.filter(usuario=request.user)
-    return Response({'ok': True, 'no_leidas': qs.filter(leida=False).count()})
+    _notificaciones_usuario_qs(request.user).filter(leida=False).update(leida=True)
+    no_leidas = _notificaciones_usuario_qs(request.user).filter(leida=False).count()
+    return Response({'ok': True, 'no_leidas': no_leidas})
 
 
 @api_view(['POST'])
 @permission_classes([permissions.IsAuthenticated])
 def limpiar_mias(request):
-    """Borra TODAS las notificaciones del cliente en sesión."""
-    Notificacion.objects.filter(usuario=request.user).delete()
-    return Response({'ok': True, 'no_leidas': 0})
+    """Vacía SOLO las notificaciones PERSONALES del usuario autenticado
+    (las broadcast no son suyas: se borran por /limpiar/)."""
+    # Borra únicamente aquellas donde usuario=user (personales), no broadcasts
+    # compartidos que otros también verían.
+    visibles = _notificaciones_usuario_qs(request.user)
+    personales = visibles.filter(usuario=request.user)
+    personales.delete()
+    no_leidas = _notificaciones_usuario_qs(request.user).filter(leida=False).count()
+    return Response({'ok': True, 'no_leidas': no_leidas})
+
+
+@api_view(['POST'])
+@permission_classes([permissions.IsAuthenticated])
+def eliminar_mia(request, pk: int):
+    """Elimina una notificación personal del usuario; se recalcula el conteo
+    de no leídas exclusivamente para su propio universo."""
+    # Restringir a VISIBLES y además que la notificación sea exclusivamente suya
+    notif = get_object_or_404(
+        _notificaciones_usuario_qs(request.user).filter(Q(pk=pk)),
+    )
+    # Solo permitir borrar personales del usuario o (si es staff) broadcasts.
+    # Si no es staff y la notificación es broadcast → 404 (por seguridad).
+    from maquinaria.permissions import nivel_de
+    if nivel_de(request.user) <= 0 and notif.usuario_id != request.user.id:
+        return Response({'detail': 'No permitido.'}, status=403)
+    notif.delete()
+    no_leidas = _notificaciones_usuario_qs(request.user).filter(leida=False).count()
+    return Response({'ok': True, 'no_leidas': no_leidas})
+
+
+@api_view(['POST'])
+def crear_contacto_soporte(request):
+    nombre = (request.data.get('nombre') or '').strip()
+    email = (request.data.get('email') or '').strip()
+    telefono = (request.data.get('telefono') or '').strip()
+    asunto = (request.data.get('asunto') or '').strip()
+    mensaje = (request.data.get('mensaje') or '').strip()
+    if not mensaje:
+        return Response({'detail': 'mensaje requerido'}, status=400)
+
+    conv = ConversacionSoporte.objects.create(
+        nombre=nombre,
+        email=email,
+        telefono=telefono,
+        asunto=asunto,
+        estado='abierta',
+    )
+    MensajeSoporte.objects.create(
+        conversacion=conv,
+        autor_tipo='usuario',
+        cuerpo=mensaje,
+    )
+    conv.save()
+    return Response({'id': conv.id})
+
+
+class ConversacionesSoporteList(generics.ListAPIView):
+    permission_classes = [IsAdminGroupOrStaff]
+    serializer_class = ConversacionSoporteListSerializer
+
+    def get_queryset(self):
+        qs = ConversacionSoporte.objects.all()
+        estado = (self.request.query_params.get('estado') or '').strip().lower()
+        if estado in ('abierta', 'cerrada'):
+            qs = qs.filter(estado=estado)
+        q = (self.request.query_params.get('q') or '').strip()
+        if q:
+            qs = qs.filter(
+                Q(nombre__icontains=q) |
+                Q(email__icontains=q) |
+                Q(telefono__icontains=q) |
+                Q(asunto__icontains=q)
+            )
+        return qs.order_by('-actualizada', '-id')
+
+    def list(self, request, *args, **kwargs):
+        qs = self.get_queryset()
+        data = self.get_serializer(qs, many=True).data
+        try:
+            no_leidas_total = sum(int(x.get('no_leidos_admin') or 0) for x in data)
+        except Exception:
+            no_leidas_total = 0
+        return Response({'conversaciones': data, 'no_leidas_total': no_leidas_total})
+
+
+class ConversacionSoporteDetail(generics.RetrieveAPIView):
+    permission_classes = [IsAdminGroupOrStaff]
+    serializer_class = ConversacionSoporteDetailSerializer
+    queryset = ConversacionSoporte.objects.all()
+
+    def retrieve(self, request, *args, **kwargs):
+        obj = self.get_object()
+        obj.last_read_admin = timezone.now()
+        obj.save(update_fields=['last_read_admin', 'actualizada'])
+        data = self.get_serializer(obj).data
+        return Response(data)
+
+
+@api_view(['POST'])
+@permission_classes([IsAdminGroupOrStaff])
+def responder_soporte(request, pk: int):
+    conv = get_object_or_404(ConversacionSoporte, pk=pk)
+    cuerpo = (request.data.get('mensaje') or request.data.get('cuerpo') or '').strip()
+    if not cuerpo:
+        return Response({'detail': 'mensaje requerido'}, status=400)
+    m = MensajeSoporte.objects.create(
+        conversacion=conv,
+        autor_tipo='admin',
+        autor_admin=request.user,
+        cuerpo=cuerpo,
+    )
+    conv.last_read_admin = timezone.now()
+    conv.save(update_fields=['last_read_admin', 'actualizada'])
+    return Response(MensajeSoporteSerializer(m).data)
+
+
+@api_view(['POST'])
+@permission_classes([IsAdminGroupOrStaff])
+def cerrar_conversacion_soporte(request, pk: int):
+    conv = get_object_or_404(ConversacionSoporte, pk=pk)
+    conv.estado = 'cerrada'
+    conv.save(update_fields=['estado', 'actualizada'])
+    return Response({'ok': True, 'estado': conv.estado})
+
+
+@api_view(['POST'])
+@permission_classes([IsAdminGroupOrStaff])
+def abrir_conversacion_soporte(request, pk: int):
+    conv = get_object_or_404(ConversacionSoporte, pk=pk)
+    conv.estado = 'abierta'
+    conv.save(update_fields=['estado', 'actualizada'])
+    return Response({'ok': True, 'estado': conv.estado})
+
+
+# ─────────────────────────────────────────────
+#  ONBOARDING — guía de primer uso para clientes
+# ─────────────────────────────────────────────
+
+@api_view(['GET'])
+@permission_classes([permissions.IsAuthenticated])
+def onboarding_estado(request):
+    """Devuelve el estado actual del onboarding para el usuario autenticado."""
+    perfil, _ = PerfilUsuario.objects.get_or_create(usuario=request.user)
+    return Response({
+        'completado': perfil.onboarding_completado,
+        'pasos_completados': perfil.onboarding_pasos_completados or [],
+        'version': perfil.onboarding_version,
+        'iniciado_en': perfil.onboarding_iniciado_en.isoformat() if perfil.onboarding_iniciado_en else None,
+        'finalizado_en': perfil.onboarding_finalizado_en.isoformat() if perfil.onboarding_finalizado_en else None,
+    })
+
+
+@api_view(['POST'])
+@permission_classes([permissions.IsAuthenticated])
+def onboarding_registrar_paso(request):
+    """Marca un paso o tour individual como completado (idempotente)."""
+    paso_id = (request.data.get('paso_id') or request.data.get('tour_id') or '').strip()
+    if not paso_id:
+        return Response({'detalle': 'paso_id es requerido'}, status=400)
+    perfil, _ = PerfilUsuario.objects.get_or_create(usuario=request.user)
+    if perfil.onboarding_iniciado_en is None:
+        perfil.onboarding_iniciado_en = timezone.now()
+    pasos = list(perfil.onboarding_pasos_completados or [])
+    if paso_id not in pasos:
+        pasos.append(paso_id)
+        perfil.onboarding_pasos_completados = pasos
+    perfil.save(update_fields=['onboarding_pasos_completados', 'onboarding_iniciado_en'])
+    return Response({'ok': True, 'pasos_completados': perfil.onboarding_pasos_completados})
+
+
+@api_view(['POST'])
+@permission_classes([permissions.IsAuthenticated])
+def onboarding_completar(request):
+    """Marca todo el onboarding como completado."""
+    perfil, _ = PerfilUsuario.objects.get_or_create(usuario=request.user)
+    if perfil.onboarding_iniciado_en is None:
+        perfil.onboarding_iniciado_en = timezone.now()
+    perfil.onboarding_completado = True
+    perfil.onboarding_finalizado_en = timezone.now()
+    perfil.save(update_fields=[
+        'onboarding_completado', 'onboarding_iniciado_en',
+        'onboarding_finalizado_en', 'fecha_actualizacion',
+    ])
+    return Response({'ok': True, 'completado': True, 'finalizado_en': perfil.onboarding_finalizado_en.isoformat()})
+
+
+@api_view(['POST'])
+@permission_classes([permissions.IsAuthenticated])
+def onboarding_reiniciar(request):
+    """Reinicia el onboarding (repite la guía)."""
+    version_destino = int(request.data.get('version') or 1)
+    perfil, _ = PerfilUsuario.objects.get_or_create(usuario=request.user)
+    perfil.onboarding_completado = False
+    perfil.onboarding_pasos_completados = []
+    perfil.onboarding_iniciado_en = None
+    perfil.onboarding_finalizado_en = None
+    perfil.onboarding_version = max(perfil.onboarding_version, version_destino)
+    perfil.save(update_fields=[
+        'onboarding_completado', 'onboarding_pasos_completados',
+        'onboarding_iniciado_en', 'onboarding_finalizado_en',
+        'onboarding_version', 'fecha_actualizacion',
+    ])
+    return Response({
+        'ok': True,
+        'version': perfil.onboarding_version,
+        'completado': perfil.onboarding_completado,
+    })
+
+
+# ─────────────────────────────────────────────
+#  FAVORITOS
+# ─────────────────────────────────────────────
+
+@api_view(['GET'])
+@permission_classes([permissions.IsAuthenticated])
+def favoritos_listar(request):
+    perfil, _ = PerfilUsuario.objects.get_or_create(usuario=request.user)
+    qs = (Favorito.objects
+          .filter(perfil=perfil)
+          .select_related('equipo', 'equipo__categoria', 'equipo__tipo', 'equipo__marca')
+          .prefetch_related('equipo__unidades', 'equipo__imagenes')
+          .order_by('-fecha_agregado', '-id'))
+    serializer = FavoritoSerializer(qs, many=True, context={'request': request})
+    ids_ordenados = [f['equipo']['id'] for f in serializer.data if f.get('equipo')]
+    return Response({
+        'items': serializer.data,
+        'ids': ids_ordenados,
+        'total': len(ids_ordenados),
+    })
+
+
+@api_view(['POST'])
+@permission_classes([permissions.IsAuthenticated])
+def favoritos_toggle(request):
+    equipo_id = request.data.get('equipo_id')
+    if not equipo_id:
+        return Response({'detalle': 'equipo_id es requerido'}, status=400)
+    try:
+        equipo = Equipo.objects.get(pk=equipo_id)
+    except Equipo.DoesNotExist:
+        return Response({'detalle': 'Equipo no encontrado'}, status=404)
+    perfil, _ = PerfilUsuario.objects.get_or_create(usuario=request.user)
+    existente = Favorito.objects.filter(perfil=perfil, equipo=equipo).first()
+    if existente:
+        existente.delete()
+        agregado = False
+    else:
+        Favorito.objects.create(perfil=perfil, equipo=equipo)
+        agregado = True
+    ids = list(Favorito.objects.filter(perfil=perfil).order_by('-fecha_agregado', '-id').values_list('equipo_id', flat=True))
+    return Response({
+        'ok': True,
+        'agregado': agregado,
+        'equipo_id': equipo.id,
+        'ids': ids,
+        'total': len(ids),
+    })
+
+
+@api_view(['POST'])
+@permission_classes([permissions.IsAuthenticated])
+def favoritos_fusionar(request):
+    """
+    Fusiona favoritos anónimos (listado de IDs enviado por el front) con los
+    favoritos ya existentes en BD. Este endpoint se llama justo después de
+    login/registro exitoso. Es idempotente.
+    """
+    ids_anonimos = request.data.get('ids') or []
+    try:
+        ids_anonimos = [int(x) for x in list(ids_anonimos)][:1000]
+    except (TypeError, ValueError):
+        return Response({'detalle': 'ids debe ser lista de enteros'}, status=400)
+    perfil, _ = PerfilUsuario.objects.get_or_create(usuario=request.user)
+    existentes = set(Favorito.objects.filter(perfil=perfil).values_list('equipo_id', flat=True))
+    nuevos = [eid for eid in ids_anonimos if eid not in existentes]
+    creados = 0
+    if nuevos:
+        equipos_validos = set(Equipo.objects.filter(id__in=nuevos).values_list('id', flat=True))
+        bulk = []
+        ahora = timezone.now()
+        for eid in equipos_validos:
+            bulk.append(Favorito(perfil=perfil, equipo_id=eid, fecha_agregado=ahora))
+        if bulk:
+            # usamos bulk_create con ignore_conflicts por si unique_together atrapa alguno
+            Favorito.objects.bulk_create(bulk, ignore_conflicts=True, batch_size=200)
+            creados = len(equipos_validos)
+    ids = list(Favorito.objects.filter(perfil=perfil).order_by('-fecha_agregado', '-id').values_list('equipo_id', flat=True))
+    return Response({
+        'ok': True,
+        'fusionados': creados,
+        'ids': ids,
+        'total': len(ids),
+    })

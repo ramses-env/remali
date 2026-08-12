@@ -1,6 +1,22 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import path from 'node:path'
+import type { ProxyOptions } from 'vite'
+
+/** Envuelve una configuración de proxy Vite para silenciar los errores benignos
+ *  `write EPIPE` y `read ECONNRESET` que aparecen cuando el backend Django se
+ *  cae, se reinicia o no está levantado. Estos errores NO afectan al usuario
+ *  (son solo intentos de Vite de escribir en un socket cerrado) pero llenan la
+ *  consola con docenas de stack traces irrelevantes. */
+function proxySinRuido(opts: ProxyOptions): ProxyOptions {
+  return {
+    ...opts,
+    configure: (proxy) => {
+      proxy.on('error', () => {})
+      if (typeof opts.configure === 'function') opts.configure(proxy, opts)
+    },
+  }
+}
 
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => ({
@@ -19,31 +35,31 @@ export default defineConfig(({ mode }) => ({
     allowedHosts: true,
     proxy: {
       // WebSocket de notificaciones en tiempo real (Channels).
-      '/ws': {
+      '/ws': proxySinRuido({
         target: 'ws://localhost:8000',
         ws: true,
         changeOrigin: true,
-      },
-      '/api': {
+      }),
+      '/api': proxySinRuido({
         target: 'http://localhost:8000',
         changeOrigin: true,
         secure: false,
-      },
-      '/admin': {
+      }),
+      '/admin': proxySinRuido({
         target: 'http://localhost:8000',
         changeOrigin: true,
         secure: false,
-      },
-      '/static': {
+      }),
+      '/static': proxySinRuido({
         target: 'http://localhost:8000',
         changeOrigin: true,
         secure: false,
-      },
-      '/media': {
+      }),
+      '/media': proxySinRuido({
         target: 'http://localhost:8000',
         changeOrigin: true,
         secure: false,
-      },
+      }),
     },
   },
 }))

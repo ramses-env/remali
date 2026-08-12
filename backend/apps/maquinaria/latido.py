@@ -47,6 +47,11 @@ def tocar(*temas):
 
 def _receptor(temas):
     def fn(sender, **kwargs):
+        # `raw=True` es loaddata: restaurar un respaldo no es "algo cambió en el
+        # negocio". Además los sellos que se crearían aquí chocan después con los
+        # del propio respaldo por el índice único de `tema`.
+        if kwargs.get('raw'):
+            return
         try:
             tocar(*temas)
         except Exception:

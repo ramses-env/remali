@@ -75,12 +75,17 @@ class RentaFlowTest(TestCase):
         self.assertEqual(resp2.status_code, 400)
 
     def test_cancelar_libera_unidad(self):
+        # Cancelar es acción sensible: exige el PIN personal del operador.
+        from maquinaria.seguridad import definir_codigo
+        definir_codigo(self.user, '123456')
+
         r = Renta.objects.create(
             inventario=self.inv, modalidad='dia', duracion=1, direccion='Obra X'
         )
         self.inv.refresh_from_db()
         self.assertEqual(self.inv.estado, 'rentado')
-        resp = self.client.post(reverse('cancelar_renta', args=[r.id]), {}, format='json')
+        resp = self.client.post(reverse('cancelar_renta', args=[r.id]),
+                                {'codigo_seguridad': '123456'}, format='json')
         self.assertEqual(resp.status_code, 200, resp.data)
         self.inv.refresh_from_db()
         self.assertEqual(self.inv.estado, 'disponible')

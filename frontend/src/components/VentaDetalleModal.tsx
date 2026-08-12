@@ -18,6 +18,7 @@ type VentaLike = {
   cuenta?: string | null
   unidad?: { codigo: string; equipo?: string | null } | null
   factura_estado?: string | null
+  nota_ajuste?: string | null
   origen?: { folio: string; resumen: string } | null
 }
 
@@ -189,6 +190,15 @@ export default function VentaDetalleModal({ venta, onClose, onChanged, notify }:
               <span className="text-[26px] font-extrabold tracking-[-0.025em] text-ink">{money(venta.total)}</span>
             </div>
           </div>
+
+          {/* Ajuste de precio: rastro de que se vendió a un precio distinto al de lista */}
+          {venta.nota_ajuste && (
+            <div className="border border-amber-500/30 bg-amber-500/10 rounded-[14px] px-[18px] py-3.5 mt-4">
+              <div className="text-[12px] font-bold uppercase tracking-wide text-amber-600 dark:text-amber-400">Precio ajustado a mano</div>
+              <div className="text-[13.5px] text-ink leading-relaxed mt-1">{venta.nota_ajuste}</div>
+              {venta.vendedor && <div className="text-[12px] text-mute mt-1">Por {venta.vendedor}</div>}
+            </div>
+          )}
 
           {/* Vincular a la cuenta del cliente */}
           {!cancelada && !venta.cuenta && (

@@ -20,6 +20,8 @@ urlpatterns = [
     # Cupones
     # Configuración del sitio (WhatsApp, negocio, correos de aviso)
     path('config/publica/', views.configuracion_publica),                 # público (tienda)
+    path('config/validar-codigo-ajuste/', views.validar_codigo_ajuste),   # verifica el PIN personal del operador
+    path('auth/codigo-seguridad/', views.definir_codigo_seguridad),       # el operador fija/cambia su propio PIN
     path('config/', views.ConfiguracionDetail.as_view()),                 # admin
     path('config/correos/verificar/', views.verificar_correo_aviso),      # público (link del correo)
     path('config/correos/', views.CorreosAvisoList.as_view()),
@@ -32,7 +34,7 @@ urlpatterns = [
     # Autenticación / perfil
     path('auth/token/', TokenObtainPairView.as_view()),
     path('auth/refresh/', TokenRefreshView.as_view()),
-    path('auth/login/', views.login),
+    path('auth/logout/', views.logout),
     path('auth/registro/', views.registro),
     path('auth/google/', views.google_login),
     path('auth/me/', views.me),
@@ -45,6 +47,15 @@ urlpatterns = [
     path('auth/verificar-correo/<str:token>/', views.verificar_correo_usuario),  # público (link del correo)
     path('auth/reenviar-verificacion/', views.reenviar_verificacion),
     path('auth/reenviar-verificacion-publica/', views.reenviar_verificacion_publica),
+    # Onboarding — guía interactiva de primer uso
+    path('auth/onboarding/estado/', views.onboarding_estado),
+    path('auth/onboarding/paso/', views.onboarding_registrar_paso),
+    path('auth/onboarding/completar/', views.onboarding_completar),
+    path('auth/onboarding/reiniciar/', views.onboarding_reiniciar),
+    # Favoritos
+    path('favoritos/', views.favoritos_listar),
+    path('favoritos/toggle/', views.favoritos_toggle),
+    path('favoritos/fusionar/', views.favoritos_fusionar),
     # Obras guardadas del cliente (para reusar al cotizar)
     path('obras-cliente/', views.ObrasClienteList.as_view()),
     path('obras-cliente/<int:pk>/', views.ObraClienteDetail.as_view()),
@@ -62,7 +73,9 @@ urlpatterns = [
     path('notificaciones/mias/limpiar/', views.limpiar_mias),
     path('notificaciones/mias/<int:pk>/eliminar/', views.eliminar_mia),
     path('notificaciones/<int:pk>/leer/', views.marcar_notificacion_leida),
+    path('notificaciones/<int:pk>/eliminar/', views.eliminar_notificacion),
     path('notificaciones/leer-todas/', views.marcar_todas_leidas),
+    path('notificaciones/limpiar/', views.limpiar_notificaciones),
 
 
     # Dashboard

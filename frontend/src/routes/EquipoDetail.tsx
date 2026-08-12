@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import api from '../lib/api'
-import { toNumber } from '../lib/utils'
+import { toNumber, tituloCaso } from '../lib/utils'
 import { useCart, type Modalidad } from '../store/cart'
 import { useToast } from '../store/toast'
 import { usePriceUnit, formatCurrency, type PriceUnit } from '../store/priceUnit'
@@ -27,6 +27,8 @@ type Equipo = {
   precio_semana?: number | string | null
   precio_mes?: number | string | null
   condicion?: string
+  modos?: Array<'venta' | 'renta'>
+  venta_estado?: 'sin_venta' | 'inmediata' | 'sobre_pedido' | 'agotado'
   disponible_venta?: boolean
   disponible_renta?: boolean
   stock_disponible?: number
@@ -95,20 +97,24 @@ export default function EquipoDetail() {
   const precioDia = toNumber(e?.precio_dia)
   const precioSemana = toNumber(e?.precio_semana)
   const precioMes = toNumber(e?.precio_mes)
+  const condiciones = (e?.condiciones || []).filter(Boolean)
   // Modos que ofrece el producto: si el backend manda las banderas (unidades +
   // precios), un mismo modelo puede venderse Y rentarse. Si no, se cae a la
   // condición de siempre (comportamiento anterior).
-  const ext = (e || {}) as { ofrece_venta?: boolean; ofrece_renta?: boolean; venta_disponible?: boolean; renta_disponible?: boolean }
-  const seRenta = ext.ofrece_renta ?? (e ? e.condicion === 'seminueva' : false)
-  const seVende = ext.ofrece_venta ?? (e ? e.condicion !== 'seminueva' : false)
+  const ext = (e || {}) as { ofrece_venta?: boolean; ofrece_renta?: boolean; venta_disponible?: boolean; renta_disponible?: boolean; entrega_estimada_dias?: number | null; venta_estado?: 'sin_venta' | 'inmediata' | 'sobre_pedido' | 'agotado' }
+  const seRenta = ext.ofrece_renta ?? (e ? condiciones.includes('seminueva') : false)
+  const seVende = ext.ofrece_venta ?? (e ? (precioVenta !== null && precioVenta > 0) : false)
 
   // Modalidades que este equipo realmente ofrece (hay quien solo se vende).
   const modalidades = useMemo<Modalidad[]>(() => {
     const m: Modalidad[] = []
     if (seVende) m.push('venta')
     if (seRenta) m.push('dia', 'semana', 'mes')
-    return m.length ? m : ['venta']
-  }, [seVende, seRenta])
+    if (m.length) return m
+    // Sin modo disponible: cae a RENTA si el producto tiene tarifa (las seminuevas
+    // se rentan, no se promocionan para venta); solo si no hay tarifa, a venta.
+    return (precioDia || precioSemana || precioMes) ? ['dia', 'semana', 'mes'] : ['venta']
+  }, [seVende, seRenta, precioDia, precioSemana, precioMes])
 
   // Si venimos de una card de Venta (?ver=venta), arrancamos en venta; si no,
   // en la unidad global del catálogo. Se corrige si el equipo no la ofrece.
@@ -136,7 +142,13 @@ export default function EquipoDetail() {
 
   // Según el modo que el cliente está viendo ahora (venta o renta).
   const availability = esRenta ? 'Renta' : 'Venta'
-  const hayStock = esRenta ? (ext.renta_disponible ?? e?.disponible_renta ?? true) : (ext.venta_disponible ?? e?.disponible_venta ?? true)
+  const hayStock = esRenta ? (ext.renta_disponible ?? e?.disponible_renta ?? true) : ((ext.venta_estado ? ext.venta_estado === 'inmediata' : undefined) ?? ext.venta_disponible ?? e?.disponible_venta ?? true)
+  // Estado de existencias con lenguaje de venta: con stock la venta dice "Entrega
+  // inmediata"; una venta con precio pero SIN stock es "Sobre pedido" (se surte a
+  // pedido, no es un "Agotado" muerto); el resto queda "Agotado". La renta con
+  // stock dice "Disponible" y sin unidades, "Agotado" (no hay "sobre pedido" en renta).
+  const ventaSobrePedido = !esRenta && (ext.venta_estado ? ext.venta_estado === 'sobre_pedido' : (!hayStock && displayPrice > 0))
+  const estadoStock = ventaSobrePedido ? 'Sobre pedido' : hayStock ? (esRenta ? 'Disponible' : 'Entrega inmediata') : 'Agotado'
 
   async function subirImagenes(ev: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(ev.target.files || [])
@@ -201,6 +213,10 @@ export default function EquipoDetail() {
 
   const waMsg = `Hola REMALI, me interesa ${esRenta ? 'rentar' : 'comprar'}: ${e.modelo}`
   const telWa = cfg.whatsapp_principal || cfg.negocio_telefono
+  const condicionesTexto = condiciones.length
+    ? condiciones.map(c => c === 'nueva' ? 'Nueva' : c === 'seminueva' ? 'Seminueva' : c).join(' y ')
+    : '—'
+  const mostrarFicha = seVende || !!e.ficha_tecnica || specs.length > 0
 
   return (
     <div className="bg-app min-h-screen text-ink">
@@ -219,8 +235,8 @@ export default function EquipoDetail() {
           <Link to="/" className="hover:text-ink transition-colors">Inicio</Link>
           <span>/</span>
           <Link to="/equipos" className="hover:text-ink transition-colors">Equipos</Link>
-          {e.categoria?.nombre && <><span>/</span><Link to="/equipos" className="hover:text-ink transition-colors">{e.categoria.nombre}</Link></>}
-          <span>/</span><span className="text-ink font-semibold">{e.modelo}</span>
+          {e.categoria?.nombre && <><span>/</span><Link to="/equipos" className="hover:text-ink transition-colors">{tituloCaso(e.categoria.nombre)}</Link></>}
+          <span>/</span><span className="text-ink font-semibold">{tituloCaso(e.modelo)}</span>
         </div>
 
         <div className="grid grid-cols-1 min-[980px]:grid-cols-[minmax(0,1fr)_400px] gap-10 items-start pb-16">
@@ -228,13 +244,8 @@ export default function EquipoDetail() {
           <div className="min-w-0">
             {/* Badges */}
             <div className="flex items-center gap-2.5 flex-wrap mb-4">
-              {e.condicion && (
-                <span className={`${mono} px-2.5 py-1.5 rounded-md border ${e.condicion === 'nueva'
-                  ? 'text-emerald-500 bg-emerald-500/10 border-emerald-500/25'
-                  : 'text-blue-500 bg-blue-500/10 border-blue-500/25'}`}>
-                  {e.condicion === 'nueva' ? 'NUEVO' : 'SEMINUEVO'}
-                </span>
-              )}
+              {condiciones.includes('nueva') && <span className={`${mono} px-2.5 py-1.5 rounded-md border text-emerald-500 bg-emerald-500/10 border-emerald-500/25`}>NUEVO</span>}
+              {condiciones.includes('seminueva') && <span className={`${mono} px-2.5 py-1.5 rounded-md border text-blue-500 bg-blue-500/10 border-blue-500/25`}>SEMINUEVO</span>}
               <span className={`${mono} px-2.5 py-1.5 rounded-md text-gold bg-gold-soft border border-gold/25 uppercase`}>{availability}</span>
               {e.marca?.nombre && <span className={`${mono} px-2.5 py-1.5 rounded-md text-mute bg-surface-2 border border-edge uppercase`}>{e.marca.nombre}</span>}
             </div>
@@ -294,7 +305,7 @@ export default function EquipoDetail() {
                   {disponibles.map(t => (
                     <button key={t} onClick={() => setTab(t)}
                       className={`pb-3.5 text-[15px] font-bold -mb-px border-b-2 whitespace-nowrap transition-colors ${tabActiva === t ? 'text-ink border-gold' : 'text-mute border-transparent hover:text-ink'}`}>
-                      {t === 'specs' ? 'Especificaciones' : t === 'incluye' ? 'Qué incluye' : seRenta ? 'Condiciones de renta' : 'Condiciones de venta'}
+                      {t === 'specs' ? 'Especificaciones' : t === 'incluye' ? 'Qué incluye' : seRenta ? 'Condiciones de Renta' : 'Condiciones de Venta'}
                     </button>
                   ))}
                 </div>
@@ -326,16 +337,29 @@ export default function EquipoDetail() {
                     })}
                   </div>
                 )}
-                {tabActiva === 'cond' && (
-                  <div className="flex flex-col gap-3.5 pt-6 max-w-[720px]">
-                    {condLista.map((c, i) => (
-                      <div key={i} className="flex gap-3.5 items-start border border-edge bg-surface rounded-xl px-4.5 p-4">
-                        <span className={`${mono} text-gold mt-0.5`}>{String(i + 1).padStart(2, '0')}</span>
-                        <p className="text-[13.5px] text-mute leading-relaxed">{c}</p>
-                      </div>
-                    ))}
-                  </div>
-                )}
+                {tabActiva === 'cond' && (() => {
+                  // Limpio, como "Qué incluye": lista numerada sin tarjetas. Las
+                  // líneas cortas EN MAYÚSCULAS (p. ej. "IMPORTANTE") son rótulos:
+                  // van como encabezado, sin número; el resto se numera en orden.
+                  let n = 0
+                  return (
+                    <ol className="pt-6 max-w-[720px]">
+                      {condLista.map((c, i) => {
+                        const encabezado = c.length <= 40 && c === c.toUpperCase() && /[A-ZÁÉÍÓÚÑ]/.test(c) && !/[.:]/.test(c)
+                        if (encabezado) return (
+                          <li key={i} className="pt-7 first:pt-0 pb-1 text-[12px] font-black uppercase tracking-[0.14em] text-gold">{c}</li>
+                        )
+                        n += 1
+                        return (
+                          <li key={i} className="flex gap-4 items-start py-3.5 border-b border-edge/50 last:border-0">
+                            <span className="shrink-0 w-6 text-[13px] font-black text-gold tabular-nums leading-6">{String(n).padStart(2, '0')}</span>
+                            <p className="text-[14.5px] text-ink/90 leading-relaxed">{c}</p>
+                          </li>
+                        )
+                      })}
+                    </ol>
+                  )
+                })()}
               </>
             )}
           </div>
@@ -351,7 +375,7 @@ export default function EquipoDetail() {
                   className={`h-10 rounded-lg text-[14.5px] font-bold transition-colors ${esRenta ? 'bg-gold text-black' : 'text-mute hover:text-ink'}`}>Rentar</button>
               </div>
             ) : (
-              <div className={`${mono} text-mute`}>{seRenta ? 'EQUIPO EN RENTA' : 'EQUIPO EN VENTA'}</div>
+              <div className={`${mono} text-mute`}>{esRenta ? 'EQUIPO EN RENTA' : 'EQUIPO EN VENTA'}</div>
             )}
 
             {/* Precio */}
@@ -418,12 +442,24 @@ export default function EquipoDetail() {
             {/* Disponibilidad del modo actual (venta o renta). Es informativo:
                 el cliente puede cotizar igual y REMALI confirma existencias. */}
             {(() => {
-              const disp = esRenta ? (ext.renta_disponible ?? true) : (ext.venta_disponible ?? true)
+              const color = ventaSobrePedido ? 'text-[#c026ff]' : hayStock ? 'text-libre' : 'text-mute'
+              const dot = ventaSobrePedido ? 'bg-[#c026ff] shadow-[0_0_9px_#c026ff]' : hayStock ? 'bg-libre shadow-[0_0_8px_var(--c-libre)]' : 'bg-mute'
+              const dias = ext.entrega_estimada_dias || 0
+              const nota = ventaSobrePedido
+                ? (dias ? `— entrega estimada: ~${dias} días.` : '— se surte sobre pedido; te confirmamos el tiempo de entrega.')
+                : !hayStock ? '— solicítalo y te avisamos si se libera.' : ''
+              const fechaAprox = ventaSobrePedido && dias
+                ? new Date(Date.now() + dias * 86400000).toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long' })
+                : ''
               return (
-                <div className="flex items-center gap-2 text-[13px] font-bold mb-1">
-                  <span className={`w-2 h-2 rounded-full ${disp ? 'bg-libre' : 'bg-mute'}`} />
-                  <span className={disp ? 'text-libre' : 'text-mute'}>{disp ? 'Disponible' : 'Agotado'}</span>
-                  {!disp && <span className="text-mute font-normal">— solicítalo y te avisamos si se libera.</span>}
+                <div className="mb-1">
+                  <div className="flex items-start gap-2 text-[13px] font-bold">
+                    <span className={`w-2 h-2 rounded-full mt-[5px] shrink-0 ${dot}`} />
+                    <span className={`${color} [text-shadow:0_0_10px_currentColor]`}>{estadoStock}
+                      {nota && <span className="text-mute font-normal [text-shadow:none]"> {nota}</span>}
+                    </span>
+                  </div>
+                  {fechaAprox && <p className="text-[12px] text-mute mt-1 ml-4">Si lo pides hoy, llega aprox. el {fechaAprox}.</p>}
                 </div>
               )
             })()}
@@ -445,21 +481,22 @@ export default function EquipoDetail() {
             {/* Datos */}
             <div className="flex flex-col gap-2.5 text-[13.5px]">
               {[
-                { k: 'Disponibilidad', v: availability, verde: hayStock },
-                { k: 'Categoría', v: e.categoria?.nombre || '—' },
-                { k: 'Tipo', v: e.tipo?.nombre || '—' },
-                { k: 'Marca', v: e.marca?.nombre || '—' },
-                { k: 'Condición', v: e.condicion ? (e.condicion === 'nueva' ? 'Nueva' : 'Seminueva') : '—' },
+                { k: 'Disponibilidad', v: estadoStock, color: ventaSobrePedido ? 'text-[#c026ff]' : hayStock ? 'text-emerald-500' : 'text-mute' },
+                ...(ventaSobrePedido && (ext.entrega_estimada_dias || 0) ? [{ k: 'Entrega estimada', v: `~${ext.entrega_estimada_dias} días`, color: 'text-[#c026ff]' }] : []),
+                { k: 'Categoría', v: e.categoria?.nombre || '—', color: '' },
+                { k: 'Tipo', v: e.tipo?.nombre || '—', color: '' },
+                { k: 'Marca', v: e.marca?.nombre || '—', color: '' },
+                { k: 'Condiciones', v: condicionesTexto, color: '' },
               ].map(f => (
                 <div key={f.k} className="flex justify-between gap-3">
                   <span className="text-mute">{f.k}</span>
-                  <span className={`font-semibold text-right ${f.verde ? 'text-emerald-500' : ''}`}>{f.v}</span>
+                  <span className={`font-semibold text-right ${f.color}`}>{f.v}</span>
                 </div>
               ))}
             </div>
 
-            {/* Ficha técnica: solo equipos de venta (nuevos). */}
-            {e.condicion !== 'seminueva' && (
+            {/* Ficha técnica: catálogo comercial del producto, no de la unidad. */}
+            {mostrarFicha && (
               <button onClick={descargarFicha}
                 className="flex items-center justify-center gap-2 border-t border-edge pt-4 text-[14px] font-semibold text-mute hover:text-gold transition-colors">
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.8"><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
@@ -474,16 +511,18 @@ export default function EquipoDetail() {
           <section className="pb-20">
             <div className="flex items-baseline justify-between mb-5">
               <h2 className="text-[24px] font-extrabold tracking-tight">
-                {e.condicion === 'seminueva' ? 'Se renta junto con' : 'También te puede interesar'}
+                {esRenta ? 'Se renta junto con' : 'También te puede interesar'}
               </h2>
               <Link to="/equipos" className="text-sm font-semibold text-gold hover:opacity-80">Ver catálogo →</Link>
             </div>
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
               {relacionados.map(r => {
-                const rModo = r.condicion === 'seminueva' ? 'renta' : 'venta'
+                const rOfreceVenta = (r as any).ofrece_venta ?? !!toNumber(r.precio_venta)
+                const rOfreceRenta = (r as any).ofrece_renta ?? (r.condiciones || []).includes('seminueva')
+                const rModo = (esRenta && rOfreceRenta) ? 'renta' : (rOfreceVenta ? 'venta' : 'renta')
                 const rPrecio = rModo === 'venta' ? toNumber(r.precio_venta) : toNumber(r.precio_dia)
                 return (
-                  <Link key={r.id} to={`/equipo/${r.id}`}
+                  <Link key={r.id} to={`/equipo/${r.id}?ver=${rModo === 'venta' ? 'venta' : 'renta'}`}
                     className="border border-edge rounded-2xl bg-surface overflow-hidden hover:border-gold/40 transition-colors group">
                     <div className="aspect-[4/3] bg-surface-2 grid place-items-center overflow-hidden">
                       {r.imagen || (r.imagenes || [])[0]

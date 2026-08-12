@@ -1,81 +1,107 @@
-import * as React from 'react'
-import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { AnimatePresence, motion, useReducedMotion, type Variants } from 'framer-motion'
-import { ArrowLeft } from 'lucide-react'
+import * as React from "react";
+import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
+import {
+  AnimatePresence,
+  motion,
+  useReducedMotion,
+  type Variants,
+} from "framer-motion";
+import { ArrowLeft } from "lucide-react";
 
-import ThemeToggle from '@/components/ThemeToggle'
-import { useRedirigirSiHaySesion } from '@/lib/sesion'
-import LogoRemali from '@/components/ui/logo-remali'
+import ThemeToggle from "@/components/ThemeToggle";
+import { useRedirigirSiHaySesion } from "@/lib/sesion";
+import LogoRemali from "@/components/ui/logo-remali";
 
 /* El escalonado va aquí y no en cada pantalla: sign-in y sign-up deben entrar
-   igual, y si cada una define sus tiempos terminan desincronizadas. */
+   igual, y si cada una define sus tiempos terminan desincronizadas.
+   NOTA: se UNIFICARON los antiguos 2 motion.div anidados (fundido + contenedor)
+   en 1 solo. Los nombres hidden/visible se mantienen para que los AuthItem hijos
+   sigan heredando el stagger correctamente. */
 const contenedor: Variants = {
   hidden: { opacity: 0 },
-  visible: { opacity: 1, transition: { staggerChildren: 0.05 } },
-}
+  visible: {
+    opacity: 1,
+    transition: {
+      duration: 0.26,
+      ease: [0.23, 1, 0.32, 1],
+      staggerChildren: 0.05,
+    },
+  },
+  sale: {
+    opacity: 0,
+    transition: { duration: 0.13, ease: [0.23, 1, 0.32, 1] },
+  },
+};
 
 export const itemAuth: Variants = {
   hidden: { y: 12, opacity: 0 },
   visible: { y: 0, opacity: 1 },
-}
+};
 
 /* Variantes "quietas" para quien pide menos movimiento (PRODUCT.md). Se dejan
    con la misma forma en vez de quitar la animación: así el contenido nace
    visible y nunca depende de que una animación llegue a su fin para poder
    leerse — un formulario de acceso invisible no es un detalle estético. */
-const contenedorQuieto: Variants = { hidden: { opacity: 1 }, visible: { opacity: 1 } }
-const itemQuieto: Variants = { hidden: { y: 0, opacity: 1 }, visible: { y: 0, opacity: 1 } }
+const contenedorQuieto: Variants = {
+  hidden: { opacity: 1 },
+  visible: { opacity: 1 },
+  sale: { opacity: 1 },
+};
+const itemQuieto: Variants = {
+  hidden: { y: 0, opacity: 1 },
+  visible: { y: 0, opacity: 1 },
+};
 
 /** Envuelve un bloque para que herede el escalonado del contenedor. */
 export function AuthItem({
   children,
   className,
 }: {
-  children: React.ReactNode
-  className?: string
+  children: React.ReactNode;
+  className?: string;
 }) {
-  const reducir = useReducedMotion()
+  const reducir = useReducedMotion();
   return (
-    <motion.div variants={reducir ? itemQuieto : itemAuth} className={className}>
+    <motion.div
+      variants={reducir ? itemQuieto : itemAuth}
+      className={className}
+    >
       {children}
     </motion.div>
-  )
+  );
 }
 
 /** Título y bajada de cada pantalla. Vive con el contenido, no con el marco,
  *  porque cambia al pasar de "iniciar sesión" a "crear cuenta". */
-export function AuthCabecera({ title, description }: { title: string; description: string }) {
+export function AuthCabecera({
+  title,
+  description,
+}: {
+  title: string;
+  description: string;
+}) {
   return (
     <AuthItem className="text-center">
       <h1 className="text-3xl font-black tracking-tight text-ink">{title}</h1>
       <p className="text-sm text-mute mt-1.5">{description}</p>
     </AuthItem>
-  )
-}
-
-/* El panel ya cruza media pantalla; si el contenido además se desplazara serían
-   dos movimientos compitiendo. Aquí solo se funde, y la salida va más rápida que
-   la entrada: el sistema responde de inmediato y se toma su tiempo al presentar. */
-const fundido: Variants = {
-  entra: { opacity: 0 },
-  centro: { opacity: 1, transition: { duration: 0.26, ease: [0.23, 1, 0.32, 1] } },
-  sale: { opacity: 0, transition: { duration: 0.13, ease: [0.23, 1, 0.32, 1] } },
+  );
 }
 
 /** ¿Estamos en el layout de dos columnas? Debajo de `md` la foto no se muestra y
  *  el formulario ocupa todo: ahí no debe aplicarse ningún desplazamiento. */
 function useEsEscritorio() {
-  const consulta = '(min-width: 768px)'
+  const consulta = "(min-width: 768px)";
   const [es, setEs] = React.useState(
-    () => typeof window !== 'undefined' && window.matchMedia(consulta).matches,
-  )
+    () => typeof window !== "undefined" && window.matchMedia(consulta).matches,
+  );
   React.useEffect(() => {
-    const mq = window.matchMedia(consulta)
-    const alCambiar = () => setEs(mq.matches)
-    mq.addEventListener('change', alCambiar)
-    return () => mq.removeEventListener('change', alCambiar)
-  }, [])
-  return es
+    const mq = window.matchMedia(consulta);
+    const alCambiar = () => setEs(mq.matches);
+    mq.addEventListener("change", alCambiar);
+    return () => mq.removeEventListener("change", alCambiar);
+  }, []);
+  return es;
 }
 
 /**
@@ -92,36 +118,38 @@ function useEsEscritorio() {
  * desde donde va en vez de reiniciar.
  */
 export function AuthSplitScreen() {
-  const reducir = useReducedMotion()
-  const esEscritorio = useEsEscritorio()
-  const nav = useNavigate()
-  const loc = useLocation()
-  const next = new URLSearchParams(loc.search).get('next') || ''
-  const vinoDelGuard = Boolean(next)
+  const reducir = useReducedMotion();
+  const esEscritorio = useEsEscritorio();
+  const nav = useNavigate();
+  const loc = useLocation();
+  const next = new URLSearchParams(loc.search).get("next") || "";
+  const vinoDelGuard = Boolean(next);
 
   // La comprobación de sesión vive aquí y no repetida en cada pantalla: es la
   // misma regla para login y registro.
-  const verificando = useRedirigirSiHaySesion(next)
+  const verificando = useRedirigirSiHaySesion(next);
 
-  const enRegistro = loc.pathname.startsWith('/registro')
+  const enRegistro = loc.pathname.startsWith("/registro");
 
   // Los dos paneles nacen pegados a la izquierda; el que va a la derecha se
   // desplaza el 100% de su propio ancho (que es media pantalla). En porcentaje
   // y no en píxeles: se adapta solo a cualquier tamaño de ventana.
-  const cruzar = esEscritorio && !reducir
-  const desplazarFormulario = cruzar && enRegistro ? 'translateX(100%)' : 'translateX(0%)'
-  const desplazarFoto = cruzar && !enRegistro ? 'translateX(100%)' : 'translateX(0%)'
+  const cruzar = esEscritorio && !reducir;
+  const desplazarFormulario =
+    cruzar && enRegistro ? "translateX(100%)" : "translateX(0%)";
+  const desplazarFoto =
+    cruzar && !enRegistro ? "translateX(100%)" : "translateX(0%)";
 
   // Se mueve por la pantalla (no entra ni sale), así que lleva ease-in-out: acelera
   // y frena como algo con masa. Un ease-out aquí se sentiría un frenazo.
-  const transicionPanel = 'transform 420ms cubic-bezier(0.77, 0, 0.175, 1)'
+  const transicionPanel = "transform 420ms cubic-bezier(0.77, 0, 0.175, 1)";
 
   function volver() {
     // Si el guard lo trajo aquí (llegó con ?next=), retroceder lo devolvería a la
     // ruta protegida y el guard lo rebotaría al login otra vez: bucle. En ese caso
     // el único destino seguro es el inicio.
-    if (!vinoDelGuard && window.history.length > 1) nav(-1)
-    else nav('/')
+    if (!vinoDelGuard && window.history.length > 1) nav(-1);
+    else nav("/");
   }
 
   /* En escritorio el alto se fija a UNA pantalla. Con solo min-h-screen, cuando el
@@ -165,17 +193,19 @@ export function AuthSplitScreen() {
 
             {/* `mode="wait"`: la saliente termina antes de entrar la nueva. Si se
                 cruzan, dos formularios de distinto alto superpuestos dan un salto.
-                `initial={false}` evita que la primera carga entre fundida. */}
+                `initial={false}` evita que la primera carga entre fundida.
+                Antes había 2 motion.div anidados (fundido + contenedor) — hoy
+                viven unificados en 1 solo para eliminar markup redundante. */}
             <AnimatePresence mode="wait" initial={false}>
-              <motion.div key={loc.pathname} variants={fundido} initial="entra" animate="centro" exit="sale">
-                <motion.div
-                  variants={reducir ? contenedorQuieto : contenedor}
-                  initial="hidden"
-                  animate="visible"
-                  className="flex flex-col gap-5"
-                >
-                  <Outlet />
-                </motion.div>
+              <motion.div
+                key={loc.pathname}
+                variants={reducir ? contenedorQuieto : contenedor}
+                initial="hidden"
+                animate="visible"
+                exit="sale"
+                className="flex flex-col gap-5"
+              >
+                <Outlet />
               </motion.div>
             </AnimatePresence>
           </div>
@@ -187,32 +217,38 @@ export function AuthSplitScreen() {
         style={{ transform: desplazarFoto, transition: transicionPanel }}
         className="relative hidden overflow-hidden md:absolute md:inset-y-0 md:left-0 md:block md:w-1/2"
       >
-        <img
-          src="/images/remali-1.jpg"
+        {/* Zoom ambiental lento (ken-burns): le da vida al panel sin distraer. Se
+            apaga con reduced-motion. La imagen se cae a la anterior si falta. */}
+        <motion.img
+          src="/images/login.jpeg"
           alt=""
           className="h-full w-full object-cover"
-          onError={e => {
-            const t = e.currentTarget
-            if (t.dataset.fb !== '1') {
-              t.dataset.fb = '1'
-              t.src = '/images/maquinas.png'
+          initial={false}
+          animate={reducir ? undefined : { scale: [1, 1.07] }}
+          transition={
+            reducir
+              ? undefined
+              : {
+                  duration: 22,
+                  ease: "linear",
+                  repeat: Infinity,
+                  repeatType: "reverse",
+                }
+          }
+          onError={(e) => {
+            const t = e.currentTarget as HTMLImageElement;
+            if (t.dataset.fb !== "1") {
+              t.dataset.fb = "1";
+              t.src = "/images/remali-1.jpg";
             }
           }}
         />
-        <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
-        <div className="absolute bottom-10 left-10 right-10">
-          <p className="text-gold text-[11px] font-mono uppercase tracking-[0.3em] mb-3">
-            Renta y venta de maquinaria
-          </p>
-          {/* "Controla tu maquinaria desde un solo lugar" era relleno de plantilla:
-              describe cualquier software. Esta dice lo que el panel hace de verdad
-              —seguir cada unidad, quién la tiene y cuándo vuelve— con las palabras
-              del negocio. */}
-          <p className="text-white text-2xl font-black leading-tight max-w-sm text-balance">
-            Sabes qué máquina salió, con quién y cuándo vuelve.
-          </p>
-        </div>
+        {/* Overlay cinematográfico: sin texto encima, se reduce el oscurecimiento
+            para que la foto se vea nítida pero siga contrastando con el formulario.
+            Se conserva un toque de marca en la esquina inferior. */}
+        <div className="absolute inset-0 bg-gradient-to-t from-black/30 via-black/10 to-transparent" />
+        <div className="absolute inset-0 bg-gradient-to-br from-transparent via-transparent to-gold/12" />
       </div>
     </div>
-  )
+  );
 }

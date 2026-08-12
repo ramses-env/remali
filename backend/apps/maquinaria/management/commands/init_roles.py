@@ -22,12 +22,21 @@ APPS_PANEL = ['maquinaria', 'inventario', 'refacciones', 'renta', 'ventas', 'cot
 
 ROLES = {
     'Administrador': 'todo',
+    # Gerente opera al nivel de administración; el nombre distingue al encargado
+    # de piso del dueño. Mismos permisos finos que Administrador (cosméticos).
+    'Gerente': 'todo',
     'Técnico': ['view', 'change'],   # ve y ajusta equipo; no borra ni configura
+    # Cajero solo consulta en el admin de Django; la caja de verdad (vender
+    # refacciones, corte) la gobierna PuedeUsarCaja, no estos permisos.
+    'Cajero': ['view'],
+    # Asesor consulta y crea (cotizaciones, clientes); la regla real la impone
+    # PuedeCotizar. No edita ni borra, no convierte a venta.
+    'Asesor': ['view', 'add'],
 }
 
 
 class Command(BaseCommand):
-    help = 'Crea los roles del panel (Administrador, Técnico) y asigna sus permisos.'
+    help = 'Crea los roles del panel (Administrador, Gerente, Técnico, Cajero, Asesor) y asigna sus permisos.'
 
     def add_arguments(self, parser):
         parser.add_argument('--limpiar', action='store_true',

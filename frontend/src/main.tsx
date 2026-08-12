@@ -6,6 +6,8 @@ import { AuthProvider } from './store/auth'
 import { ProfileProvider } from './store/profile'
 import { ToastProvider } from './store/toast'
 import { ThemeProvider } from './store/theme'
+import { FavoritosProvider } from './store/favoritos'
+import { OnboardingProvider } from './store/onboarding'
 import './index.css'
 import App from './App.tsx'
 
@@ -35,11 +37,15 @@ createRoot(document.getElementById('root')!).render(
       <ThemeProvider>
         <AuthProvider>
           <ProfileProvider>
-            <CartProvider>
-              <ToastProvider>
-                <App />
-              </ToastProvider>
-            </CartProvider>
+            <OnboardingProvider>
+              <CartProvider>
+                <FavoritosProvider>
+                  <ToastProvider>
+                    <App />
+                  </ToastProvider>
+                </FavoritosProvider>
+              </CartProvider>
+            </OnboardingProvider>
           </ProfileProvider>
         </AuthProvider>
       </ThemeProvider>

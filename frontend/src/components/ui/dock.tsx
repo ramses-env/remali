@@ -26,6 +26,8 @@ export type DockItem = {
   punto?: boolean
   to?: string
   onClick?: () => void
+  /** Atributos de datos para testing, onboarding, analytics. */
+  [key: `data-${string}`]: string | undefined
 }
 
 export default function Dock({ items, className }: { items: DockItem[]; className?: string }) {
@@ -92,15 +94,21 @@ function DockBoton({ item }: { item: DockItem }) {
     item.activo ? 'bg-gold-soft text-gold' : 'text-mute hover:text-ink',
   )
 
+  // Extraer attrs data-* para onboarding y testing.
+  const dataAttrs: Record<string, string> = {}
+  for (const k of Object.keys(item)) {
+    if (k.startsWith('data-')) dataAttrs[k] = (item as any)[k]
+  }
+
   if (item.to) {
     return (
-      <Link to={item.to} aria-current={item.activo ? 'page' : undefined} className={clases}>
+      <Link to={item.to} aria-current={item.activo ? 'page' : undefined} className={clases} {...dataAttrs}>
         {contenido}
       </Link>
     )
   }
   return (
-    <button type="button" onClick={item.onClick} aria-current={item.activo ? 'page' : undefined} className={clases}>
+    <button type="button" onClick={item.onClick} aria-current={item.activo ? 'page' : undefined} className={clases} {...dataAttrs}>
       {contenido}
     </button>
   )

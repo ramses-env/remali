@@ -26,6 +26,7 @@ type Equipo = {
   precio_venta?: number | string | null
   condicion?: string
   modo?: 'venta' | 'renta'
+  modos?: Array<'venta' | 'renta'>
   promo_pct?: number
   estado?: string
   tipo?: { id: number; nombre: string }
@@ -33,13 +34,23 @@ type Equipo = {
   marca?: { id: number; nombre: string }
   disponible_venta?: boolean
   disponible_renta?: boolean
-  // Qué modos ofrece el producto según sus unidades + precios (un mismo modelo
-  // puede venderse Y rentarse), y si hay stock disponible de cada uno.
   ofrece_venta?: boolean
   ofrece_renta?: boolean
   venta_disponible?: boolean
   renta_disponible?: boolean
+  venta_estado?: 'sin_venta' | 'inmediata' | 'sobre_pedido' | 'agotado'
+  renta_estado?: 'sin_renta' | 'disponible' | 'agotado'
+  entrega_estimada_dias?: number | null
   condiciones?: string[]
+  permite_sobre_pedido?: boolean
+  disponibilidad_detallada?: Record<string, {
+    venta_disponible: boolean
+    renta_disponible: boolean
+    venta_estado: 'sin_venta' | 'inmediata' | 'sobre_pedido' | 'agotado'
+    stock_venta: number
+    stock_renta: number
+    entrega_estimada_dias?: number | null
+  }>
 }
 
 export default function EquiposList() {
@@ -140,23 +151,20 @@ export default function EquiposList() {
 
   useEffect(() => { setPage(0) }, [query, filters, sortKey, uso])
 
-  // Categorías para chips rápidos (derivadas del catálogo cargado)
-  const categoriasChips = useMemo(() => {
-    const m = new Map<string, number>()
-    items.forEach(e => { const n = e.categoria?.nombre; if (n) m.set(n, (m.get(n) || 0) + 1) })
-    return [...m.entries()].sort((a, b) => b[1] - a[1]).map(([nombre]) => nombre)
-  }, [items])
-  const activeCat = (filters['category'] || [])[0] || ''
-  const setCat = (nombre: string) => setFilters(f => {
-    const next = { ...f }
-    if (!nombre || activeCat === nombre) delete next['category']
-    else next['category'] = [nombre]
-    return next
-  })
+  // (Se quitó el filtro de categorías por chips amarillos del hero: el catálogo
+  //  muestra todas. El filtrado sigue por búsqueda y por el panel de Filtros.)
 
-  // Una card por MODO ofrecido. Un producto que se vende Y se renta emite dos
-  // (Venta y Renta), reusando la card de siempre; cada una con su precio y su
-  // Disponible/Agotado. Así el cliente ve "los dos", no solo uno.
+  // ⭐ FIX: UNA CARD POR CADA (CONDICIÓN × MODO) VÁLIDO.
+  // Antes: 1 card por modo, colapsando todas las condiciones en una sola
+  //        (p. ej. si había Martillo NUEVO + SEMINUEVO para venta, solo
+  //         salía una card "Nueva" y la Seminueva se perdía).
+  // Ahora:  Si hay 2 condiciones válidas, se generan 2 cards de venta
+  //         (una etiquetada "Nueva", otra "Seminueva"), cada una con su
+  //         disponibilidad específica.
+  //
+  // Jerarquía de fuentes:
+  //   1. disponibilidad_detallada (backend nuevo, info por condición)
+  //   2. Fallback a la lógica anterior (backend viejo, info colapsada)
   const asProducts = useMemo(() => (e: Equipo) => {
     const d = toNumber(e.precio_dia)
     const s = toNumber(e.precio_semana)
@@ -166,32 +174,96 @@ export default function EquiposList() {
       unit === 'semana' ? (s ?? (d ? d * 7 : null) ?? m ?? 0) :
       (m ?? (d ? d * 30 : null) ?? (s ? s * 4 : null) ?? 0)
     const promo = Math.max(0, Math.min(90, e.promo_pct || 0))
-    const card = (modo: 'venta' | 'renta') => {
-      const bruto = modo === 'venta' ? (toNumber(e.precio_venta) ?? 0) : rentaPrice
+    const precioVentaNum = toNumber(e.precio_venta) ?? 0
+    const precioVentaOk = precioVentaNum > 0
+    const precioRentaOk = !!((d && d > 0) || (s && s > 0) || (m && m > 0))
+
+    // ═══════════════════════════════════════════════════════════════
+    // BUILDER: crea una card PARA UNA CONDICIÓN + MODO ESPECÍFICOS.
+    // ═══════════════════════════════════════════════════════════════
+    const card = (modo: 'venta' | 'renta', condition: string, opts: {
+      estado: 'inmediata' | 'disponible' | 'sobre_pedido' | 'agotado'
+      entregaDias?: number | null
+    }) => {
+      const bruto = modo === 'venta' ? precioVentaNum : rentaPrice
       const price = promo ? Math.round(bruto * (1 - promo / 100) * 100) / 100 : bruto
-      const disponible = modo === 'venta'
-        ? (e.venta_disponible ?? e.disponible_venta ?? true)
-        : (e.renta_disponible ?? e.disponible_renta ?? false)
+      // `estado` (del backend) es la fuente de verdad; `disponible` se deriva de
+      // él y se conserva por compatibilidad con el resto del archivo (chips, PDF…).
+      const disponible = opts.estado === 'inmediata' || opts.estado === 'disponible'
+
       return {
-        id: e.id, key: `${e.id}-${modo}`, title: e.modelo, price,
-        priceOriginal: promo ? bruto : undefined, promo, modo, disponible,
-        precioDia: d, precioSemana: s, precioMes: m,
+        id: e.id,
+        key: `${e.id}-${condition}-${modo}`,
+        title: e.modelo,
+        price,
+        priceOriginal: promo ? bruto : undefined,
+        promo,
+        modo,
+        estado: opts.estado,
+        disponible,
+        precioDia: d,
+        precioSemana: s,
+        precioMes: m,
         image: resolveMediaUrl(e.imagen || (e.imagenes || [])[0] || '') || '',
         description: e.descripcion || '',
-        condition: (e as any).condicion || '',
+        condition,
         brand: (e as any).marca?.nombre || '',
         category: (e as any).categoria?.nombre || '',
         type: (e as any).tipo?.nombre || '',
+        entregaDias: opts.entregaDias ?? e.entrega_estimada_dias ?? null,
         condiciones: e.condiciones || [],
       }
     }
-    // Modos que ofrece; si el backend aún no manda las banderas, se cae al modo
-    // único de siempre (según la condición) — nada se rompe.
-    const modos: ('venta' | 'renta')[] = []
-    if (e.ofrece_venta) modos.push('venta')
-    if (e.ofrece_renta) modos.push('renta')
-    if (!modos.length) modos.push(e.modo || (e.condicion === 'seminueva' ? 'renta' : 'venta'))
-    return modos.map(card)
+
+    type Producto = ReturnType<typeof card>
+    const out: Producto[] = []
+
+    // ═══════════════════════════════════════════════════════════════
+    //  DISPONIBILIDAD — fuente de verdad: el BACKEND.
+    //  Cada equipo expone CAPACIDAD + ESTADO EN VIVO por modo:
+    //    ofrece_venta / venta_estado  (sin_venta|inmediata|sobre_pedido|agotado)
+    //    ofrece_renta / renta_estado  (sin_renta|disponible|agotado)
+    //  Reglas de negocio (ya resueltas en el backend, ver models.py):
+    //   • Venta pública = SOLO línea NUEVA. Seminueva → 'sin_venta'
+    //     (se vende internamente, pero no se promociona al público).
+    //   • Nueva sin stock pero permite_sobre_pedido → 'sobre_pedido';
+    //     al LLEGAR stock vuelve a 'inmediata'; sin ninguna vía → 'agotado'.
+    //   • Renta = línea SEMINUEVA (o nueva autorizada, muy rara vez).
+    //  Generamos como máximo UNA card de venta y UNA de renta por equipo.
+    //  (Con fallbacks por si el backend aún no manda las props nuevas.)
+    // ═══════════════════════════════════════════════════════════════
+    const ventaEstado: 'sin_venta' | 'inmediata' | 'sobre_pedido' | 'agotado' =
+      e.venta_estado ?? (precioVentaOk
+        ? ((e.venta_disponible ?? e.disponible_venta) ? 'inmediata'
+            : (e.permite_sobre_pedido ? 'sobre_pedido' : 'agotado'))
+        : 'sin_venta')
+    const ofreceVenta = e.ofrece_venta ?? (precioVentaOk && ventaEstado !== 'sin_venta')
+
+    const rentaEstado: 'sin_renta' | 'disponible' | 'agotado' =
+      e.renta_estado ?? (precioRentaOk
+        ? ((e.renta_disponible ?? e.disponible_renta) ? 'disponible' : 'agotado')
+        : 'sin_renta')
+    const ofreceRenta = e.ofrece_renta ?? (precioRentaOk && rentaEstado !== 'sin_renta')
+
+    // ——— Card de VENTA (solo línea nueva; el backend ya excluye seminueva) ———
+    if (ofreceVenta && ventaEstado !== 'sin_venta') {
+      out.push(card('venta', 'nueva', {
+        estado: ventaEstado,
+        entregaDias: e.entrega_estimada_dias,
+      }))
+    }
+
+    // ——— Card de RENTA (línea seminueva / nueva autorizada) ———
+    if (ofreceRenta && rentaEstado !== 'sin_renta') {
+      // La renta suele ser seminueva; usamos esa condición para el filtro
+      // (la card ya no muestra badge de condición, solo Venta/Renta).
+      const condRenta = (e.condiciones || []).includes('seminueva')
+        ? 'seminueva'
+        : ((e.condiciones || []).find(c => c !== 'nueva') || 'seminueva')
+      out.push(card('renta', condRenta, { estado: rentaEstado }))
+    }
+
+    return out
   }, [unit])
 
   const filteredAll = useMemo(() => {
@@ -227,25 +299,48 @@ export default function EquiposList() {
     return out
   }, [items, filters, query, sortKey, unit, asProducts])
 
+  // El grid respeta la pestaña activa: Comprar → SOLO cards de venta; Rentar →
+  // SOLO de renta; Todos → ambas. (Un equipo con venta Y renta —p.ej. la
+  // Mezcladora— generaba dos cards; en Comprar se colaba la de renta.)
+  // filteredAll se queda completo para el PDF y sus conteos venta/renta.
+  const filteredVista = useMemo(
+    () => (uso ? filteredAll.filter(p => p.modo === uso) : filteredAll),
+    [filteredAll, uso],
+  )
+
   const shown = useMemo(() => {
     const start = page * pageSize
-    return filteredAll.slice(start, start + pageSize)
-  }, [filteredAll, page, pageSize])
+    return filteredVista.slice(start, start + pageSize)
+  }, [filteredVista, page, pageSize])
 
-  // Animar cards cuando cambia el resultado
+  // Firma estable del conjunto visible: la animación debe dispararse cuando cambia
+  // QUÉ cards se muestran (filtros, búsqueda, página), NO cada vez que se recalcula
+  // pageSize y devuelve el MISMO conjunto en un array nuevo. Ese re-disparo a medio
+  // vuelo era lo que dejaba una card atenuada (oscura) al refrescar.
+  const shownKey = shown.map(p => p.key).join('|')
+
+  // Entrada de las cards. fromTo (NO from) es la clave: fija el estado FINAL en
+  // opacity:1 / y:0. Con .from(), GSAP INFIERE el final leyendo el estilo actual;
+  // si el efecto se re-disparaba mientras un tween anterior iba a medias, capturaba
+  // una opacidad intermedia como "final" y la card quedaba semitransparente para
+  // siempre. overwrite:'auto' mata cualquier tween previo sobre la misma card y
+  // clearProps limpia los estilos inline al terminar (la card queda con su CSS
+  // natural, siempre visible).
+  //
+  // Targeteamos SOLO el wrapper (.equipo-card-anim), no '.equipo-card' a secas:
+  // esa clase también vive en la raíz de ProductCard, así que '.equipo-card'
+  // animaba wrapper + raíz ANIDADOS y sus opacidades se multiplicaban a media
+  // animación (oscurecía de más). Con el wrapper basta: contiene a la card entera.
   useEffect(() => {
     if (loading) return
     const ctx = gsap.context(() => {
-      gsap.from('.equipo-card', {
-        y: 50,
-        opacity: 0,
-        duration: 0.7,
-        ease: 'expo.out',
-        stagger: 0.07,
-      })
+      gsap.fromTo('.equipo-card-anim',
+        { y: 50, opacity: 0 },
+        { y: 0, opacity: 1, duration: 0.7, ease: 'expo.out', stagger: 0.07, overwrite: 'auto', clearProps: 'opacity,transform' },
+      )
     }, gridRef)
     return () => ctx.revert()
-  }, [loading, shown])
+  }, [loading, shownKey])
 
   const suggestions = useMemo(() => {
     const q = inputValue.trim().toLowerCase()
@@ -291,26 +386,6 @@ export default function EquiposList() {
           Explora nuestra flota. Filtra por categoría, compara precios por día, semana o mes, y solicita tu equipo en minutos.
         </p>
 
-        {/* Chips de categoría */}
-        {categoriasChips.length > 0 && (
-          <div className="catalog-header-title flex gap-2 mt-6 overflow-x-auto pb-1 -mx-1 px-1 scrollbar-thin">
-            <button
-              onClick={() => setCat('')}
-              className={`shrink-0 px-4 py-1.5 rounded-full text-xs font-semibold border transition-colors ${!activeCat ? 'bg-gold text-black border-gold' : 'border-edge bg-surface-2 text-mute hover:text-ink'}`}
-            >
-              Todas
-            </button>
-            {categoriasChips.map(c => (
-              <button
-                key={c}
-                onClick={() => setCat(c)}
-                className={`shrink-0 px-4 py-1.5 rounded-full text-xs font-semibold border transition-colors ${activeCat === c ? 'bg-gold text-black border-gold' : 'border-edge bg-surface-2 text-mute hover:text-ink'}`}
-              >
-                {c}
-              </button>
-            ))}
-          </div>
-        )}
       </div>
 
       {/* ── BARRA DE CONTROLES ── */}
@@ -387,10 +462,10 @@ export default function EquiposList() {
           </div>
 
           {/* Controles derecha */}
-          <div className="flex items-center gap-3 flex-wrap">
+          <div className="flex flex-wrap items-center gap-2.5 md:gap-3">
             {/* Segmentado Todos / Comprar / Rentar — mismo estilo glass que el
                 selector de periodo (glider deslizante). */}
-            <div className="glass-radio-group" role="radiogroup" aria-label="Tipo">
+            <div className="glass-radio-group w-full md:w-auto" role="radiogroup" aria-label="Tipo">
               <input type="radio" name="uso" id="uso-todos" checked={uso === ''} onChange={() => setUso('')} />
               <label htmlFor="uso-todos">Todos</label>
               <input type="radio" name="uso" id="uso-venta" checked={uso === 'venta'} onChange={() => setUso('venta')} />
@@ -402,6 +477,7 @@ export default function EquiposList() {
 
             {/* Filtros mobile */}
             <button
+              data-onboarding="filtros-flotantes"
               onClick={() => window.dispatchEvent(new Event('toggleFilters'))}
               className={`md:hidden flex items-center gap-2 px-4 py-2.5 rounded-full border text-sm font-medium transition-colors ${activeFilterCount > 0 ? 'border-gold bg-gold-soft text-gold' : 'border-edge bg-surface-2 text-mute hover:text-ink hover:border-edge'}`}
             >
@@ -428,8 +504,13 @@ export default function EquiposList() {
             </div>
 
             {/* Precio por periodo: SOLO aplica a renta. En Comprar no tiene
-                sentido (una venta no se cobra por día/semana/mes). */}
-            {uso !== 'venta' && <PriceUnitToggle />}
+                sentido (una venta no se cobra por día/semana/mes). Ahí NO se quita
+                —se deja invisible en escritorio para RESERVAR su espacio— si no, la
+                fila se recorría y el toggle Todos/Comprar/Rentar saltaba bajo el
+                cursor. En móvil (apilado) sí se oculta: no hay fila que recorrer. */}
+            <div className={uso === 'venta' ? 'hidden md:block md:invisible md:pointer-events-none md:w-auto' : 'w-full md:w-auto'}>
+              <PriceUnitToggle />
+            </div>
 
             {/* PDF con opciones de descarga */}
             <div className="relative" ref={dlRef}>
@@ -503,7 +584,7 @@ export default function EquiposList() {
 
             {/* Contador */}
             <p className="text-xs text-mute font-mono whitespace-nowrap">
-              {shown.length} / {filteredAll.length} equipos
+              {shown.length} / {filteredVista.length} equipos
             </p>
           </div>
         </div>
@@ -513,7 +594,7 @@ export default function EquiposList() {
       <div className="contenedor flex gap-0 py-10">
 
         {/* Sidebar filtros desktop */}
-        <aside className="hidden md:block w-64 shrink-0 mr-10">
+        <aside data-onboarding="filtros-flotantes" className="hidden md:block w-64 shrink-0 mr-10">
           <div className="sticky top-[140px] max-h-[calc(100vh-160px)] overflow-y-auto scrollbar-thin">
             <div className="bg-surface border border-edge rounded-2xl overflow-hidden">
               <div className="flex items-center justify-between px-5 py-4 border-b border-edge">
@@ -535,7 +616,7 @@ export default function EquiposList() {
 
         {/* Grid de equipos */}
         <div className="flex-1 min-w-0">
-          <div ref={gridRef} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5 min-h-[50vh]">
+          <div ref={gridRef} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5 min-h-[50vh] content-start items-start">
 
             {/* Skeletons */}
             {loading && Array.from({ length: 6 }).map((_, i) => (
@@ -567,19 +648,23 @@ export default function EquiposList() {
             {!loading && shown.map((p, i) => (
               /* h-full: la card llena su celda del grid; sin esto, una card sin
                  descripción queda más corta que su vecina y el precio flota. */
-              <div key={p.key} className="equipo-card h-full" ref={i === 0 ? firstCardRef : undefined}>
+              <div key={p.key} className="equipo-card equipo-card-anim h-full" ref={i === 0 ? firstCardRef : undefined}>
                 <ProductCard
                   id={p.id}
                   title={p.title}
                   price={p.price}
                   modo={p.modo}
+                  estado={p.estado}
                   agotado={!p.disponible}
+                  entregaDias={p.entregaDias}
                   image={p.image || ''}
                   subtitle={p.description}
                   meta={[p.category, p.brand].filter(Boolean).join(' · ')}
                   linkTo={`/equipo/${p.id}?ver=${p.modo === 'venta' ? 'venta' : 'renta'}`}
                   priceOriginal={p.priceOriginal}
                   tags={[
+                    // Solo el MODO (Venta/Renta): con la regla nuevo→venta / seminuevo→renta,
+                    // la condición es redundante. La promo (si hay) se conserva.
                     ...(p.promo ? [{ label: `PROMO −${p.promo}%`, tone: 'promo' as const }] : []),
                     p.modo === 'venta' ? { label: 'Venta', tone: 'sale' as const } : { label: 'Renta', tone: 'rent' as const },
                   ]}
@@ -589,7 +674,7 @@ export default function EquiposList() {
           </div>
 
           {/* Paginación */}
-          {filteredAll.length > pageSize && (
+          {filteredVista.length > pageSize && (
             <div className="mt-10 flex items-center justify-center gap-4">
               <button
                 onClick={() => setPage(p => Math.max(p - 1, 0))}
@@ -600,12 +685,12 @@ export default function EquiposList() {
               </button>
 
               <span className="text-xs text-mute font-mono">
-                {page + 1} / {Math.ceil(filteredAll.length / pageSize)}
+                {page + 1} / {Math.ceil(filteredVista.length / pageSize)}
               </span>
 
               <button
-                onClick={() => setPage(p => (p + 1) * pageSize < filteredAll.length ? p + 1 : p)}
-                disabled={(page + 1) * pageSize >= filteredAll.length}
+                onClick={() => setPage(p => (p + 1) * pageSize < filteredVista.length ? p + 1 : p)}
+                disabled={(page + 1) * pageSize >= filteredVista.length}
                 className="px-6 py-3 rounded-full bg-gold text-black text-sm font-bold hover:opacity-90 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
               >
                 Siguiente →

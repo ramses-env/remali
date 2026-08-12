@@ -31,19 +31,19 @@
   --c-border:     #E5E7EB;   /* bordes/divisores */
   --c-ink:        #111827;   /* texto principal */
   --c-mute:       #6B7280;   /* metadatos */
-  --c-gold:       #B8872E;   /* acento dorado */
-  --c-gold-soft:  #F7ECD9;   /* fondo suave del acento */
-  --c-gold-on:    #FFFFFF;   /* texto encima del acento */
-  --c-gold-glow:  rgba(184, 135, 46, 0.38);  /* halo del botón primario */
-  --c-yellow:     #f2b736;   /* el amarillo de la tienda; igual en ambos temas */
+  --c-gold:       #FFC61A;   /* acento AMARILLO (igual que la tienda y el tema oscuro) */
+  --c-gold-soft:  rgba(255, 198, 26, 0.14);   /* fondo suave del acento */
+  --c-gold-on:    #111827;   /* texto encima del amarillo: oscuro para que se lea */
+  --c-gold-glow:  rgba(255, 198, 26, 0.30);  /* halo del botón primario */
+  --c-yellow:     #FFC61A;   /* el amarillo de la tienda; igual en ambos temas */
   /* Estados de una unidad. Son datos, no decoración: el mismo verde/azul/ámbar
      debe significar lo mismo en la dona, los chips y la leyenda. */
   --c-libre:      #1F7A4D;   /* disponible, lista para operar */
   --c-renta:      #2B5FAD;   /* rentada, en obra */
   --c-renta-on:   #FFFFFF;   /* texto sobre el azul sólido */
   --c-renta-glow: rgba(43, 95, 173, 0.34);
-  --c-taller:     #B8872E;   /* en mantenimiento */
-  --c-price:      #111827;   /* precios: negro en claro (el dorado no resalta) */
+  --c-taller:     #FFC61A;   /* en mantenimiento */
+  --c-price:      #111827;   /* precios: negro en claro (el amarillo no se lee sobre blanco) */
   --c-stroke:     #E5E7EB;
   --c-grid:       rgba(17, 24, 39, 1);
   /* Colores SUAVES solo para gráficas (dona, barras), estilo dashboard pastel.
@@ -69,19 +69,19 @@
   --c-border:     rgba(255, 255, 255, 0.09);
   --c-ink:        #f4f4f5;   /* texto casi blanco, neutro */
   --c-mute:       #9a9aa2;   /* gris frío */
-  --c-gold:       #f2b736;
-  --c-gold-soft:  rgba(242, 183, 54, 0.12);
+  --c-gold:       #FFC61A;
+  --c-gold-soft:  rgba(255, 198, 26, 0.12);
   --c-gold-on:    #111827;   /* sobre el amarillo brillante el texto va oscuro */
-  --c-gold-glow:  rgba(242, 183, 54, 0.30);
-  --c-yellow:     #f2b736;   /* mismo amarillo que en claro: el chip no cambia de tema */
+  --c-gold-glow:  rgba(255, 198, 26, 0.30);
+  --c-yellow:     #FFC61A;   /* mismo amarillo que en claro: el chip no cambia de tema */
   /* Los tonos profundos del tema claro se hunden contra el panel #161618
      (2.9:1 el azul). Aquí suben para volver a ser legibles. */
   --c-libre:      #4ADE80;
   --c-renta:      #7BAAF0;
   --c-renta-on:   #0a0a0b;
   --c-renta-glow: rgba(123, 170, 240, 0.26);
-  --c-taller:     #f2b736;
-  --c-price:      #f2b736;   /* precios: el dorado sí resalta en oscuro */
+  --c-taller:     #FFC61A;
+  --c-price:      #FFC61A;   /* precios: el amarillo sí resalta en oscuro */
   --c-stroke:     rgba(255, 255, 255, 0.16);
   --c-grid:       rgba(255, 255, 255, 1);
   /* Versión más brillante para que resalten sobre el panel oscuro. */
@@ -169,6 +169,10 @@
   ::-webkit-scrollbar-thumb:hover {
     background-color: var(--c-mute);
   }
+
+  /* Oculta el scrollbar pero mantiene el scroll (p.ej. pestañas deslizables en móvil). */
+  .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+  .no-scrollbar::-webkit-scrollbar { display: none; }
 
   a { color: inherit; text-decoration: none; }
 }
@@ -676,17 +680,14 @@
     transition: all 0.2s ease-in-out; 
   } 
   
-  .glass-radio-group label:hover { 
-    background: linear-gradient(135deg, #2563eb, #7c3aed);
-    -webkit-background-clip: text;
-    background-clip: text;
-    color: transparent;
-  } 
-  
-  .glass-radio-group input:checked + label { 
-    color: #fff; 
+  .glass-radio-group label:hover {
+    color: var(--c-gold);
+  }
+
+  .glass-radio-group input:checked + label {
+    color: var(--c-gold-on, #1a1400);
     background: none;
-  } 
+  }
   
   .glass-glider { 
     position: absolute; 
@@ -700,11 +701,11 @@
       background 0.3s ease-in-out, 
       box-shadow 0.3s ease-in-out; 
   
-    background: linear-gradient(135deg, #2563eb, #7c3aed); 
-    box-shadow: 
-      0 0 10px rgba(99, 102, 241, 0.3), 
-      0 0 5px rgba(255, 255, 255, 0.2) inset; 
-  } 
+    background: linear-gradient(135deg, #FFD35A, var(--c-gold));
+    box-shadow:
+      0 4px 12px rgba(0, 0, 0, 0.22),
+      0 0 0 1px rgba(0, 0, 0, 0.06) inset;
+  }
   
   /* Movimiento del selector */ 
   #plan-dia:checked ~ .glass-glider { 
@@ -849,3 +850,89 @@
 @media (prefers-reduced-motion: reduce) {
   .modal-in > * { animation: modal-backdrop-in 180ms ease-out both; }
 }
+
+/* Éxito (p. ej. al vincular): UN solo momento de delight. La insignia entra con
+   un pop suave (nada nace de la nada), un anillo de confirmación se expande una
+   vez, la palomita se dibuja sola y el texto sube en cascada. Momento raro, así
+   que un toque está bien; curva ease-out del sistema y reduced-motion respetado. */
+@keyframes exito-pop {
+  0%   { opacity: 0; transform: scale(0.86); }
+  60%  { opacity: 1; transform: scale(1.04); }
+  100% { transform: scale(1); }
+}
+/* Un solo pulso detrás de la insignia: el "quedó hecho". */
+@keyframes exito-ring {
+  0%   { opacity: 0.5; transform: scale(0.75); }
+  100% { opacity: 0;   transform: scale(1.9); }
+}
+@keyframes exito-check { to { stroke-dashoffset: 0; } }
+@keyframes vc-rise {
+  0%   { opacity: 0; transform: translateY(10px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+.exito-pop  { animation: exito-pop 520ms cubic-bezier(0.23, 1, 0.32, 1) both; }
+.exito-ring { animation: exito-ring 900ms cubic-bezier(0.23, 1, 0.32, 1) 140ms both; }
+/* pathLength=1 normaliza la palomita: dasharray/offset 1 = trazo completo oculto,
+   →0 la dibuja. Arranca cuando el círculo casi terminó su pop. */
+.exito-check { stroke-dasharray: 1; stroke-dashoffset: 1; animation: exito-check 360ms cubic-bezier(0.23, 1, 0.32, 1) 300ms forwards; }
+/* Cascada genérica del texto/botones de vincular; delay inline por elemento. */
+.vc-rise { opacity: 0; animation: vc-rise 460ms cubic-bezier(0.23, 1, 0.32, 1) both; }
+@media (prefers-reduced-motion: reduce) {
+  .exito-pop, .exito-check, .vc-rise { animation: none; }
+  .exito-pop  { opacity: 1; transform: none; }
+  .exito-check { stroke-dashoffset: 0; }
+  .vc-rise { opacity: 1; transform: none; }
+  .exito-ring { display: none; }
+}
+
+/* Entrada CALMADA de la insignia (sin rebote): la usan los estados neutros de
+   vincular (sin sesión, confirmar) y el error. El error suma .err-shake, un "no"
+   sutil una sola vez. En todos los casos el texto sube con .vc-rise. */
+@keyframes vc-pop {
+  0%   { opacity: 0; transform: scale(0.92); }
+  100% { opacity: 1; transform: scale(1); }
+}
+@keyframes err-shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-3px); }
+  45% { transform: translateX(3px); }
+  70% { transform: translateX(-2px); }
+  88% { transform: translateX(1px); }
+}
+.vc-pop    { animation: vc-pop 320ms cubic-bezier(0.23, 1, 0.32, 1) both; }
+.err-shake { animation: err-shake 440ms ease-in-out 300ms 1 both; }
+@media (prefers-reduced-motion: reduce) {
+  .vc-pop    { animation: none; opacity: 1; transform: none; }
+  .err-shake { animation: none; }
+}
+
+/* ── Anti-zoom al enfocar inputs en iOS ──────────────────────────────────────
+   iOS Safari hace zoom automático al enfocar un campo cuyo texto mide < 16px.
+   En dispositivos táctiles (móvil/tablet) forzamos 16px en los campos para
+   evitarlo. NO se toca el zoom por pinch (accesible) ni el diseño de escritorio
+   (puntero fino). `!important` porque gana a las utilidades text-* de Tailwind. */
+@media (hover: none) and (pointer: coarse) {
+  input:not([type='checkbox']):not([type='radio']):not([type='range']),
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
+}
+
+/* ── Selects: apariencia propia + alto cómodo ────────────────────────────────
+   Los <select> NATIVOS ignoran la altura CSS en varios navegadores (Safari, y a
+   veces Chrome), por eso "se veían igual" al subir el padding. Se les quita la
+   apariencia nativa (appearance:none) para poder controlar el alto de verdad, y
+   se les pone una flecha propia. Global: aplica a todos los <select> del sitio.
+   Solo afecta alto/flecha; ancho, color y borde siguen viniendo de su clase. */
+select {
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  padding-right: 2.5rem;   /* espacio para la flecha propia */
+  background-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='16'%20height='16'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='%239ca3af'%20stroke-width='2.2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M6%209l6%206%206-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.85rem center;
+  background-size: 16px;
+}
+select::-ms-expand { display: none; }

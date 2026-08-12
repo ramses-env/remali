@@ -64,13 +64,89 @@ Lo mínimo indispensable para que arranque en Railway:
 | `SECRET_KEY` | Clave de Django. Larga y aleatoria. |
 | `DEBUG` | `False` en producción, siempre. |
 | `MYSQL_URL` / `DATABASE_URL` | Las inyecta solo Railway al agregar el servicio MySQL. |
-| `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET` | Imágenes y respaldos. El *secret* da control total del almacenamiento. |
+| `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET` | Imágenes (solo imágenes: los respaldos de la base NO van a Cloudinary). El *secret* da control total del almacenamiento. |
+| `BACKUP_LOCAL_DIR` | Dónde escribe los respaldos el cron. En Railway tiene que apuntar a un **volumen montado** (`/data/backups`); si no, se pierden en cada despliegue. |
 | `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD` | SMTP para los avisos. Van en el entorno, **no** en la configuración del panel (ahí quedarían en texto plano en la base). |
 | `GOOGLE_CLIENT_ID` | Entrar con Google. Es público; el *client secret* no se usa en este flujo. |
 
 `ALLOWED_HOSTS`, `CSRF_TRUSTED_ORIGINS` y `CORS_ALLOWED_ORIGINS` se pueden dejar
 vacías: `settings.py` ya incluye `remali.mx`, `www.remali.mx`, el dominio de
 Railway y localhost. Lo que pongas ahí **se suma** a esa lista.
+
+---
+
+## Redis: prueba local primero
+
+Para producción conviene habilitar Redis por dos motivos:
+
+1. el cache deja de vivir por proceso y se vuelve **compartido**;
+2. los WebSockets de Channels sí cruzan entre workers, que es lo que importa en Railway.
+
+### Levantar Redis en local
+
+Con Docker:
+
+```bash
+docker compose -f docker-compose.redis.yml up -d
+```
+
+Luego en `backend/.env.dev`:
+
+```env
+REDIS_URL=redis://127.0.0.1:6379/1
+```
+
+Reinicia Django y valida con:
+
+```bash
+cd backend
+../env/bin/python manage.py check_redis --strict
+```
+
+Si todo está bien verás que cache y Channels pasan la prueba sobre Redis.
+
+### Respaldos: el volumen NO es opcional
+
+El respaldo se guarda en un directorio del disco, no en Cloudinary. Antes intentaba
+subirlo a Cloudinary y **tronaba todos los días**: Cloudinary lo recibe por el
+storage de imágenes y lo rechaza con "Invalid image file". Y aunque se arreglara
+mandándolo como archivo "raw", tampoco debe ir ahí: los assets de Cloudinary se
+sirven por URL pública y el volcado lleva hashes de contraseñas y datos de clientes.
+
+En local:
+
+```bash
+cd backend && ../env/bin/python manage.py respaldar_bd
+```
+
+En Railway hace falta un **volumen**, porque el disco del contenedor se borra en
+cada despliegue — justo cuando más falta haría el respaldo:
+
+1. En el servicio **cron**: *Settings → Volumes → New Volume*, punto de montaje `/data`.
+2. En ese mismo servicio, variable `BACKUP_LOCAL_DIR=/data/backups`.
+3. Desplegar y revisar los logs: debe decir `Respaldo listo: /data/backups/remali-….json.gz`.
+
+Si el destino no parece un volumen, el comando lo advierte en los logs. Y si el
+respaldo falla, además de salir con error deja una notificación en el panel
+(*Configuración*), para que un cron roto se note sin ir a leer logs.
+
+Retención: conserva los 30 más recientes y poda el resto. Se ajusta con
+`--retener N` en el start command del cron.
+
+**Copia fuera de Railway.** Un volumen en el mismo proveedor no protege contra
+perder la cuenta. Bájate un respaldo a mano de vez en cuando, o manda una copia a
+otro lado. Mínimo: una vez al mes, y probar que restaura.
+
+### Pasarlo luego a Railway
+
+1. Agrega un servicio **Redis** en Railway.
+2. Copia su URL a la variable `REDIS_URL` del servicio web.
+3. Pon la misma `REDIS_URL` también en el servicio cron.
+4. Despliega y valida otra vez con:
+
+```bash
+python manage.py check_redis --strict
+```
 
 ---
 

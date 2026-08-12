@@ -13,6 +13,33 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
+/** "DEMOLICIÓN" → "Demolición", "DEMOLEDOR 11 KG" → "Demoledor 11 Kg".
+ *  Para mostrar en Título nombres que en la data vienen en MAYÚSCULAS (categorías,
+ *  modelos). Deja los conectores en minúscula (de, del, la…) para que se lea natural. */
+export function tituloCaso(texto: string | null | undefined): string {
+  const conectores = new Set(['de', 'del', 'la', 'las', 'los', 'y', 'e', 'a', 'en', 'con', 'el'])
+  return (texto || '').trim().toLowerCase().split(/\s+/)
+    .map((w, i) => (i > 0 && conectores.has(w)) ? w : (w.charAt(0).toUpperCase() + w.slice(1)))
+    .join(' ')
+}
+
+/** Teléfono: SOLO dígitos y máximo 10 (los de México son de 10). Úsalo en el
+ *  onChange de todo input de teléfono para que no admita letras ni de más. */
+export function soloTelefono(v: string | null | undefined): string {
+  return (v || '').replace(/\D/g, '').slice(0, 10)
+}
+
+/** true si el teléfono ya tiene los 10 dígitos exactos. */
+export function telefonoValido(v: string | null | undefined): boolean {
+  return soloTelefono(v).length === 10
+}
+
+/** Email SIEMPRE en minúsculas y sin espacios (no existen correos con espacios).
+ *  Úsalo en el onChange de todo input de correo: nunca se guarda en MAYÚSCULAS. */
+export function normalizarEmail(v: string | null | undefined): string {
+  return (v || '').replace(/\s+/g, '').toLowerCase()
+}
+
 /** '1200', 1200 o null → número o null. La API manda los decimales como string. */
 export function toNumber(v: unknown): number | null {
   const n = typeof v === 'string' ? parseFloat(v) : typeof v === 'number' ? v : null

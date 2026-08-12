@@ -8,15 +8,15 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework import permissions
 
-from maquinaria.permissions import IsAdminGroupOrStaff, EsOperador
-from .models import Venta, ItemVenta
+from maquinaria.permissions import IsAdminGroupOrStaff, EsOperador, PuedeUsarCaja, puede_de
+from .models import Venta, ItemVenta, SesionCaja, MovimientoCaja
 
 logger = logging.getLogger(__name__)
 
 
 
 @api_view(['POST'])
-@permission_classes([EsOperador])   # el técnico puede cerrar la venta
+@permission_classes([PuedeUsarCaja])   # la caja: cajero, gerente y administración; no el técnico de campo
 def venta_mostrador(request):
     """Venta de mostrador de refacciones al público.
 
@@ -28,6 +28,11 @@ def venta_mostrador(request):
     items = datos.get('items') or []
     if not items:
         return Response({'detalle': 'Agrega al menos una refacción'}, status=400)
+    # La caja opera dentro de un turno: sin una sesión abierta no se registra la
+    # venta. El frontend usa el código 'sin_caja' para ofrecer abrir la caja.
+    sesion = SesionCaja.objects.filter(usuario=request.user, estado=SesionCaja.ABIERTA).select_related('caja').first()
+    if not sesion:
+        return Response({'detalle': 'Debes abrir una caja para registrar esta operación.', 'codigo': 'sin_caja'}, status=400)
     try:
         with transaction.atomic():
             venta = Venta.objects.create(
@@ -58,6 +63,16 @@ def venta_mostrador(request):
                 raise ValueError('No se agregó ninguna refacción válida')
             venta.refresh_from_db()
 
+            # Movimiento de caja de la venta: entra al turno. Solo el efectivo
+            # toca el cajón; tarjeta/transferencia se registran para el corte del
+            # turno pero no cuentan al arqueo de efectivo.
+            MovimientoCaja.objects.create(
+                sesion=sesion, caja=sesion.caja, usuario=request.user,
+                tipo=MovimientoCaja.VENTA, metodo_pago=venta.metodo_pago,
+                afecta_efectivo=(venta.metodo_pago == 'efectivo'), monto=venta.total,
+                venta=venta, concepto=f'Venta {venta.folio or ("#" + str(venta.id))}',
+            )
+
             # Solicitud de factura (si el cliente la pedirá).
             if datos.get('requiere_factura'):
                 try:
@@ -77,9 +92,76 @@ def venta_mostrador(request):
 
     return Response({
         'detalle': 'Venta registrada',
-        'venta': {'id': venta.id, 'subtotal': str(venta.subtotal), 'iva': str(venta.iva), 'total': str(venta.total)},
+        'venta': {'id': venta.id, 'folio': venta.folio, 'subtotal': str(venta.subtotal), 'iva': str(venta.iva), 'total': str(venta.total)},
         'ticket_url': f'/api/ventas/{venta.id}/ticket/',
+        'sesion_id': sesion.id,
     }, status=201)
+
+
+@api_view(['GET'])
+@permission_classes([PuedeUsarCaja])
+def corte_caja(request):
+    """Corte de caja (arqueo) de las ventas de mostrador de un día.
+
+    El cajero ve solo lo suyo; de administración para arriba se ve la caja de
+    todos, o la de un cajero en concreto (?cajero=<id>). Solo ventas de mostrador
+    (refacciones) y activas: la caja es el mostrador, no la venta de maquinaria.
+
+    Devuelve lo esperado por método (efectivo/tarjeta/transferencia), el total y
+    los tickets del día; el conteo físico y la diferencia los pone la interfaz.
+    Los pagos combinados se cuentan por su método dominante, que es lo que guarda
+    la venta; el desglose fino de un pago mixto no se reparte aquí.
+    """
+    from decimal import Decimal
+    from django.utils import timezone
+
+    dia = timezone.localdate()
+    pedida = (request.query_params.get('fecha') or '').strip()
+    if pedida:
+        try:
+            dia = _dt.date.fromisoformat(pedida)
+        except ValueError:
+            pass
+
+    qs = (Venta.objects.filter(estado='activa', inventario__isnull=True, fecha__date=dia)
+          .select_related('usuario').prefetch_related('items').order_by('-fecha'))
+
+    # Quien no ve las cuentas del negocio (el cajero) solo ve SU caja. Arriba de
+    # ahí se ve la de todos, o la de un cajero puntual.
+    ver_todo = bool(puede_de(request.user).get('ver_dinero'))
+    if ver_todo:
+        cid = (request.query_params.get('cajero') or '').strip()
+        if cid.isdigit():
+            qs = qs.filter(usuario_id=int(cid))
+    else:
+        qs = qs.filter(usuario=request.user)
+
+    metodos = {'efectivo': [0, Decimal('0')], 'tarjeta': [0, Decimal('0')], 'transferencia': [0, Decimal('0')]}
+    movimientos = []
+    total = Decimal('0')
+    for v in qs:
+        m = v.metodo_pago if v.metodo_pago in metodos else 'efectivo'
+        importe = v.total or Decimal('0')
+        metodos[m][0] += 1
+        metodos[m][1] += importe
+        total += importe
+        movimientos.append({
+            'id': v.id, 'folio': v.folio, 'hora': v.fecha,
+            'cliente': v.nombre_cliente or 'Público general',
+            'metodo_pago': v.metodo_pago,
+            'piezas': sum(i.cantidad for i in v.items.all()),
+            'total': str(importe),
+            'cajero': getattr(v.usuario, 'username', None),
+        })
+
+    return Response({
+        'fecha': dia,
+        'ver_todo': ver_todo,
+        'por_metodo': {k: {'tickets': c, 'total': str(s)} for k, (c, s) in metodos.items()},
+        'tickets': len(movimientos),
+        'total': str(total),
+        'movimientos': movimientos,
+    })
 
 
 def _rango_fechas(params):
@@ -98,9 +180,9 @@ def exportar_ventas_csv(request):
     """Reporte de ventas en CSV (abre en Excel). Respeta ?estado=&desde=&hasta=."""
     estado = (request.query_params.get('estado') or '').strip().lower()
     desde, hasta = _rango_fechas(request.query_params)
-    qs = (Venta.objects.select_related('inventario__equipo', 'empresa', 'usuario', 'cotizacion')
+    qs = (Venta.objects.select_related('inventario__equipo', 'equipo', 'empresa', 'usuario', 'cotizacion')
           .prefetch_related('solicitudes_factura').order_by('-fecha'))
-    if estado in ('activa', 'cancelada'):
+    if estado in ('activa', 'cancelada', 'apartada'):
         qs = qs.filter(estado=estado)
     if desde:
         qs = qs.filter(fecha__date__gte=desde)
@@ -112,28 +194,35 @@ def exportar_ventas_csv(request):
     resp.write('﻿')  # BOM: Excel abre bien los acentos
     w = csv.writer(resp)
     w.writerow(['Fecha', 'Venta #', 'Cliente', 'Teléfono', 'Empresa', 'Equipo', 'Código',
-                'Método de pago', 'Subtotal', 'IVA', 'Total', 'Estado', 'Facturación'])
+                'Método de pago', 'Subtotal', 'IVA', 'Total', 'Pagado', 'Saldo', 'Estado', 'Facturación'])
     from decimal import Decimal
+    # Ingreso = solo ventas CONSUMADAS (activas). Un apartado aún no es ingreso:
+    # se cuenta su saldo aparte como "por cobrar".
     tsub = tiva = ttot = Decimal('0')
+    tapart = Decimal('0')
     for v in qs:
         inv = v.inventario
         fac = next((s.get_estado_display() for s in v.solicitudes_factura.all() if s.estado != 'cancelada'), '—')
-        if v.estado != 'cancelada':
+        if v.estado == 'activa':
             tsub += v.subtotal or 0; tiva += v.iva or 0; ttot += v.total or 0
+        elif v.estado == 'apartada':
+            tapart += v.saldo_pendiente()
         w.writerow([
             v.fecha.strftime('%Y-%m-%d %H:%M') if v.fecha else '',
             v.id,
             v.nombre_cliente or (v.empresa.nombre if v.empresa_id else '') or 'Público general',
             v.telefono_cliente or '',
             v.empresa.nombre if v.empresa_id else '',
-            (inv.equipo.modelo if inv and inv.equipo else '') or 'Venta mostrador',
+            (inv.equipo.modelo if inv and inv.equipo else '') or (v.equipo.modelo if v.equipo_id else '') or 'Venta mostrador',
             inv.codigo if inv else '',
             v.get_metodo_pago_display(),
             v.subtotal, v.iva, v.total,
+            v.pagado(), v.saldo_pendiente(),
             v.get_estado_display(), fac,
         ])
     w.writerow([])
-    w.writerow(['', '', '', '', '', '', '', 'TOTALES (sin canceladas)', tsub, tiva, ttot, '', ''])
+    w.writerow(['', '', '', '', '', '', '', 'TOTALES (solo consumadas)', tsub, tiva, ttot, '', '', '', ''])
+    w.writerow(['', '', '', '', '', '', '', 'Apartados por cobrar (saldo)', '', '', '', '', tapart, '', ''])
     return resp
 
 
@@ -142,7 +231,7 @@ def exportar_ventas_csv(request):
 def listar_ventas(request):
     """Lista de ventas (incluye ventas de maquinaria con su unidad)."""
     qs = Venta.objects.all().select_related(
-        'inventario', 'inventario__equipo', 'usuario', 'cliente_usuario', 'empresa', 'cotizacion'
+        'inventario', 'inventario__equipo', 'equipo', 'usuario', 'cliente_usuario', 'empresa', 'cotizacion'
     ).prefetch_related('solicitudes_factura').order_by('-fecha')
 
     solo_maquinaria = (request.query_params.get('maquinaria') or '') in ('1', 'true', 'True')
@@ -150,7 +239,7 @@ def listar_ventas(request):
         qs = qs.filter(inventario__isnull=False)
 
     estado = (request.query_params.get('estado') or '').strip().lower()
-    if estado in ('activa', 'cancelada'):
+    if estado in ('activa', 'cancelada', 'apartada'):
         qs = qs.filter(estado=estado)
 
     # Filtro por periodo (año/mes/rango). Sin periodo pedido → el año en curso,
@@ -177,9 +266,16 @@ def listar_ventas(request):
             'subtotal': str(v.subtotal),
             'iva': str(v.iva),
             'total': str(v.total),
+            'pagado': str(v.pagado()),
+            'saldo': str(v.saldo_pendiente()),
+            'sobre_pedido': v.sobre_pedido,
+            'fecha_estimada_entrega': v.fecha_estimada_entrega,
+            'entregada_en': v.entregada_en,
             'metodo_pago': v.metodo_pago,
             'fecha': v.fecha,
             'vendedor': getattr(v.usuario, 'username', None),
+            # Rastro si el precio se ajustó a mano al vender (de lista X → Y + motivo).
+            'nota_ajuste': v.nota_ajuste or None,
             # Cuenta de cliente ligada (por la liga de vinculación), si la hay.
             'cuenta': ((v.cliente_usuario.get_full_name() or v.cliente_usuario.username)
                        if v.cliente_usuario_id else None),
@@ -197,6 +293,9 @@ def listar_ventas(request):
                 'numero_serie': inv.numero_serie,
                 'equipo': inv.equipo.modelo if inv.equipo else None,
             },
+            # Equipo pedido cuando aún no hay unidad (apartado sobre pedido).
+            'equipo': ((inv.equipo.modelo if inv and inv.equipo else None)
+                       or (v.equipo.modelo if v.equipo_id else None)),
         })
     return Response({'ventas': data, 'total': len(data)})
 
@@ -206,18 +305,315 @@ def listar_ventas(request):
 def ventas_mias(request):
     """Compras del cliente en sesión (ligadas por la liga de vinculación)."""
     qs = (Venta.objects.filter(cliente_usuario=request.user)
-          .select_related('inventario', 'inventario__equipo', 'cotizacion')
+          .select_related('inventario', 'inventario__equipo', 'equipo', 'cotizacion')
           .order_by('-fecha')[:100])
     data = []
     for v in qs:
         inv = v.inventario
         concepto = (inv.equipo.modelo if inv and inv.equipo else None) \
+            or (v.equipo.modelo if v.equipo_id else None) \
             or (v.cotizacion.folio if v.cotizacion_id and v.cotizacion else None) or 'Compra'
         data.append({
             'id': v.id, 'fecha': v.fecha, 'total': str(v.total),
+            'pagado': str(v.pagado()), 'saldo': str(v.saldo_pendiente()),
+            # Historial de abonos: el cliente ve lo que ha pagado de su apartado,
+            # igual que en sus rentas. Antes solo veía el saldo, sin el desglose.
+            'pagos': v.pagos or [],
+            'sobre_pedido': v.sobre_pedido,
+            'pedido_fase': v.pedido_fase,
+            'fecha_estimada_entrega': v.fecha_estimada_entrega,
             'estado': v.estado, 'metodo_pago': v.metodo_pago, 'concepto': concepto,
         })
     return Response({'compras': data})
+
+
+# ─────────────────────────────────────────────
+#  PEDIDOS Y APARTADOS (venta con anticipo)
+# ─────────────────────────────────────────────
+def _serialize_pedido(v):
+    inv = v.inventario
+    return {
+        'id': v.id,
+        'folio': v.folio,
+        'nombre_cliente': v.nombre_cliente,
+        'telefono_cliente': v.telefono_cliente,
+        'empresa': v.empresa.nombre if v.empresa_id else None,
+        'cuenta': ((v.cliente_usuario.get_full_name() or v.cliente_usuario.username)
+                   if v.cliente_usuario_id else None),
+        'estado': v.estado,
+        'sobre_pedido': v.sobre_pedido,
+        'total': str(v.total),
+        'pagado': str(v.pagado()),
+        'saldo': str(v.saldo_pendiente()),
+        'pagos': v.pagos or [],
+        'metodo_pago': v.metodo_pago,
+        'anticipo_nota': v.anticipo_nota or None,
+        'fecha': v.fecha,
+        'fecha_estimada_entrega': v.fecha_estimada_entrega,
+        'pedido_fase': v.pedido_fase,
+        'entregada_en': v.entregada_en,
+        'vendedor': getattr(v.usuario, 'username', None),
+        'equipo': ((inv.equipo.modelo if inv and inv.equipo else None)
+                   or (v.equipo.modelo if v.equipo_id else None)),
+        'equipo_id': (inv.equipo_id if inv else v.equipo_id),
+        'unidad': None if not inv else {
+            'id': inv.id, 'codigo': inv.codigo,
+            'equipo': inv.equipo.modelo if inv.equipo else None,
+        },
+    }
+
+
+@api_view(['GET'])
+@permission_classes([EsOperador])
+def pedidos_adeudos(request):
+    """Ventas 'apartada' (con anticipo): lo que falta por cobrar y entregar.
+    Es la sección 'Pedidos y apartados'."""
+    from decimal import Decimal
+    qs = (Venta.objects.filter(estado='apartada')
+          .select_related('inventario', 'inventario__equipo', 'equipo', 'empresa', 'usuario', 'cliente_usuario')
+          .order_by('fecha_estimada_entrega', '-fecha'))
+    filas, total = [], Decimal('0')
+    for v in qs:
+        filas.append(_serialize_pedido(v))
+        total += v.saldo_pendiente()
+    clientes = len({(f.get('cuenta') or f.get('empresa') or f.get('nombre_cliente') or str(f['id'])) for f in filas})
+    return Response({'pedidos': filas, 'total': str(total), 'clientes': clientes})
+
+
+@api_view(['POST'])
+@permission_classes([EsOperador])
+def registrar_abono_venta(request, pk: int):
+    """Registra un abono a un apartado (baja el saldo). NO toca caja (consistente
+    con renta y con la venta de maquinaria)."""
+    from decimal import Decimal, InvalidOperation
+    from django.utils import timezone
+    datos = request.data or {}
+    try:
+        v = Venta.objects.get(pk=pk)
+    except Venta.DoesNotExist:
+        return Response({'detalle': 'Venta no encontrada'}, status=404)
+    if v.estado == 'cancelada':
+        return Response({'detalle': 'La venta está cancelada.'}, status=400)
+    try:
+        monto = Decimal(str(datos.get('monto') or 0))
+    except (InvalidOperation, TypeError):
+        return Response({'detalle': 'Monto inválido.'}, status=400)
+    if monto <= 0:
+        return Response({'detalle': 'El abono debe ser mayor a 0.'}, status=400)
+    metodo = (str(datos.get('metodo') or 'efectivo').lower())
+    if metodo not in ('efectivo', 'tarjeta', 'transferencia'):
+        return Response({'detalle': 'Método de pago inválido.'}, status=400)
+    saldo = v.saldo_pendiente()
+    if monto > saldo:
+        return Response({'detalle': f'El abono (${monto}) es mayor al saldo (${saldo}).'}, status=400)
+    sello = timezone.now().isoformat()
+    pagos = list(v.pagos or [])
+    pagos.append({'fecha': sello, 'monto': str(monto), 'metodo': metodo,
+                  'por': request.user.get_username() if request.user.is_authenticated else ''})
+    v.pagos = pagos
+    v.metodo_pago = metodo
+    v.save(update_fields=['pagos', 'metodo_pago'])
+    return Response({'detalle': 'Abono registrado', 'pedido': _serialize_pedido(v)})
+
+
+@api_view(['POST'])
+@permission_classes([EsOperador])
+def entregar_venta(request, pk: int):
+    """Cierra un apartado: exige saldo 0; si es sobre pedido, asigna la unidad que
+    ya llegó (`unidad_id`). Marca la unidad vendida y la venta 'activa'."""
+    from inventario.models import Inventario
+    datos = request.data or {}
+    with transaction.atomic():
+        try:
+            v = Venta.objects.select_for_update().select_related('inventario', 'equipo', 'cliente_usuario').get(pk=pk)
+        except Venta.DoesNotExist:
+            return Response({'detalle': 'Venta no encontrada'}, status=404)
+        if v.estado != 'apartada':
+            return Response({'detalle': 'Solo se puede entregar un apartado.'}, status=400)
+        if v.saldo_pendiente() > 0:
+            return Response({'detalle': f'Falta liquidar el saldo (${v.saldo_pendiente()}). Registra el abono antes de entregar.'}, status=400)
+        unidad = None
+        if v.sobre_pedido or not v.inventario_id:
+            unidad_id = datos.get('unidad_id')
+            if not unidad_id:
+                return Response({'detalle': 'Elige la unidad que llegó para entregar el pedido.'}, status=400)
+            try:
+                unidad = Inventario.objects.select_for_update().select_related('equipo').get(pk=int(unidad_id))
+            except (ValueError, Inventario.DoesNotExist):
+                return Response({'detalle': 'Unidad no encontrada.'}, status=404)
+            if v.equipo_id and unidad.equipo_id != v.equipo_id:
+                return Response({'detalle': 'La unidad no corresponde al equipo pedido.'}, status=400)
+            if not unidad.puede_venderse():
+                return Response({'detalle': f'La unidad {unidad.codigo} no está disponible.'}, status=400)
+        try:
+            v.entregar(unidad=unidad, user=request.user)
+        except ValueError as e:
+            return Response({'detalle': str(e)}, status=400)
+        try:
+            from maquinaria.models import crear_notificacion
+            if v.cliente_usuario_id:
+                cod = v.inventario.codigo if v.inventario_id else ''
+                crear_notificacion(
+                    'venta', 'Tu compra fue entregada',
+                    f'Se entregó tu máquina{(" (" + cod + ")") if cod else ""}. ¡Gracias por tu compra!',
+                    seccion='mis-compras', usuario=v.cliente_usuario, data={'venta_id': v.id},
+                )
+        except Exception:
+            pass
+    return Response({'detalle': 'Entregado', 'pedido': _serialize_pedido(v)})
+
+
+@api_view(['POST'])
+@permission_classes([EsOperador])
+def actualizar_pedido_fase(request, pk: int):
+    """Avanza el seguimiento de un SOBRE PEDIDO (confirmado → en_camino → en_sucursal)
+    y avisa al cliente si tiene cuenta ligada. La entrega final se hace aparte."""
+    try:
+        v = Venta.objects.select_related('equipo', 'inventario', 'inventario__equipo', 'cliente_usuario').get(pk=pk)
+    except Venta.DoesNotExist:
+        return Response({'detalle': 'Pedido no encontrado.'}, status=404)
+    if not v.sobre_pedido:
+        return Response({'detalle': 'Solo los pedidos sobre pedido tienen seguimiento.'}, status=400)
+    if v.estado != 'apartada':
+        return Response({'detalle': 'El pedido ya se entregó o canceló.'}, status=400)
+    fase = str(request.data.get('fase') or '').strip()
+    if fase not in dict(Venta.PEDIDO_FASES):
+        return Response({'detalle': 'Fase inválida.'}, status=400)
+
+    v.pedido_fase = fase
+    v.save(update_fields=['pedido_fase'])
+
+    try:
+        from maquinaria.models import crear_notificacion
+        if v.cliente_usuario_id:
+            equipo = ((v.equipo.modelo if v.equipo_id else None)
+                      or (v.inventario.equipo.modelo if v.inventario_id and v.inventario.equipo else None)
+                      or 'tu equipo')
+            eta = f' Llega aprox. el {v.fecha_estimada_entrega:%d/%m/%Y}.' if (fase == 'en_camino' and v.fecha_estimada_entrega) else ''
+            cuerpo = {
+                'confirmado': f'Tu pedido de {equipo} está confirmado. Te avisamos cuando salga del proveedor.',
+                'en_camino': f'{equipo} ya viene en camino desde el proveedor.{eta}',
+                'en_sucursal': f'¡{equipo} llegó a sucursal! Pasa a recogerla; liquida el saldo si te falta.',
+            }[fase]
+            crear_notificacion(
+                'venta', 'Actualización de tu pedido', cuerpo,
+                seccion='mis-compras', ref=f'pedido-fase-{v.id}-{fase}',
+                usuario=v.cliente_usuario, data={'venta_id': v.id, 'fase': fase},
+            )
+    except Exception:
+        pass
+    return Response({'detalle': 'Seguimiento actualizado', 'pedido': _serialize_pedido(v)})
+
+
+@api_view(['POST'])
+@permission_classes([EsOperador])
+def crear_pedido(request):
+    """Aparta una máquina SOBRE PEDIDO (sin stock): crea una venta 'apartada' con
+    anticipo y sin unidad; la unidad se asigna al entregar (cuando llega)."""
+    from decimal import Decimal
+    from django.utils import timezone
+    from maquinaria.models import Equipo, ConfiguracionSitio
+    from ventas.models import evaluar_anticipo
+    datos = request.data or {}
+    try:
+        equipo = Equipo.objects.get(pk=int(datos.get('equipo_id')))
+    except (TypeError, ValueError, Equipo.DoesNotExist):
+        return Response({'detalle': 'Equipo no encontrado.'}, status=404)
+    # Puente desde una cotización de SOBRE PEDIDO: si viene `cotizacion_id`, el
+    # pedido nace ligado a esa cotización (hereda la cuenta del cliente y, tras
+    # guardar, consume su cupón). Es el equivalente a vender_unidad, pero para
+    # una máquina que NO está en stock.
+    cot = None
+    cot_id = datos.get('cotizacion_id')
+    if cot_id:
+        from cotizaciones.models import Cotizacion
+        try:
+            cot = Cotizacion.objects.get(pk=int(cot_id))
+        except (TypeError, ValueError, Cotizacion.DoesNotExist):
+            return Response({'detalle': 'La cotización indicada no existe.'}, status=404)
+        if cot.estado != 'aceptada':
+            return Response({'detalle': 'Solo se puede concretar una cotización aceptada.'}, status=400)
+        if cot.conversiones.exists():
+            return Response({'detalle': 'Esta cotización ya se convirtió.'}, status=400)
+    # Un sobre pedido lo surte el proveedor a petición del cliente: sirve cualquier
+    # equipo con precio de venta (no exigimos el flag 'permite_sobre_pedido', que
+    # solo rige cómo se muestra en el catálogo público).
+    try:
+        precio = Decimal(str(datos.get('precio') or equipo.precio_venta or 0))
+    except Exception:
+        precio = Decimal('0')
+    if precio <= 0:
+        return Response({'detalle': 'El equipo no tiene precio de venta definido. Ponle uno para poder pedirlo.'}, status=400)
+
+    metodo = (str(datos.get('metodo_pago') or 'efectivo').lower())
+    if metodo not in ('efectivo', 'tarjeta', 'transferencia'):
+        metodo = 'efectivo'
+    try:
+        anticipo = Decimal(str(datos.get('anticipo') or 0))
+    except Exception:
+        anticipo = Decimal('0')
+    anticipo_nota, err = evaluar_anticipo(precio, anticipo, datos.get('codigo_ajuste'), user=request.user)
+    if err:
+        return Response({'detalle': err['detalle']}, status=err['status'])
+
+    # Fecha estimada de entrega: la que capture el admin (ETA real del proveedor),
+    # o, si no la da, la calculada por días del equipo / general del sitio.
+    fee = None
+    fee_in = (str(datos.get('fecha_estimada_entrega') or '')).strip()
+    if fee_in:
+        try:
+            fee = _dt.date.fromisoformat(fee_in)
+        except ValueError:
+            fee = None
+    if not fee:
+        dias = equipo.dias_entrega_pedido or ConfiguracionSitio.get_solo().dias_entrega_pedido or 0
+        fee = (timezone.localdate() + _dt.timedelta(days=dias)) if dias else None
+
+    v = Venta(
+        usuario=request.user if request.user.is_authenticated else None,
+        # Cuenta del cliente (opcional): si se liga, el cliente ve su pedido y su
+        # ETA en "Mis compras" y puede seguirlo hasta que llegue. Si el pedido nace
+        # de una cotización, hereda la cuenta del cliente que la pidió.
+        cliente_usuario_id=(datos.get('cliente_usuario_id') or (cot.usuario_id if cot else None) or None),
+        nombre_cliente=(datos.get('nombre_cliente') or '').strip(),
+        telefono_cliente=(datos.get('telefono_cliente') or '').strip(),
+        empresa_id=(datos.get('empresa_id') or None),
+        equipo=equipo,
+        sobre_pedido=True,
+        estado='apartada',
+        inventario=None,
+        precio_maquina=precio,
+        metodo_pago=metodo,
+        anticipo_nota=anticipo_nota,
+        fecha_estimada_entrega=fee,
+        cotizacion=cot,
+    )
+    try:
+        v.save()
+        sello = timezone.now().isoformat()
+        por = request.user.get_username() if request.user.is_authenticated else ''
+        v.pagos = [{'fecha': sello, 'monto': str(anticipo), 'metodo': metodo, 'por': por}]
+        v.save(update_fields=['pagos'])
+        # El cliente "gasta" su cupón (5% de bienvenida) al concretarse el pedido.
+        # Idempotente y a prueba de fallos: un tropiezo marcándolo jamás debe
+        # tumbar un pedido ya guardado.
+        if cot is not None and getattr(cot, 'cupon_id', None):
+            try:
+                cot.cupon.marcar_usado()
+            except Exception:
+                pass
+    except ValueError as e:
+        return Response({'detalle': str(e)}, status=400)
+    try:
+        from maquinaria.models import crear_notificacion
+        crear_notificacion(
+            'venta', f'Pedido registrado · {equipo.modelo}',
+            f'{v.nombre_cliente or "Cliente"} pidió {equipo.modelo}: anticipo ${v.pagado():,.2f} de ${v.total:,.2f} (saldo ${v.saldo_pendiente():,.2f}).',
+            seccion='pedidos', data={'venta_id': v.id, 'equipo_id': equipo.id},
+        )
+    except Exception:
+        pass
+    return Response({'detalle': 'Pedido registrado', 'pedido': _serialize_pedido(v)}, status=201)
 
 
 @api_view(['POST', 'PATCH'])
@@ -231,11 +627,35 @@ def cancelar_venta(request, pk: int):
     if v.estado == 'cancelada':
         return Response({'detalle': 'La venta ya está cancelada'}, status=400)
 
+    # Acción sensible: exige el CÓDIGO PERSONAL del operador que la ejecuta.
+    from maquinaria.seguridad import verificar_codigo
+    ok, detalle, status_cod, _c = verificar_codigo(request.user, (request.data or {}).get('codigo_seguridad'))
+    if not ok:
+        return Response({'detalle': detalle}, status=status_cod)
+
     motivo = (request.data or {}).get('motivo', '').strip()
-    v.cancelar(motivo=motivo)
+    quien = getattr(request.user, 'username', '') or 's/d'
+    v.cancelar(motivo=(f'{motivo} — autorizó {quien}' if motivo else f'Autorizó {quien}'))
+
+    # Reverso de caja (auditoría): si la venta entró a un turno, se crea un
+    # movimiento INVERSO (devolución) y se conserva el original. Nunca se borra.
+    mov = MovimientoCaja.objects.filter(venta=v, tipo=MovimientoCaja.VENTA).order_by('id').first()
+    if mov and not MovimientoCaja.objects.filter(venta=v, tipo=MovimientoCaja.DEVOLUCION).exists():
+        MovimientoCaja.objects.create(
+            sesion=mov.sesion, caja=mov.caja, usuario=request.user,
+            tipo=MovimientoCaja.DEVOLUCION, metodo_pago=mov.metodo_pago,
+            afecta_efectivo=mov.afecta_efectivo, monto=-mov.monto, venta=v,
+            concepto=f'Cancelación de {v.folio or ("#" + str(v.id))}' + (f' · {motivo}' if motivo else ''),
+        )
 
     try:
         from maquinaria.models import crear_notificacion
+        equipo_nombre = (
+            v.inventario.equipo.modelo
+            if v.inventario_id and v.inventario and v.inventario.equipo
+            else 'tu equipo'
+        )
+        # ── BROADCAST para STAFF ─────────────────────────────────────────────
         crear_notificacion(
             'venta',
             f'Venta cancelada · #{v.id}',
@@ -243,6 +663,22 @@ def cancelar_venta(request, pk: int):
             seccion='ventas',
             data={'venta_id': v.id},
         )
+        # ── PERSONAL para CLIENTE (2ª persona) ─────────────────────────────
+        if v.cliente_usuario_id:
+            try:
+                crear_notificacion(
+                    'venta',
+                    f'Se canceló tu compra de {equipo_nombre}',
+                    f'Tu compra #{v.id} por ${v.total} fue cancelada.'
+                    + (f' Motivo: {motivo}' if motivo else '')
+                    + ' Si tienes dudas, contacta a REMALI.',
+                    seccion='mis-compras',
+                    ref=f'cancelacion-compra-cliente-{v.id}',
+                    usuario=v.cliente_usuario,
+                    data={'venta_id': v.id, 'accion_cliente': 'cancelacion', 'motivo': motivo or ''},
+                )
+            except Exception:
+                pass
     except Exception:
         pass
 

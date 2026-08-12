@@ -21,6 +21,12 @@ export type Capacidades = {
   /** Dar de alta equipo nuevo, distinto de mover el que ya existe. */
   alta_inventario: boolean
   operar_inventario: boolean; reparar: boolean
+  /** La caja: punto de venta de refacciones en el mostrador. */
+  usar_caja: boolean
+  /** Cerrar el turno de caja (arqueo). */
+  corte_caja: boolean
+  /** "Mi jornada": el escritorio del técnico de campo (no cascadea a admin). */
+  jornada_campo: boolean
 }
 
 export type Yo = {
@@ -58,8 +64,14 @@ export function destinoSegun(yo: Yo | null | undefined): string {
  */
 export function destinoTrasEntrar(yo: Yo | null | undefined, next?: string | null): string {
   const base = destinoSegun(yo)
-  if (!next) return base
-  if (!entraAlPanel(yo) && next.startsWith('/dashboard')) return base
+  // Admin/dueño/técnico SIEMPRE entran al panel: su lugar es administrar, no la
+  // tienda ni el perfil de cliente. Un `next` de la tienda (perfil, favoritos,
+  // un equipo…) no los desvía — para eso entraron.
+  if (entraAlPanel(yo)) return '/dashboard'
+  // Cliente (no entra al panel): un `next` que apunte al panel lo mandaría al
+  // guard, que lo rechaza y lo regresa al login con el mismo `next` → bucle
+  // (parpadeo). Para él, una ruta del panel NO es un destino válido.
+  if (!next || next.startsWith('/dashboard')) return base
   return next
 }
 

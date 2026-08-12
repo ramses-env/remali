@@ -3,6 +3,7 @@ import { Route, Routes, useLocation } from 'react-router-dom'
 import Navbar from './components/Navbar'
 import Home from './routes/Home'
 import EquiposList from './routes/EquiposList'
+import Favoritos from './routes/Favoritos'
 import EquipoDetail from './routes/EquipoDetail'
 import Cotizacion from './routes/Cotizacion'
 import Login from './routes/Login'
@@ -16,15 +17,21 @@ import MisRentas from './routes/MisRentas'
 import MisAdeudos from './routes/MisAdeudos'
 import RecordatorioAdeudo from './components/RecordatorioAdeudo'
 import MisCompras from './routes/MisCompras'
+import MisReparaciones from './routes/MisReparaciones'
+import SeguirReparacion from './routes/SeguirReparacion'
 import VincularCuenta from './routes/VincularCuenta'
 import AutorizarCotizacion from './routes/AutorizarCotizacion'
+import AutorizarLote from './routes/AutorizarLote'
 import UnidadQR from './routes/UnidadQR'
 import RecordatorioPerfil from './components/RecordatorioPerfil'
 import CambioTipoCotizacion from './components/CambioTipoCotizacion'
 import DockTienda from './components/DockTienda'
+import OnboardingTour from './components/onboarding/OnboardingTour'
+import TODOS_TOURS from './components/onboarding/tours'
 import { AuthSplitScreen } from '@/components/ui/auth-split-screen'
 import Footer from './components/Footer'
 import ErrorBoundary from './components/ErrorBoundary'
+import ErrorPage from './routes/ErrorPage'
 import RequireAdmin from './components/RequireAdmin'
 import CargaGlobal from './components/CargaGlobal'
 import { PriceUnitProvider } from './store/priceUnit'
@@ -84,7 +91,7 @@ function App() {
             /* pb en móvil: reserva el alto del dock flotante para que no tape el
                final del contenido. En md+ el dock no existe, así que sin padding. */
             className="min-h-screen flex flex-col bg-app text-ink pb-24 md:pb-0"
-            style={{ ['--c-gold' as any]: '#f2b736', ['--c-gold-soft' as any]: 'rgba(242,183,54,0.14)' }}
+            style={{ ['--c-gold' as any]: '#FFC61A', ['--c-gold-soft' as any]: 'rgba(255,198,26,0.14)' }}
           >
             <Navbar />
             <div className="flex-1 w-full">
@@ -92,6 +99,7 @@ function App() {
                 <Routes>
                   <Route path="/" element={<Home />} />
                   <Route path="/equipos" element={<EquiposList />} />
+                  <Route path="/favoritos" element={<Favoritos />} />
                   <Route path="/equipo/:id" element={<EquipoDetail />} />
                   <Route path="/cotizacion" element={<Cotizacion />} />
                   {/* El perfil del cliente vive en la tienda, con su navbar y su
@@ -102,25 +110,35 @@ function App() {
                   <Route path="/mis-rentas" element={<MisRentas />} />
                   <Route path="/mis-adeudos" element={<MisAdeudos />} />
                   <Route path="/mis-compras" element={<MisCompras />} />
+                  <Route path="/mis-reparaciones" element={<MisReparaciones />} />
+                  <Route path="/mis-reparaciones/:folio" element={<SeguirReparacion modo="cuenta" />} />
                   <Route path="/vincular/venta/:token" element={<VincularCuenta tipo="venta" />} />
                   <Route path="/vincular/renta/:token" element={<VincularCuenta tipo="renta" />} />
                   <Route path="/vincular/cotizacion/:token" element={<VincularCuenta tipo="cotizacion" />} />
+                  <Route path="/vincular/reparacion/:token" element={<VincularCuenta tipo="reparacion" />} />
+                  <Route path="/seguir/reparacion/:token" element={<SeguirReparacion modo="publico" />} />
                   {/* Liga del JEFE: pública, sin cuenta; autorizar la manda a REMALI */}
                   <Route path="/autorizar/:token" element={<AutorizarCotizacion />} />
+                  {/* Liga del JEFE para un LOTE: autoriza/rechaza varias juntas */}
+                  <Route path="/autorizar-lote/:token" element={<AutorizarLote />} />
                   {/* La página del QR pegado en cada máquina */}
                   <Route path="/u/:codigo" element={<UnidadQR />} />
-                  <Route path="*" element={<Home />} />
+                  <Route path="*" element={<ErrorPage type="404" />} />
                 </Routes>
               </ErrorBoundary>
             </div>
             <Footer />
-            {/* Recordatorio flotante para clientes con el perfil a medias. Vive
-                aquí, no en cada página, para aparecer en toda la tienda. */}
-            <RecordatorioPerfil />
-            {/* Y el de saldos pendientes: 'tienes un adeudo de $X'. */}
-            <RecordatorioAdeudo />
+            {/* Recordatorios flotantes del cliente (perfil a medias, adeudo):
+                apilados en un contenedor para que NO se enciman si salen juntos.
+                El contenedor no bloquea clics; cada alerta sí es interactiva. */}
+            <div className="fixed top-[76px] left-4 right-4 z-40 md:left-auto md:right-5 md:max-w-[360px] flex flex-col gap-3 pointer-events-none">
+              <RecordatorioPerfil />
+              <RecordatorioAdeudo />
+            </div>
             {/* Pregunta al intentar mezclar venta y renta en una cotización. */}
             <CambioTipoCotizacion />
+            {/* Tour guiado de primer uso (solo corre si el cliente es nuevo y no lo completó ya). */}
+            <OnboardingTour tours={TODOS_TOURS} />
             {/* Dock inferior (solo móvil): navegación al alcance del pulgar. */}
             <DockTienda />
           </div>

@@ -4,11 +4,13 @@ import { useAuth } from '../store/auth'
 import CampanaCliente from './CampanaCliente'
 import { useProfile } from '../store/profile'
 import { useCart } from '../store/cart'
+import { useFavoritos } from '../store/favoritos'
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import ThemeToggle from './ThemeToggle'
-import { AvatarInicial } from '@/components/ui/avatar-inicial'
+import { AvatarUsuario } from '@/components/ui/avatar-usuario'
 import LogoRemali from '@/components/ui/logo-remali'
+
 
 export default function Navbar() {
   const { token, logout } = useAuth()
@@ -18,6 +20,7 @@ export default function Navbar() {
   const { user } = useProfile()
   const { state } = useCart()
   const cartCount = state.items.reduce((n, i) => n + i.qty, 0)
+  const { count: favCount } = useFavoritos()
   const [confirm, setConfirm] = useState(false)
   const [scrolled, setScrolled] = useState(false)
 
@@ -71,6 +74,14 @@ export default function Navbar() {
 
         {/* Acciones */}
         <div className="flex items-center gap-3">
+          {/* Favoritos: solo en escritorio. En móvil ya está en el dock inferior,
+              así que se oculta aquí para no duplicar. */}
+          <Link to="/favoritos" aria-label="Tus favoritos" className="relative w-9 h-9 rounded-full border border-edge bg-surface-2 text-mute hover:text-gold transition-colors hidden md:flex items-center justify-center">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M11.995 20.5s-7-4.5-7-10.5a4 4 0 017-2.5 4 4 0 017 2.5c0 6-7 10.5-7 10.5z" /></svg>
+            {favCount > 0 && (
+              <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-gold text-black text-[10px] font-black flex items-center justify-center">{favCount}</span>
+            )}
+          </Link>
           {/* Cotización del cliente: es el módulo de cotizar, no un carrito de
               tienda — el ícono de documento comunica eso (igual que el dock). */}
           <Link to="/cotizacion" aria-label="Tu cotización" className="relative w-9 h-9 rounded-full border border-edge bg-surface-2 text-mute hover:text-gold transition-colors flex items-center justify-center">
@@ -99,9 +110,11 @@ export default function Navbar() {
                 className="flex items-center gap-2 p-1.5 sm:pl-2 sm:pr-3 sm:py-1.5 rounded-full bg-surface-2 text-ink text-sm font-medium hover:text-gold transition-colors"
               >
                 <span className="relative">
-                  <AvatarInicial
+                  <AvatarUsuario
                     nombre={user?.first_name || user?.username}
                     correo={user?.email}
+                    avatarUrl={user?.avatar_url}
+                    fallbackUrl={user?.avatar_url_rol}
                     tamano="sm"
                   />
                   {esCliente && perfilIncompleto && (
@@ -116,17 +129,22 @@ export default function Navbar() {
                 <>
                   <div className="fixed inset-0 z-[80]" onClick={() => setMenuCuenta(false)} />
                   <div role="menu" className="absolute right-0 top-full mt-2 z-[81] w-64 rounded-2xl border border-edge bg-surface shadow-[0_20px_50px_rgba(17,24,39,0.18)] overflow-hidden">
-                    <div className="px-4 py-3.5 border-b border-edge flex items-center gap-3">
-                      <AvatarInicial nombre={user?.first_name || user?.username} correo={user?.email} tamano="md" />
-                      <div className="min-w-0">
+                    {/* El encabezado (nombre + correo) ES el acceso al perfil/panel:
+                        se ahorra un renglón separado de "Perfil". */}
+                    <Link to={esCliente ? '/perfil' : '/dashboard'} onClick={() => setMenuCuenta(false)}
+                      className="px-4 py-3.5 border-b border-edge flex items-center gap-3 hover:bg-surface-2 transition-colors">
+                      <AvatarUsuario
+                        nombre={user?.first_name || user?.username}
+                        correo={user?.email}
+                        avatarUrl={user?.avatar_url}
+                        fallbackUrl={user?.avatar_url_rol}
+                        tamano="md"
+                      />
+                      <div className="min-w-0 flex-1">
                         <p className="text-[14px] font-bold text-ink truncate">{user?.first_name || user?.username}</p>
                         <p className="text-[12px] text-mute truncate">{user?.email}</p>
                       </div>
-                    </div>
-                    <Link to={esCliente ? '/perfil' : '/dashboard'} onClick={() => setMenuCuenta(false)}
-                      className="flex items-center gap-3 px-4 py-3 text-[14px] font-semibold text-ink hover:bg-surface-2 transition-colors">
-                      <svg className="w-4 h-4 text-mute" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.8"><circle cx="12" cy="8" r="4" /><path d="M4.5 20a7.5 7.5 0 0 1 15 0" /></svg>
-                      {esCliente ? 'Perfil' : 'Panel'}
+                      <svg className="w-4 h-4 text-mute shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 18l6-6-6-6" /></svg>
                     </Link>
                     {/* Lo transaccional del cliente vive aquí, al alcance desde
                         cualquier página — no enterrado dentro del perfil. */}
@@ -146,6 +164,11 @@ export default function Navbar() {
                           className="flex items-center gap-3 px-4 py-3 text-[14px] font-semibold text-ink hover:bg-surface-2 transition-colors">
                           <svg className="w-4 h-4 text-mute" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z" /><path d="M3 6h18" /><path d="M16 10a4 4 0 0 1-8 0" /></svg>
                           Mis compras
+                        </Link>
+                        <Link to="/mis-reparaciones" onClick={() => setMenuCuenta(false)}
+                          className="flex items-center gap-3 px-4 py-3 text-[14px] font-semibold text-ink hover:bg-surface-2 transition-colors">
+                          <svg className="w-4 h-4 text-mute" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M14.7 6.3a4 4 0 0 0-5.6 5.6L3 18v3h3l6.1-6.1a4 4 0 0 0 5.6-5.6l-2.5 2.5-2.1-2.1z" /></svg>
+                          Mis reparaciones
                         </Link>
                         <Link to="/mis-adeudos" onClick={() => setMenuCuenta(false)}
                           className="flex items-center gap-3 px-4 py-3 text-[14px] font-semibold text-ink hover:bg-surface-2 transition-colors">
@@ -184,7 +207,7 @@ export default function Navbar() {
             <motion.div
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
               transition={{ duration: 0.2 }}
-              className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50 backdrop-blur-md"
+              className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50 backdrop-blur-md modal-in"
               onClick={() => setConfirm(false)}
             >
               <motion.div

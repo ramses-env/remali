@@ -217,7 +217,7 @@ function BotonExportar({ onClick }: { onClick: () => void }) {
   )
 }
 
-type Section = 'resumen' | 'equipos' | 'inventario' | 'refacciones' | 'reparaciones' | 'cotizaciones' | 'catalogos' | 'empresas' | 'rentas' | 'ventas' | 'facturacion' | 'adeudos' | 'cupones' | 'notificaciones' | 'perfil' | 'ubicaciones' | 'usuarios' | 'configuracion'
+type Section = 'resumen' | 'equipos' | 'inventario' | 'refacciones' | 'reparaciones' | 'cotizaciones' | 'catalogos' | 'empresas' | 'rentas' | 'ventas' | 'pedidos' | 'facturacion' | 'adeudos' | 'cupones' | 'notificaciones' | 'perfil' | 'ubicaciones' | 'usuarios' | 'configuracion'
 
 const SECTION_META: Record<Section, { title: string; subtitle: string }> = {
   resumen: { title: 'Resumen', subtitle: 'Monitorea tus métricas y gestiona tu operación.' },
@@ -229,6 +229,7 @@ const SECTION_META: Record<Section, { title: string; subtitle: string }> = {
   catalogos: { title: 'Clasificación', subtitle: 'Organiza categorías, tipos y marcas.' },
   rentas: { title: 'Rentas', subtitle: 'Gestiona rentas activas, reservas y devoluciones.' },
   ventas: { title: 'Ventas', subtitle: 'Historial de ventas de maquinaria y refacciones.' },
+  pedidos: { title: 'Pedidos y apartados', subtitle: 'Ventas con anticipo: apartados y sobre pedidos. Cobra el saldo y entrega cuando llegue.' },
   facturacion: { title: 'Por facturar', subtitle: 'Ventas y rentas que el cliente pidió facturar. Timbra aparte y márcalas.' },
   adeudos: { title: 'Adeudos', subtitle: 'Rentas con saldo pendiente: quién debe, cuánto y desde cuándo. Registra abonos hasta liquidar.' },
   cupones: { title: 'Cupones', subtitle: 'Crea y administra códigos de descuento.' },
@@ -410,6 +411,7 @@ export default function Dashboard() {
   const [ordenAbrir, setOrdenAbrir] = useState<number | null>(null)
   const [solicitudes, setSolicitudes] = useState<SolicitudFactura[]>([])
   const [adeudos, setAdeudos] = useState<AdeudosDatos>({ rentas: [], total: '0', clientes: 0 })
+  const [pedidos, setPedidos] = useState<PedidosDatos>({ pedidos: [], total: '0', clientes: 0 })
   const [cotAbiertas, setCotAbiertas] = useState(0)
   const [ventas, setVentas] = useState<Venta[]>([])
   const [notifs, setNotifs] = useState<Notif[]>([])
@@ -505,6 +507,11 @@ export default function Dashboard() {
   const loadAdeudos = useCallback(() => {
     api.get<AdeudosDatos>('/rentas/adeudos/').then(r => setAdeudos(r.data || { rentas: [], total: '0', clientes: 0 })).catch(() => {})
   }, [])
+  // Apartados/pedidos con saldo (cuentas por cobrar de VENTA). Junto con las rentas
+  // forman las "cuentas por cobrar unificadas" de Adeudos.
+  const loadPedidos = useCallback(() => {
+    api.get<PedidosDatos>('/ventas/pedidos/').then(r => setPedidos(r.data || { pedidos: [], total: '0', clientes: 0 })).catch(() => {})
+  }, [])
   // Solo el conteo de "abiertas" para el badge del menú: la lista completa la
   // pagina el propio módulo de cotizaciones, no el padre.
   const loadCotizaciones = useCallback(() => {
@@ -577,6 +584,7 @@ export default function Dashboard() {
   // Errores globales del interceptor (red, 500, permisos) → la pila de alertas.
   useEffect(() => conectarAvisos(m => notify(m, 'err')), [])  // eslint-disable-line react-hooks/exhaustive-deps
   useRecurso(['ventas'], loadVentas)
+  useRecurso(['ventas'], loadPedidos)   // los apartados son ventas: abonos/entregas los refrescan
   useRecurso(['empresas'], loadEmpresas)
 
   useEffect(() => {
@@ -653,10 +661,11 @@ export default function Dashboard() {
         { key: 'ubicaciones', label: 'Mi jornada', icon: <><path d="M12 21s7-5.5 7-11a7 7 0 1 0-14 0c0 5.5 7 11 7 11z" /><circle cx="12" cy="10" r="2.5" /></> },
         { key: 'rentas', label: 'Rentas', badge: rentasActivas, icon: <><path d="M7 4.5v2.5M17 4.5v2.5" /><path d="M5.5 8h13" /><path d="M6.5 7.5h11a2 2 0 0 1 2 2v9.5a2 2 0 0 1-2 2h-11a2 2 0 0 1-2-2V9.5a2 2 0 0 1 2-2z" /><path d="M12 13v3l2 1" /></> },
         { key: 'ventas', label: 'Ventas', badge: ventas.length, icon: <><path d="M6.5 9.5h15l-1.6 8.2a2 2 0 0 1-2 1.6H9.2a2 2 0 0 1-2-1.6z" /><path d="M6.5 9.5l-1.2-5h-3" /><path d="M10 21a1 1 0 1 0 0-2 1 1 0 0 0 0 2zM18 21a1 1 0 1 0 0-2 1 1 0 0 0 0 2z" /></> },
+        { key: 'pedidos', label: 'Pedidos', badge: pedidos.pedidos.filter(p => Number(p.saldo || 0) > 0).length, icon: <><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z" /><path d="M4 7.5l8 4.5 8-4.5" /><path d="M12 12v9" /></> },
         { key: 'reparaciones', label: 'Reparaciones', badge: ordenesAbiertas, icon: <><path d="M14.7 6.3a4 4 0 0 0-5.6 5.6l-6 6v3h3l6-6a4 4 0 0 0 5.6-5.6l-2.5 2.5-2.1-2.1z" /><path d="M14 14l6 6" /></> },
         { key: 'cotizaciones', label: 'Cotizaciones', badge: cotizacionesAbiertas, icon: <><path d="M6 3.5h9l3.5 3.5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4.5a1 1 0 0 1 1-1z" /><path d="M14 3.5V8h4.5" /><path d="M8.5 12h7M8.5 15.5h7M8.5 18.5h4" /></> },
         { key: 'facturacion', label: 'Por facturar', badge: facturasPendientes, icon: <><path d="M6 3.5h9l3.5 3.5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4.5a1 1 0 0 1 1-1z" /><path d="M14 3.5V8h4.5" /><path d="M8.5 13h7M8.5 16.5h7" /></> },
-        { key: 'adeudos', label: 'Adeudos', badge: adeudos.rentas.length, icon: <><circle cx="12" cy="12" r="8.5" /><path d="M12 7.5v9M14.8 9.2c-.6-.8-1.6-1.2-2.8-1.2-1.7 0-3 .9-3 2.2 0 2.8 6 1.6 6 4.3 0 1.3-1.3 2.2-3 2.2-1.2 0-2.2-.4-2.8-1.2" /></> },
+        { key: 'adeudos', label: 'Adeudos', badge: adeudos.rentas.length + pedidos.pedidos.filter(p => Number(p.saldo || 0) > 0).length, icon: <><circle cx="12" cy="12" r="8.5" /><path d="M12 7.5v9M14.8 9.2c-.6-.8-1.6-1.2-2.8-1.2-1.7 0-3 .9-3 2.2 0 2.8 6 1.6 6 4.3 0 1.3-1.3 2.2-3 2.2-1.2 0-2.2-.4-2.8-1.2" /></> },
         { key: 'notificaciones', label: 'Notificaciones', badge: noLeidas, icon: <><path d="M15 17h5l-1.3-1.3A2 2 0 0 1 18.1 14V11a6.1 6.1 0 1 0-12.2 0v3a2 2 0 0 1-.6 1.4L4 17h5" /><path d="M9.2 17v.8a2.8 2.8 0 0 0 5.6 0V17" /></> },
         { key: 'cupones', label: 'Cupones', badge: coupons.length, icon: <><path d="M7.5 6.5h9a2 2 0 0 1 2 2V10a1.8 1.8 0 0 0 0 4v1.5a2 2 0 0 1-2 2h-9a2 2 0 0 1-2-2V14a1.8 1.8 0 0 0 0-4V8.5a2 2 0 0 1 2-2z" /><path d="M12 8.8v6.4" /></> },
       ],
@@ -1056,7 +1065,7 @@ export default function Dashboard() {
               equipos={equipos} categorias={categorias}
               tipos={tipos} marcas={marcas} coupons={coupons} rentas={rentas}
               unidades={unidades} ventas={ventas} me={me} go={go} metrics={metrics}
-              adeudos={adeudos} solicitudes={solicitudes}
+              adeudos={adeudos} pedidos={pedidos} solicitudes={solicitudes}
             />
           )}
           {section === 'equipos' && (
@@ -1086,7 +1095,10 @@ export default function Dashboard() {
             <FacturacionAdmin solicitudes={solicitudes} reload={loadFacturacion} notify={notify} />
           )}
           {section === 'adeudos' && (
-            <AdeudosAdmin datos={adeudos} reload={loadAdeudos} notify={notify} />
+            <AdeudosAdmin datos={adeudos} pedidos={pedidos} reload={loadAdeudos} reloadApartados={loadPedidos} notify={notify} />
+          )}
+          {section === 'pedidos' && (
+            <PedidosAdmin datos={pedidos} reload={loadPedidos} equipos={equipos} empresas={empresas} notify={notify} />
           )}
           {section === 'cotizaciones' && (
             <CotizacionesAdmin empresas={empresas} notify={notify} irAInventario={() => go('inventario')} />
@@ -1228,12 +1240,12 @@ function RelojVivo({ now }: { now: Date }) {
   )
 }
 
-function Resumen({ equipos, rentas, unidades, ventas, me, go, metrics, adeudos, solicitudes }: {
+function Resumen({ equipos, rentas, unidades, ventas, me, go, metrics, adeudos, pedidos, solicitudes }: {
   equipos: Equipo[]; categorias: Option[]; tipos: Option[]; marcas: Option[]
   coupons: Coupon[]; rentas: RentaActiva[]; unidades: Unidad[]; ventas: Venta[]
   me: { username?: string; email?: string } | null; go: (s: Section) => void
   metrics: DashMetrics | null
-  adeudos: AdeudosDatos; solicitudes: SolicitudFactura[]
+  adeudos: AdeudosDatos; pedidos: PedidosDatos; solicitudes: SolicitudFactura[]
 }) {
   const money0 = (n: number) => '$' + Math.round(n).toLocaleString('en-US')
 
@@ -1291,12 +1303,19 @@ function Resumen({ equipos, rentas, unidades, ventas, me, go, metrics, adeudos, 
 
   // ── Requiere tu atención: los pendientes de dinero/operación de un vistazo,
   //    cada uno lleva a su módulo. Se pinta "urgente" solo si hay algo. ──
-  const porCobrar = Number(adeudos?.total || 0)
-  const clientesDeben = adeudos?.clientes || 0
+  const apartadosConSaldo = (pedidos?.pedidos || []).filter(p => Number(p.saldo || 0) > 0)
+  const totalApartados = apartadosConSaldo.reduce((a, p) => a + Number(p.saldo || 0), 0)
+  const porCobrar = Number(adeudos?.total || 0) + totalApartados
+  const clientesDeben = (adeudos?.clientes || 0) + (pedidos?.clientes || 0)
+  // Pedidos "abiertos": apartados con saldo. "Por entregar": los que ya se pagaron
+  // (o el sobre-pedido ya llegó a sucursal) y solo falta entregar la unidad.
+  const pedidosAbiertos = apartadosConSaldo.length
+  const pedidosPorEntregar = (pedidos?.pedidos || []).filter(p => Number(p.saldo || 0) <= 0 && (!p.sobre_pedido || p.pedido_fase === 'en_sucursal')).length
   const porFacturar = solicitudes.filter(s => s.estado === 'pendiente').length
   const rentasVencidas = rentas.filter(r => r.vencida).length
   const pendientes: { label: string; value: string; sub: string; urgente: boolean; ir: Section }[] = [
     { label: 'Por cobrar', value: money0(porCobrar), sub: clientesDeben ? `${clientesDeben} cliente${clientesDeben === 1 ? '' : 's'}` : 'al corriente', urgente: porCobrar > 0, ir: 'adeudos' },
+    { label: 'Pedidos abiertos', value: String(pedidosAbiertos), sub: pedidosPorEntregar ? `${pedidosPorEntregar} por entregar` : (pedidosAbiertos ? 'con anticipo' : 'ninguno'), urgente: pedidosPorEntregar > 0, ir: 'pedidos' },
     { label: 'Por facturar', value: String(porFacturar), sub: porFacturar ? 'sin timbrar' : 'nada pendiente', urgente: porFacturar > 0, ir: 'facturacion' },
     { label: 'Rentas vencidas', value: String(rentasVencidas), sub: rentasVencidas ? 'por recoger' : 'ninguna', urgente: rentasVencidas > 0, ir: 'rentas' },
     { label: 'En taller', value: String(mant), sub: mant ? 'en mantenimiento' : 'sin equipos', urgente: false, ir: 'inventario' },
@@ -1384,7 +1403,7 @@ function Resumen({ equipos, rentas, unidades, ventas, me, go, metrics, adeudos, 
           <div className="flex items-center gap-2 mb-2 px-0.5">
             <span className="text-[11px] font-bold uppercase tracking-[0.08em] text-mute">Requiere tu atención</span>
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+          <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-2">
             {pendientes.map((p, i) => (
               <button key={i} onClick={() => go(p.ir)}
                 className={`${panel} px-4 py-4 text-left transition-all hover:shadow-[0_4px_14px_rgba(33,29,22,0.10)] hover:-translate-y-0.5 active:translate-y-0 ${p.urgente ? '!border-red-500/40 bg-red-500/[0.04]' : ''}`}>
@@ -2392,6 +2411,12 @@ function RentModal({ unit, equipo, onClose, onDone, notify }: {
   const [usuarioId, setUsuarioId] = useState('')
   // ¿Venimos de "Concretar renta" de una cotización? Precarga y liga.
   const [deCot, setDeCot] = useState(leerCotParaRenta())
+  // Cobro inicial de la renta: un método, o pago dividido en dos (efectivo + tarjeta…).
+  const [metodo, setMetodo] = useState<'efectivo' | 'tarjeta' | 'transferencia'>('efectivo')
+  const [splitPago, setSplitPago] = useState(false)
+  const [metodo2, setMetodo2] = useState<'efectivo' | 'tarjeta' | 'transferencia'>('tarjeta')
+  const [monto1, setMonto1] = useState('')
+  const [monto2, setMonto2] = useState('')
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
@@ -2445,6 +2470,16 @@ function RentModal({ unit, equipo, onClose, onDone, notify }: {
     if ((!cliente.trim() && !empresaId) || !direccion.trim()) { notify('Cliente (o empresa) y dirección son obligatorios', 'err'); return }
     const errFactura = validarFactura(requiereFactura, empresaId, factura)
     if (errFactura) { notify(errFactura, 'err'); return }
+    let pagos: { metodo: string; monto: number }[] | undefined
+    if (splitPago) {
+      const m1 = Number(monto1) || 0, m2 = Number(monto2) || 0
+      if (metodo === metodo2) { notify('Elige dos métodos distintos para dividir el pago', 'err'); return }
+      if (m1 <= 0 || m2 <= 0) { notify('Con pago dividido, ambos montos deben ser mayores a 0', 'err'); return }
+      if (Math.round((m1 + m2) * 100) / 100 !== Math.round(totalConIva * 100) / 100) {
+        notify(`Los dos montos deben sumar el total (${formatMoney(totalConIva)})`, 'err'); return
+      }
+      pagos = [{ metodo, monto: m1 }, { metodo: metodo2, monto: m2 }]
+    }
     setBusy(true)
     api.post('/rentas/crear/', {
       inventario_id: unit.id, modalidad, duracion: Number(duracion) || 1,
@@ -2453,6 +2488,7 @@ function RentModal({ unit, equipo, onClose, onDone, notify }: {
       empresa_id: empresaId || undefined, obra_id: obraId || undefined, usuario_id: usuarioId || undefined,
       cotizacion_id: deCot?.id || undefined,
       descuento: Number(descuento) || 0, deposito: Number(deposito) || 0,
+      metodo_pago: metodo, pagos,
       requiere_factura: requiereFactura, factura,
     })
       .then(res => {
@@ -2533,6 +2569,49 @@ function RentModal({ unit, equipo, onClose, onDone, notify }: {
             <div><label className={label}>Descuento</label><InputDinero valor={descuento} onValor={setDescuento} /></div>
           </div>
           <div><label className={label}>Depósito / garantía</label><InputDinero valor={deposito} onValor={setDeposito} /></div>
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className={`${label} mb-0`}>Método de pago</label>
+              <button type="button" onClick={() => setSplitPago(s => !s)} className="text-[11px] font-bold text-gold hover:underline">
+                {splitPago ? 'Un solo método' : 'Dividir en 2 métodos'}
+              </button>
+            </div>
+            {!splitPago ? (
+              <select className={input} value={metodo} onChange={e => setMetodo(e.target.value as any)}>
+                <option value="efectivo" className="bg-surface">Efectivo</option>
+                <option value="tarjeta" className="bg-surface">Tarjeta</option>
+                <option value="transferencia" className="bg-surface">Transferencia</option>
+              </select>
+            ) : (
+              <div className="space-y-2">
+                <div className="flex gap-2">
+                  <select className={`${input} flex-1`} value={metodo} onChange={e => setMetodo(e.target.value as any)}>
+                    <option value="efectivo" className="bg-surface">Efectivo</option>
+                    <option value="tarjeta" className="bg-surface">Tarjeta</option>
+                    <option value="transferencia" className="bg-surface">Transferencia</option>
+                  </select>
+                  <div className="w-[44%]"><InputDinero valor={monto1} onValor={setMonto1} placeholder="Monto" /></div>
+                </div>
+                <div className="flex gap-2">
+                  <select className={`${input} flex-1`} value={metodo2} onChange={e => setMetodo2(e.target.value as any)}>
+                    <option value="efectivo" className="bg-surface">Efectivo</option>
+                    <option value="tarjeta" className="bg-surface">Tarjeta</option>
+                    <option value="transferencia" className="bg-surface">Transferencia</option>
+                  </select>
+                  <div className="w-[44%] flex gap-1">
+                    <InputDinero valor={monto2} onValor={setMonto2} placeholder="Resto" className="flex-1" />
+                    <button type="button" onClick={() => { const m1 = Number(monto1) || 0; setMonto2(String(Math.max(0, Number((totalConIva - m1).toFixed(2))))) }}
+                      className="px-2 rounded-lg border border-edge text-[11px] font-semibold text-mute hover:text-ink shrink-0 whitespace-nowrap">Resto</button>
+                  </div>
+                </div>
+                {(() => {
+                  const s = (Number(monto1) || 0) + (Number(monto2) || 0)
+                  const ok = Math.round(s * 100) / 100 === Math.round(totalConIva * 100) / 100
+                  return <p className={`text-[11px] ${ok ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}`}>{ok ? '✓ Los montos suman el total' : `Deben sumar ${formatMoney(totalConIva)} · llevas ${formatMoney(s)}`}</p>
+                })()}
+              </div>
+            )}
+          </div>
           <FacturaFields requiere={requiereFactura} onRequiere={setRequiereFactura} factura={factura} onFactura={setFactura} empresaNombre={empresaId ? empresas.find(e => String(e.id) === empresaId)?.nombre : undefined} />
           {Number(precio) <= 0 && (
             <p className="text-[11px] text-amber-600 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2">
@@ -2567,6 +2646,11 @@ function SellModal({ unit, equipo, onClose, onDone, notify }: {
   const [cliente, setCliente] = useState('')
   const [telefono, setTelefono] = useState('')
   const [metodo, setMetodo] = useState<'efectivo' | 'tarjeta' | 'transferencia'>('efectivo')
+  // Pago dividido: dos métodos que reparten el total con IVA (p. ej. efectivo + tarjeta).
+  const [splitPago, setSplitPago] = useState(false)
+  const [metodo2, setMetodo2] = useState<'efectivo' | 'tarjeta' | 'transferencia'>('tarjeta')
+  const [monto1, setMonto1] = useState('')
+  const [monto2, setMonto2] = useState('')
   const [total, setTotal] = useState(String(equipo.precio_venta ?? ''))
   const [empresas, setEmpresas] = useState<Empresa[]>([])
   const [empresaId, setEmpresaId] = useState('')
@@ -2598,10 +2682,21 @@ function SellModal({ unit, equipo, onClose, onDone, notify }: {
     if (precioNum <= 0) { notify('El precio debe ser mayor a 0', 'err'); return }
     const errFactura = validarFactura(requiereFactura, empresaId, factura)
     if (errFactura) { notify(errFactura, 'err'); return }
+    let pagos: { metodo: string; monto: number }[] | undefined
+    if (splitPago) {
+      const m1 = Number(monto1) || 0, m2 = Number(monto2) || 0
+      if (metodo === metodo2) { notify('Elige dos métodos distintos para dividir el pago', 'err'); return }
+      if (m1 <= 0 || m2 <= 0) { notify('Con pago dividido, ambos montos deben ser mayores a 0', 'err'); return }
+      if (Math.round((m1 + m2) * 100) / 100 !== Math.round(totalConIva * 100) / 100) {
+        notify(`Los dos montos deben sumar el total con IVA (${formatMoney(totalConIva)})`, 'err'); return
+      }
+      pagos = [{ metodo, monto: m1 }, { metodo: metodo2, monto: m2 }]
+    }
     setBusy(true)
     api.post(`/unidades/${unit.id}/vender/`, {
       nombre_cliente: cliente.trim(), telefono_cliente: telefono.trim(),
       metodo_pago: metodo, empresa_id: empresaId || undefined, total: precioNum,
+      pagos,
       requiere_factura: requiereFactura, factura,
     })
       .then(res => {
@@ -2640,12 +2735,47 @@ function SellModal({ unit, equipo, onClose, onDone, notify }: {
           <div><label className={label}>Cliente</label><input className={input} value={cliente} onChange={e => setCliente(e.target.value)} placeholder="Nombre del comprador" /></div>
           <div><label className={label}>Teléfono</label><input className={input} value={telefono} onChange={e => setTelefono(e.target.value)} placeholder="555-..." /></div>
           <div>
-            <label className={label}>Método de pago</label>
-            <select className={input} value={metodo} onChange={e => setMetodo(e.target.value as any)}>
-              <option value="efectivo" className="bg-surface">Efectivo</option>
-              <option value="tarjeta" className="bg-surface">Tarjeta</option>
-              <option value="transferencia" className="bg-surface">Transferencia</option>
-            </select>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className={`${label} mb-0`}>Método de pago</label>
+              <button type="button" onClick={() => setSplitPago(s => !s)} className="text-[11px] font-bold text-gold hover:underline">
+                {splitPago ? 'Un solo método' : 'Dividir en 2 métodos'}
+              </button>
+            </div>
+            {!splitPago ? (
+              <select className={input} value={metodo} onChange={e => setMetodo(e.target.value as any)}>
+                <option value="efectivo" className="bg-surface">Efectivo</option>
+                <option value="tarjeta" className="bg-surface">Tarjeta</option>
+                <option value="transferencia" className="bg-surface">Transferencia</option>
+              </select>
+            ) : (
+              <div className="space-y-2">
+                <div className="flex gap-2">
+                  <select className={`${input} flex-1`} value={metodo} onChange={e => setMetodo(e.target.value as any)}>
+                    <option value="efectivo" className="bg-surface">Efectivo</option>
+                    <option value="tarjeta" className="bg-surface">Tarjeta</option>
+                    <option value="transferencia" className="bg-surface">Transferencia</option>
+                  </select>
+                  <div className="w-[44%]"><InputDinero valor={monto1} onValor={setMonto1} placeholder="Monto" /></div>
+                </div>
+                <div className="flex gap-2">
+                  <select className={`${input} flex-1`} value={metodo2} onChange={e => setMetodo2(e.target.value as any)}>
+                    <option value="efectivo" className="bg-surface">Efectivo</option>
+                    <option value="tarjeta" className="bg-surface">Tarjeta</option>
+                    <option value="transferencia" className="bg-surface">Transferencia</option>
+                  </select>
+                  <div className="w-[44%] flex gap-1">
+                    <InputDinero valor={monto2} onValor={setMonto2} placeholder="Resto" className="flex-1" />
+                    <button type="button" onClick={() => { const m1 = Number(monto1) || 0; setMonto2(String(Math.max(0, Number((totalConIva - m1).toFixed(2))))) }}
+                      className="px-2 rounded-lg border border-edge text-[11px] font-semibold text-mute hover:text-ink shrink-0 whitespace-nowrap">Resto</button>
+                  </div>
+                </div>
+                {(() => {
+                  const s = (Number(monto1) || 0) + (Number(monto2) || 0)
+                  const ok = Math.round(s * 100) / 100 === Math.round(totalConIva * 100) / 100
+                  return <p className={`text-[11px] ${ok ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}`}>{ok ? '✓ Los montos suman el total con IVA' : `Deben sumar ${formatMoney(totalConIva)} · llevas ${formatMoney(s)}`}</p>
+                })()}
+              </div>
+            )}
           </div>
           <div><label className={label}>Precio (sin IVA)</label><InputDinero valor={total} onValor={setTotal} placeholder="16,500" /></div>
           <div className="px-4 py-3 rounded-xl bg-surface-2 space-y-1">
@@ -5511,6 +5641,18 @@ function OrdenDetalleModal({ orden, refacciones, notify, onClose, onChanged, onP
    ADEUDOS — cobranza: rentas con saldo pendiente
 ════════════════════════════════════════ */
 type AdeudosDatos = { rentas: RentaFull[]; total: string; clientes: number }
+// Apartado / sobre pedido (venta con anticipo). Espejo de _serialize_pedido en el backend.
+type Pedido = {
+  id: number; folio: string | null; nombre_cliente: string; telefono_cliente: string
+  empresa: string | null; cuenta: string | null; estado: string; sobre_pedido: boolean
+  total: string; pagado: string; saldo: string
+  pagos: { fecha: string; monto: string; metodo: string; por?: string }[]
+  metodo_pago: string; anticipo_nota: string | null; fecha: string
+  fecha_estimada_entrega: string | null; pedido_fase: string; entregada_en: string | null
+  vendedor: string | null; equipo: string | null; equipo_id: number | null
+  unidad: { id: number; codigo: string; equipo: string | null } | null
+}
+type PedidosDatos = { pedidos: Pedido[]; total: string; clientes: number }
 
 /* La deuda se agrupa por la identidad MÁS FUERTE que tenga la renta: cuenta
    vinculada primero, empresa después, y el nombre de mostrador al final. Así
@@ -5558,13 +5700,336 @@ const CHIP_RENTA_ADEUDO: Record<string, { label: string; cls: string }> = {
   finalizada: { label: 'EQUIPO DEVUELTO', cls: 'bg-surface-2 text-mute' },
 }
 
-function AdeudosAdmin({ datos, reload, notify }: {
-  datos: AdeudosDatos; reload: () => void; notify: (m: string, t?: 'ok' | 'err') => void
+/* ════════════════════════════════════════
+   PEDIDOS Y APARTADOS (venta con anticipo)
+════════════════════════════════════════ */
+// Contexto opcional cuando el pedido nace de una cotización sin stock (sobre pedido).
+type PedidoDesde = {
+  id: number                 // id de la cotización de origen
+  equipoId?: number | null
+  equipoNombre?: string
+  precio?: number
+  cliente?: string
+  telefono?: string
+  empresaId?: number | null
+}
+
+function NuevoPedidoModal({ desde, equipos = [], empresas, onClose, onDone, notify }: {
+  desde?: PedidoDesde | null
+  equipos?: Equipo[]; empresas: Empresa[]
+  onClose: () => void; onDone: () => void; notify: (m: string, t?: 'ok' | 'err') => void
+}) {
+  const [equipoId, setEquipoId] = useState<string>(desde?.equipoId ? String(desde.equipoId) : '')
+  const equipo = equipos.find(e => String(e.id) === equipoId) || null
+  const [precio, setPrecio] = useState<string>(
+    desde?.precio ? String(desde.precio) : (equipo && num(equipo.precio_venta) ? String(num(equipo.precio_venta)) : '')
+  )
+  const [cliente, setCliente] = useState(desde?.cliente || '')
+  const [telefono, setTelefono] = useState(desde?.telefono || '')
+  const [empresaId, setEmpresaId] = useState<string>(desde?.empresaId ? String(desde.empresaId) : '')
+  const [anticipo, setAnticipo] = useState('')
+  const [metodo, setMetodo] = useState('efectivo')
+  const [fecha, setFecha] = useState('')     // ETA opcional (yyyy-mm-dd)
+  const [codigo, setCodigo] = useState('')   // por si el anticipo va bajo el mínimo
+  const [busy, setBusy] = useState(false)
+
+  // Al elegir equipo (cuando no viene de una cotización), sugiere su precio de venta.
+  useEffect(() => {
+    if (desde?.precio) return
+    const e = equipos.find(x => String(x.id) === equipoId)
+    if (e && num(e.precio_venta)) setPrecio(String(num(e.precio_venta)))
+  }, [equipoId])   // eslint-disable-line react-hooks/exhaustive-deps
+
+  const precioNum = Number(precio) || 0
+  const anticipoNum = Number(anticipo) || 0
+  const saldo = Math.max(0, precioNum - anticipoNum)
+
+  function submit() {
+    if (!equipoId) { notify('Elige el equipo a pedir', 'err'); return }
+    if (precioNum <= 0) { notify('Captura el precio del pedido', 'err'); return }
+    if (!cliente.trim()) { notify('Escribe el nombre del cliente', 'err'); return }
+    if (anticipoNum > precioNum) { notify('El anticipo no puede ser mayor al precio', 'err'); return }
+    setBusy(true)
+    api.post('/ventas/pedidos/crear/', {
+      equipo_id: Number(equipoId),
+      cotizacion_id: desde?.id || undefined,
+      precio: precioNum,
+      nombre_cliente: cliente.trim(),
+      telefono_cliente: telefono.trim(),
+      empresa_id: empresaId || undefined,
+      anticipo: anticipoNum,
+      metodo_pago: metodo,
+      fecha_estimada_entrega: fecha || undefined,
+      codigo_ajuste: codigo || undefined,
+    })
+      .then(() => { notify('Pedido registrado'); onDone() })
+      .catch(err => { const d = err?.response?.data?.detalle; if (d) notify(d, 'err') })
+      .finally(() => setBusy(false))
+  }
+
+  return (
+    <div className="fixed inset-0 z-[70] bg-black/40 backdrop-blur-[2px]" onClick={onClose}>
+      <motion.div
+        initial={{ x: '100%' }} animate={{ x: 0 }} transition={{ duration: 0.3, ease: [0.23, 1, 0.32, 1] }}
+        onClick={e => e.stopPropagation()}
+        className="fixed inset-y-0 right-0 w-full sm:max-w-[520px] bg-surface border-l border-edge shadow-[-24px_0_60px_rgba(33,29,22,0.22)] flex flex-col"
+      >
+        <div className="px-6 py-4 border-b border-edge flex items-start justify-between gap-3 shrink-0">
+          <div className="min-w-0">
+            <h3 className="font-black text-ink">Nuevo pedido</h3>
+            <p className="text-xs text-mute mt-0.5">Aparta una máquina sin stock con anticipo. La unidad se asigna cuando llega.</p>
+          </div>
+          <button onClick={onClose} className="w-8 h-8 grid place-items-center rounded-full hover:bg-surface-2 text-mute hover:text-ink transition-colors shrink-0">✕</button>
+        </div>
+        <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
+          {desde && (
+            <div className="rounded-xl border border-gold/35 bg-gold/[0.06] px-3.5 py-2.5 text-[12px] text-mute">
+              Nace de la cotización <b className="text-ink">#{desde.id}</b>: hereda al cliente y aplica su cupón al guardar.
+            </div>
+          )}
+          {desde?.equipoId ? (
+            <div>
+              <label className={label}>Equipo a pedir</label>
+              <div className="h-10 px-3 flex items-center rounded-lg border border-edge bg-surface-2 text-[13.5px] font-medium text-ink">{desde.equipoNombre || equipo?.modelo || 'Equipo de la cotización'}</div>
+            </div>
+          ) : (
+            <div>
+              <label className={label}>Equipo a pedir</label>
+              <select value={equipoId} onChange={e => setEquipoId(e.target.value)} className={input}>
+                <option value="">Elige el equipo…</option>
+                {equipos.map(e => <option key={e.id} value={e.id}>{e.modelo}</option>)}
+              </select>
+            </div>
+          )}
+          <div className="grid grid-cols-2 gap-3">
+            <div><label className={label}>Precio</label><InputDinero valor={precio} onValor={setPrecio} placeholder="0" /></div>
+            <div><label className={label}>Anticipo</label><InputDinero valor={anticipo} onValor={setAnticipo} placeholder="0" /></div>
+          </div>
+          <div className="flex items-center justify-between text-[12px] px-1">
+            <span className="text-mute">Saldo tras el anticipo</span>
+            <span className="font-bold text-ink tabular-nums">{formatMoney(saldo)}</span>
+          </div>
+          <div>
+            <label className={label}>Método del anticipo</label>
+            <div className="flex gap-2">
+              {(['efectivo', 'tarjeta', 'transferencia'] as const).map(m => (
+                <button key={m} type="button" onClick={() => setMetodo(m)}
+                  className={`flex-1 h-10 rounded-lg border text-[12.5px] font-semibold capitalize transition-colors ${metodo === m ? 'border-gold bg-gold/10 text-ink' : 'border-edge text-mute hover:text-ink'}`}>{m}</button>
+              ))}
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div><label className={label}>Cliente</label><input value={cliente} onChange={e => setCliente(e.target.value)} placeholder="Nombre" className={input} /></div>
+            <div><label className={label}>Teléfono</label><input value={telefono} onChange={e => setTelefono(e.target.value)} placeholder="Opcional" className={input} /></div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={label}>Empresa (opcional)</label>
+              <select value={empresaId} onChange={e => setEmpresaId(e.target.value)} className={input}>
+                <option value="">Sin empresa</option>
+                {empresas.map(em => <option key={em.id} value={em.id}>{em.nombre}</option>)}
+              </select>
+            </div>
+            <div><label className={label}>Llega aprox.</label><input type="date" value={fecha} onChange={e => setFecha(e.target.value)} className={input} /></div>
+          </div>
+          <div>
+            <label className={label}>Código de autorización (si el anticipo va bajo el mínimo)</label>
+            <input type="password" autoComplete="one-time-code" inputMode="numeric" maxLength={6} value={codigo}
+              onChange={e => setCodigo(e.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="••••••"
+              className={`${input} text-center font-mono tracking-[0.4em]`} />
+          </div>
+        </div>
+        <div className="px-6 py-4 border-t border-edge flex justify-end gap-3 shrink-0">
+          <button onClick={onClose} className="px-6 py-2.5 rounded-full border border-edge text-mute text-sm font-medium hover:text-ink transition-colors active:scale-[0.97]">Cancelar</button>
+          <button onClick={submit} disabled={busy} className="px-7 py-2.5 rounded-full bg-gold text-black text-sm font-bold hover:opacity-90 active:scale-[0.96] transition disabled:opacity-50">{busy ? 'Guardando…' : 'Registrar pedido'}</button>
+        </div>
+      </motion.div>
+    </div>
+  )
+}
+
+function PedidosAdmin({ datos, reload, equipos, empresas, notify }: {
+  datos: PedidosDatos; reload: () => void; equipos: Equipo[]; empresas: Empresa[]
+  notify: (m: string, t?: 'ok' | 'err') => void
+}) {
+  const money = formatMoney
+  const [busca, setBusca] = useState('')
+  const [nuevo, setNuevo] = useState(false)
+  const [abonando, setAbonando] = useState<Pedido | null>(null)
+  const [abierto, setAbierto] = useState<Set<number>>(new Set())
+  const toggle = (id: number) => setAbierto(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
+  const fechaAbono = (iso: string) => { try { return new Date(iso).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }) } catch { return iso } }
+
+  const conSaldo = datos.pedidos.filter(p => Number(p.saldo || 0) > 0).length
+  const sobre = datos.pedidos.filter(p => p.sobre_pedido).length
+  const q = busca.trim().toLowerCase()
+  const lista = !q ? datos.pedidos : datos.pedidos.filter(p =>
+    [p.nombre_cliente, p.empresa, p.cuenta, p.equipo, p.folio].some(x => (x || '').toLowerCase().includes(q)))
+
+  async function abonar(monto: number, metodo: string, fecha: string) {
+    if (!abonando) return
+    try {
+      await api.post(`/ventas/${abonando.id}/abono/`, { monto, metodo, fecha: fecha || undefined })
+      notify(`Abono de ${money(monto)} registrado`)
+      setAbonando(null); reload()
+    } catch { /* el interceptor avisa */ }
+  }
+
+  const FASES: { key: string; label: string }[] = [
+    { key: 'confirmado', label: 'Confirmado' },
+    { key: 'en_camino', label: 'En camino' },
+    { key: 'en_sucursal', label: 'En sucursal' },
+  ]
+  async function avanzarFase(p: Pedido) {
+    const idx = FASES.findIndex(f => f.key === p.pedido_fase)
+    const sig = FASES[idx + 1] || FASES[0]
+    try {
+      await api.post(`/ventas/${p.id}/pedido-fase/`, { fase: sig.key })
+      notify(`Seguimiento: ${sig.label}`)
+      reload()
+    } catch (e) { notify((e as { response?: { data?: { detalle?: string } } })?.response?.data?.detalle || 'No se pudo actualizar', 'err') }
+  }
+
+  async function entregar(p: Pedido) {
+    if (Number(p.saldo || 0) > 0) { notify('Falta liquidar el saldo antes de entregar.', 'err'); return }
+    let unidad_id: number | undefined
+    if (p.sobre_pedido || !p.unidad) {
+      try {
+        const resp = await api.get<Unidad[]>(`/equipos/${p.equipo_id}/unidades/`, { fondo: true } as never)
+        const libres = (resp.data || []).filter(u => u.estado === 'disponible')
+        if (!libres.length) { notify('No hay una unidad disponible de ese equipo. Da de alta la que llegó.', 'err'); return }
+        const sel = await elegir({
+          titulo: 'Unidad que llegó',
+          mensaje: `Elige la unidad de ${p.equipo || 'este equipo'} que entregarás al cliente.`,
+          opciones: libres.map(u => ({ valor: String(u.id), label: u.codigo, detalle: u.numero_serie ? `S/N ${u.numero_serie}` : 'Disponible' })),
+        })
+        if (!sel || !sel[0]) return
+        unidad_id = Number(sel[0])
+      } catch { notify('No se pudieron cargar las unidades', 'err'); return }
+    }
+    try {
+      await api.post(`/ventas/${p.id}/entregar/`, { unidad_id })
+      notify('Pedido entregado')
+      reload()
+    } catch (e) { notify((e as { response?: { data?: { detalle?: string } } })?.response?.data?.detalle || 'No se pudo entregar', 'err') }
+  }
+
+  return (
+    <div className="space-y-5">
+      <KpiGrid
+        gridClassName="grid-cols-2 lg:grid-cols-3"
+        items={[
+          { label: 'Por cobrar', value: money(Number(datos.total)), tone: 'gold' },
+          { label: 'Apartados con saldo', value: String(conSaldo), tone: 'muted' },
+          { label: 'Sobre pedido', value: String(sobre), tone: 'muted' },
+        ]}
+      />
+
+      <div className="flex flex-wrap items-center gap-2">
+        <input value={busca} onChange={e => setBusca(e.target.value)} placeholder="Buscar cliente, equipo o folio…"
+          className={`${input} flex-1 min-w-[200px]`} />
+        <button onClick={() => setNuevo(true)}
+          className="h-10 px-4 rounded-full bg-gold text-black text-sm font-bold hover:brightness-95 transition whitespace-nowrap active:scale-[0.97]">
+          + Nuevo pedido
+        </button>
+      </div>
+
+      {lista.length === 0 ? (
+        <div className="rounded-2xl border border-edge bg-surface px-6 py-14 text-center">
+          <p className="text-[16px] font-bold text-ink">{datos.pedidos.length ? 'Sin coincidencias' : 'No hay pedidos ni apartados'}</p>
+          <p className="text-[13px] text-mute mt-1">{datos.pedidos.length ? 'Prueba con otro nombre o folio.' : 'Registra un sobre pedido con "Nuevo pedido", o convierte una cotización sin stock.'}</p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {lista.map(p => {
+            const abiertoP = abierto.has(p.id)
+            const quien = p.cuenta || p.empresa || p.nombre_cliente || 'Cliente'
+            const inicial = (quien.trim()[0] || '?').toUpperCase()
+            const saldo = Number(p.saldo || 0)
+            const badge = p.sobre_pedido
+              ? { label: 'SOBRE PEDIDO', cls: 'bg-violet-500/12 text-violet-600 dark:text-violet-300' }
+              : { label: 'APARTADO', cls: 'bg-sky-500/12 text-sky-600 dark:text-sky-300' }
+            const faseLabel = FASES.find(f => f.key === p.pedido_fase)?.label
+            return (
+              <div key={p.id} className="rounded-2xl border border-edge bg-surface overflow-hidden">
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 sm:px-5 py-4">
+                  <span className="w-10 h-10 shrink-0 rounded-full bg-surface-2 grid place-items-center text-[15px] font-black text-ink">{inicial}</span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-[14.5px] font-extrabold text-ink truncate">{quien}</span>
+                      <span className={`text-[9.5px] font-bold px-1.5 py-0.5 rounded ${badge.cls}`}>{badge.label}</span>
+                      {p.sobre_pedido && faseLabel && <span className="text-[9.5px] font-bold px-1.5 py-0.5 rounded bg-surface-2 text-mute">{faseLabel}</span>}
+                    </div>
+                    <p className="text-[12px] text-mute mt-0.5 truncate">
+                      {p.equipo || 'Equipo'}{p.folio ? ` · ${p.folio}` : ''}
+                      {p.fecha_estimada_entrega ? ` · llega ${fechaAbono(p.fecha_estimada_entrega)}` : ''}
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-[10px] text-mute">Pagó {money(Number(p.pagado || 0))} de {money(Number(p.total || 0))}</p>
+                    <p className={`text-[17px] font-black tabular-nums leading-tight ${saldo > 0 ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400'}`}>{saldo > 0 ? money(saldo) : 'Liquidado'}</p>
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-1.5 px-4 sm:px-5 pb-3">
+                  {saldo > 0 && (
+                    <button onClick={() => setAbonando(p)} className="h-8 px-3 rounded-lg bg-gold text-black text-[12px] font-bold hover:brightness-95 transition-all">+ Abono</button>
+                  )}
+                  <button onClick={() => toggle(p.id)} className="h-8 px-3 rounded-lg border border-edge text-[12px] font-bold text-ink hover:bg-surface-2 transition-colors">{abiertoP ? 'Ocultar' : 'Ver abonos'}</button>
+                  {p.sobre_pedido && p.pedido_fase !== 'en_sucursal' && (
+                    <button onClick={() => avanzarFase(p)} className="h-8 px-3 rounded-lg border border-edge text-[12px] font-bold text-ink hover:bg-surface-2 transition-colors">Avanzar seguimiento</button>
+                  )}
+                  <button onClick={() => entregar(p)} disabled={saldo > 0}
+                    className="h-8 px-3 rounded-lg border border-emerald-500/40 text-[12px] font-bold text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+                    Entregar
+                  </button>
+                </div>
+                {abiertoP && (
+                  <div className="border-t border-edge px-4 sm:px-5 py-3 bg-surface-2/30">
+                    {(p.pagos || []).length === 0 ? (
+                      <p className="text-[12px] text-mute">Aún no hay abonos. El anticipo y cada pago quedan aquí con su fecha.</p>
+                    ) : (
+                      <ul className="space-y-1.5">
+                        {(p.pagos || []).map((pago, i) => (
+                          <li key={i} className="flex items-center justify-between gap-3 text-[12.5px]">
+                            <span className="text-mute">{fechaAbono(pago.fecha)} · <span className="capitalize">{pago.metodo}</span>{pago.por ? ` · ${pago.por}` : ''}</span>
+                            <span className="font-bold text-ink tabular-nums">{money(Number(pago.monto || 0))}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {abonando && <AbonoModal saldo={Number(abonando.saldo || 0)} onClose={() => setAbonando(null)} onRegistrar={abonar} />}
+      {nuevo && <NuevoPedidoModal equipos={equipos} empresas={empresas} onClose={() => setNuevo(false)} onDone={() => { setNuevo(false); reload() }} notify={notify} />}
+    </div>
+  )
+}
+
+function AdeudosAdmin({ datos, pedidos, reload, reloadApartados, notify }: {
+  datos: AdeudosDatos; pedidos: PedidosDatos
+  reload: () => void; reloadApartados: () => void; notify: (m: string, t?: 'ok' | 'err') => void
 }) {
   const money = formatMoney
   const [ver, setVer] = useState<RentaFull | null>(null)
   const [abonando, setAbonando] = useState<RentaFull | null>(null)
   const [abiertos, setAbiertos] = useState<Set<string>>(new Set())
+  // Apartados/pedidos con saldo: la otra mitad de las cuentas por cobrar (venta).
+  const [abonandoApartado, setAbonandoApartado] = useState<Pedido | null>(null)
+  const [apartadoAbierto, setApartadoAbierto] = useState<Set<number>>(new Set())
+  const apartados = useMemo(() => pedidos.pedidos.filter(p => Number(p.saldo || 0) > 0), [pedidos.pedidos])
+  const totalApartados = useMemo(() => apartados.reduce((a, p) => a + Number(p.saldo || 0), 0), [apartados])
+  const toggleApartado = (id: number) => setApartadoAbierto(s => {
+    const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n
+  })
+  const fechaAbono = (iso: string) => {
+    try { return new Date(iso).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }) } catch { return iso }
+  }
 
   const grupos = useMemo(() => agruparAdeudos(datos.rentas), [datos.rentas])
   const toggle = (clave: string) => setAbiertos(s => {
@@ -5578,6 +6043,17 @@ function AdeudosAdmin({ datos, reload, notify }: {
       notify(`Abono de ${money(monto)} registrado`)
       setAbonando(null)
       reload()
+    } catch { /* el interceptor avisa */ }
+  }
+
+  // Abono a un APARTADO (venta con anticipo). Endpoint distinto al de rentas.
+  async function registrarAbonoApartado(monto: number, metodo: string, fecha: string) {
+    if (!abonandoApartado) return
+    try {
+      await api.post(`/ventas/${abonandoApartado.id}/abono/`, { monto, metodo, fecha: fecha || undefined })
+      notify(`Abono de ${money(monto)} registrado`)
+      setAbonandoApartado(null)
+      reloadApartados()
     } catch { /* el interceptor avisa */ }
   }
 
@@ -5624,9 +6100,9 @@ function AdeudosAdmin({ datos, reload, notify }: {
           <KpiGrid
             gridClassName="grid-cols-2 lg:grid-cols-3"
             items={[
-              { label: 'Por cobrar', value: money(Number(datos.total)), tone: 'gold' },
-              { label: 'Clientes que deben', value: String(grupos.length), tone: 'default' },
-              { label: 'Rentas con adeudo', value: String(datos.rentas.length), tone: 'muted' },
+              { label: 'Por cobrar', value: money(Number(datos.total) + totalApartados), tone: 'gold' },
+              { label: 'Rentas con saldo', value: String(datos.rentas.length), tone: 'muted' },
+              { label: 'Apartados con saldo', value: String(apartados.length), tone: 'muted' },
             ]}
           />
         </div>
@@ -5635,13 +6111,15 @@ function AdeudosAdmin({ datos, reload, notify }: {
         )}
       </div>
 
-      {grupos.length === 0 ? (
+      {grupos.length === 0 && apartados.length === 0 ? (
         <div className="rounded-2xl border border-edge bg-surface px-6 py-14 text-center">
           <p className="text-[16px] font-bold text-ink">Nadie debe nada</p>
-          <p className="text-[13px] text-mute mt-1">Cuando una renta quede con saldo, aparece aquí hasta liquidarse.</p>
+          <p className="text-[13px] text-mute mt-1">Cuando una renta o un apartado quede con saldo, aparece aquí hasta liquidarse.</p>
         </div>
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-6">
+         {grupos.length > 0 && (
+          <div className="space-y-3">
           {grupos.map(g => {
             const abierto = abiertos.has(g.clave)
             const tipo = TIPO_ADEUDO[g.tipo]
@@ -5715,11 +6193,78 @@ function AdeudosAdmin({ datos, reload, notify }: {
               </div>
             )
           })}
+          </div>
+         )}
+         {apartados.length > 0 && (
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <h3 className="text-[13px] font-black uppercase tracking-[0.08em] text-mute">Apartados y pedidos con saldo</h3>
+              <span className="text-[11px] text-mute">· {money(totalApartados)}</span>
+            </div>
+            {apartados.map(p => {
+              const abierto = apartadoAbierto.has(p.id)
+              const quien = p.cuenta || p.empresa || p.nombre_cliente || 'Cliente'
+              const inicial = (quien.trim()[0] || '?').toUpperCase()
+              const badge = p.sobre_pedido
+                ? { label: 'SOBRE PEDIDO', cls: 'bg-violet-500/12 text-violet-600 dark:text-violet-300' }
+                : { label: 'APARTADO', cls: 'bg-sky-500/12 text-sky-600 dark:text-sky-300' }
+              return (
+                <div key={p.id} className="rounded-2xl border border-edge bg-surface overflow-hidden">
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 sm:px-5 py-4">
+                    <span className="w-10 h-10 shrink-0 rounded-full bg-surface-2 grid place-items-center text-[15px] font-black text-ink">{inicial}</span>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-[14.5px] font-extrabold text-ink truncate">{quien}</span>
+                        <span className={`text-[9.5px] font-bold px-1.5 py-0.5 rounded ${badge.cls}`}>{badge.label}</span>
+                      </div>
+                      <p className="text-[12px] text-mute mt-0.5 truncate">
+                        {p.equipo || 'Equipo'}{p.folio ? ` · ${p.folio}` : ''}{p.telefono_cliente ? ` · ${p.telefono_cliente}` : ''}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-[10px] text-mute">Pagó {money(Number(p.pagado || 0))} de {money(Number(p.total || 0))}</p>
+                      <p className="text-[17px] font-black text-red-600 dark:text-red-400 tabular-nums leading-tight">{money(Number(p.saldo || 0))}</p>
+                    </div>
+                    <div className="flex gap-1.5 shrink-0">
+                      <button onClick={() => setAbonandoApartado(p)}
+                        className="h-8 px-3 rounded-lg bg-gold text-black text-[12px] font-bold hover:brightness-95 transition-all whitespace-nowrap">
+                        + Abono
+                      </button>
+                      <button onClick={() => toggleApartado(p.id)}
+                        className="h-8 px-3 rounded-lg border border-edge text-[12px] font-bold text-ink hover:bg-surface-2 transition-colors whitespace-nowrap">
+                        {abierto ? 'Ocultar' : 'Ver abonos'}
+                      </button>
+                    </div>
+                  </div>
+                  {abierto && (
+                    <div className="border-t border-edge px-4 sm:px-5 py-3 bg-surface-2/30">
+                      {(p.pagos || []).length === 0 ? (
+                        <p className="text-[12px] text-mute">Aún no hay abonos. El anticipo y cada pago quedan aquí con su fecha.</p>
+                      ) : (
+                        <ul className="space-y-1.5">
+                          {(p.pagos || []).map((pago, i) => (
+                            <li key={i} className="flex items-center justify-between gap-3 text-[12.5px]">
+                              <span className="text-mute">{fechaAbono(pago.fecha)} · <span className="capitalize">{pago.metodo}</span>{pago.por ? ` · ${pago.por}` : ''}</span>
+                              <span className="font-bold text-ink tabular-nums">{money(Number(pago.monto || 0))}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+         )}
         </div>
       )}
 
       {abonando && (
         <AbonoModal saldo={Number(abonando.saldo || 0)} onClose={() => setAbonando(null)} onRegistrar={registrarAbono} />
+      )}
+      {abonandoApartado && (
+        <AbonoModal saldo={Number(abonandoApartado.saldo || 0)} onClose={() => setAbonandoApartado(null)} onRegistrar={registrarAbonoApartado} />
       )}
       {ver && (
         <RentaDetalleModal renta={ver} onClose={() => { setVer(null); reload() }} onTicket={() => abrirOrdenCartaPDF('rentas', ver.id)} notify={notify} onChanged={reload} />
@@ -6286,6 +6831,26 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
   const [clienteNombre, setClienteNombre] = useState(cotizacion.cliente_nombre || '')
   const [clienteTel, setClienteTel] = useState(cotizacion.cliente_telefono || '')
   const [empresaSel, setEmpresaSel] = useState(String(cotizacion.empresa || ''))
+  // Sobre pedido: si la cotización es de VENTA y su equipo no tiene stock, "convertir"
+  // no crea una venta sino un PEDIDO con anticipo (la unidad se asigna cuando llega).
+  const [sinStock, setSinStock] = useState<boolean | null>(null)
+  const [pedidoDesde, setPedidoDesde] = useState<PedidoDesde | null>(null)
+  const itemVenta = c.items.find(i => i.modalidad === 'venta' && i.equipo)
+  useEffect(() => {
+    let cancel = false
+    const eqs = Array.from(new Set(c.items.filter(i => i.modalidad === 'venta' && i.equipo).map(i => i.equipo as number)))
+    if (c.tipo === 'renta' || eqs.length === 0) { setSinStock(false); return }
+    ;(async () => {
+      try {
+        for (const eq of eqs) {
+          const r = await api.get<Unidad[]>(`/equipos/${eq}/unidades/`, { fondo: true } as never)
+          if ((r.data || []).some(u => u.estado === 'disponible')) { if (!cancel) setSinStock(false); return }
+        }
+        if (!cancel) setSinStock(true)
+      } catch { if (!cancel) setSinStock(false) }
+    })()
+    return () => { cancel = true }
+  }, [c.id, c.tipo, c.items.length])   // eslint-disable-line react-hooks/exhaustive-deps
   const [vigencia, setVigencia] = useState(String(cotizacion.vigencia_dias || 15))
   const [aplicaIva, setAplicaIva] = useState(cotizacion.aplica_iva)
   const [savingInfo, setSavingInfo] = useState(false)
@@ -6512,6 +7077,19 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
     if (c.estado !== 'aceptada') { notify('Marca la cotización como “Aceptada” antes de convertirla en venta', 'err'); return }
     if (!clienteNombre.trim() && !empresaSel) { notify('Agrega el nombre del cliente antes de convertir', 'err'); return }
     if (c.items.length === 0) { notify('Agrega al menos una partida antes de convertir', 'err'); return }
+    // Sin stock → sobre pedido: se recoge el contexto de la cotización y se abre el
+    // modal de pedido (crea una venta 'apartada' ligada, no una venta consumada).
+    if (sinStock) {
+      setPedidoDesde({
+        id: c.id,
+        equipoId: itemVenta?.equipo || null,
+        equipoNombre: itemVenta?.descripcion,
+        precio: Number(c.subtotal_venta || c.total) || undefined,
+        cliente: clienteNombre.trim() || undefined,
+        empresaId: empresaSel ? Number(empresaSel) : null,
+      })
+      return
+    }
     const aviso = c.tipo === 'mixta'
       ? `¿Crear la venta con las partidas de venta (${orMoney(c.subtotal_venta)})?\n\nLas partidas de renta NO se incluyen: esas se concretan desde Rentas eligiendo unidad y fechas.`
       : '¿Convertir esta cotización en venta? Se creará la venta con estas partidas y su ticket.'
@@ -7152,25 +7730,34 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
           {!cotCerrada && (c.convertida ? (
             <button onClick={convertir} disabled={busy} className="w-full sm:w-auto py-2.5 px-5 rounded-full text-sm font-bold transition active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-2 border border-emerald-500/40 text-emerald-600 hover:bg-emerald-500/10">
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.9"><path strokeLinecap="round" strokeLinejoin="round" d="M4 12l5 5L20 6" /></svg>
-              Ver ticket de venta
+              Ver ticket
             </button>
           ) : c.tipo === 'renta' ? (
             <div className="w-full sm:w-auto py-2.5 px-4 rounded-full border border-edge text-mute text-[12px] font-medium flex items-center justify-center text-center" title="Las cotizaciones de renta se concretan creando la renta">
               Concreta esta renta desde Rentas
             </div>
           ) : c.estado !== 'aceptada' ? (
-            <div className="w-full sm:w-auto py-2.5 px-4 rounded-full border border-edge text-mute text-[12px] font-medium flex items-center justify-center text-center" title="Marca la cotización como “Aceptada” para poder convertirla en venta">
-              Acéptala para convertir a venta
+            <div className="w-full sm:w-auto py-2.5 px-4 rounded-full border border-edge text-mute text-[12px] font-medium flex items-center justify-center text-center" title="Marca la cotización como “Aceptada” para poder convertirla en venta o pedirla sobre pedido">
+              Acéptala primero
             </div>
           ) : (
             <button onClick={convertir} disabled={busy} className="w-full sm:w-auto py-2.5 px-5 rounded-full bg-gold text-black text-sm font-bold hover:opacity-90 transition active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-2">
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M4 12l5 5L20 6" /></svg>
-              {c.tipo === 'mixta' ? `Convertir la venta (${orMoney(c.subtotal_venta)})` : 'Convertir a venta'}
+              {sinStock ? 'Registrar sobre pedido' : c.tipo === 'mixta' ? `Convertir la venta (${orMoney(c.subtotal_venta)})` : 'Convertir a venta'}
             </button>
           ))}
         </div>
       </div>
 
+      {pedidoDesde && (
+        <NuevoPedidoModal
+          desde={pedidoDesde}
+          empresas={empresas}
+          onClose={() => setPedidoDesde(null)}
+          onDone={() => { setPedidoDesde(null); onChanged(); onClose() }}
+          notify={notify}
+        />
+      )}
       {zoomFoto && createPortal(
         <div className="modal-in fixed inset-0 z-[70] bg-black/75 flex items-center justify-center p-4" onClick={() => setZoomFoto(null)}>
           <img src={resolveMediaUrl(zoomFoto.imagen)} alt="Foto de la cotización" onClick={e => e.stopPropagation()}
@@ -8363,10 +8950,13 @@ function UsuarioModal({ usuario, roles, soyYo, onClose, onSaved, notify }: {
   const [f, setF] = useState({
     username: usuario?.username || '', first_name: usuario?.first_name || '', last_name: usuario?.last_name || '',
     email: usuario?.email || '', rol: usuario?.rol || '', telefono: usuario?.telefono || '',
-    puesto: usuario?.puesto || '', password: '',
+    puesto: usuario?.puesto || '', password: '', codigo_seguridad: '',
   })
   const [guardando, setGuardando] = useState(false)
   const set = (k: keyof typeof f, v: string) => setF(s => ({ ...s, [k]: v }))
+  // Solo Administrador y Gerente pueden autorizar acciones sensibles: su PIN es su
+  // firma. A los demás roles ni se les pide (el backend también lo impone).
+  const esAutoridad = ['Administrador', 'Gerente'].includes(f.rol)
 
   function guardar() {
     setGuardando(true)
@@ -8375,6 +8965,7 @@ function UsuarioModal({ usuario, roles, soyYo, onClose, onSaved, notify }: {
       : api.patch(`/usuarios/${usuario!.id}/`, {
           first_name: f.first_name, last_name: f.last_name, email: f.email,
           rol: f.rol, telefono: f.telefono, puesto: f.puesto,
+          ...(esAutoridad && f.codigo_seguridad ? { codigo_seguridad: f.codigo_seguridad } : {}),
         })
     pedir
       .then(() => onSaved(nuevo ? `${f.first_name || f.username} ya puede entrar` : 'Cambios guardados'))
@@ -8468,6 +9059,16 @@ function UsuarioModal({ usuario, roles, soyYo, onClose, onSaved, notify }: {
               {soyYo && f.rol === 'Administrador' && <p className="text-mute mt-1.5">No puedes quitarte a ti mismo el acceso de administrador.</p>}
             </div>
           </div>
+
+          {esAutoridad && (
+            <div>
+              <label className={etiqueta}>Código de seguridad (PIN de 6 dígitos)</label>
+              <input className={`${campo} font-mono tracking-[0.3em]`} type="password" inputMode="numeric" maxLength={6} autoComplete="one-time-code"
+                value={f.codigo_seguridad} onChange={e => set('codigo_seguridad', e.target.value.replace(/\D/g, '').slice(0, 6))}
+                placeholder={nuevo ? '6 dígitos' : 'Dejar vacío para no cambiarlo'} />
+              <p className="text-[12px] text-mute mt-1.5">Solo Administrador y Gerente pueden autorizar acciones sensibles (ajustes de precio, anticipos bajos, devoluciones). Este PIN es su firma.</p>
+            </div>
+          )}
 
           <div><label className={etiqueta}>Puesto</label><input className={campo} value={f.puesto} onChange={e => set('puesto', e.target.value)} placeholder="Técnico de servicio, asesor de ventas…" /></div>
 

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useClienteEventos } from '../lib/clienteEventos'
 import { useLatido } from '../lib/latido'
 import { Link, useParams } from 'react-router-dom'
 import api from '../lib/api'
@@ -35,11 +36,13 @@ export default function MisCotizacionEstado() {
   const [cancelListo, setCancelListo] = useState(false)
   const [fotos, setFotos] = useState<Record<number, string>>({})
 
-  /* Tiempo real: latido de 2 s que compara un sello de versión; solo cuando
-     el admin cambió algo se recarga la cotización. El cliente ve aceptada,
-     fecha de entrega o conversión prácticamente al instante. */
+  /* Tiempo real real por WebSocket; el latido queda como respaldo lento si el
+     socket cae. Así la aceptación, conversión o entrega llegan sin refrescar. */
   const recargar = useRef(() => {})
-  useLatido('/cotizaciones/latido/', 2_000, () => recargar.current())
+  useClienteEventos((evt) => {
+    if (evt.topic === 'cotizaciones') recargar.current()
+  })
+  useLatido('/cotizaciones/latido/', 10_000, () => recargar.current())
   useEffect(() => {
     let vivo = true
     const cargar = (fondo = false) => {
@@ -92,7 +95,11 @@ export default function MisCotizacionEstado() {
   // eso el flujo real es: recibida (autorizada) → existencia → fecha/hora →
   // entrega. No hay un paso de "autorización" a media revisión.
   const porAutorizar = cot.estado === 'por_autorizar'
-  const activo = compl ? 4 : rentaPorEntregar ? 3 : acep ? 2 : porAutorizar ? 0 : 1
+  // Ya con fecha/hora agendada (entrega_prometida), el paso "Fecha y hora" queda
+  // HECHO y el activo pasa a "Entrega en obra" (3). Antes, una venta aceptada se
+  // quedaba en 2 aunque ya hubiera fecha, y el paso no se ponía verde con palomita.
+  const entregaAgendada = acep && !!cot.entrega_prometida
+  const activo = compl ? 4 : rentaPorEntregar ? 3 : entregaAgendada ? 3 : acep ? 2 : porAutorizar ? 0 : 1
   const entrega = cot.entrega_prometida
     ? new Date(cot.entrega_prometida).toLocaleString('es-MX', { weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
     : null
@@ -111,6 +118,7 @@ export default function MisCotizacionEstado() {
     : entregado ? { txt: `Entregado · ${entregadoTxt}`, cls: 'text-emerald-500 border-emerald-500/40' }
     : ventaConv ? { txt: 'Completada · compra lista', cls: 'text-emerald-500 border-emerald-500/40' }
     : rentaPorEntregar ? { txt: 'Paso 4 de 4 · pendiente de entrega', cls: 'text-gold border-gold/40' }
+    : entregaAgendada ? { txt: 'Paso 4 de 4 · pendiente de entrega', cls: 'text-gold border-gold/40' }
     : acep ? { txt: 'Paso 3 de 4 · agendando fecha y hora', cls: 'text-gold border-gold/40' }
     : porAutorizar ? { txt: 'Paso 1 de 4 · esperando autorización', cls: 'text-gold border-gold/40' }
     : { txt: 'Paso 2 de 4 · revisando existencias', cls: 'text-gold border-gold/40' }

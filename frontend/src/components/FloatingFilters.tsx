@@ -31,6 +31,7 @@ export default function FloatingFilters({ value, onChange }: Props) {
         onClick={() => setOpen(false)}
       />
       <div
+        data-onboarding="filtros-flotantes"
         className="fixed left-0 top-0 h-full w-full sm:w-[360px] md:w-[380px] bg-white z-50 shadow-2xl flex flex-col transition-transform duration-300 ease-out"
       >
         <div className="px-6 py-5 border-b border-neutral-100 flex items-center justify-between bg-white sticky top-0 z-10">

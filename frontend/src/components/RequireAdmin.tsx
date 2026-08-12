@@ -46,7 +46,10 @@ export default function RequireAdmin({ children }: { children: React.ReactNode }
   }
 
   if (state === 'denied') {
-    return <Navigate to={`/login?next=${encodeURIComponent(loc.pathname)}`} replace />
+    // Sin sesión → al login para que entre. Con sesión pero sin nivel (un cliente
+    // que cayó en una ruta del panel) → a la tienda: ya está autenticado, mandarlo
+    // al login lo regresaría aquí en bucle (el parpadeo de "Verificando acceso…").
+    return <Navigate to={token ? '/' : `/login?next=${encodeURIComponent(loc.pathname)}`} replace />
   }
 
   return <>{children}</>

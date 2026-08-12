@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useClienteEventos } from '../lib/clienteEventos'
 import { useLatido } from '../lib/latido'
 import { Link, useNavigate } from 'react-router-dom'
 import { CalendarClock, Loader2, PackageOpen } from 'lucide-react'
@@ -166,9 +167,12 @@ export default function MisRentas() {
   const [cargando, setCargando] = useState(true)
   const [rentas, setRentas] = useState<RentaMia[]>([])
 
-  // Tiempo real: si en el negocio le registran o cierran una renta, la ve llegar.
+  // Push real por WebSocket; el latido queda solo como red de seguridad.
   const recargar = useRef<() => void>(() => {})
-  useLatido('/cotizaciones/latido/', 3_000, () => recargar.current())
+  useClienteEventos((evt) => {
+    if (evt.topic === 'rentas' || evt.topic === 'adeudos') recargar.current()
+  })
+  useLatido('/cotizaciones/latido/', 60_000, () => recargar.current())
 
   useEffect(() => {
     if (!token) {

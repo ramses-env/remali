@@ -54,14 +54,61 @@ class Command(BaseCommand):
 
         try:
             with transaction.atomic():
-                # migrate ya creó estos; el respaldo trae los suyos (incluidos los
-                # de apps viejas). Si no se vacían, chocan por clave única.
-                from django.contrib.auth.models import Permission
-                from django.contrib.contenttypes.models import ContentType
-                borrados = Permission.objects.all().delete()[0] + ContentType.objects.all().delete()[0]
-                self.stdout.write(f'Limpiados {borrados} contenttypes/permisos autogenerados.')
+                vaciadas = self._vaciar_tablas_del_respaldo(plano)
+                self.stdout.write(f'Vaciadas {vaciadas} tablas antes de cargar.')
+
                 call_command('loaddata', plano, verbosity=1)
+
+                # El latido es estado de runtime, no negocio: el respaldo ya no lo
+                # trae. Se vacía por si la base venía de una versión anterior, así
+                # el primer /latido/ lo regenera coherente con lo recién cargado.
+                from maquinaria.models import SelloTema
+                SelloTema.objects.all().delete()
             self.stdout.write(self.style.SUCCESS('Restauración completa.'))
         finally:
             if plano != ruta:
                 os.unlink(plano)
+
+    def _vaciar_tablas_del_respaldo(self, plano):
+        """Deja en cero toda tabla que el respaldo vaya a repoblar.
+
+        Restaurar significa "que la base quede como estaba", y para eso el
+        destino tiene que empezar vacío. Sin esto, `loaddata` choca contra las
+        filas que `migrate` acaba de sembrar por su cuenta: los ContentType y
+        Permission que Django regenera, la "Caja principal" de una migración de
+        datos, los grupos de roles… Cada choque es un `IntegrityError` que —al
+        ir todo en una transacción— tira la restauración COMPLETA.
+
+        Se iba parcheando tabla por tabla conforme aparecían; esto lo resuelve
+        de raíz: se leen los modelos que trae el respaldo y se vacían esos, ni
+        uno más. Lo que el respaldo no toca (sesiones, log del admin) se queda.
+
+        Se usa DELETE crudo y no el ORM a propósito: `.delete()` dispararía las
+        señales de post_delete y mandaría miles de eventos de WebSocket, además
+        de arrastrar cascadas que aquí sobran.
+        """
+        import json
+
+        from django.apps import apps
+        from django.db import connection
+
+        with open(plano, encoding='utf-8') as fh:
+            registros = json.load(fh)
+
+        etiquetas = {r['model'] for r in registros if r.get('model')}
+        tablas = []
+        for etiqueta in etiquetas:
+            try:
+                tablas.append(apps.get_model(etiqueta)._meta.db_table)
+            except LookupError:
+                # Modelo de una app que ya no existe (esta base arrastra tipos de
+                # una 'shop' vieja). loaddata lo ignorará igual.
+                continue
+
+        # Sin desactivar las FK habría que borrar en orden topológico; con ellas
+        # apagadas el orden da igual y al terminar la carga todo vuelve a cuadrar.
+        with connection.constraint_checks_disabled():
+            with connection.cursor() as c:
+                for tabla in tablas:
+                    c.execute(f'DELETE FROM `{tabla}`')
+        return len(tablas)

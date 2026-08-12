@@ -71,6 +71,10 @@ def _serialize_renta(r: Renta, ver_dinero: bool = True):
         'pagos': r.pagos or [],
         'pagado': str(pagado),
         'saldo': str(saldo),
+        # Depósito en garantía: su estado (retenido → devuelto/a_favor/por_devolver/
+        # aplicado) y cuánto se le regresa/queda debiendo al cliente.
+        'deposito_estado': r.deposito_estado,
+        'deposito_reembolso': str(r.deposito_reembolso),
         'inventario': {
             'id': r.inventario.id,
             'codigo': r.inventario.codigo,
@@ -115,12 +119,18 @@ def _serialize_renta(r: Renta, ver_dinero: bool = True):
             'por': r.recogida_por.get_username() if r.recogida_por_id else None,
         },
         'creado_en': r.creado_en,
+        # Renovación: de qué renta viene ésta (si es continuación de otra).
+        'renta_origen_id': r.renta_origen_id,
+        'aplica_iva': r.aplica_iva,
     }
     if ver_dinero:
         datos.update({
             'precio_unitario': str(r.precio_unitario),
             'descuento': str(r.descuento),
             'deposito': str(r.deposito),
+            'deposito_aplicado': str(r.deposito_aplicado),
+            'deposito_nota': r.deposito_nota,
+            'deposito_resuelto_en': r.deposito_resuelto_en,
             'recargo': str(r.recargo),
             'subtotal': str(r.subtotal),
             'total': str(r.total),
@@ -550,6 +560,31 @@ def crear_renta(request):
 
     descuento = _dec(datos.get('descuento'))
     deposito = _dec(datos.get('deposito'))
+    # Pago combinado: array [{'metodo':'efectivo','monto':'1200'}] o un solo
+    # metodo. Si no viene nada, se registra como efectivo con monto = total en
+    # pagos (para que "pagado" y "saldo" calculen bien).
+    metodo_pago_uno = (datos.get('metodo_pago') or 'efectivo').lower()
+    pagos_raw = datos.get('pagos')
+    pagos_limpios = []
+    if isinstance(pagos_raw, list):
+        for p in pagos_raw:
+            if not isinstance(p, dict):
+                continue
+            m = (str(p.get('metodo') or '').lower() or metodo_pago_uno)
+            try:
+                mo = Decimal(str(p.get('monto') or 0))
+            except Exception:
+                mo = Decimal('0')
+            if mo > 0 and m in ('efectivo', 'tarjeta', 'transferencia'):
+                pagos_limpios.append({'metodo': m, 'monto': str(mo)})
+    if not pagos_limpios:
+        try:
+            monto_unico = _dec(datos.get('monto_pago') or None)
+        except Exception:
+            monto_unico = Decimal('0')
+        if monto_unico <= 0:
+            monto_unico = Decimal('0')
+        pagos_limpios.append({'metodo': metodo_pago_uno, 'monto': str(monto_unico)})
 
     if modalidad not in ('dia', 'semana', 'mes'):
         return Response({'detalle': 'Modalidad inválida. Usa dia, semana o mes.'}, status=400)
@@ -591,6 +626,29 @@ def crear_renta(request):
 
         try:
             r.save()
+            # Guarda pagos combinados o el pago único: si los montos están en
+            # 0 (no se capturó), se asume que el cliente entrega el total
+            # en efectivo (comportamiento histórico).
+            try:
+                total = r.total or Decimal('0')
+                suma_pagos = sum((Decimal(str(p.get('monto', 0))) for p in pagos_limpios), Decimal('0'))
+                if suma_pagos <= 0 and total > 0:
+                    # Fallback retro-compatible: capturar el total en efectivo.
+                    pagos_limpios = [{'metodo': metodo_pago_uno, 'monto': str(total)}]
+                # Normaliza cada pago a {fecha, monto, metodo, por} —igual que
+                # registrar_abono— para que el detalle no truene al leer p.fecha.
+                _sello = timezone.now().isoformat()
+                _por = request.user.get_username() if request.user.is_authenticated else ''
+                pagos_limpios = [{
+                    'fecha': p.get('fecha') or _sello,
+                    'monto': str(p.get('monto', '0')),
+                    'metodo': p.get('metodo') or 'efectivo',
+                    'por': p.get('por') or _por,
+                } for p in pagos_limpios]
+                r.pagos = pagos_limpios
+                r.save(update_fields=['pagos'])
+            except Exception:
+                pass
             # Liga con su cotización: explícita si viene, o match único e inequívoco
             # (mismo cliente, tipo renta, aceptada y sin rentas ya ligadas).
             try:
@@ -607,6 +665,10 @@ def crear_renta(request):
                     # Toca la cotización: su sello de versión avanza y el
                     # cliente ve el paso "completada" en su siguiente latido.
                     _Cot.objects.filter(pk=cot.pk).update(actualizada=timezone.now())
+                    # El cliente "gasta" su cupón personal (5% de bienvenida) al
+                    # concretarse la renta. Idempotente; solo afecta a los personales.
+                    if cot.cupon_id:
+                        cot.cupon.marcar_usado()
             except Exception:
                 pass  # valida traslape, calcula montos y ocupa la unidad si es 'activa'
         except ValidationError as e:
@@ -618,6 +680,7 @@ def crear_renta(request):
             from maquinaria.models import crear_notificacion
             equipo_nombre = inv.equipo.modelo if inv.equipo else 'Equipo'
             verbo = 'reservó' if estado == 'reservada' else 'rentó'
+            # ── BROADCAST para STAFF (3ª persona) ─────────────────────────────
             crear_notificacion(
                 'renta',
                 f'{"Nueva reserva" if estado == "reservada" else "Nueva renta"} · {equipo_nombre}',
@@ -626,6 +689,38 @@ def crear_renta(request):
                 seccion='rentas',
                 data={'renta_id': r.id, 'inventario_id': inv.id, 'equipo_id': inv.equipo_id, 'codigo': inv.codigo},
             )
+            # ── NOTIFICACIÓN PERSONAL para el CLIENTE (2ª persona) ──────────
+            if r.usuario_id:
+                _modal = {'dia': 'día', 'semana': 'semana', 'mes': 'mes'}.get(r.modalidad, r.modalidad or 'periodo')
+                if estado == 'reservada':
+                    _titulo = f'Tu reserva de {equipo_nombre} está confirmada'
+                    _cuerpo = (
+                        f'Reservaste {inv.codigo} por {r.duracion} {_modal}{"s" if r.duracion != 1 else ""}, '
+                        f'total ${r.total}. Inicia el {r.fecha_inicio.strftime("%d/%m/%Y")}. '
+                        f'Entrega en: {direccion}. REMALI te contacta.'
+                    )
+                else:
+                    _titulo = f'Rentaste {equipo_nombre}'
+                    _cuerpo = (
+                        f'Rentaste {inv.codigo} por {r.duracion} {_modal}{"s" if r.duracion != 1 else ""}, '
+                        f'total ${r.total}. Entrega en: {direccion}. Si necesitas algo, avísanos.'
+                    )
+                try:
+                    crear_notificacion(
+                        'renta',
+                        _titulo,
+                        _cuerpo,
+                        seccion='mis-rentas',
+                        ref=f'renta-cliente-{r.id}',
+                        usuario=r.usuario,
+                        data={
+                            'renta_id': r.id, 'inventario_id': inv.id,
+                            'equipo_id': inv.equipo_id, 'codigo': inv.codigo,
+                            'accion_cliente': 'reservaste' if estado == 'reservada' else 'rentaste',
+                        },
+                    )
+                except Exception:
+                    pass
         except Exception:
             pass
 
@@ -647,6 +742,159 @@ def crear_renta(request):
         return Response({
             'renta': _serialize_renta(r),
             'ticket_url': f'/api/rentas/{r.id}/ticket/',
+        }, status=201)
+
+
+@api_view(['POST'])
+@permission_classes([EsOperador])
+def renovar_renta(request, pk: int):
+    """Renovar/revivar una renta: crea una NUEVA renta LIGADA (renta_origen) para
+    la misma unidad y cliente, con la modalidad/duración del nuevo periodo.
+
+    - Renta ACTIVA (el cliente conserva la máquina): se cierra el periodo anterior
+      y su depósito se TRASLADA como garantía a la renovación (no se pide otro).
+    - Renta FINALIZADA (revivir): la unidad debe estar disponible.
+    Cada periodo queda como su propio registro con su propio dinero (historial limpio).
+    """
+    datos = request.data or {}
+    modalidad = (datos.get('modalidad') or '').lower()
+    duracion = max(int(datos.get('duracion', 1) or 1), 1)
+    if modalidad not in ('dia', 'semana', 'mes'):
+        return Response({'detalle': 'Modalidad inválida. Usa dia, semana o mes.'}, status=400)
+
+    def _dec(v):
+        try:
+            return Decimal(str(v or 0))
+        except Exception:
+            return Decimal('0')
+
+    with transaction.atomic():
+        try:
+            prev = Renta.objects.select_for_update().select_related('inventario', 'inventario__equipo').get(pk=pk)
+        except Renta.DoesNotExist:
+            return Response({'detalle': 'Renta no encontrada'}, status=404)
+
+        if prev.estado == 'cancelada':
+            return Response({'detalle': 'No se puede renovar una renta cancelada.'}, status=400)
+        if prev.estado == 'reservada':
+            return Response({'detalle': 'Esa renta aún no inicia; edítala en lugar de renovarla.'}, status=400)
+
+        # Trabajamos la unidad con bloqueo y una SOLA instancia (para ocupar/liberar
+        # de forma consistente entre la renta previa y la nueva).
+        inv = Inventario.objects.select_for_update().select_related('equipo').get(pk=prev.inventario_id)
+        prev.inventario = inv
+
+        # Depósito a trasladar: solo si venía RETENIDO en una renta activa.
+        deposito_traslado = Decimal('0')
+        if prev.estado == 'activa':
+            if (prev.deposito or Decimal('0')) > 0 and prev.deposito_estado == 'retenido':
+                deposito_traslado = prev.deposito
+            # Cierra el periodo anterior y libera la unidad (finalizar aplica recargo
+            # solo si venía vencida; una renovación al día no genera recargo).
+            prev.finalizar()
+            nota_prev = f'Renovada el {timezone.localdate():%d/%m/%Y}.'
+            prev.observaciones = (f'{prev.observaciones}\n{nota_prev}' if prev.observaciones else nota_prev)
+            campos_prev = ['observaciones']
+            if deposito_traslado > 0:
+                prev.deposito_estado = 'a_favor'
+                prev.deposito_reembolso = deposito_traslado
+                prev.deposito_nota = 'Trasladado como garantía a la renovación.'
+                prev.deposito_resuelto_en = timezone.now()
+                prev.deposito_resuelto_por = request.user if request.user.is_authenticated else None
+                campos_prev += ['deposito_estado', 'deposito_reembolso', 'deposito_nota',
+                                'deposito_resuelto_en', 'deposito_resuelto_por']
+            prev.save(update_fields=campos_prev)
+        else:
+            # FINALIZADA → revivir: la unidad debe estar libre.
+            inv.refresh_from_db()
+            if not inv.puede_rentarse():
+                return Response({'detalle': 'La unidad no está disponible (rentada, vendida o en mantenimiento). Libérala antes de revivir la renta.'}, status=400)
+
+        # El admin puede fijar un depósito para el nuevo periodo; si no, se traslada el previo.
+        deposito_nuevo = _dec(datos.get('deposito')) if str(datos.get('deposito') or '') != '' else deposito_traslado
+
+        fecha_inicio = _parse_date(datos.get('fecha_inicio')) or timezone.localdate()
+        estado = 'reservada' if fecha_inicio > timezone.localdate() else 'activa'
+
+        nueva = Renta(
+            inventario=inv,
+            modalidad=modalidad,
+            duracion=duracion,
+            direccion=prev.direccion,
+            cliente=prev.cliente,
+            telefono_cliente=prev.telefono_cliente,
+            empresa_id=prev.empresa_id,
+            obra_id=prev.obra_id,
+            usuario_id=prev.usuario_id,          # sigue visible en "Tus rentas" del cliente
+            descuento=_dec(datos.get('descuento')),
+            deposito=deposito_nuevo,
+            fecha_inicio=fecha_inicio,
+            estado=estado,
+            aplica_iva=prev.aplica_iva,
+            renta_origen=prev,
+        )
+        nueva.fecha_fin = nueva.calcular_fecha_fin()
+        try:
+            nueva.save()  # recalcula montos, valida traslape y ocupa la unidad si 'activa'
+        except ValidationError as e:
+            return Response({'detalle': ' '.join(e.messages)}, status=400)
+        except ValueError as e:
+            return Response({'detalle': str(e)}, status=400)
+
+        # Abonos del nuevo periodo (opcional; mismo formato que crear_renta).
+        pagos_raw = datos.get('pagos')
+        pagos_limpios = []
+        if isinstance(pagos_raw, list):
+            for p in pagos_raw:
+                if not isinstance(p, dict):
+                    continue
+                m = str(p.get('metodo') or '').lower()
+                mo = _dec(p.get('monto'))
+                if mo > 0 and m in ('efectivo', 'tarjeta', 'transferencia'):
+                    pagos_limpios.append({
+                        'fecha': timezone.now().isoformat(),
+                        'monto': str(mo), 'metodo': m,
+                        'por': request.user.get_username() if request.user.is_authenticated else '',
+                    })
+        if pagos_limpios:
+            nueva.pagos = pagos_limpios
+            nueva.save(update_fields=['pagos'])
+
+        # Notificaciones (staff + cliente), al estilo de crear_renta.
+        try:
+            from maquinaria.models import crear_notificacion
+            equipo_nombre = inv.equipo.modelo if inv.equipo else 'Equipo'
+            crear_notificacion(
+                'renta',
+                f'Renovación · {equipo_nombre}',
+                f'{nueva.cliente_nombre} renovó {inv.codigo} ({nueva.modalidad} x{nueva.duracion}) por ${nueva.total}.',
+                seccion='rentas',
+                data={'renta_id': nueva.id, 'inventario_id': inv.id, 'equipo_id': inv.equipo_id,
+                      'codigo': inv.codigo, 'renovacion_de': prev.id},
+            )
+            if nueva.usuario_id:
+                _modal = {'dia': 'día', 'semana': 'semana', 'mes': 'mes'}.get(nueva.modalidad, nueva.modalidad or 'periodo')
+                try:
+                    crear_notificacion(
+                        'renta',
+                        f'Renovaste {equipo_nombre}',
+                        f'Renovaste {inv.codigo} por {nueva.duracion} {_modal}{"s" if nueva.duracion != 1 else ""}, '
+                        f'total ${nueva.total}. Vence el {nueva.fecha_fin.strftime("%d/%m/%Y")}.',
+                        seccion='mis-rentas',
+                        ref=f'renta-cliente-{nueva.id}',
+                        usuario=nueva.usuario,
+                        data={'renta_id': nueva.id, 'inventario_id': inv.id, 'equipo_id': inv.equipo_id,
+                              'codigo': inv.codigo, 'accion_cliente': 'renovaste'},
+                    )
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        return Response({
+            'renta': _serialize_renta(nueva),
+            'origen_id': prev.id,
+            'ticket_url': f'/api/rentas/{nueva.id}/ticket/',
         }, status=201)
 
 
@@ -672,10 +920,58 @@ def devolver_renta(request, pk: int):
     r.save(update_fields=['recogida_en', 'recogida_por', 'actualizado_en'])
     _avisar_movimiento(r, 'recogió', request.user)
 
+    # Cierre del DEPÓSITO (lo decide el técnico al devolver): si mandó cómo
+    # resolverlo y hay depósito retenido, se liquida en el mismo movimiento.
+    dep = (request.data or {}).get('deposito')
+    if dep and (r.deposito or 0) > 0:
+        r.resolver_deposito(
+            aplicar_deuda=dep.get('aplicar_deuda') or 0,
+            aplicar_dano=dep.get('aplicar_dano') or 0,
+            reembolso_tipo=dep.get('reembolso_tipo') or 'devuelto',
+            nota=dep.get('nota') or '',
+            user=request.user if request.user.is_authenticated else None,
+        )
+
     detalle = 'Equipo devuelto y renta finalizada'
     if r.recargo and r.recargo > 0:
         detalle += f'. Recargo por retraso: ${r.recargo}'
     return Response({'renta': _serialize_renta(r), 'detalle': detalle})
+
+
+@api_view(['POST'])
+@permission_classes([EsOperador])
+def resolver_deposito_renta(request, pk: int):
+    """Liquidar el depósito aparte de la devolución, o AJUSTARLO después.
+
+    - action 'saldar': la empresa ya le regresó al cliente lo que le debía
+      ('por_devolver'/'a_favor' → 'devuelto').
+    - si no, resuelve un depósito aún 'retenido' (aplicar a deuda/daño, devolver,
+      dejar a favor o marcar por devolver).
+    """
+    try:
+        r = Renta.objects.select_related('inventario__equipo', 'empresa', 'obra', 'usuario').get(pk=pk)
+    except Renta.DoesNotExist:
+        return Response({'detalle': 'Renta no encontrada'}, status=404)
+    d = request.data or {}
+    user = request.user if request.user.is_authenticated else None
+    # Acción sensible (mueve dinero de garantía): exige el CÓDIGO PERSONAL.
+    from maquinaria.seguridad import verificar_codigo
+    ok, detalle, status_cod, _c = verificar_codigo(request.user, d.get('codigo_seguridad'))
+    if not ok:
+        return Response({'detalle': detalle}, status=status_cod)
+    if d.get('action') == 'saldar':
+        r.marcar_deposito_saldado(user=user, nota=d.get('nota') or '')
+        return Response({'renta': _serialize_renta(r), 'detalle': 'Depósito marcado como devuelto'})
+    if r.deposito_estado != 'retenido':
+        return Response({'detalle': 'El depósito ya está resuelto.'}, status=400)
+    r.resolver_deposito(
+        aplicar_deuda=d.get('aplicar_deuda') or 0,
+        aplicar_dano=d.get('aplicar_dano') or 0,
+        reembolso_tipo=d.get('reembolso_tipo') or 'devuelto',
+        nota=d.get('nota') or '',
+        user=user,
+    )
+    return Response({'renta': _serialize_renta(r), 'detalle': 'Depósito resuelto'})
 
 
 @api_view(['POST'])
@@ -721,7 +1017,10 @@ def sustituir_unidad_renta(request, pk: int):
 
     La averiada entra a mantenimiento; el repuesto queda ocupado por la MISMA
     renta —mismo cliente, fechas y precio—, que sigue su curso. Queda registro
-    del cambio en las observaciones."""
+    del cambio en las observaciones.
+
+    Si la unidad sustituta es NUEVA, se AUTORIZA automáticamente para renta
+    (el propio flujo de sustitución es la evidencia)."""
     r = Renta.objects.select_related('inventario__equipo', 'usuario').filter(pk=pk).first()
     if not r:
         return Response({'detalle': 'Renta no encontrada'}, status=404)
@@ -741,6 +1040,20 @@ def sustituir_unidad_renta(request, pk: int):
             return Response({'detalle': 'El repuesto debe ser del mismo equipo.'}, status=400)
         if nueva.estado != 'disponible':
             return Response({'detalle': f'La unidad {nueva.codigo} no está disponible (está {nueva.estado}).'}, status=400)
+
+        # ✅ Auto-autorizar para renta si es NUEVA (el propio flujo de sustitución
+        #    justifica la autorización; la fecha y usuario quedan trazados).
+        if nueva.condicion == 'nueva' and not nueva.autorizada_para_renta:
+            nota_aut = (
+                f'Sustitución por avería en renta #{r.id} '
+                f'(cliente {r.cliente or r.empresa or "n/a"}).'
+                + (f' Motivo: {motivo}' if motivo else '')
+            )[:255]
+            nueva.autorizar_para_renta(
+                motivo=nota_aut,
+                usuario=getattr(request, 'user', None),
+            )
+
         nueva.ocupar_por_renta()                 # disponible -> rentado
         r.inventario = nueva
         nota = (f"[{timezone.now():%d/%m %H:%M}] Unidad sustituida por avería: "
@@ -773,8 +1086,15 @@ def cancelar_renta(request, pk: int):
     if r.estado in ('finalizada', 'cancelada'):
         return Response({'detalle': f'La renta ya está {r.estado}'}, status=400)
 
+    # Acción sensible: exige el CÓDIGO PERSONAL del operador que la ejecuta.
+    from maquinaria.seguridad import verificar_codigo
+    ok, detalle, status_cod, _c = verificar_codigo(request.user, (request.data or {}).get('codigo_seguridad'))
+    if not ok:
+        return Response({'detalle': detalle}, status=status_cod)
+
     motivo = (request.data or {}).get('motivo', '').strip()
-    r.cancelar(motivo=motivo)
+    quien = getattr(request.user, 'username', '') or 's/d'
+    r.cancelar(motivo=(f'{motivo} — autorizó {quien}' if motivo else f'Autorizó {quien}'))
     return Response({'renta': _serialize_renta(r), 'detalle': 'Renta cancelada'})
 
 
@@ -1083,15 +1403,18 @@ def mis_tareas(request):
         'proximas': sum(1 for t in tareas if t['urgencia'] == 'proxima'),
     }
     # Entregas PROMETIDAS de hoy (cotizaciones aceptadas con fecha, aún sin
-    # convertir): el técnico las ve en su día aunque la venta/renta formal no
-    # exista todavía. Sin botones de acción: son un compromiso, no una renta.
+    # convertir): el técnico las ve en su día aunque la renta formal no exista
+    # todavía. Sin botones de acción: son un compromiso, no una renta.
+    # Se EXCLUYE la VENTA: esas máquinas las recoge el cliente en el punto, no
+    # las entrega el técnico, así que no van en su jornada.
     try:
         from cotizaciones.models import Cotizacion as _Cot
         hoy_ini = timezone.make_aware(timezone.datetime.combine(hoy, timezone.datetime.min.time()))
         hoy_fin = hoy_ini + timezone.timedelta(days=1)
         for c in _Cot.objects.filter(estado='aceptada', entrega_prometida__gte=hoy_ini,
                                      entrega_prometida__lt=hoy_fin,
-                                     conversiones__isnull=True, rentas_convertidas__isnull=True):
+                                     conversiones__isnull=True, rentas_convertidas__isnull=True
+                                     ).exclude(tipo='venta'):
             obra = (c.datos_solicitud or {}).get('obra') or {}
             tareas.append({
                 'renta_id': None, 'cotizacion_folio': c.folio,

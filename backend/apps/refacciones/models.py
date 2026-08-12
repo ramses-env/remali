@@ -13,6 +13,12 @@ class Refaccion(models.Model):
         help_text="Además de mantenimiento, esta refacción también se vende al público"
     )
     ubicacion = models.CharField(max_length=120, blank=True, default='', help_text="Ubicación en el taller (estante/caja)")
+    # Familia para agrupar en la caja (chips del POS). Texto libre con sugeridas.
+    CATEGORIAS = ['Puntas', 'Eléctricos', 'Discos', 'Motor', 'Lubricantes', 'Accesorios']
+    categoria = models.CharField(
+        max_length=30, blank=True, default='',
+        help_text="Familia para agrupar en la caja (puntas, discos, motor…)"
+    )
     codigo_barras = models.CharField(
         max_length=20,
         unique=True,

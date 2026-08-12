@@ -18,8 +18,9 @@ class CotizacionPagination(PageNumberPagination):
     page_size_query_param = 'page_size'
     max_page_size = 100
 
-from maquinaria.permissions import IsAdminGroupOrStaff, EsOperador
+from maquinaria.permissions import IsAdminGroupOrStaff, EsOperador, PuedeCotizar, puede_de
 from maquinaria.throttling import SolicitudPublicaThrottle, SubidaEvidenciaThrottle
+from maquinaria.ws_events import push_user_event
 from .models import Cotizacion, CotizacionItem, CotizacionFoto
 from .serializers import CotizacionSerializer, CotizacionFotoSerializer
 
@@ -86,6 +87,104 @@ def _enviar_acuse_cliente(cot):
     except Exception:
         logger.exception('No se pudo generar el PDF de %s; se manda el correo sin adjunto', cot.folio)
     return enviar_async(f'Tu cotización {cot.folio} · {negocio}', cuerpo, [cot.cliente_email], adjuntos)
+
+
+def _construir_cotizacion(d, usuario, *, por_autorizar, token_lote=None):
+    """Valida el payload de UNA cotización de tienda y la crea (con sus items),
+    calculando los precios DEL SERVIDOR (no se confía en los del navegador).
+
+    Devuelve la Cotizacion creada. Lanza ValueError(mensaje) si el payload no
+    sirve. NO abre transacción ni dispara notificaciones: eso lo decide quien
+    llama —un envío suelto (crear_cotizacion_publica) o un lote—. Así el precio
+    se calcula en un SOLO lugar para ambos caminos."""
+    from maquinaria.models import Equipo, nombre_propio
+
+    items = d.get('items') or []
+    if not isinstance(items, list) or not items:
+        raise ValueError('Agrega al menos un equipo a tu solicitud.')
+    if len(items) > 50:
+        raise ValueError('Demasiados equipos en una sola solicitud.')
+
+    cliente = d.get('cliente') or {}
+    nombre = (cliente.get('nombre') or '').strip()
+    if not nombre:
+        raise ValueError('Tu nombre es obligatorio.')
+
+    partidas = []
+    carrito = []   # snapshot {id,title,price,qty,unit} para "volver a cotizar"
+    for it in items:
+        try:
+            eq = Equipo.objects.get(pk=it.get('equipo_id') or it.get('id'))
+        except (Equipo.DoesNotExist, ValueError, TypeError):
+            continue
+        try:
+            cant = max(1, min(int(it.get('cantidad') or 1), 999))
+        except (ValueError, TypeError):
+            cant = 1
+        unit = (it.get('unit') or '').lower()
+        try:
+            dur = max(1, min(int(it.get('duracion') or 1), 999)) if unit in ('dia', 'semana', 'mes') else 1
+        except (ValueError, TypeError):
+            dur = 1
+        etiqueta, precio, modalidad = _resolver_partida(eq, unit)
+        promo = min(90, max(0, getattr(eq, 'promo_pct', 0) or 0))
+        precio_lista = Decimal('0')
+        if precio and promo:
+            precio_lista = Decimal(str(precio))
+            precio = (Decimal(precio) * (Decimal('100') - promo) / Decimal('100')).quantize(Decimal('0.01'))
+            etiqueta = f'{etiqueta} (promo −{promo}%)'
+        partidas.append((etiqueta, cant, dur, Decimal(str(precio or 0)), modalidad, precio_lista or Decimal(str(precio or 0)), eq))
+        carrito.append({'id': eq.id, 'title': etiqueta, 'price': float(precio or 0),
+                        'qty': cant, 'duracion': dur, 'unit': unit or 'venta'})
+
+    if not partidas:
+        raise ValueError('No pudimos identificar los equipos de tu solicitud.')
+
+    # Cupón que el cliente trae aplicado (p.ej. su 5% de bienvenida). Se ATA a la
+    # cotización pero NO se gasta aquí: se marca usado recién al concretarse la
+    # venta/renta. Si el código no sirve, no es suyo o ya lo usó, simplemente no
+    # se amarra (el precio del servidor no depende de esto).
+    cupon_obj = None
+    codigo_cupon = (d.get('cupon') or '').strip()
+    if codigo_cupon:
+        from maquinaria.models import Cupon
+        c = Cupon.objects.filter(codigo=codigo_cupon, activo=True).first()
+        if c and not c.usado and (not c.personal or (usuario is not None and c.usuario_id == getattr(usuario, 'id', None))):
+            cupon_obj = c
+
+    obra = d.get('obra') or {}
+    cot = Cotizacion.objects.create(
+        tipo='venta',          # provisional: lo define recalcular_tipo() con las partidas
+        origen='cliente',
+        estado='por_autorizar' if por_autorizar else 'enviada',
+        usuario=usuario,
+        cupon=cupon_obj,
+        cliente_nombre=nombre_propio(nombre),
+        cliente_telefono=(cliente.get('telefono') or '').strip(),
+        cliente_email=(cliente.get('email') or '').strip().lower(),
+        aplica_iva=bool(d.get('requiere_factura')),
+        token_lote=token_lote or None,
+        datos_solicitud={
+            'empresa': (cliente.get('empresa') or '').strip(),
+            'obra': {
+                'responsable': (obra.get('responsable') or '').strip(),
+                'direccion': (obra.get('direccion') or '').strip(),
+                'telefono': (obra.get('telefono') or '').strip(),
+                'email': (obra.get('email') or '').strip().lower(),
+            },
+            'carrito': carrito,
+        },
+    )
+    for etiqueta, cant, dur, precio, modalidad, precio_lista, eq_ref in partidas:
+        CotizacionItem.objects.create(cotizacion=cot, descripcion=etiqueta, cantidad=cant,
+                                      duracion=dur, precio_unitario=precio, precio_lista=precio_lista,
+                                      equipo=eq_ref, modalidad=modalidad)
+    cot.recalcular_tipo()   # venta, renta o mixta según lo que armó el cliente
+    if por_autorizar:
+        import secrets
+        cot.token_autorizacion = secrets.token_hex(16)
+        cot.save(update_fields=['token_autorizacion'])
+    return cot
 
 
 @api_view(['POST'])
@@ -268,7 +367,7 @@ def solicitar_cancelacion(request, pk):
 
 
 @api_view(['POST'])
-@permission_classes([EsOperador])
+@permission_classes([IsAdminGroupOrStaff])
 def aprobar_cancelacion(request, pk):
     """Administración aprueba la cancelación que pidió el cliente: estado final
     'cancelada' + aviso a su campanita. La cotización deja de contar."""
@@ -448,6 +547,180 @@ def autorizacion_cotizacion(request, token):
 
 
 @api_view(['POST'])
+@permission_classes([IsAuthenticated])   # el lote lo arma el comprador con sesión
+@throttle_classes([SolicitudPublicaThrottle])
+def crear_lote_autorizacion(request):
+    """Crea VARIAS cotizaciones (todas 'por_autorizar') bajo UN mismo token_lote,
+    para que el jefe las apruebe con UNA sola liga. Comparten el mismo contacto
+    y la misma obra (mismo comprador). Todo-o-nada: si un borrador no sirve, no
+    se crea ninguno."""
+    import secrets
+    d = request.data or {}
+    cotizaciones = d.get('cotizaciones') or []
+    if not isinstance(cotizaciones, list) or not cotizaciones:
+        return Response({'detalle': 'Selecciona al menos un borrador para el lote.'}, status=400)
+    if len(cotizaciones) > 20:
+        return Response({'detalle': 'Máximo 20 cotizaciones por lote.'}, status=400)
+
+    cliente = d.get('cliente') or {}
+    if not (cliente.get('nombre') or '').strip():
+        return Response({'detalle': 'Faltan tus datos de contacto.'}, status=400)
+    obra = d.get('obra') or {}
+    if not (obra.get('direccion') or '').strip():
+        return Response({'detalle': 'Falta la obra a la que va el lote.'}, status=400)
+
+    token_lote = secrets.token_hex(16)
+    folios = []
+    try:
+        with transaction.atomic():
+            for c in cotizaciones:
+                cot = _construir_cotizacion(
+                    {
+                        'items': c.get('items') or [],
+                        'cliente': cliente,
+                        'obra': obra,
+                        'requiere_factura': d.get('requiere_factura'),
+                        'cupon': c.get('cupon'),
+                    },
+                    request.user,
+                    por_autorizar=True,
+                    token_lote=token_lote,
+                )
+                folios.append(cot.folio)
+    except ValueError as e:
+        return Response({'detalle': str(e)}, status=400)
+
+    return Response({
+        'detalle': 'Lote listo para autorización',
+        'liga_autorizacion': f'/autorizar-lote/{token_lote}',
+        'token': token_lote,
+        'folios': folios,
+        'count': len(folios),
+    }, status=201)
+
+
+@api_view(['GET', 'POST'])
+@permission_classes([AllowAny])
+@throttle_classes([SolicitudPublicaThrottle])
+def autorizacion_lote(request, token):
+    """Liga pública del jefe para un LOTE: ve TODAS las cotizaciones con su total
+    combinado y las autoriza/rechaza JUNTAS (todo-o-nada). Espejo de
+    autorizacion_cotizacion, en bucle."""
+    from django.utils import timezone
+    cots = list(Cotizacion.objects.prefetch_related('items').filter(token_lote=token).order_by('id'))
+    if not cots:
+        return Response({'detalle': 'Enlace no válido.'}, status=404)
+
+    primero = cots[0]
+    resuelto = any(c.autorizada_en for c in cots)
+    rechazado = any(c.autorizacion_rechazo for c in cots)
+    total_lote = sum((c.total for c in cots), Decimal('0'))
+
+    def _ser(c):
+        return {
+            'folio': c.folio, 'tipo': c.tipo,
+            'items': [{'descripcion': i.descripcion, 'cantidad': i.cantidad, 'duracion': i.duracion,
+                       'precio': str(i.precio_unitario), 'subtotal': str(i.subtotal), 'modalidad': i.modalidad}
+                      for i in c.items.all()],
+            'subtotal': str(c.subtotal), 'total': str(c.total),
+        }
+
+    if request.method == 'GET':
+        return Response({
+            'cliente': primero.cliente_nombre or '',
+            'empresa': (primero.datos_solicitud or {}).get('empresa') or '',
+            'obra': ((primero.datos_solicitud or {}).get('obra') or {}).get('direccion') or '',
+            'count': len(cots),
+            'cotizaciones': [_ser(c) for c in cots],
+            'total': str(total_lote),
+            'vence_el': primero.vence_el,
+            'autorizada': resuelto and not rechazado,
+            'rechazada': rechazado,
+            'autorizada_por': primero.autorizada_por,
+        })
+
+    if resuelto:
+        return Response({'detalle': 'Este lote ya fue resuelto.', 'ya': True, 'rechazada': rechazado})
+    nombre_aut = (request.data.get('nombre') or '').strip()
+    if not nombre_aut:
+        return Response({'detalle': 'Escribe tu nombre para continuar.'}, status=400)
+
+    from maquinaria.models import crear_notificacion, nombre_propio as _np, Notificacion, CorreoAviso
+    from maquinaria.correo import enviar_async
+    quien = _np(nombre_aut)[:120]
+    ahora = timezone.now()
+    folios = [c.folio for c in cots]
+
+    if (request.data.get('accion') or 'autorizar') == 'rechazar':
+        # Rechazo INTERNO: nunca llegó a REMALI, así que a REMALI no se le avisa.
+        motivo = (request.data.get('motivo') or '').strip()
+        with transaction.atomic():
+            for c in cots:
+                c.estado = 'rechazada'
+                c.autorizada_por = quien
+                c.autorizada_en = ahora
+                c.autorizacion_rechazo = motivo or 'Sin motivo indicado'
+                c.save(update_fields=['estado', 'autorizada_por', 'autorizada_en', 'autorizacion_rechazo'])
+        if primero.usuario_id:
+            try:
+                Notificacion.objects.create(
+                    usuario=primero.usuario, tipo='sistema',
+                    titulo=f'Tu lote de {len(cots)} cotizaciones fue rechazado',
+                    mensaje=f'{quien} lo rechazó{f": {motivo}" if motivo else ""}. Puedes armar otra versión y volver a mandarlo.',
+                    seccion='cotizaciones', ref=f'aut-lote-rechazo-{token[:12]}',
+                )
+            except Exception:
+                pass
+        return Response({'detalle': 'Rechazado. Le avisamos a quien lo armó.', 'rechazada': True})
+
+    # Autorizar TODAS. Si alguna venció, no se autoriza el lote (todo-o-nada).
+    if any(c.vence_el and c.vence_el < ahora.date() for c in cots):
+        return Response({'detalle': 'Una o más cotizaciones del lote ya vencieron. Pide una versión nueva a quien lo armó.'}, status=400)
+    with transaction.atomic():
+        for c in cots:
+            c.estado = 'aceptada'
+            c.autorizada_por = quien
+            c.autorizada_en = ahora
+            c.save(update_fields=['estado', 'autorizada_por', 'autorizada_en'])
+
+    if primero.usuario_id:
+        try:
+            Notificacion.objects.create(
+                usuario=primero.usuario, tipo='sistema',
+                titulo=f'Tu lote de {len(cots)} cotizaciones fue autorizado',
+                mensaje=f'{quien} lo autorizó; ya están con REMALI y te contactan pronto.',
+                seccion='cotizaciones', ref=f'aut-lote-ok-{token[:12]}',
+            )
+        except Exception:
+            pass
+    try:
+        crear_notificacion(
+            'sistema',
+            f'Lote de {len(cots)} cotizaciones AUTORIZADO',
+            f'{quien} autorizó {len(cots)} cotizaciones de {primero.cliente_nombre or "cliente"} por ${total_lote}. Solo falta concretarlas.',
+            seccion='cotizaciones',
+            ref=f'lote-autorizado-{token[:12]}',
+            data={'folios': folios},
+        )
+    except Exception:
+        pass
+    try:
+        destinatarios = list(CorreoAviso.objects.filter(verificado=True).values_list('email', flat=True))
+        if destinatarios:
+            enviar_async(
+                f'[REMALI] Lote autorizado · {len(cots)} cotizaciones',
+                f'{quien} autorizó un lote de {len(cots)} cotizaciones ({", ".join(folios)}) de '
+                f'{primero.cliente_nombre or "—"} por ${total_lote}. Ya aparecen en el panel.',
+                destinatarios,
+            )
+        for c in cots:
+            _enviar_acuse_cliente(c)
+    except Exception:
+        pass
+    return Response({'detalle': 'Autorizado: REMALI recibió el lote.'})
+
+
+@api_view(['POST'])
 @permission_classes([EsOperador])
 def generar_vinculo_cotizacion(request, pk):
     """Liga de un solo uso para que el cliente ligue esta cotización a su cuenta."""
@@ -575,6 +848,9 @@ def cotizaciones_mias(request):
             'cancelacion_solicitada': c.cancelacion_solicitada.isoformat() if c.cancelacion_solicitada else None,
             # Para reenviar la liga al jefe desde "Mis cotizaciones".
             'liga_autorizacion': (f'/autorizar/{c.token_autorizacion}' if c.estado == 'por_autorizar' and c.token_autorizacion else None),
+            # Si es parte de un LOTE: se agrupan en la lista y comparten UNA liga
+            # (/autorizar-lote/<token>) en vez de la individual de cada una.
+            'token_lote': c.token_lote or None,
             'tipo': c.tipo,
             'total': str(c.total),
             'aplica_iva': c.aplica_iva,
@@ -587,6 +863,9 @@ def cotizaciones_mias(request):
             'convertida': bool(len(c.conversiones.all()) or len(c.rentas_convertidas.all())),
             'venta_id': next((x.id for x in c.conversiones.all()), None),
             'renta_id': next((x.id for x in c.rentas_convertidas.all()), None),
+            # Entrega REAL: la marca el técnico (entregada_en), NO la conversión.
+            # Sin esto el cliente veía "equipo entregado" apenas se creaba la renta.
+            'entregada_en': next((x.entregada_en.isoformat() for x in c.rentas_convertidas.all() if x.entregada_en), None),
             'atendida_por': (
                 (c.atendida_por.get_full_name() or c.atendida_por.username)
                 if c.atendida_por_id and c.atendida_por else None
@@ -603,11 +882,13 @@ def cotizaciones_mias(request):
 
 class CotizacionListCreate(generics.ListCreateAPIView):
     serializer_class = CotizacionSerializer
-    permission_classes = [IsAdminGroupOrStaff]
+    # El asesor arma y lista cotizaciones. Convertir a venta, borrar y autorizar
+    # siguen pidiendo administración (ver más abajo).
+    permission_classes = [PuedeCotizar]
     pagination_class = CotizacionPagination
 
     def get_queryset(self):
-        qs = Cotizacion.objects.all().select_related('empresa', 'usuario', 'atendida_por').prefetch_related('items', 'fotos', 'conversiones')
+        qs = Cotizacion.objects.all().select_related('empresa', 'usuario', 'atendida_por', 'cupon').prefetch_related('items', 'fotos', 'conversiones')
         p = self.request.query_params
         estado = (p.get('estado') or '').strip().lower()
         if estado == 'vencida':
@@ -617,6 +898,13 @@ class CotizacionListCreate(generics.ListCreateAPIView):
         q = (p.get('q') or '').strip()
         if q:
             qs = qs.filter(Q(folio__icontains=q) | Q(cliente_nombre__icontains=q) | Q(empresa__nombre__icontains=q))
+        # Filtro por periodo (año/mes/rango) sobre la fecha de alta.
+        from server.periodos import rango_periodo
+        ini, fin = rango_periodo(p)
+        if ini:
+            qs = qs.filter(creada__gte=ini)
+        if fin:
+            qs = qs.filter(creada__lt=fin)
         return qs
 
 
@@ -645,8 +933,14 @@ class CotizacionDetail(generics.RetrieveUpdateDestroyAPIView):
             )
 
     serializer_class = CotizacionSerializer
-    permission_classes = [IsAdminGroupOrStaff]
-    queryset = Cotizacion.objects.all().select_related('empresa', 'usuario', 'atendida_por').prefetch_related('items', 'fotos', 'conversiones')
+    queryset = Cotizacion.objects.all().select_related('empresa', 'usuario', 'atendida_por', 'cupon').prefetch_related('items', 'fotos', 'conversiones')
+
+    def get_permissions(self):
+        # Ver y trabajar la cotización: cualquiera que cotice (el asesor incluido).
+        # Borrarla es de administración: el asesor propone, no destruye.
+        if self.request.method == 'DELETE':
+            return [IsAdminGroupOrStaff()]
+        return [PuedeCotizar()]
 
     def update(self, request, *args, **kwargs):
         # Una vez convertida en venta, la cotización queda de solo lectura: es el
@@ -662,6 +956,11 @@ class CotizacionDetail(generics.RetrieveUpdateDestroyAPIView):
         # Máquina de estados: no se regresa a etapas que ya pasaron.
         nuevo_estado = request.data.get('estado')
         if nuevo_estado and nuevo_estado != cot.estado:
+            # Aceptar o rechazar ES autorizar: es la decisión del negocio. El
+            # asesor propone y la manda a autorizar; quien acepta o rechaza ve las
+            # cuentas (administración, o el jefe desde su liga).
+            if nuevo_estado in ('aceptada', 'rechazada') and not puede_de(request.user).get('ver_dinero'):
+                return Response({'detalle': 'Solo administración autoriza (acepta o rechaza). Tú puedes mandarla a autorizar.'}, status=403)
             if cot.estado == 'cancelada':
                 return Response({'detalle': 'Está cancelada: es un estado final.'}, status=400)
             if nuevo_estado == 'cancelada' and not cot.cancelacion_solicitada:
@@ -710,8 +1009,15 @@ def cotizacion_stats(request):
     esto las cuenta de una sola pasada.
     """
     from django.db.models import Count
+    from server.periodos import rango_periodo
     hoy = timezone.now().date()
     base = Cotizacion.objects.all()
+    # Mismos KPIs que la lista: si viene un periodo, los conteos lo respetan.
+    ini, fin = rango_periodo(request.query_params)
+    if ini:
+        base = base.filter(creada__gte=ini)
+    if fin:
+        base = base.filter(creada__lt=fin)
     por_estado = dict(base.values_list('estado').annotate(n=Count('id')))
     vencidas = base.filter(estado__in=['borrador', 'enviada'], vence_el__lt=hoy).count()
     abiertas = max(0, por_estado.get('borrador', 0) + por_estado.get('enviada', 0) - vencidas)
@@ -743,7 +1049,7 @@ def _bloqueada_si_convertida(cot):
 
 
 @api_view(['POST'])
-@permission_classes([IsAdminGroupOrStaff])
+@permission_classes([PuedeCotizar])
 def cotizacion_agregar_item(request, pk: int):
     try:
         cot = Cotizacion.objects.get(pk=pk)
@@ -815,7 +1121,7 @@ def cotizacion_agregar_item(request, pk: int):
 
 
 @api_view(['PATCH'])
-@permission_classes([IsAdminGroupOrStaff])
+@permission_classes([PuedeCotizar])
 def cotizacion_item_modalidad(request, pk: int, item_id: int):
     """Corrige si una partida es de venta o de renta (y con qué unidad)."""
     try:
@@ -900,20 +1206,6 @@ def convertir_cotizacion(request, pk: int):
         if abs(suma - cot.total) > Decimal('0.01'):
             return Response({'detalle': f'Los pagos suman {suma} y el total es {cot.total}.'}, status=400)
         metodo = max(pagos, key=lambda p: Decimal(p['monto']))['metodo']
-    # Unidades físicas que se entregan (número de identificación): se marcan
-    # vendidas en el mismo acto, así el inventario y el catálogo público
-    # (que se calculan de las unidades) quedan cuadrados sin pasos manuales.
-    from inventario.models import Inventario as _Inv
-    unidades = []
-    for uid in (request.data.get('unidad_ids') or []):
-        try:
-            u = _Inv.objects.get(id=int(uid))
-        except (ValueError, _Inv.DoesNotExist):
-            return Response({'detalle': f'Unidad {uid} no existe.'}, status=400)
-        if u.estado != 'disponible':
-            return Response({'detalle': f'La unidad {u.codigo} no está disponible (está {u.estado}).'}, status=400)
-        unidades.append(u)
-
     partidas_venta = [i for i in cot.items.all() if i.modalidad == 'venta']
     if not partidas_venta:
         return Response(
@@ -921,6 +1213,40 @@ def convertir_cotizacion(request, pk: int):
                         'Las de renta se concretan creando la renta (eligiendo unidad y fechas).'},
             status=400,
         )
+    # Unidades físicas que se entregan (número de identificación): se marcan
+    # vendidas en el mismo acto, así el inventario y el catálogo público
+    # (que se calculan de las unidades) quedan cuadrados sin pasos manuales.
+    # Si la cotización nació de equipo(s) concretos, las unidades elegidas deben
+    # corresponder a ese mismo equipo y no exceder lo que el cliente pidió.
+    from inventario.models import Inventario as _Inv
+    unidades = []
+    requeridas_por_equipo = {}
+    for item in partidas_venta:
+        if item.equipo_id:
+            requeridas_por_equipo[item.equipo_id] = requeridas_por_equipo.get(item.equipo_id, 0) + max(item.cantidad or 0, 0)
+    elegidas_por_equipo = {}
+    unidades_vistas = set()
+    for uid in (request.data.get('unidad_ids') or []):
+        try:
+            u = _Inv.objects.get(id=int(uid))
+        except (ValueError, _Inv.DoesNotExist):
+            return Response({'detalle': f'Unidad {uid} no existe.'}, status=400)
+        if u.id in unidades_vistas:
+            return Response({'detalle': f'La unidad {u.codigo} viene repetida.'}, status=400)
+        unidades_vistas.add(u.id)
+        if u.estado != 'disponible':
+            return Response({'detalle': f'La unidad {u.codigo} no está disponible (está {u.estado}).'}, status=400)
+        if requeridas_por_equipo:
+            if u.equipo_id not in requeridas_por_equipo:
+                return Response({
+                    'detalle': f'La unidad {u.codigo} no coincide con el equipo cotizado por el cliente.'
+                }, status=400)
+            elegidas_por_equipo[u.equipo_id] = elegidas_por_equipo.get(u.equipo_id, 0) + 1
+            if elegidas_por_equipo[u.equipo_id] > requeridas_por_equipo[u.equipo_id]:
+                return Response({
+                    'detalle': f'Estás asignando más unidades de {u.equipo.modelo if u.equipo_id and u.equipo else "ese equipo"} de las que pidió el cliente.'
+                }, status=400)
+        unidades.append(u)
 
     existente = cot.conversiones.first()
     if existente:
@@ -929,10 +1255,14 @@ def convertir_cotizacion(request, pk: int):
     with transaction.atomic():
         venta = Venta.objects.create(
             usuario=request.user if request.user.is_authenticated else None,
+            # Cuenta del COMPRADOR: si la cotización la pidió un cliente con
+            # sesión, la venta queda ligada a su perfil y aparece en "Mis
+            # compras" (igual que la renta liga su cuenta al concretarse).
+            cliente_usuario=cot.usuario,
             nombre_cliente=(cot.cliente_nombre or (cot.empresa.nombre if cot.empresa_id and cot.empresa else '')),
             telefono_cliente=cot.cliente_telefono,
             empresa_id=cot.empresa_id,
-            precio_maquina=cot.subtotal_venta,  # solo lo que se vende (sin IVA)
+            precio_maquina=cot.subtotal_venta,  # lo que se vende (precio con IVA incluido)
             metodo_pago=metodo,
             pagos=pagos,
             inventario=unidades[0] if unidades else None,
@@ -951,7 +1281,7 @@ def convertir_cotizacion(request, pk: int):
 
 
 @api_view(['POST'])
-@permission_classes([IsAdminGroupOrStaff])
+@permission_classes([PuedeCotizar])
 def atender_cotizacion(request, pk: int):
     """Un asesor toma la solicitud del cliente → detiene el escalamiento."""
     try:
@@ -964,11 +1294,53 @@ def atender_cotizacion(request, pk: int):
     cot.atendida_por = request.user
     cot.atendida_en = timezone.now()
     cot.save(update_fields=['atendida_por', 'atendida_en', 'actualizada'])
+    if cot.usuario_id:
+        push_user_event(cot.usuario_id, {
+            'topic': 'cotizaciones',
+            'action': 'atendida_por_asignado',
+            'source': 'cotizacion_admin',
+            'cotizacion_id': cot.id,
+            'folio': cot.folio,
+        })
     return Response({'detalle': 'La estás atendiendo', 'cotizacion': CotizacionSerializer(cot).data})
 
 
+@api_view(['POST'])
+@permission_classes([PuedeCotizar])
+def mandar_a_autorizar(request, pk: int):
+    """La deja lista y la MANDA A AUTORIZAR: pasa a 'por_autorizar' y devuelve la
+    liga del jefe (/autorizar/<token>) que ya existe. El asesor propone; quien
+    autoriza es el jefe desde su liga (o administración desde el panel). No
+    convierte ni acepta: eso viene después y es de otro."""
+    import secrets
+    try:
+        cot = Cotizacion.objects.prefetch_related('items').get(pk=pk)
+    except Cotizacion.DoesNotExist:
+        return Response({'detalle': 'Cotización no encontrada'}, status=404)
+    bloqueo = _bloqueada_si_convertida(cot)
+    if bloqueo:
+        return bloqueo
+    if cot.estado in ('aceptada', 'rechazada', 'cancelada'):
+        return Response({'detalle': f'Ya está {cot.get_estado_display().lower()}: no se puede mandar a autorizar.'}, status=400)
+    if not cot.items.exists():
+        return Response({'detalle': 'Agrega al menos una partida antes de mandarla a autorizar.'}, status=400)
+    cot.estado = 'por_autorizar'
+    if not cot.token_autorizacion:
+        cot.token_autorizacion = secrets.token_hex(16)
+    # Deja registrado quién la trabajó, si nadie la había tomado.
+    if not cot.atendida_por_id and request.user.is_authenticated:
+        cot.atendida_por = request.user
+        cot.atendida_en = timezone.now()
+    cot.save()   # completo: al salir de 'borrador' el modelo asigna folio
+    return Response({
+        'detalle': 'Lista para autorizar. Comparte la liga con quien autoriza.',
+        'liga_autorizacion': f'/autorizar/{cot.token_autorizacion}',
+        'cotizacion': CotizacionSerializer(cot).data,
+    })
+
+
 @api_view(['PATCH', 'DELETE'])
-@permission_classes([IsAdminGroupOrStaff])
+@permission_classes([PuedeCotizar])
 def cotizacion_item(request, pk: int, item_id: int):
     """Edita (PATCH: descripción/cantidad/precio) o elimina (DELETE) una partida.
 
@@ -1025,7 +1397,7 @@ def _nombre_foto(cot_id: int, formato: str) -> str:
 
 
 @api_view(['GET', 'POST'])
-@permission_classes([IsAdminGroupOrStaff])
+@permission_classes([PuedeCotizar])
 @throttle_classes([SubidaEvidenciaThrottle])
 def cotizacion_fotos(request, pk: int):
     """GET: fotos de la cotización. POST: sube una o varias.
@@ -1080,7 +1452,7 @@ def cotizacion_fotos(request, pk: int):
 
 
 @api_view(['GET'])
-@permission_classes([IsAdminGroupOrStaff])
+@permission_classes([PuedeCotizar])
 def cotizacion_pdf(request, pk: int):
     """Descarga la cotización en PDF.
 
@@ -1119,7 +1491,7 @@ def cotizacion_publica_pdf(request, token):
 
 
 @api_view(['POST'])
-@permission_classes([IsAdminGroupOrStaff])
+@permission_classes([PuedeCotizar])
 def cotizacion_enviar(request, pk: int):
     """Envía la cotización al correo del cliente con el PDF adjunto y el link.
 
@@ -1187,7 +1559,7 @@ def cotizacion_enviar(request, pk: int):
 
 
 @api_view(['DELETE'])
-@permission_classes([IsAdminGroupOrStaff])
+@permission_classes([PuedeCotizar])
 def cotizacion_foto_eliminar(request, pk: int, foto_id: int):
     try:
         foto = CotizacionFoto.objects.select_related('cotizacion').get(pk=foto_id, cotizacion_id=pk)

@@ -19,12 +19,12 @@ type Info = {
 /** Página pública de la "liga de vinculación": el cliente abre el enlace que le
  *  mandó el admin; si no tiene sesión se le pide iniciar, y al confirmar la
  *  venta/renta queda ligada a SU cuenta (la liga es de un solo uso). */
-export default function VincularCuenta({ tipo }: { tipo: 'venta' | 'renta' | 'cotizacion' }) {
+export default function VincularCuenta({ tipo }: { tipo: 'venta' | 'renta' | 'cotizacion' | 'reparacion' }) {
   const { token } = useParams()
   const nav = useNavigate()
   const { token: sesion } = useAuth()
   const ruta = `/vincular/${tipo}/${token}`
-  const titulo = tipo === 'renta' ? 'renta' : tipo === 'cotizacion' ? 'cotización' : 'compra'
+  const titulo = tipo === 'renta' ? 'renta' : tipo === 'cotizacion' ? 'cotización' : tipo === 'reparacion' ? 'reparación' : 'compra'
 
   const [info, setInfo] = useState<Info | null>(null)
   const [cargando, setCargando] = useState(true)
@@ -33,11 +33,10 @@ export default function VincularCuenta({ tipo }: { tipo: 'venta' | 'renta' | 'co
   const [vinculando, setVinculando] = useState(false)
 
   useEffect(() => {
-    // Sin sesión: al login y de regreso aquí (Login respeta ?next).
-    if (!sesion) {
-      nav(`/login?next=${encodeURIComponent(ruta)}`, { replace: true })
-      return
-    }
+    // Sin sesión NO redirigimos a ciegas: mostramos la tarjeta con el aviso de
+    // iniciar sesión (abajo), para que el cliente entienda POR QUÉ se le pide y
+    // no aparezca en el login sin contexto.
+    if (!sesion) { setCargando(false); return }
     let vivo = true
     api.get<Info>(`/vinculo/${tipo}/${token}/`, { fondo: true } as never)
       .then(r => { if (vivo) setInfo(r.data) })
@@ -67,38 +66,65 @@ export default function VincularCuenta({ tipo }: { tipo: 'venta' | 'renta' | 'co
             <span className="w-8 h-8 rounded-full border-2 border-gold border-t-transparent animate-spin" />
             <p className="text-mute text-sm">Abriendo tu enlace…</p>
           </div>
+        ) : !sesion ? (
+          <>
+            <div className="vc-pop w-16 h-16 mx-auto rounded-full bg-gold-soft text-gold flex items-center justify-center mb-5">
+              <svg className="w-7 h-7" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7" /><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7" /></svg>
+            </div>
+            <h1 className="vc-rise text-[22px] font-black text-ink leading-tight" style={{ animationDelay: '120ms' }}>Vincular {titulo} a tu cuenta</h1>
+            <p className="vc-rise text-mute text-sm mt-2 max-w-[34ch] mx-auto" style={{ animationDelay: '180ms' }}>
+              Para guardarla en tu historial de REMALI, primero <b className="text-ink">inicia sesión</b> con tu cuenta. Al entrar, vuelves aquí solo.
+            </p>
+            <button onClick={() => nav(`/login?next=${encodeURIComponent(ruta)}`)}
+              style={{ animationDelay: '260ms' }}
+              className="vc-rise mt-7 w-full py-3.5 rounded-full bg-gold text-black font-bold text-sm transition-[transform,opacity] duration-150 ease-out hover:opacity-95 active:scale-[0.97]">
+              Iniciar sesión para vincular
+            </button>
+            <p className="vc-rise text-[12px] text-mute mt-3" style={{ animationDelay: '320ms' }}>¿No tienes cuenta? En el login puedes crearla.</p>
+          </>
         ) : ok ? (
           <>
-            <div className="w-16 h-16 mx-auto rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mb-5">
-              <svg className="w-8 h-8" fill="none" stroke="currentColor" strokeWidth="2.4" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
+            {/* Un solo momento de delight: la insignia hace pop, un anillo pulsa
+                una vez y la palomita se dibuja; el texto sube en cascada detrás. */}
+            <div className="relative w-[76px] h-[76px] mx-auto mb-6 grid place-items-center">
+              <span aria-hidden="true" className="exito-ring absolute inset-0 rounded-full border-2 border-emerald-500/60" />
+              <div className="exito-pop w-[76px] h-[76px] rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 grid place-items-center">
+                <svg className="w-9 h-9" fill="none" stroke="currentColor" strokeWidth="2.4" viewBox="0 0 24 24"><path className="exito-check" pathLength={1} strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
+              </div>
             </div>
-            <h1 className="text-[22px] font-black text-ink">¡Listo!</h1>
-            <p className="text-mute text-sm mt-2">Tu {titulo} ya vive en tu cuenta.</p>
-            <button onClick={() => nav(tipo === 'renta' ? '/mis-rentas' : '/mis-cotizaciones')}
-              className="mt-7 w-full py-3.5 rounded-full bg-gold text-black font-bold text-sm hover:opacity-90 transition-opacity">
+            <h1 className="vc-rise text-[26px] font-black tracking-tight text-ink" style={{ animationDelay: '300ms' }}>¡Listo!</h1>
+            <p className="vc-rise text-mute text-sm mt-2 max-w-[30ch] mx-auto" style={{ animationDelay: '370ms' }}>Tu {titulo} ya vive en tu cuenta.</p>
+            <button
+              onClick={() => nav(tipo === 'renta' ? '/mis-rentas' : tipo === 'cotizacion' ? '/mis-cotizaciones' : tipo === 'reparacion' ? '/mis-reparaciones' : '/mis-compras')}
+              style={{ animationDelay: '450ms' }}
+              className="vc-rise group mt-7 w-full py-3.5 rounded-full bg-gold text-black font-bold text-sm inline-flex items-center justify-center gap-2 transition-[transform,opacity] duration-150 ease-out hover:opacity-95 active:scale-[0.97]"
+            >
               Ver mi historial
+              <svg className="w-4 h-4 transition-transform duration-200 ease-out group-hover:translate-x-0.5" fill="none" stroke="currentColor" strokeWidth="2.2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M5 12h14m0 0l-6-6m6 6l-6 6" /></svg>
             </button>
           </>
         ) : error ? (
           <>
-            <div className="w-16 h-16 mx-auto rounded-full bg-red-500/10 text-red-500 flex items-center justify-center mb-5">
-              <svg className="w-8 h-8" fill="none" stroke="currentColor" strokeWidth="2.2" viewBox="0 0 24 24" strokeLinecap="round"><path d="M12 7v6" /><circle cx="12" cy="17" r="0.6" className="fill-current" /></svg>
+            {/* Contraparte sobria del éxito: la insignia entra calmada y el "!"
+                hace un "no" sutil una vez; el texto sube en cascada detrás. */}
+            <div className="vc-pop w-16 h-16 mx-auto rounded-full bg-red-500/10 text-red-500 flex items-center justify-center mb-5">
+              <svg className="err-shake w-8 h-8" fill="none" stroke="currentColor" strokeWidth="2.2" viewBox="0 0 24 24" strokeLinecap="round"><path d="M12 7v6" /><circle cx="12" cy="17" r="0.6" className="fill-current" /></svg>
             </div>
-            <h1 className="text-[22px] font-black text-ink">Enlace no disponible</h1>
-            <p className="text-mute text-sm mt-2">{error}</p>
-            <button onClick={() => nav('/')} className="mt-7 w-full py-3.5 rounded-full border border-edge text-ink font-semibold text-sm hover:bg-surface-2 transition-colors">
+            <h1 className="vc-rise text-[22px] font-black text-ink" style={{ animationDelay: '160ms' }}>Enlace no disponible</h1>
+            <p className="vc-rise text-mute text-sm mt-2" style={{ animationDelay: '230ms' }}>{error}</p>
+            <button onClick={() => nav('/')} style={{ animationDelay: '310ms' }} className="vc-rise mt-7 w-full py-3.5 rounded-full border border-edge text-ink font-semibold text-sm transition-[transform,background-color] duration-150 ease-out hover:bg-surface-2 active:scale-[0.97]">
               Ir al inicio
             </button>
           </>
         ) : info ? (
           <>
-            <div className="w-16 h-16 mx-auto rounded-full bg-gold-soft text-gold flex items-center justify-center mb-5">
+            <div className="vc-pop w-16 h-16 mx-auto rounded-full bg-gold-soft text-gold flex items-center justify-center mb-5">
               <svg className="w-7 h-7" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7" /><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7" /></svg>
             </div>
-            <h1 className="text-[22px] font-black text-ink leading-tight">Vincular {titulo} a tu cuenta</h1>
-            <p className="text-mute text-sm mt-2">Confírmalo y quedará guardada en tu historial de REMALI.</p>
+            <h1 className="vc-rise text-[22px] font-black text-ink leading-tight" style={{ animationDelay: '120ms' }}>Vincular {titulo} a tu cuenta</h1>
+            <p className="vc-rise text-mute text-sm mt-2" style={{ animationDelay: '180ms' }}>Confírmalo y quedará guardada en tu historial de REMALI.</p>
 
-            <div className="mt-6 rounded-2xl bg-surface-2 border border-edge p-5 text-left text-sm">
+            <div className="vc-rise mt-6 rounded-2xl bg-surface-2 border border-edge p-5 text-left text-sm" style={{ animationDelay: '250ms' }}>
               <div className="flex justify-between gap-4">
                 <span className="text-mute">Concepto</span>
                 <span className="text-ink font-semibold text-right">{info.concepto || '—'}</span>
@@ -128,13 +154,14 @@ export default function VincularCuenta({ tipo }: { tipo: 'venta' | 'renta' | 'co
             </div>
 
             {info.ya_ligada && (
-              <p className="text-amber-600 dark:text-amber-400 text-xs mt-3">Esta {titulo} ya estaba en una cuenta; al confirmar pasará a la tuya.</p>
+              <p className="vc-rise text-amber-600 dark:text-amber-400 text-xs mt-3" style={{ animationDelay: '310ms' }}>Esta {titulo} ya estaba en una cuenta; al confirmar pasará a la tuya.</p>
             )}
             <button onClick={vincular} disabled={vinculando}
-              className="mt-6 w-full py-3.5 rounded-full bg-gold text-black font-bold text-sm hover:opacity-90 transition-opacity disabled:opacity-50">
+              style={{ animationDelay: '340ms' }}
+              className="vc-rise mt-6 w-full py-3.5 rounded-full bg-gold text-black font-bold text-sm transition-[transform,opacity] duration-150 ease-out hover:opacity-95 active:scale-[0.97] disabled:opacity-50 disabled:active:scale-100">
               {vinculando ? 'Vinculando…' : 'Vincular a mi cuenta'}
             </button>
-            <p className="text-[11.5px] text-mute mt-3">Se guardará en la cuenta con la que iniciaste sesión.</p>
+            <p className="vc-rise text-[11.5px] text-mute mt-3" style={{ animationDelay: '400ms' }}>Se guardará en la cuenta con la que iniciaste sesión.</p>
           </>
         ) : null}
       </div>

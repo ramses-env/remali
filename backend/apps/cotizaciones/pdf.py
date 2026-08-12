@@ -326,6 +326,10 @@ def render_cotizacion_pdf(cot) -> bytes:
     total('Subtotal', cot.base)
     if cot.iva:
         total('IVA (16%)', cot.iva)
+    # Cupón del cliente (p.ej. 5% de bienvenida): línea propia para que Subtotal +
+    # IVA − descuento cuadre con el Total (si no, el PDF se ve "descuadrado").
+    if cot.descuento_cupon:
+        total('Descuento cupón', -cot.descuento_cupon)
     total('Total', cot.total, fuerte=True)
     # Contado (solo venta): el MAYOR descuento entre la promo y el 5% de contado,
     # SIN apilarlos. Solo se muestra si de verdad baja el precio (si la promo ya

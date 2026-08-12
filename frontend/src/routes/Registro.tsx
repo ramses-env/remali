@@ -19,7 +19,7 @@ import { Input } from '@/components/ui/input'
 const esquema = z
   .object({
     nombre: z.string().trim().min(2, { message: 'Escribe tu nombre.' }),
-    email: z.string().trim().email({ message: 'Escribe un correo válido.' }),
+    email: z.string().trim().email({ message: 'Escribe un correo válido.' }).transform(v => v.toLowerCase()),
     password: z.string().min(8, { message: 'Mínimo 8 caracteres.' }),
     confirmar: z.string(),
   })

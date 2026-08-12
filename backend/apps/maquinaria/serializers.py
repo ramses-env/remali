@@ -2,6 +2,7 @@ from rest_framework import serializers
 from .models import (
     Equipo, Cupon, Categoria, Tipo, Marca, PerfilUsuario, Notificacion,
     ConfiguracionSitio, CorreoAviso, ObraCliente, nombre_propio,
+    ConversacionSoporte, MensajeSoporte, Favorito,
 )
 
 
@@ -373,3 +374,83 @@ class MarcaSerializer(_CatalogoSerializer):
     class Meta:
         model = Marca
         fields = ['id', 'nombre']
+
+
+# ── Soporte (conversaciones + mensajes) y Favoritos ──
+# Reconstruidos tras una corrupción de este archivo (colisión de sesiones).
+class MensajeSoporteSerializer(serializers.ModelSerializer):
+    autor_admin_username = serializers.SerializerMethodField()
+
+    class Meta:
+        model = MensajeSoporte
+        fields = ['id', 'autor_tipo', 'autor_admin_username', 'cuerpo', 'creada']
+
+    def get_autor_admin_username(self, obj):
+        try:
+            return obj.autor_admin.username if obj.autor_admin_id else None
+        except Exception:
+            return None
+
+
+class ConversacionSoporteListSerializer(serializers.ModelSerializer):
+    no_leidos_admin = serializers.SerializerMethodField()
+    ultimo_mensaje = serializers.SerializerMethodField()
+    ultima_actividad = serializers.DateTimeField(source='actualizada', read_only=True)
+
+    class Meta:
+        model = ConversacionSoporte
+        fields = [
+            'id', 'nombre', 'email', 'telefono', 'asunto', 'estado',
+            'asignado_a', 'ultima_actividad', 'ultimo_mensaje', 'no_leidos_admin',
+        ]
+        depth = 1
+
+    def get_no_leidos_admin(self, obj):
+        qs = obj.mensajes.filter(autor_tipo='usuario')
+        if obj.last_read_admin:
+            qs = qs.filter(creada__gt=obj.last_read_admin)
+        return qs.count()
+
+    def get_ultimo_mensaje(self, obj):
+        m = obj.mensajes.order_by('-creada', '-id').first()
+        if not m:
+            return None
+        txt = (m.cuerpo or '').strip()
+        return (txt[:140] + '…') if len(txt) > 140 else txt
+
+
+class ConversacionSoporteDetailSerializer(serializers.ModelSerializer):
+    no_leidos_admin = serializers.SerializerMethodField()
+    mensajes = MensajeSoporteSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = ConversacionSoporte
+        fields = [
+            'id', 'nombre', 'email', 'telefono', 'asunto', 'estado',
+            'asignado_a', 'creada', 'actualizada', 'last_read_admin',
+            'no_leidos_admin', 'mensajes',
+        ]
+        depth = 1
+
+    def get_no_leidos_admin(self, obj):
+        qs = obj.mensajes.filter(autor_tipo='usuario')
+        if obj.last_read_admin:
+            qs = qs.filter(creada__gt=obj.last_read_admin)
+        return qs.count()
+
+
+class FavoritoSerializer(serializers.ModelSerializer):
+    equipo = EquipoSerializer(read_only=True)
+    equipo_id = serializers.IntegerField(write_only=True, required=True)
+
+    class Meta:
+        model = Favorito
+        fields = ['id', 'equipo', 'equipo_id', 'fecha_agregado']
+        read_only_fields = ['id', 'fecha_agregado']
+
+    def create(self, validated_data):
+        perfil = self.context['perfil']
+        equipo_id = validated_data.pop('equipo_id')
+        equipo = Equipo.objects.get(pk=equipo_id)
+        favorito, _ = Favorito.objects.get_or_create(perfil=perfil, equipo=equipo)
+        return favorito

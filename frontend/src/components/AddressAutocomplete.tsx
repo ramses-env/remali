@@ -1,21 +1,28 @@
 /**
  * AddressAutocomplete — autocompletado de direcciones estilo Google Maps.
  *
- * Reutilizable en cualquier formulario con dirección (empresa, obra, cliente,
- * proveedor, sucursal…). Toda la búsqueda pasa por nuestro backend
- * (`src/lib/geocoding.ts`) — este componente no sabe nada del proveedor.
+ * Flujo de DOS pasos (todo a través de nuestro backend, `src/lib/geocoding.ts`):
+ *   1. Mientras tecleas → `/address/autocomplete/` devuelve varias predicciones
+ *      en vivo, sesgadas a la zona de operación.
+ *   2. Al elegir una → `/address/details/` resuelve su dirección completa
+ *      (calle, colonia, CP, coordenadas) y se entrega por `onSelect`.
+ * Un `sessionToken` agrupa ambas llamadas en una sesión de facturación de Google
+ * (más barato); se renueva tras cada selección.
  *
  * Props:
  *   value    — texto actual del campo (controlado por el padre)
- *   onChange — el usuario escribe (dispara la búsqueda con debounce)
+ *   onChange — el usuario escribe (dispara autocomplete con debounce)
  *   onSelect — el usuario elige una sugerencia → recibe el AddressResult completo
  *
- * UX: debounce 400 ms · cancelación de peticiones · navegación con ↑ ↓ Enter ·
- * Esc para cerrar · clic fuera para cerrar · indicador de carga ·
+ * UX: debounce · cancelación de peticiones · navegación con ↑ ↓ Enter · Esc para
+ * cerrar · clic fuera para cerrar · indicador de carga (tecleo y resolución) ·
  * "No se encontraron resultados".
  */
 import { useEffect, useRef, useState } from 'react'
-import { searchAddresses, type AddressResult } from '../lib/geocoding'
+import {
+  autocompleteAddresses, getAddressDetails, nuevaSesionDireccion,
+  type AddressPrediction, type AddressResult,
+} from '../lib/geocoding'
 
 type Props = {
   value: string
@@ -36,18 +43,20 @@ export default function AddressAutocomplete({
   value, onChange, onSelect,
   placeholder = 'Buscar dirección…',
   className = '', inputClassName,
-  minChars = 3, debounceMs = 400, autoFocus,
+  minChars = 3, debounceMs = 300, autoFocus,
 }: Props) {
-  const [results, setResults] = useState<AddressResult[]>([])
+  const [results, setResults] = useState<AddressPrediction[]>([])
   const [open, setOpen] = useState(false)
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(false)     // buscando predicciones
+  const [selecting, setSelecting] = useState(false) // resolviendo la elegida (details)
   const [searched, setSearched] = useState(false)
   const [error, setError] = useState(false)
   const [active, setActive] = useState(-1)
   const rootRef = useRef<HTMLDivElement>(null)
   const skipRef = useRef(false) // no re-buscar justo después de seleccionar
+  const sesionRef = useRef(nuevaSesionDireccion())
 
-  // Debounce + búsqueda con cancelación de la petición anterior
+  // Debounce + autocomplete con cancelación de la petición anterior
   useEffect(() => {
     if (skipRef.current) { skipRef.current = false; return }
     const q = value.trim()
@@ -56,7 +65,7 @@ export default function AddressAutocomplete({
     const ctrl = new AbortController()
     setLoading(true)
     const t = setTimeout(() => {
-      searchAddresses(q, ctrl.signal)
+      autocompleteAddresses(q, sesionRef.current, ctrl.signal)
         .then(r => { setResults(r); setSearched(true); setError(false); setActive(-1); setOpen(true) })
         .catch(err => {
           if (err?.name === 'CanceledError' || err?.code === 'ERR_CANCELED') return
@@ -77,10 +86,26 @@ export default function AddressAutocomplete({
     return () => document.removeEventListener('mousedown', onDocClick)
   }, [])
 
-  function choose(a: AddressResult) {
+  async function choose(p: AddressPrediction) {
     skipRef.current = true
-    onSelect(a)
-    setOpen(false); setActive(-1); setResults([])
+    setActive(-1)
+    try {
+      // Los proveedores sin autocomplete nativo ya traen la dirección embebida.
+      let addr: AddressResult
+      if (p.detalle) {
+        addr = p.detalle
+      } else {
+        setSelecting(true)
+        addr = await getAddressDetails(p.place_id, sesionRef.current)
+      }
+      onSelect(addr)
+      setOpen(false); setResults([])
+      sesionRef.current = nuevaSesionDireccion() // la sesión de facturación terminó
+    } catch {
+      setError(true); setOpen(true) // no se pudo resolver: deja el aviso en el desplegable
+    } finally {
+      setSelecting(false)
+    }
   }
 
   function onKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
@@ -115,8 +140,8 @@ export default function AddressAutocomplete({
           autoComplete="off"
           autoFocus={autoFocus}
         />
-        {/* Indicador de carga */}
-        {loading && <span className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 border-2 border-mute/30 border-t-gold rounded-full animate-spin" />}
+        {/* Indicador de carga: tecleo (autocomplete) o resolución (details) */}
+        {(loading || selecting) && <span className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 border-2 border-mute/30 border-t-gold rounded-full animate-spin" />}
       </div>
 
       {showDropdown && (
@@ -130,22 +155,19 @@ export default function AddressAutocomplete({
           {!loading && !error && searched && results.length === 0 && (
             <p className="px-4 py-3 text-sm text-mute">No se encontraron resultados.</p>
           )}
-          {results.map((r, i) => {
-            const linea1 = [r.street, r.house_number].filter(Boolean).join(' ')
-            const linea2 = [r.neighborhood, r.city, r.state, r.postcode].filter(Boolean).join(', ')
-            return (
-              <button
-                type="button"
-                key={`${r.latitude},${r.longitude},${i}`}
-                onMouseEnter={() => setActive(i)}
-                onClick={() => choose(r)}
-                className={`w-full text-left px-4 py-2.5 border-b border-edge last:border-0 transition-colors ${active === i ? 'bg-gold-soft' : 'hover:bg-surface-2'}`}
-              >
-                <p className="text-sm font-medium text-ink truncate">{linea1 || r.display_name}</p>
-                {linea2 && <p className="text-[12px] text-mute truncate">{linea2}</p>}
-              </button>
-            )
-          })}
+          {results.map((p, i) => (
+            <button
+              type="button"
+              key={`${p.place_id || 'x'}-${i}`}
+              onMouseEnter={() => setActive(i)}
+              onClick={() => choose(p)}
+              disabled={selecting}
+              className={`w-full text-left px-4 py-2.5 border-b border-edge last:border-0 transition-colors disabled:opacity-60 ${active === i ? 'bg-gold-soft' : 'hover:bg-surface-2'}`}
+            >
+              <p className="text-sm font-medium text-ink truncate">{p.main_text || p.description}</p>
+              {p.secondary_text && <p className="text-[12px] text-mute truncate">{p.secondary_text}</p>}
+            </button>
+          ))}
         </div>
       )}
     </div>

@@ -35,7 +35,8 @@ def datos_comprobante_venta(v) -> dict:
             'importe': f'{it.subtotal}',
         })
 
-    # Los precios son SIN IVA: solo se desglosa IVA si la venta llevará factura.
+    # El precio de venta YA incluye IVA: el total no suma impuestos. Se desglosa
+    # el IVA (subtotal + IVA = total) para el comprobante y la factura.
     if v.iva and v.iva > 0:
         totales = [
             {'label': 'Subtotal', 'value': f'{v.subtotal}'},

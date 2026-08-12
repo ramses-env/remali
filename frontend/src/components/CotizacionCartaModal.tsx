@@ -14,7 +14,7 @@ type Cotizacion = {
   id: number; folio: string | null; estado: string; tipo: string
   cliente_display: string; cliente_telefono: string
   vigencia_dias: number; vigencia_hasta?: string | null; aplica_iva: boolean; notas: string
-  items: Item[]; fotos?: Foto[]; subtotal: string; base: string; iva: string; total: string; creada: string
+  items: Item[]; fotos?: Foto[]; subtotal: string; base: string; iva: string; total: string; descuento_cupon?: string; creada: string
 }
 
 // La carta se maqueta SIEMPRE a tamaño Carta (216 × 279 mm). En pantalla se
@@ -202,6 +202,7 @@ export default function CotizacionCartaModal({ cotizacion, onClose }: { cotizaci
                 <div style={{ width: '62mm' }}>
                   <div className="row"><span className="muted">Subtotal</span><span>{money(cotizacion.base)}</span></div>
                   {Number(cotizacion.iva) > 0 && <div className="row"><span className="muted">IVA (16%)</span><span>{money(cotizacion.iva)}</span></div>}
+                  {Number(cotizacion.descuento_cupon) > 0 && <div className="row"><span className="muted">Descuento cupón</span><span>−{money(cotizacion.descuento_cupon)}</span></div>}
                   <div className="row" style={{ borderTop: '1px solid #E5E7EB', marginTop: 4, paddingTop: 6, fontWeight: 800, fontSize: '13pt' }}><span>TOTAL</span><span style={{ color: acento }}>{money(cotizacion.total)}</span></div>
                   {cotizacion.tipo !== 'renta' && <div className="row" style={{ marginTop: 4 }}><span className="muted" style={{ fontSize: '9pt' }}>Contado (−5%)</span><span className="muted" style={{ fontSize: '9pt' }}>{money(Number(cotizacion.total) * 0.95)}</span></div>}
                 </div>

@@ -10,7 +10,13 @@ urlpatterns = [
     path('unidades/<int:pk>/vender/', views.vender_unidad),
     path('unidades/<int:pk>/mantenimiento/', views.mantenimiento_unidad),
     path('reparaciones/', views.OrdenReparacionListCreate.as_view()),
+    path('reparaciones/mias/', views.reparaciones_mias),
+    path('reparaciones/mias/<int:pk>/pdf/', views.orden_reparacion_pdf_mia),
     path('reparaciones/<int:pk>/', views.OrdenReparacionDetail.as_view()),
     path('reparaciones/<int:pk>/items/', views.orden_agregar_item),
     path('reparaciones/<int:pk>/items/<int:item_id>/', views.orden_eliminar_item),
+    path('reparaciones/<int:pk>/vinculo/', views.generar_vinculo_orden),
+    path('vinculo/reparacion/<str:token>/', views.vinculo_orden),
+    path('seguir/reparacion/<str:token>/', views.seguimiento_orden),
+    path('seguir/reparacion/<str:token>/pdf/', views.orden_reparacion_pdf_publico),
 ]

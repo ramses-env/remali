@@ -49,6 +49,14 @@ class Cotizacion(models.Model):
         settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL,
         related_name='cotizaciones_cliente',
     )
+    # Cupón que el cliente aplicó a ESTA cotización (p.ej. su 5% de bienvenida).
+    # Se guarda aquí para poder "gastarlo" recién cuando la cotización se
+    # concreta en venta/renta, no antes: si nunca prospera, el cliente no lo
+    # pierde. SET_NULL para no romper el historial si el cupón se borra.
+    cupon = models.ForeignKey(
+        'maquinaria.Cupon', null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='cotizaciones',
+    )
 
     vigencia_dias = models.PositiveIntegerField(default=15, help_text='Días de validez de la cotización')
     # Fecha de vencimiento GUARDADA (creación + vigencia). Se persiste para poder
@@ -90,6 +98,9 @@ class Cotizacion(models.Model):
     cancelacion_motivo = models.TextField(blank=True, default='')
     # Si quien autoriza la RECHAZA: el motivo queda aquí (vacío = autorizada).
     autorizacion_rechazo = models.TextField(blank=True, default='')
+    # Autorización EN LOTE: varias cotizaciones comparten este token para que el
+    # jefe las apruebe TODAS con una sola liga. Vacío = no es parte de un lote.
+    token_lote = models.CharField(max_length=64, null=True, blank=True, db_index=True)
     escalada_en = models.DateTimeField(null=True, blank=True, help_text='Cuándo se avisó a los respaldos por falta de atención')
 
     creada = models.DateTimeField(auto_now_add=True)
@@ -104,17 +115,24 @@ class Cotizacion(models.Model):
         # el filesort y el escaneo completo conforme crece el historial.
         indexes = [
             models.Index(fields=['estado', '-creada']),
+            # Filtro por periodo (año/mes/rango) sobre la fecha de alta.
+            models.Index(fields=['creada']),
         ]
 
     def generar_folio(self):
-        ultimo = Cotizacion.objects.filter(folio__startswith='COT-').aggregate(m=Max('folio'))['m']
+        # Folio por ejercicio: COT-AAAA-NNNN, el consecutivo reinicia cada año.
+        # Se filtra por el prefijo del año, así el Max() (comparación de texto)
+        # coincide con el orden numérico dentro del mismo año.
+        from server.periodos import anio_actual
+        prefijo = f'COT-{anio_actual()}-'
+        ultimo = Cotizacion.objects.filter(folio__startswith=prefijo).aggregate(m=Max('folio'))['m']
         n = 1
         if ultimo:
             try:
                 n = int(ultimo.split('-')[-1]) + 1
             except (ValueError, IndexError):
                 n = 1
-        return f'COT-{n:04d}'
+        return f'{prefijo}{n:04d}'
 
     def save(self, *args, **kwargs):
         # Regla de la casa: los nombres entran como nombre propio, se capturen
@@ -202,8 +220,22 @@ class Cotizacion(models.Model):
         return (iva_venta + iva_renta).quantize(Decimal('0.01'))
 
     @property
+    def descuento_cupon(self):
+        """Importe del descuento del cupón que el cliente aplicó a ESTA cotización.
+
+        Es un % sobre el total con IVA (igual que lo muestra el PDF del cliente).
+        Da 0 si no hay cupón, si el admin lo apagó, o si YA se gastó — así el
+        descuento no se aplica dos veces ni se cuela en otra cotización cuyo
+        cupón ya se usó en una compra anterior."""
+        c = self.cupon
+        if not c or not c.activo or c.usado:
+            return Decimal('0.00')
+        bruto = (self.base + self.iva).quantize(Decimal('0.01'))
+        return (bruto * Decimal(str(c.descuento))).quantize(Decimal('0.01'))
+
+    @property
     def total(self):
-        return (self.base + self.iva).quantize(Decimal('0.01'))
+        return (self.base + self.iva - self.descuento_cupon).quantize(Decimal('0.01'))
 
     # ── Precio de CONTADO (5% de venta), SIN apilar con la promo ──
     @property

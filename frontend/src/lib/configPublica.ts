@@ -15,6 +15,9 @@ export type ConfigPublica = {
   cotizacion_condiciones_renta: string
   datos_bancarios: string
   cotizacion_cierre: string
+  descuento_contado_pct: number
+  anticipo_minimo_pct: number
+  ajuste_requiere_codigo: boolean
 }
 
 const VACIA: ConfigPublica = {
@@ -22,6 +25,7 @@ const VACIA: ConfigPublica = {
   negocio_direccion: '', negocio_email: '', negocio_web: '', negocio_rfc: '',
   negocio_representante: '', negocio_footer: '',
   cotizacion_condiciones: '', cotizacion_condiciones_renta: '', datos_bancarios: '', cotizacion_cierre: '',
+  descuento_contado_pct: 5, anticipo_minimo_pct: 60, ajuste_requiere_codigo: false,
 }
 
 // Cache a nivel módulo: la config pública se pide UNA vez por sesión de página.

@@ -70,9 +70,9 @@ export default function RecordatorioPerfil() {
           animate={{ opacity: 1, y: 0, scale: 1 }}
           exit={reducir ? { opacity: 0 } : { opacity: 0, y: -12, scale: 0.97 }}
           transition={{ duration: 0.28, ease: [0.23, 1, 0.32, 1] }}
-          /* Arriba a la derecha, en el MISMO lugar donde aterrizan las demás
-             alertas (bajo el navbar); en móvil ocupa el ancho. */
-          className="fixed top-[76px] left-4 right-4 z-40 md:left-auto md:right-5 md:max-w-[360px]"
+          /* Fluye dentro del apilador de recordatorios (App.tsx): así nunca se
+             encima con el de adeudo cuando salen juntos. */
+          className="w-full pointer-events-auto"
         >
           {/* Misma anatomía que las alertas: barra gris, círculo de color, ✕ */}
           <div className="flex items-center gap-3 pl-3 pr-2 py-2.5 rounded-2xl border border-edge bg-alert shadow-[0_18px_50px_rgba(0,0,0,0.35)]">
@@ -80,7 +80,7 @@ export default function RecordatorioPerfil() {
             <Link to="/perfil" className="group min-w-0 flex-1 flex items-center gap-2">
               <span className="min-w-0">
                 <span className="block text-sm font-bold text-ink">Completa tu perfil y obtén 5%</span>
-                <span className="block text-[12.5px] leading-snug text-mute">Un descuento por darnos tus datos de contacto y obra.</span>
+                <span className="block text-[12.5px] leading-snug text-mute">Tu descuento de bienvenida, de un solo uso, por darnos tus datos.</span>
               </span>
               <ArrowRight className="ml-auto h-4 w-4 shrink-0 text-gold transition-transform group-hover:translate-x-0.5" />
             </Link>

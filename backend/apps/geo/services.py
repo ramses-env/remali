@@ -45,11 +45,38 @@ _BBOX = {
 
 
 class GeocodingProvider:
-    """Interfaz común. Un proveedor concreto solo implementa `search`."""
+    """Interfaz común. Un proveedor concreto implementa al menos `search`.
+
+    `autocomplete` (sugerencias en vivo) y `details` (resolver una sugerencia a su
+    dirección completa) son el flujo de dos pasos que usa el frontend. Un proveedor
+    sin autocomplete propio (Photon/Nominatim) hereda el fallback: `autocomplete`
+    reusa `search` y embebe la dirección completa en cada predicción (`detalle`),
+    así el frontend no necesita llamar a `details`.
+    """
 
     slug = 'base'
+    #: True si el proveedor tiene autocomplete/details nativos (p.ej. Google).
+    supports_autocomplete = False
 
     def search(self, query: str, *, limit: int = 8, lang: str = 'es') -> List[AddressResult]:
+        raise NotImplementedError
+
+    def autocomplete(self, query: str, *, session_token: str = '', lang: str = 'es') -> List[Dict]:
+        out: List[Dict] = []
+        for r in self.search(query, lang=lang):
+            secundaria = ', '.join(p for p in (r.get('neighborhood'), r.get('city'), r.get('state')) if p)
+            out.append({
+                'place_id': '',
+                'description': r.get('display_name', '') or '',
+                'main_text': r.get('street') or r.get('display_name', '') or '',
+                'secondary_text': secundaria,
+                'detalle': r,  # dirección completa embebida: el front no llama a details
+            })
+        return out
+
+    def details(self, place_id: str, *, session_token: str = '', lang: str = 'es') -> AddressResult:
+        # Solo aplica a proveedores con place_id real (Google). Los demás ya
+        # entregaron la dirección completa embebida en la predicción.
         raise NotImplementedError
 
 
@@ -215,11 +242,17 @@ class GooglePlacesProvider(GeocodingProvider):
 
     slug = 'google'
     BASE_URL = 'https://places.googleapis.com/v1/places:searchText'
+    AUTOCOMPLETE_URL = 'https://places.googleapis.com/v1/places:autocomplete'
+    DETAILS_URL = 'https://places.googleapis.com/v1/places/{place_id}'
+    supports_autocomplete = True
 
-    def __init__(self, *, api_key: str = '', country: str = '', timeout: int = 6):
+    def __init__(self, *, api_key: str = '', country: str = '', timeout: int = 6, bias: str = ''):
         self.api_key = api_key or ''
         self.country = (country or '').upper()   # regionCode ISO-3166 alpha-2 (ej. 'MX')
         self.timeout = timeout
+        # Sesgo SUAVE hacia la zona de operación: 'lat,lng,radio_m'. Hace que un
+        # término genérico ("Reforma") priorice tu ciudad en vez de CDMX. Vacío = sin sesgo.
+        self.bias = bias or ''
 
     def search(self, query: str, *, limit: int = 8, lang: str = 'es') -> List[AddressResult]:
         if not self.api_key:
@@ -245,6 +278,74 @@ class GooglePlacesProvider(GeocodingProvider):
         resp.raise_for_status()
         data = resp.json() or {}
         return [self._normalizar(p) for p in (data.get('places') or [])]
+
+    def _location_bias(self):
+        """Círculo de sesgo (suave) hacia la zona, si `self.bias` está configurado."""
+        if not self.bias:
+            return None
+        try:
+            lat, lng, radio = (float(x) for x in self.bias.split(','))
+        except (ValueError, TypeError, AttributeError):
+            return None
+        radio = max(1.0, min(radio, 50000.0))  # Google exige radio en (0, 50000] m
+        return {'circle': {'center': {'latitude': lat, 'longitude': lng}, 'radius': radio}}
+
+    def autocomplete(self, query: str, *, session_token: str = '', lang: str = 'es') -> List[Dict]:
+        """Predicciones EN VIVO (Places Autocomplete New). Baratas y numerosas:
+        una llamada por tecleo devuelve varias sugerencias. NO traen coordenadas ni
+        componentes — eso lo resuelve `details` cuando el usuario elige una."""
+        if not self.api_key:
+            raise RuntimeError('Falta GOOGLE_MAPS_API_KEY para el proveedor Google Places.')
+        body = {'input': query, 'languageCode': lang}
+        if self.country:
+            body['includedRegionCodes'] = [self.country.lower()]
+        bias = self._location_bias()
+        if bias:
+            body['locationBias'] = bias
+        if session_token:
+            body['sessionToken'] = session_token  # facturación por sesión (más barato)
+        headers = {'Content-Type': 'application/json', 'X-Goog-Api-Key': self.api_key}
+        resp = requests.post(self.AUTOCOMPLETE_URL, json=body, headers=headers, timeout=self.timeout)
+        if resp.status_code != 200:
+            log.warning('Google Autocomplete %s: %s', resp.status_code, (resp.text or '')[:600])
+        resp.raise_for_status()
+        data = resp.json() or {}
+        out: List[Dict] = []
+        for sug in (data.get('suggestions') or []):
+            pp = sug.get('placePrediction') or {}
+            if not pp:
+                continue  # ignora queryPrediction (no es un lugar concreto)
+            fmt = pp.get('structuredFormat') or {}
+            main = (fmt.get('mainText') or {}).get('text', '') or ''
+            secundaria = (fmt.get('secondaryText') or {}).get('text', '') or ''
+            out.append({
+                'place_id': pp.get('placeId', '') or '',
+                'description': (pp.get('text') or {}).get('text', '') or main,
+                'main_text': main,
+                'secondary_text': secundaria,
+            })
+        return out
+
+    def details(self, place_id: str, *, session_token: str = '', lang: str = 'es') -> AddressResult:
+        """Resuelve un place_id (de `autocomplete`) a la dirección completa
+        (componentes + coordenadas). Una sola llamada, solo al seleccionar."""
+        if not self.api_key:
+            raise RuntimeError('Falta GOOGLE_MAPS_API_KEY para el proveedor Google Places.')
+        headers = {
+            'X-Goog-Api-Key': self.api_key,
+            'X-Goog-FieldMask': 'formattedAddress,addressComponents,location',
+        }
+        params = {'languageCode': lang}
+        if session_token:
+            params['sessionToken'] = session_token  # cierra la sesión de facturación
+        url = self.DETAILS_URL.format(place_id=place_id)
+        resp = requests.get(url, params=params, headers=headers, timeout=self.timeout)
+        if resp.status_code != 200:
+            log.warning('Google Details %s: %s', resp.status_code, (resp.text or '')[:600])
+        resp.raise_for_status()
+        # La respuesta de Details trae formattedAddress/addressComponents/location:
+        # el MISMO shape que un place de Text Search, así que reusamos _normalizar.
+        return self._normalizar(resp.json() or {})
 
     @staticmethod
     def _componente(comps: list, *tipos: str) -> str:
@@ -309,6 +410,9 @@ def get_provider() -> GeocodingProvider:
             _provider_singleton = cls(
                 api_key=getattr(settings, 'GOOGLE_MAPS_API_KEY', os.environ.get('GOOGLE_MAPS_API_KEY', '')),
                 country=country,
+                # Sesgo a la zona de operación (default Acapulco). Configurable con
+                # GEOCODING_BIAS='lat,lng,radio_m'; vacío lo desactiva.
+                bias=getattr(settings, 'GEOCODING_BIAS', os.environ.get('GEOCODING_BIAS', '16.8531,-99.8237,50000')),
             )
         else:
             _provider_singleton = cls(

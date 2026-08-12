@@ -51,6 +51,8 @@ class CotizacionSerializer(serializers.ModelSerializer):
     subtotal_renta = serializers.SerializerMethodField()
     iva = serializers.SerializerMethodField()
     total = serializers.SerializerMethodField()
+    descuento_cupon = serializers.SerializerMethodField()
+    cupon = serializers.SerializerMethodField()
     base = serializers.SerializerMethodField()
     cliente_display = serializers.CharField(read_only=True)
     vigencia_hasta = serializers.DateField(read_only=True)
@@ -69,7 +71,7 @@ class CotizacionSerializer(serializers.ModelSerializer):
             'id', 'folio', 'tipo', 'estado', 'origen', 'datos_solicitud',
             'cliente_nombre', 'cliente_telefono', 'cliente_email', 'empresa', 'empresa_nombre',
             'vigencia_dias', 'aplica_iva', 'notas',
-            'items', 'fotos', 'subtotal', 'subtotal_venta', 'subtotal_renta', 'base', 'iva', 'total',
+            'items', 'fotos', 'subtotal', 'subtotal_venta', 'subtotal_renta', 'base', 'iva', 'total', 'descuento_cupon', 'cupon',
             'cliente_display', 'vigencia_hasta', 'vencida', 'token_publico',
             'convertida', 'venta_id', 'renta_id', 'atendida_en', 'atendida_por_nombre', 'usuario_nombre', 'usuario_email', 'entrega_prometida', 'escalada_en',
             'autorizada_por', 'autorizada_en', 'autorizacion_rechazo', 'cancelacion_solicitada', 'cancelacion_motivo',
@@ -119,6 +121,18 @@ class CotizacionSerializer(serializers.ModelSerializer):
 
     def get_total(self, obj):
         return str(obj.total)
+
+    def get_descuento_cupon(self, obj):
+        return str(obj.descuento_cupon)
+
+    def get_cupon(self, obj):
+        """El cupón vigente aplicado a esta cotización (o None si no aplica hoy).
+        Lo lee el panel al concretar la venta/renta para mostrar y cobrar el
+        descuento; sale None si ya se gastó, para no cobrarlo dos veces."""
+        c = obj.cupon
+        if not c or not c.activo or c.usado:
+            return None
+        return {'codigo': c.codigo, 'descuento': float(c.descuento)}
 
     def get_base(self, obj):
         return str(obj.base)

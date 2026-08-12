@@ -5,7 +5,7 @@
     "dockerfilePath": "Dockerfile"
   },
   "deploy": {
-    "startCommand": "python manage.py procesar_rentas; python manage.py recordar_reparaciones; python manage.py respaldar_bd",
+    "startCommand": "python manage.py procesar_rentas; python manage.py recordar_reparaciones; python manage.py recordar_vigencia; python manage.py respaldar_bd",
     "cronSchedule": "0 12 * * *",
     "restartPolicyType": "NEVER",
     "numReplicas": 1

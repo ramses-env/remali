@@ -88,8 +88,9 @@ export default function RecordatorioAdeudo() {
           animate={{ opacity: 1, y: 0, scale: 1 }}
           exit={reducir ? { opacity: 0 } : { opacity: 0, y: -12, scale: 0.97 }}
           transition={{ duration: 0.28, ease: [0.23, 1, 0.32, 1] }}
-          /* Bajo el del perfil para no encimarse si salieran juntos. */
-          className="fixed top-[140px] left-4 right-4 z-40 md:left-auto md:right-5 md:max-w-[360px]"
+          /* Fluye dentro del apilador de recordatorios (App.tsx), debajo del de
+             perfil, con separación real — ya no se enciman. */
+          className="w-full pointer-events-auto"
         >
           {/* Misma anatomía que las alertas: barra gris, círculo de color, ✕ */}
           <div className="flex items-center gap-3 pl-3 pr-2 py-2.5 rounded-2xl border border-edge bg-alert shadow-[0_18px_50px_rgba(0,0,0,0.35)]">

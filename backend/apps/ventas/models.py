@@ -8,6 +8,34 @@ from django.conf import settings
 IVA_RATE = Decimal('0.16')
 
 
+def evaluar_anticipo(precio, anticipo, codigo='', user=None):
+    """Valida un anticipo de apartado contra el mínimo configurado.
+
+    Devuelve (anticipo_nota, error) donde `error` es None o {'detalle','status'}.
+    Un anticipo menor al mínimo solo se acepta con el CÓDIGO PERSONAL del operador
+    que lo registra (`user`), y deja rastro de QUIÉN autorizó en `anticipo_nota`.
+    """
+    from maquinaria.models import ConfiguracionSitio
+    from maquinaria.seguridad import verificar_codigo
+    precio = Decimal(str(precio or 0))
+    anticipo = Decimal(str(anticipo or 0))
+    if anticipo <= 0:
+        return '', {'detalle': 'Captura el anticipo que deja el cliente para apartar.', 'status': 400}
+    if anticipo >= precio:
+        return '', {'detalle': 'El anticipo cubre el total: registra una venta normal, no un apartado.', 'status': 400}
+    cfg = ConfiguracionSitio.get_solo()
+    pct_min = Decimal(str(cfg.anticipo_minimo_pct or 0))
+    minimo = (precio * pct_min / Decimal('100')).quantize(Decimal('0.01'))
+    if anticipo < minimo:
+        ok, detalle, status, _cod = verificar_codigo(user, codigo)
+        if not ok:
+            return '', {'detalle': f'Anticipo menor al mínimo ({int(pct_min)}%). {detalle}', 'status': status}
+        pct_dado = (anticipo / precio * Decimal('100')).quantize(Decimal('0.1'))
+        quien = getattr(user, 'username', '') or 's/d'
+        return f'Anticipo {pct_dado}% (mínimo {int(pct_min)}%), autorizado por {quien}.', None
+    return '', None
+
+
 class Venta(models.Model):
     METODO_PAGO = [
         ('efectivo', 'Efectivo'),
@@ -16,9 +44,14 @@ class Venta(models.Model):
     ]
 
     ESTADOS = [
-        ('activa', 'Activa'),
+        ('apartada', 'Apartada'),   # con anticipo; saldo pendiente y/o sobre pedido
+        ('activa', 'Activa'),       # venta consumada (liquidada y entregada)
         ('cancelada', 'Cancelada'),
     ]
+
+    # Folio por ejercicio: VEN-AAAA-NNNN, el consecutivo reinicia cada año.
+    # Nace al crear la venta (save); los registros viejos sin folio caen a #id.
+    folio = models.CharField(max_length=20, unique=True, editable=False, blank=True, null=True)
 
     nombre_cliente = models.CharField(max_length=255, blank=True, null=True)
     telefono_cliente = models.CharField(max_length=40, blank=True, default='')
@@ -88,6 +121,46 @@ class Venta(models.Model):
     iva = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'))
     total = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'))
 
+    # Rastro cuando el precio se AJUSTÓ a mano al vender (botón "Ajustar precio"):
+    # queda "de lista $X → $Y. Motivo: …". Quién lo hizo = `usuario`; cuándo = `fecha`.
+    nota_ajuste = models.CharField(max_length=300, blank=True, default='')
+
+    # ── Apartado / pedido con anticipo ────────────────────────────────
+    # Una venta 'apartada' se paga en abonos (viven en `pagos`); el saldo se cobra
+    # contra entrega. Al entregar pasa a 'activa'. El IVA/total son completos desde
+    # el día uno; los abonos solo bajan el saldo.
+    sobre_pedido = models.BooleanField(
+        default=False,
+        help_text='Apartado de una máquina sin stock (se manda a pedir; la unidad se asigna al llegar).',
+    )
+    # Equipo pedido cuando aún no hay unidad física asignada (sobre pedido).
+    equipo = models.ForeignKey(
+        'maquinaria.Equipo',
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='ventas_sobre_pedido',
+    )
+    fecha_estimada_entrega = models.DateField(null=True, blank=True)
+    # Seguimiento del SOBRE PEDIDO para el cliente: confirmado (anticipo dado) →
+    # en_camino (surtido con el proveedor) → en_sucursal (llegó, listo para
+    # recoger/entregar). Al entregar, la venta pasa a 'activa' y el seguimiento
+    # se muestra como "entregado". Solo aplica cuando sobre_pedido=True.
+    PEDIDO_FASES = [
+        ('confirmado', 'Confirmado'),
+        ('en_camino', 'En camino'),
+        ('en_sucursal', 'En sucursal'),
+    ]
+    pedido_fase = models.CharField(max_length=12, choices=PEDIDO_FASES, default='confirmado')
+    entregada_en = models.DateTimeField(null=True, blank=True)
+    entregada_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='ventas_entregadas',
+    )
+    # Rastro si el anticipo fue MENOR al mínimo (autorizado con código).
+    anticipo_nota = models.CharField(max_length=300, blank=True, default='')
+
     class Meta:
         db_table = 'ventas'
         verbose_name = 'Venta'
@@ -95,27 +168,80 @@ class Venta(models.Model):
         ordering = ['-fecha']
         indexes = [
             models.Index(fields=['estado', '-fecha']),
+            # Filtro por periodo (año/mes/rango) sobre la fecha de la venta.
+            models.Index(fields=['fecha']),
         ]
+
+    def generar_folio(self):
+        """VEN-AAAA-NNNN con el consecutivo reiniciado por año."""
+        from server.periodos import anio_actual
+        prefijo = f'VEN-{anio_actual()}-'
+        ultimo = Venta.objects.filter(folio__startswith=prefijo).aggregate(m=models.Max('folio'))['m']
+        n = 1
+        if ultimo:
+            try:
+                n = int(ultimo.split('-')[-1]) + 1
+            except (ValueError, IndexError):
+                n = 1
+        return f'{prefijo}{n:04d}'
 
     # ─────────────────────────────────────────────
     #  MONTOS
     # ─────────────────────────────────────────────
     def recalcular_total(self):
-        """El precio capturado es el SUBTOTAL (sin IVA). En ventas el IVA (16%)
-        se suma SIEMPRE (save() fuerza aplica_iva=True)."""
-        base = Decimal(self.precio_maquina or 0)
+        """El precio de venta (máquina y refacciones) YA INCLUYE IVA (16%): es un
+        precio al público, así que NO se le suma ningún impuesto encima. El total
+        es esa suma tal cual; el IVA se DESGLOSA del total (total / 1.16) solo para
+        mostrarlo en el comprobante y la factura — igual que hace la cotización."""
+        total = Decimal(self.precio_maquina or 0)
         # Los items solo existen si la venta ya fue guardada (tiene PK)
         if self.pk:
             for item in self.items.all():
-                base += item.subtotal
-        base = base.quantize(Decimal('0.01'))
-        self.subtotal = base
-        if self.aplica_iva:
-            self.iva = (base * IVA_RATE).quantize(Decimal('0.01'))
-            self.total = (base + self.iva).quantize(Decimal('0.01'))
+                total += item.subtotal
+        total = total.quantize(Decimal('0.01'))
+        self.total = total
+        # IVA incluido → se desglosa hacia atrás, nunca se suma encima.
+        self.subtotal = (total / (Decimal('1') + IVA_RATE)).quantize(Decimal('0.01'))
+        self.iva = (total - self.subtotal).quantize(Decimal('0.01'))
+
+    # ─────────────────────────────────────────────
+    #  ANTICIPO / SALDO / ENTREGA (apartado)
+    # ─────────────────────────────────────────────
+    def pagado(self):
+        """Suma de abonos registrados en `pagos`."""
+        return sum((Decimal(str(p.get('monto', 0))) for p in (self.pagos or [])), Decimal('0'))
+
+    def saldo_pendiente(self):
+        """Lo que el cliente aún debe (total − abonos). Nunca negativo."""
+        return max((self.total or Decimal('0')) - self.pagado(), Decimal('0'))
+
+    @property
+    def liquidada(self):
+        return self.saldo_pendiente() <= 0
+
+    @transaction.atomic
+    def entregar(self, unidad=None, user=None):
+        """Cierra un apartado: exige saldo 0; asigna y marca vendida la unidad
+        (si es sobre pedido) o marca vendida la ya apartada; pasa a 'activa'."""
+        if self.estado != 'apartada':
+            raise ValueError('Solo se puede entregar una venta apartada.')
+        if self.saldo_pendiente() > 0:
+            raise ValueError(f'Falta liquidar el saldo (${self.saldo_pendiente()}).')
+        from django.utils import timezone
+        if self.sobre_pedido or not self.inventario:
+            if unidad is None:
+                raise ValueError('Se requiere una unidad para entregar un pedido sobre pedido.')
+            if not unidad.puede_venderse():
+                raise ValueError(f'La unidad {unidad.codigo} no está disponible.')
+            self.inventario = unidad
+            unidad.marcar_vendido()
         else:
-            self.iva = Decimal('0.00')
-            self.total = base
+            self.inventario.entregar_apartado()
+        self.estado = 'activa'
+        self.entregada_en = timezone.now()
+        if user is not None and getattr(user, 'is_authenticated', False):
+            self.entregada_por = user
+        self.save(update_fields=['inventario', 'estado', 'entregada_en', 'entregada_por'])
 
     @transaction.atomic
     def save(self, *args, **kwargs):
@@ -139,11 +265,34 @@ class Venta(models.Model):
                 self.precio_maquina = Decimal(pv) if pv else Decimal('0.00')
 
         self.recalcular_total()
-        super().save(*args, **kwargs)
 
-        # Fuente única: la venta marca la unidad como vendida
+        # Folio por ejercicio (VEN-AAAA-NNNN), solo al crear. Reintenta si dos
+        # ventas se registran a la vez y chocan por el consecutivo (folio único).
+        if es_nueva and not self.folio:
+            from django.db import IntegrityError
+            ultimo_error = None
+            for _ in range(6):
+                self.folio = self.generar_folio()
+                try:
+                    with transaction.atomic():
+                        super().save(*args, **kwargs)
+                    ultimo_error = None
+                    break
+                except IntegrityError as e:
+                    ultimo_error = e
+            if ultimo_error:
+                raise ultimo_error
+        else:
+            super().save(*args, **kwargs)
+
+        # Fuente única: la venta transiciona la unidad según su estado.
+        #  • activa   → vendida de inmediato (venta normal / liquidada).
+        #  • apartada → reservada (apartado); se marca vendida al entregar.
         if es_nueva and self.inventario:
-            self.inventario.marcar_vendido()
+            if self.estado == 'apartada':
+                self.inventario.apartar()
+            else:
+                self.inventario.marcar_vendido()
 
     # ─────────────────────────────────────────────
     #  CANCELACIÓN (reversa)
@@ -159,8 +308,10 @@ class Venta(models.Model):
             if ref:
                 ref.stock = (ref.stock or 0) + item.cantidad
                 ref.save(update_fields=['stock'])
-        # Devolver la máquina a inventario
-        if self.inventario and self.inventario.estado == 'vendido':
+        # Devolver la máquina a inventario (vendida o apartada). Un apartado
+        # sobre pedido sin unidad no toca inventario. Los abonos NO se borran:
+        # quedan como rastro; el reembolso del anticipo es una acción manual.
+        if self.inventario and self.inventario.estado in ('vendido', 'apartado'):
             self.inventario._set_estado('disponible', 'Bodega')
         self.estado = 'cancelada'
         self.save(update_fields=['estado'])
@@ -267,3 +418,116 @@ class ItemVenta(models.Model):
         verbose_name = 'Detalle de venta'
         verbose_name_plural = 'Detalles de venta'
         ordering = ['id']
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CAJA · SESIÓN · MOVIMIENTOS
+#
+# La caja es un concepto aparte del rol y del permiso: quién PUEDE operarla lo
+# decide el permiso (usar_caja); qué DINERO hay dentro lo lleva una SESIÓN (un
+# turno). Una venta de mostrador exige una sesión abierta, y cada evento queda
+# en un LIBRO que no se borra: cancelar o devolver genera un movimiento inverso,
+# nunca elimina el original.
+# ─────────────────────────────────────────────────────────────────────────────
+class Caja(models.Model):
+    """El cajón físico. Puede haber varias; se siembra una principal."""
+    nombre = models.CharField(max_length=80, unique=True)
+    activa = models.BooleanField(default=True)
+    creada = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'cajas'
+        verbose_name = 'Caja'
+        verbose_name_plural = 'Cajas'
+        ordering = ['nombre']
+
+    def __str__(self):
+        return self.nombre
+
+
+class SesionCaja(models.Model):
+    """Un turno de caja: se abre con un fondo inicial y se cierra con el arqueo.
+    Máximo una abierta por usuario a la vez (lo garantiza la BD)."""
+    ABIERTA, CERRADA = 'abierta', 'cerrada'
+    ESTADOS = [(ABIERTA, 'Abierta'), (CERRADA, 'Cerrada')]
+
+    caja = models.ForeignKey(Caja, on_delete=models.PROTECT, related_name='sesiones')
+    usuario = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='sesiones_caja')
+    abierta_en = models.DateTimeField(auto_now_add=True)
+    monto_inicial = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0'))
+    cerrada_en = models.DateTimeField(null=True, blank=True)
+    # Se calculan al cerrar (arqueo). Nulos mientras la sesión sigue abierta.
+    monto_esperado = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    monto_contado = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    diferencia = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    estado = models.CharField(max_length=10, choices=ESTADOS, default=ABIERTA)
+    notas_cierre = models.CharField(max_length=300, blank=True)
+
+    class Meta:
+        db_table = 'sesiones_caja'
+        verbose_name = 'Sesión de caja'
+        verbose_name_plural = 'Sesiones de caja'
+        ordering = ['-abierta_en']
+        constraints = [
+            # Nadie puede tener dos cajas abiertas a la vez: la BD lo impide.
+            models.UniqueConstraint(
+                fields=['usuario'], condition=models.Q(estado='abierta'),
+                name='una_sesion_abierta_por_usuario',
+            ),
+        ]
+
+    def __str__(self):
+        return f'Sesión #{self.id} · {self.caja} · {self.usuario_id}'
+
+    def efectivo_esperado(self) -> Decimal:
+        """Lo que DEBERÍA haber en el cajón: suma con signo de los movimientos
+        que tocan efectivo (apertura, ventas en efectivo, entradas, retiros,
+        devoluciones, ajustes). Tarjeta y transferencia no cuentan."""
+        from django.db.models import Sum
+        s = self.movimientos.filter(afecta_efectivo=True).aggregate(s=Sum('monto'))['s']
+        return s or Decimal('0')
+
+    def totales_por_metodo(self) -> dict:
+        """{metodo: total} de las ventas del turno (todas, no solo efectivo)."""
+        from django.db.models import Sum
+        out = {}
+        qs = self.movimientos.filter(tipo=MovimientoCaja.VENTA).values('metodo_pago').annotate(t=Sum('monto'))
+        for row in qs:
+            out[row['metodo_pago'] or 'efectivo'] = row['t'] or Decimal('0')
+        return out
+
+
+class MovimientoCaja(models.Model):
+    """Cada evento de la caja, en orden. Append-only: NUNCA se borra. Una
+    cancelación o devolución crea un movimiento inverso y deja el original."""
+    APERTURA = 'apertura'; VENTA = 'venta'; DEVOLUCION = 'devolucion'
+    ENTRADA = 'entrada'; RETIRO = 'retiro'; AJUSTE = 'ajuste'; CIERRE = 'cierre'
+    TIPOS = [
+        (APERTURA, 'Apertura'), (VENTA, 'Venta'), (DEVOLUCION, 'Devolución'),
+        (ENTRADA, 'Entrada de efectivo'), (RETIRO, 'Retiro de efectivo'),
+        (AJUSTE, 'Ajuste'), (CIERRE, 'Cierre'),
+    ]
+
+    sesion = models.ForeignKey(SesionCaja, on_delete=models.PROTECT, related_name='movimientos')
+    caja = models.ForeignKey(Caja, on_delete=models.PROTECT, related_name='movimientos')
+    usuario = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='movimientos_caja')
+    tipo = models.CharField(max_length=12, choices=TIPOS)
+    metodo_pago = models.CharField(max_length=15, blank=True)
+    # Si el movimiento mueve el cajón (efectivo). Tarjeta/transferencia = False:
+    # se registran para el corte del turno pero no cuentan al arqueo de efectivo.
+    afecta_efectivo = models.BooleanField(default=True)
+    # Con signo: entra (+) / sale (−). Así la suma da el efectivo esperado.
+    monto = models.DecimalField(max_digits=12, decimal_places=2)
+    concepto = models.CharField(max_length=200, blank=True)
+    referencia = models.CharField(max_length=80, blank=True)
+    venta = models.ForeignKey('ventas.Venta', on_delete=models.PROTECT, null=True, blank=True, related_name='movimientos_caja')
+    creado_en = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'movimientos_caja'
+        verbose_name = 'Movimiento de caja'
+        verbose_name_plural = 'Movimientos de caja'
+        ordering = ['creado_en', 'id']
+
+    def __str__(self):
+        return f'{self.get_tipo_display()} · {self.monto}'
