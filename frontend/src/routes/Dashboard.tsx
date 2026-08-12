@@ -17,7 +17,7 @@ import Dock, { type DockItem } from '../components/ui/dock'
 import { formatAddress, addressToFields, type AddressResult } from '../lib/geocoding'
 import { REGIMEN_FISCAL, USO_CFDI, RFC_PUBLICO_GENERAL } from '../lib/sat'
 import { usePrintSettings, charsPerLine } from '../lib/printSettings'
-import { invalidarConfigPublica } from '../lib/configPublica'
+import { invalidarConfigPublica, useConfigPublica } from '../lib/configPublica'
 import { AnimatePresence, motion } from 'framer-motion'
 import { useRecurso, invalidar, type Tema } from '../lib/realtime'
 import { useLatidoPanel } from '../lib/latido'
@@ -2156,6 +2156,8 @@ function InventoryModal({ equipo, onClose, notify }: {
   const [qrUnit, setQrUnit] = useState<Unidad | null>(null)
   const [rentUnit, setRentUnit] = useState<Unidad | null>(null)
   const [sellUnit, setSellUnit] = useState<Unidad | null>(null)
+  const [filtro, setFiltro] = useState<'todas' | 'disponibles' | 'fuera'>('todas')
+  const [menuId, setMenuId] = useState<number | null>(null)
 
   const load = useCallback(() => {
     setLoading(true)
@@ -5732,6 +5734,17 @@ function NuevoPedidoModal({ desde, equipos = [], empresas, onClose, onDone, noti
   const [fecha, setFecha] = useState('')     // ETA opcional (yyyy-mm-dd)
   const [codigo, setCodigo] = useState('')   // por si el anticipo va bajo el mínimo
   const [busy, setBusy] = useState(false)
+  // Sobre pedido = se ordena al proveedor: pide un anticipo mínimo (config, 60% por
+  // defecto). El backend lo impone; aquí se sugiere y se avisa antes de enviar.
+  const cfg = useConfigPublica()
+  const pctMin = Number(cfg.anticipo_minimo_pct) || 60
+  // Ligar a una cuenta de cliente para que vea su pedido y su avance en "Mis compras".
+  const [clientes, setClientes] = useState<{ id: number; nombre: string; empresa?: string }[]>([])
+  const [clienteCuenta, setClienteCuenta] = useState('')
+  useEffect(() => {
+    api.get<{ clientes: { id: number; nombre: string; empresa?: string }[] }>('/clientes-lookup/')
+      .then(r => setClientes(r.data.clientes || [])).catch(() => {})
+  }, [])
 
   // Al elegir equipo (cuando no viene de una cotización), sugiere su precio de venta.
   useEffect(() => {
@@ -5743,12 +5756,21 @@ function NuevoPedidoModal({ desde, equipos = [], empresas, onClose, onDone, noti
   const precioNum = Number(precio) || 0
   const anticipoNum = Number(anticipo) || 0
   const saldo = Math.max(0, precioNum - anticipoNum)
+  const anticipoMin = precioNum > 0 ? Math.round(precioNum * pctMin / 100 * 100) / 100 : 0
+  const anticipoBajo = anticipoNum > 0 && anticipoMin > 0 && anticipoNum < anticipoMin
+  // Sugerir el anticipo mínimo cuando ya hay precio y aún no se capturó (el común es el 60%).
+  useEffect(() => {
+    if (anticipoMin > 0 && !anticipo) setAnticipo(String(anticipoMin))
+  }, [anticipoMin])   // eslint-disable-line react-hooks/exhaustive-deps
 
   function submit() {
     if (!equipoId) { notify('Elige el equipo a pedir', 'err'); return }
     if (precioNum <= 0) { notify('Captura el precio del pedido', 'err'); return }
     if (!cliente.trim()) { notify('Escribe el nombre del cliente', 'err'); return }
     if (anticipoNum > precioNum) { notify('El anticipo no puede ser mayor al precio', 'err'); return }
+    if (anticipoBajo && codigo.length !== 6) {
+      notify(`El anticipo es menor al mínimo (${pctMin}% = ${formatMoney(anticipoMin)}). Súbelo o pon el código de autorización.`, 'err'); return
+    }
     setBusy(true)
     api.post('/ventas/pedidos/crear/', {
       equipo_id: Number(equipoId),
@@ -5757,6 +5779,7 @@ function NuevoPedidoModal({ desde, equipos = [], empresas, onClose, onDone, noti
       nombre_cliente: cliente.trim(),
       telefono_cliente: telefono.trim(),
       empresa_id: empresaId || undefined,
+      cliente_usuario_id: clienteCuenta || undefined,
       anticipo: anticipoNum,
       metodo_pago: metodo,
       fecha_estimada_entrega: fecha || undefined,
@@ -5797,8 +5820,9 @@ function NuevoPedidoModal({ desde, equipos = [], empresas, onClose, onDone, noti
               <label className={label}>Equipo a pedir</label>
               <select value={equipoId} onChange={e => setEquipoId(e.target.value)} className={input}>
                 <option value="">Elige el equipo…</option>
-                {equipos.map(e => <option key={e.id} value={e.id}>{e.modelo}</option>)}
+                {equipos.map(e => <option key={e.id} value={e.id}>{e.modelo}{typeof e.stock_disponible === 'number' ? (e.stock_disponible > 0 ? ` · ${e.stock_disponible} en stock` : ' · sin stock') : ''}</option>)}
               </select>
+              <p className="text-[11px] text-mute mt-1">Para máquinas sin stock (agotadas o especiales de proveedor). Al llegar, se asigna la unidad.</p>
             </div>
           )}
           <div className="grid grid-cols-2 gap-3">
@@ -5809,6 +5833,12 @@ function NuevoPedidoModal({ desde, equipos = [], empresas, onClose, onDone, noti
             <span className="text-mute">Saldo tras el anticipo</span>
             <span className="font-bold text-ink tabular-nums">{formatMoney(saldo)}</span>
           </div>
+          {precioNum > 0 && (
+            <div className={`flex items-center justify-between gap-2 text-[11.5px] rounded-lg px-3 py-2 border ${anticipoBajo ? 'border-amber-500/30 bg-amber-500/[0.06] text-amber-700 dark:text-amber-300' : 'border-edge bg-surface-2 text-mute'}`}>
+              <span>Anticipo mínimo <b>{pctMin}%</b> = {formatMoney(anticipoMin)}{anticipoBajo ? ' · va bajo, pide código' : ''}</span>
+              <button type="button" onClick={() => setAnticipo(String(anticipoMin))} className="font-bold text-gold hover:underline shrink-0 whitespace-nowrap">Usar {pctMin}%</button>
+            </div>
+          )}
           <div>
             <label className={label}>Método del anticipo</label>
             <div className="flex gap-2">
@@ -5822,6 +5852,18 @@ function NuevoPedidoModal({ desde, equipos = [], empresas, onClose, onDone, noti
             <div><label className={label}>Cliente</label><input value={cliente} onChange={e => setCliente(e.target.value)} placeholder="Nombre" className={input} /></div>
             <div><label className={label}>Teléfono</label><input value={telefono} onChange={e => setTelefono(e.target.value)} placeholder="Opcional" className={input} /></div>
           </div>
+          {desde ? (
+            <p className="text-[11px] text-mute px-1">Se liga al cliente de la cotización #{desde.id} (verá su pedido en "Mis compras").</p>
+          ) : (
+            <div>
+              <label className={label}>Ligar a cuenta de cliente (opcional)</label>
+              <select value={clienteCuenta} onChange={e => { setClienteCuenta(e.target.value); const c = clientes.find(x => String(x.id) === e.target.value); if (c && !cliente.trim()) setCliente(c.nombre) }} className={input}>
+                <option value="">Sin cuenta (solo nombre)</option>
+                {clientes.map(c => <option key={c.id} value={c.id}>{c.nombre}{c.empresa ? ` · ${c.empresa}` : ''}</option>)}
+              </select>
+              <p className="text-[11px] text-mute mt-1">Si lo ligas, el cliente ve su pedido y su avance en "Mis compras".</p>
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className={label}>Empresa (opcional)</label>
