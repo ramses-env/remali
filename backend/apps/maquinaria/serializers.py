@@ -221,8 +221,10 @@ class EquipoSerializer(serializers.ModelSerializer):
     # las seminuevas se rentan. El catálogo ya no depende de Equipo.condicion
     # para esto; lo decide el inventario real.
     def get_ofrece_venta(self, obj):
-        tiene_precio = bool(obj.precio_venta and obj.precio_venta > 0)
-        return tiene_precio and any(u.condicion == 'nueva' and u.estado != 'vendido' for u in obj.unidades.all())
+        # Fuente única: la property del modelo. Cubre los tres casos —con stock
+        # (unidad nueva disponible), agotada, y SOBRE PEDIDO sin unidades— para que
+        # una máquina de puro sobre pedido (0 unidades) también salga en el catálogo.
+        return obj.ofrece_venta_catalogo
 
     def get_ofrece_renta(self, obj):
         tiene_precio = any([obj.precio_dia, obj.precio_semana, obj.precio_mes])
