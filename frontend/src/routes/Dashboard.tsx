@@ -2175,6 +2175,8 @@ function InventoryModal({ equipo, onClose, notify }: {
   const [sellUnit, setSellUnit] = useState<Unidad | null>(null)
   const [filtro, setFiltro] = useState<'todas' | 'disponibles' | 'fuera'>('todas')
   const [menu, setMenu] = useState<{ id: number; top: number; right: number } | null>(null)
+  const [proximoCodigo, setProximoCodigo] = useState('')
+  const [confirmando, setConfirmando] = useState(false)
 
   const load = useCallback(() => {
     setLoading(true)
@@ -2187,10 +2189,18 @@ function InventoryModal({ equipo, onClose, notify }: {
 
   const puedeAlta = usePuede()('alta_inventario')
 
+  // Predice el código que se asignará, para mostrarlo en la confirmación de alta.
+  const cargarProximo = useCallback(() => {
+    api.get<{ codigo: string }>(`/equipos/${equipo.id}/unidades/proximo-codigo/`)
+      .then(r => setProximoCodigo(r.data?.codigo || ''))
+      .catch(() => setProximoCodigo(''))
+  }, [equipo.id])
+  useEffect(() => { if (puedeAlta) cargarProximo() }, [puedeAlta, cargarProximo])
+
   function addUnit() {
     setAdding(true)
     api.post(`/equipos/${equipo.id}/unidades/`, { condicion: newCond, numero_serie: newSerie.trim() || null })
-      .then(() => { notify('Unidad agregada'); setNewSerie(''); load() })
+      .then(() => { notify('Unidad agregada'); setNewSerie(''); setConfirmando(false); load(); cargarProximo() })
       .catch(err => notify(err?.response?.data?.detail || 'Error al agregar', 'err'))
       .finally(() => setAdding(false))
   }
@@ -2278,10 +2288,30 @@ function InventoryModal({ equipo, onClose, notify }: {
               ))}
             </div>
             <input className={`${input} flex-1`} value={newSerie} onChange={e => setNewSerie(e.target.value)} placeholder="N° de serie (opcional)" />
-            <button onClick={addUnit} disabled={adding} className="shrink-0 px-5 py-2.5 rounded-xl border border-edge bg-surface-2 text-ink font-bold text-sm hover:border-gold/40 hover:text-gold transition-colors disabled:opacity-50 whitespace-nowrap">
-              {adding ? 'Agregando…' : 'Agregar'}
+            <button onClick={() => { cargarProximo(); setConfirmando(true) }} className="shrink-0 px-5 py-2.5 rounded-xl border border-edge bg-surface-2 text-ink font-bold text-sm hover:border-gold/40 hover:text-gold transition-colors whitespace-nowrap">
+              Agregar
             </button>
           </div>
+          {newCond === 'nueva' && !num(equipo.precio_venta) && (
+            <p className="mt-2.5 text-[12px] text-amber-600 dark:text-amber-400 bg-amber-500/[0.08] border border-amber-500/25 rounded-lg px-3 py-2">
+              Este producto no tiene <b>precio de venta</b>: la unidad nueva no saldrá en el catálogo de venta hasta que le pongas uno (edita el producto → <b>Precio venta</b>).
+            </p>
+          )}
+          {confirmando && (
+            <div className="mt-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-2xl border border-edge px-4 py-3.5">
+              <p className="text-[13px] text-ink leading-snug">
+                Se dará de alta una unidad <b>{newCond === 'nueva' ? 'nueva' : 'seminueva'}</b>
+                {proximoCodigo && <> como <span className="font-mono font-bold text-gold">{proximoCodigo}</span></>}
+                {newSerie.trim() ? <>, con serie <b>{newSerie.trim()}</b>.</> : ', sin número de serie.'}
+              </p>
+              <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto">
+                <button onClick={() => setConfirmando(false)} disabled={adding} className="px-4 py-2 rounded-lg text-[13px] font-semibold text-mute hover:text-ink transition-colors disabled:opacity-50">Cancelar</button>
+                <button onClick={addUnit} disabled={adding} className="px-5 py-2 rounded-lg bg-gold text-black text-[13px] font-bold hover:opacity-90 transition-opacity disabled:opacity-50 whitespace-nowrap">
+                  {adding ? 'Dando de alta…' : 'Sí, dar de alta'}
+                </button>
+              </div>
+            </div>
+          )}
         </div>}
         <BannerConcretando />
 
