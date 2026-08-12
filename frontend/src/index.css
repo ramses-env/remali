@@ -936,3 +936,15 @@ select {
   background-size: 16px;
 }
 select::-ms-expand { display: none; }
+
+/* Inputs numéricos: fuera las flechitas nativas (spinners), se ven baratas y
+   descuadran el alto. El número se teclea. Global: todos los <input type=number>. */
+input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}

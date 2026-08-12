@@ -1922,21 +1922,31 @@ function EquiposAdmin({ equipos, categorias, tipos, marcas, reload, notify }: {
                 {!editing && cond === 'nueva' && (
                   <div className="mt-3">
                     <label className={label}>Disponibilidad</label>
-                    <div className="flex gap-2">
-                      {([['stock', 'En stock'], ['pedido', 'Sobre pedido']] as const).map(([k, txt]) => {
-                        const activo = (k === 'pedido') === esSobrePedido
+                    <div className="grid grid-cols-2 gap-1.5 p-1 rounded-2xl bg-surface-2/70 border border-edge">
+                      {([
+                        { k: 'stock', txt: 'En stock', sub: 'Con inventario', icon: <><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z" /><path d="M4 7.5l8 4.5 8-4.5" /><path d="M12 12v9" /></> },
+                        { k: 'pedido', txt: 'Sobre pedido', sub: 'Al proveedor', icon: <><path d="M3.5 7.5h10v8h-10z" /><path d="M13.5 10.5h3.5l3 3v2h-6.5z" /><circle cx="7" cy="17.5" r="1.5" /><circle cx="17.5" cy="17.5" r="1.5" /></> },
+                      ] as const).map(o => {
+                        const activo = (o.k === 'pedido') === esSobrePedido
                         return (
-                          <button key={k} type="button" onClick={() => setEsSobrePedido(k === 'pedido')}
-                            className={`flex-1 py-2.5 rounded-xl text-[13px] font-bold border transition-all active:scale-[0.98] ${activo ? 'bg-yellow border-transparent text-[#111827]' : 'bg-surface-2 border-edge text-ink hover:border-gold/40'}`}>
-                            {txt}
+                          <button key={o.k} type="button" onClick={() => setEsSobrePedido(o.k === 'pedido')}
+                            className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-left transition-all active:scale-[0.985] ${activo ? 'bg-gold text-black shadow-[0_3px_10px_rgba(255,198,26,0.28)]' : 'text-mute hover:text-ink hover:bg-surface/60'}`}>
+                            <svg className="w-[18px] h-[18px] shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">{o.icon}</svg>
+                            <span className="min-w-0">
+                              <span className="block text-[13px] font-bold leading-tight">{o.txt}</span>
+                              <span className={`block text-[10.5px] leading-tight ${activo ? 'text-black/60' : 'text-mute'}`}>{o.sub}</span>
+                            </span>
                           </button>
                         )
                       })}
                     </div>
                     {esSobrePedido ? (
-                      <p className="mt-2 text-[12px] text-gold bg-gold/[0.06] border border-gold/25 rounded-lg px-3 py-2">Sin stock: se ofrece para <b>pedir al proveedor</b>. La unidad se asigna cuando llega; al dar de alta stock pasa a venta inmediata.</p>
+                      <div className="mt-2.5 flex items-start gap-2.5 rounded-xl border border-gold/25 bg-gold/[0.06] px-3.5 py-3">
+                        <svg className="w-4 h-4 text-gold shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9" /><path d="M12 8v4l2.5 2.5" /></svg>
+                        <p className="text-[12px] text-ink/80 leading-snug">Nace <b className="text-ink">sin stock</b>: se ofrece para pedir al proveedor y la unidad se asigna cuando llega. Al dar de alta stock, pasa a venta inmediata.</p>
+                      </div>
                     ) : (
-                      <div className="mt-2">
+                      <div className="mt-2.5">
                         <label className={label}>¿Cuántas unidades entran a stock?</label>
                         <input type="number" min={1} max={100} className={input} value={cantidad} onChange={e => setCantidad(e.target.value)} />
                       </div>
