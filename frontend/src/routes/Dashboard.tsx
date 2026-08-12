@@ -61,6 +61,7 @@ type Equipo = {
   stock_disponible?: number
   unidades_total?: number
   unidades_rentadas?: number
+  dias_entrega_pedido?: number | string | null
 }
 type Coupon = { id?: number; codigo: string; descuento: number; activo?: boolean }
 type Refaccion = {
@@ -1613,7 +1614,7 @@ function EquiposAdmin({ equipos, categorias, tipos, marcas, reload, notify }: {
       reload()
     } catch { notify('No se pudo guardar la clasificación', 'err') }
   }
-  const empty: Equipo = { modelo: '', descripcion: '', precio_dia: '', precio_semana: '', precio_mes: '', precio_venta: '', especificaciones: [], que_incluye: [], promo_pct: 0 }
+  const empty: Equipo = { modelo: '', descripcion: '', precio_dia: '', precio_semana: '', precio_mes: '', precio_venta: '', especificaciones: [], que_incluye: [], promo_pct: 0, dias_entrega_pedido: '' }
   const [form, setForm] = useState<Equipo>(empty)
   // Helpers del editor de especificaciones técnicas (etiqueta → valor)
   const specs = form.especificaciones || []
@@ -1681,6 +1682,8 @@ function EquiposAdmin({ equipos, categorias, tipos, marcas, reload, notify }: {
     // "Qué incluye": una línea por punto (formato libre "Título: detalle")
     fd.append('que_incluye', JSON.stringify((form.que_incluye || []).map(l => l.trim()).filter(Boolean)))
     fd.append('promo_pct', String(Math.max(0, Math.min(90, Number(form.promo_pct) || 0))))
+    // Días que tarda el proveedor si esta máquina va sobre pedido (0 = usar el global).
+    if (soloVenta) fd.append('dias_entrega_pedido', String(Math.max(0, Math.min(365, Number(form.dias_entrega_pedido) || 0))))
 
     try {
       const method = editing ? 'patch' : 'post'
@@ -1933,6 +1936,13 @@ function EquiposAdmin({ equipos, categorias, tipos, marcas, reload, notify }: {
                 </div>
                 {cond === 'nueva' && (
                   <p className="col-span-2 text-[11px] text-mute -mt-1">Las <b>nuevas</b> solo se venden, por eso no se piden precios de renta.</p>
+                )}
+                {cond === 'nueva' && (
+                  <div className="col-span-2">
+                    <label className={label}>Días de entrega si es sobre pedido</label>
+                    <input type="number" min={0} max={365} className={input} value={form.dias_entrega_pedido ?? ''} onChange={e => setForm({ ...form, dias_entrega_pedido: e.target.value })} placeholder="Vacío = usar el tiempo general del negocio" />
+                    <p className="text-[11px] text-mute mt-1">Cuánto tarda el proveedor en surtir <b>esta</b> máquina cuando va sobre pedido. Vacío o 0 usa el tiempo general.</p>
+                  </div>
                 )}
               </div>
               <div className="grid grid-cols-1 gap-3">
