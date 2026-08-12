@@ -462,16 +462,14 @@ class Equipo(models.Model):
             venta_disponible = len(unidades_venta) > 0
             renta_disponible = (len(unidades_renta) > 0) and precio_renta_ok
 
-            # Sobre pedido también es de línea nueva (pedir una máquina nueva sin stock).
-            ofrece_venta_cond = es_nueva and precio_venta_ok and (venta_disponible or self.permite_sobre_pedido)
+            # Cualquier máquina de venta (línea nueva con precio) se ofrece: con stock
+            # es venta inmediata; si se AGOTÓ, pasa sola a SOBRE PEDIDO (se ordena al
+            # proveedor) y al reponer stock vuelve a 'inmediata'. `permite_sobre_pedido`
+            # ya no es requisito: solo distingue las "especiales" que nunca tienen stock.
+            ofrece_venta_cond = es_nueva and precio_venta_ok
 
             if ofrece_venta_cond:
-                if venta_disponible:
-                    venta_estado = 'inmediata'
-                elif self.permite_sobre_pedido:
-                    venta_estado = 'sobre_pedido'
-                else:
-                    venta_estado = 'agotado'
+                venta_estado = 'inmediata' if venta_disponible else 'sobre_pedido'
             else:
                 venta_estado = 'sin_venta'
 
@@ -513,7 +511,8 @@ class Equipo(models.Model):
             return False
         if self.venta_disponible_catalogo:
             return True
-        return self.permite_sobre_pedido and self._tiene_linea_nueva
+        # Agotada (o especial sin stock): se ofrece SOBRE PEDIDO automáticamente.
+        return self._tiene_linea_nueva
 
     @property
     def _tiene_linea_renta(self):
@@ -555,9 +554,8 @@ class Equipo(models.Model):
             return 'sin_venta'
         if self.venta_disponible_catalogo:
             return 'inmediata'
-        if self.permite_sobre_pedido and self._tiene_linea_nueva:
-            return 'sobre_pedido'
-        return 'agotado'
+        # Sin stock pero es línea de venta -> sobre pedido (se ordena al proveedor).
+        return 'sobre_pedido'
 
     @property
     def entrega_estimada_dias(self):

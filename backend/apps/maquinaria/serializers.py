@@ -142,6 +142,11 @@ class EquipoSerializer(serializers.ModelSerializer):
     stock_disponible = serializers.SerializerMethodField()
     unidades_total = serializers.SerializerMethodField()
     unidades_rentadas = serializers.SerializerMethodField()
+    # Estado de venta al público: inmediata | sobre_pedido | agotado | sin_venta.
+    # Una máquina de venta agotada cae sola en 'sobre_pedido' (se ordena al proveedor);
+    # al reponer stock vuelve a 'inmediata'. El frontend pinta el badge con esto.
+    venta_estado = serializers.SerializerMethodField()
+    entrega_estimada_dias = serializers.SerializerMethodField()
     # 'venta' (nueva) o 'renta' (seminueva). Lo decide la condición del equipo.
     modo = serializers.CharField(read_only=True)
 
@@ -241,6 +246,12 @@ class EquipoSerializer(serializers.ModelSerializer):
 
     def get_unidades_rentadas(self, obj):
         return sum(1 for u in obj.unidades.all() if u.estado == 'rentado')
+
+    def get_venta_estado(self, obj):
+        return obj.estado_venta_catalogo
+
+    def get_entrega_estimada_dias(self, obj):
+        return obj.entrega_estimada_dias
 
     def get_imagenes(self, obj):
         urls = []
