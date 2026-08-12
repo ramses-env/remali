@@ -1691,8 +1691,8 @@ function EquiposAdmin({ equipos, categorias, tipos, marcas, reload, notify }: {
       // (el backend crea las N o ninguna; ya no es un bucle que traga errores).
       if (!editing) {
         const equipoId = res.data?.id
-        const n = Math.max(1, Math.min(100, Number(cantidad) || 1))
-        if (equipoId) {
+        const n = Math.max(0, Math.min(100, Number(cantidad) || 0))
+        if (equipoId && n > 0) {
           try {
             const u = await api.post(`/equipos/${equipoId}/unidades/`, { condicion: cond, cantidad: n })
             const creadas = u.data?.cantidad ?? n
@@ -1701,6 +1701,10 @@ function EquiposAdmin({ equipos, categorias, tipos, marcas, reload, notify }: {
             // El producto sí se creó; fallaron las unidades. Se dice la verdad.
             notify('Producto creado, pero no se pudieron generar las unidades. Agrégalas desde Inventario.', 'err')
           }
+        } else if (equipoId && cond === 'nueva') {
+          // Sin unidades y de venta: nace como SOBRE PEDIDO (se ordena al proveedor;
+          // la unidad se asigna al llegar). Al dar de alta stock, pasa a venta inmediata.
+          notify('Producto creado como sobre pedido (sin stock). Se ofrece para pedir; agrega unidades cuando lleguen.')
         } else {
           notify('Producto creado')
         }
@@ -1905,8 +1909,11 @@ function EquiposAdmin({ equipos, categorias, tipos, marcas, reload, notify }: {
                   </div>
                   {!editing && (
                     <div>
-                      <label className={label}>Cantidad de unidades</label>
-                      <input type="number" min={1} max={100} className={input} value={cantidad} onChange={e => setCantidad(e.target.value)} />
+                      <label className={label}>Unidades en stock</label>
+                      <input type="number" min={0} max={100} className={input} value={cantidad} onChange={e => setCantidad(e.target.value)} placeholder="0" />
+                      {cond === 'nueva' && (Number(cantidad) || 0) === 0 && (
+                        <p className="text-[11px] text-gold mt-1 font-semibold">0 = sobre pedido (se ordena al proveedor)</p>
+                      )}
                     </div>
                   )}
                 </div>
@@ -2226,6 +2233,8 @@ function InventoryModal({ equipo, onClose, notify }: {
           </button>
         </div>
 
+        {/* Zona desplazable: al subir, los KPIs y "Agregar unidad" salen y se ven más unidades */}
+        <div className="flex-1 overflow-y-auto min-h-0">
         {/* KPIs por unidad */}
         <div className="grid grid-cols-4 border-y border-edge divide-x divide-edge">
           {([
@@ -2266,8 +2275,8 @@ function InventoryModal({ equipo, onClose, notify }: {
         </div>}
         <BannerConcretando />
 
-        {/* Encabezado + filtro de unidades */}
-        <div className="px-6 sm:px-7 pt-5 pb-3 flex items-center justify-between gap-3">
+        {/* Encabezado + filtro de unidades (se queda pegado arriba al desplazar) */}
+        <div className="sticky top-0 z-[1] bg-surface px-6 sm:px-7 pt-5 pb-3 flex items-center justify-between gap-3">
           <p className="font-bold text-ink">Unidades <span className="text-mute font-normal">({unidades.length})</span></p>
           <div className="flex p-1 rounded-xl border border-edge bg-surface-2">
             {(['todas', 'disponibles', 'fuera'] as const).map(f => (
@@ -2280,7 +2289,7 @@ function InventoryModal({ equipo, onClose, notify }: {
         </div>
 
         {/* Lista de unidades */}
-        <div className="flex-1 overflow-y-auto px-6 sm:px-7 pb-5 space-y-2.5">
+        <div className="px-6 sm:px-7 pb-5 space-y-2.5">
           {loading && <p className="text-sm text-mute text-center py-8">Cargando…</p>}
           {!loading && filtradas.length === 0 && (
             <p className="text-sm text-mute text-center py-10">
@@ -2360,6 +2369,7 @@ function InventoryModal({ equipo, onClose, notify }: {
               )}
             </div>
           ))}
+        </div>
         </div>
 
         {/* Pie */}
