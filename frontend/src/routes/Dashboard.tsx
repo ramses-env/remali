@@ -1633,6 +1633,7 @@ function EquiposAdmin({ equipos, categorias, tipos, marcas, reload, notify }: {
   const [q, setQ] = useState('')
   const [cond, setCond] = useState<'nueva' | 'seminueva'>('seminueva')
   const [cantidad, setCantidad] = useState('1')
+  const [esSobrePedido, setEsSobrePedido] = useState(false)   // alta de venta SIN stock (sobre pedido)
   const editing = Boolean(form.id)
 
   const filtrados = equipos.filter(e => {
@@ -1646,7 +1647,7 @@ function EquiposAdmin({ equipos, categorias, tipos, marcas, reload, notify }: {
   const puede = usePuede()
   const puedeEditar = puede('editar_catalogo')   // el técnico consulta el catálogo, no lo cambia
 
-  function openNew() { setForm(empty); setImageFile(null); setFichaFile(null); setCond('seminueva'); setCantidad('1'); setFormOpen(true) }
+  function openNew() { setForm(empty); setImageFile(null); setFichaFile(null); setCond('seminueva'); setCantidad('1'); setEsSobrePedido(false); setFormOpen(true) }
   function openEdit(e: Equipo) { setForm({ ...e }); setCond(((e as any).condicion as 'nueva' | 'seminueva') || 'nueva'); setImageFile(null); setFichaFile(null); setFormOpen(true) }
 
   async function save() {
@@ -1694,7 +1695,8 @@ function EquiposAdmin({ equipos, categorias, tipos, marcas, reload, notify }: {
       // (el backend crea las N o ninguna; ya no es un bucle que traga errores).
       if (!editing) {
         const equipoId = res.data?.id
-        const n = Math.max(0, Math.min(100, Number(cantidad) || 0))
+        // "Sobre pedido" (solo venta) = alta SIN stock: no se crean unidades.
+        const n = (cond === 'nueva' && esSobrePedido) ? 0 : Math.max(1, Math.min(100, Number(cantidad) || 1))
         if (equipoId && n > 0) {
           try {
             const u = await api.post(`/equipos/${equipoId}/unidades/`, { condicion: cond, cantidad: n })
@@ -1910,16 +1912,37 @@ function EquiposAdmin({ equipos, categorias, tipos, marcas, reload, notify }: {
                       <option value="nueva" className="bg-surface">Nueva (venta)</option>
                     </select>
                   </div>
-                  {!editing && (
+                  {!editing && cond === 'seminueva' && (
                     <div>
-                      <label className={label}>Unidades en stock</label>
-                      <input type="number" min={0} max={100} className={input} value={cantidad} onChange={e => setCantidad(e.target.value)} placeholder="0" />
-                      {cond === 'nueva' && (Number(cantidad) || 0) === 0 && (
-                        <p className="text-[11px] text-gold mt-1 font-semibold">0 = sobre pedido (se ordena al proveedor)</p>
-                      )}
+                      <label className={label}>Unidades</label>
+                      <input type="number" min={1} max={100} className={input} value={cantidad} onChange={e => setCantidad(e.target.value)} />
                     </div>
                   )}
                 </div>
+                {!editing && cond === 'nueva' && (
+                  <div className="mt-3">
+                    <label className={label}>Disponibilidad</label>
+                    <div className="flex gap-2">
+                      {([['stock', 'En stock'], ['pedido', 'Sobre pedido']] as const).map(([k, txt]) => {
+                        const activo = (k === 'pedido') === esSobrePedido
+                        return (
+                          <button key={k} type="button" onClick={() => setEsSobrePedido(k === 'pedido')}
+                            className={`flex-1 py-2.5 rounded-xl text-[13px] font-bold border transition-all active:scale-[0.98] ${activo ? 'bg-yellow border-transparent text-[#111827]' : 'bg-surface-2 border-edge text-ink hover:border-gold/40'}`}>
+                            {txt}
+                          </button>
+                        )
+                      })}
+                    </div>
+                    {esSobrePedido ? (
+                      <p className="mt-2 text-[12px] text-gold bg-gold/[0.06] border border-gold/25 rounded-lg px-3 py-2">Sin stock: se ofrece para <b>pedir al proveedor</b>. La unidad se asigna cuando llega; al dar de alta stock pasa a venta inmediata.</p>
+                    ) : (
+                      <div className="mt-2">
+                        <label className={label}>¿Cuántas unidades entran a stock?</label>
+                        <input type="number" min={1} max={100} className={input} value={cantidad} onChange={e => setCantidad(e.target.value)} />
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Renta → precios de renta; venta → solo su precio de venta. El precio
@@ -1937,7 +1960,7 @@ function EquiposAdmin({ equipos, categorias, tipos, marcas, reload, notify }: {
                 {cond === 'nueva' && (
                   <p className="col-span-2 text-[11px] text-mute -mt-1">Las <b>nuevas</b> solo se venden, por eso no se piden precios de renta.</p>
                 )}
-                {cond === 'nueva' && (
+                {cond === 'nueva' && (editing || esSobrePedido) && (
                   <div className="col-span-2">
                     <label className={label}>Días de entrega si es sobre pedido</label>
                     <input type="number" min={0} max={365} className={input} value={form.dias_entrega_pedido ?? ''} onChange={e => setForm({ ...form, dias_entrega_pedido: e.target.value })} placeholder="Vacío = usar el tiempo general del negocio" />
