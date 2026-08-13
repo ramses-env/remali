@@ -9,8 +9,8 @@ class Refaccion(models.Model):
     stock = models.PositiveIntegerField(default=0, help_text="Cantidad disponible en el taller")
     stock_minimo = models.PositiveIntegerField(default=0, help_text="Umbral para alertar reorden (0 = sin alerta)")
     para_venta = models.BooleanField(
-        default=False,
-        help_text="Además de mantenimiento, esta refacción también se vende al público"
+        default=True,
+        help_text="Se vende al público (caja/POS). Todas las refacciones son vendibles; el campo se conserva para el módulo de caja."
     )
     ubicacion = models.CharField(max_length=120, blank=True, default='', help_text="Ubicación en el taller (estante/caja)")
     # Familia para agrupar en la caja (chips del POS). Texto libre con sugeridas.

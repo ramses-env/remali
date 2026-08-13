@@ -5127,7 +5127,7 @@ function VenderRefaccionModal({ refaccion, notify, onClose, onSold }: {
 function RefaccionesAdmin({ refacciones, reload, notify }: {
   refacciones: Refaccion[]; reload: () => void; notify: (m: string, t?: 'ok' | 'err') => void
 }) {
-  const empty = { nombre: '', descripcion: '', precio_venta: '', stock: '0', stock_minimo: '0', para_venta: false, ubicacion: '', codigo_barras: '' }
+  const empty = { nombre: '', descripcion: '', precio_venta: '', stock: '0', stock_minimo: '0', para_venta: true, ubicacion: '', codigo_barras: '' }
   const [q, setQ] = useState('')
   const [formOpen, setFormOpen] = useState(false)
   const [editing, setEditing] = useState<Refaccion | null>(null)
@@ -5159,7 +5159,7 @@ function RefaccionesAdmin({ refacciones, reload, notify }: {
     const payload = {
       nombre: form.nombre.trim(), descripcion: (form.descripcion || '').trim(),
       precio_venta: num(form.precio_venta), stock: num(form.stock), stock_minimo: num(form.stock_minimo),
-      para_venta: !!form.para_venta, ubicacion: (form.ubicacion || '').trim(),
+      para_venta: true, ubicacion: (form.ubicacion || '').trim(),   // todas las refacciones se venden al público (caja)
       codigo_barras: (form.codigo_barras || '').trim(),
     }
     const req = editing ? api.patch(`/refacciones/${editing.id}/`, payload) : api.post('/refacciones/', payload)
@@ -5283,21 +5283,6 @@ function RefaccionesAdmin({ refacciones, reload, notify }: {
                 <input className={`${input} font-mono`} value={form.codigo_barras} onChange={e => setForm({ ...form, codigo_barras: e.target.value })} placeholder="Escanéalo o déjalo vacío" />
                 <p className="text-[11px] text-mute mt-1.5">Si la refacción ya trae código, escríbelo o escanéalo. Si lo dejas <b>vacío</b>, el sistema genera uno único automáticamente.</p>
               </div>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={form.para_venta}
-                onClick={() => setForm({ ...form, para_venta: !form.para_venta })}
-                className="w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-edge cursor-pointer hover:bg-surface-2 transition-colors text-left"
-              >
-                <span className={`relative shrink-0 w-11 h-6 rounded-full transition-colors ${form.para_venta ? 'bg-gold' : 'bg-surface-2 border border-edge'}`}>
-                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${form.para_venta ? 'translate-x-5' : ''}`} />
-                </span>
-                <span>
-                  <span className="block text-sm font-semibold text-ink">También se vende al público</span>
-                  <span className="block text-[11px] text-mute">Por defecto las refacciones son solo para mantenimiento.</span>
-                </span>
-              </button>
             </div>
             <div className="px-6 py-4 border-t border-edge flex justify-end gap-3 shrink-0 bg-surface">
               <button onClick={() => setFormOpen(false)} className="px-6 py-2.5 rounded-full border border-edge text-ink text-sm font-semibold hover:bg-surface-2 transition-colors">Cancelar</button>
