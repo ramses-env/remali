@@ -5910,6 +5910,9 @@ function NuevoPedidoModal({ desde, equipos = [], empresas, onClose, onDone, noti
   const precioNum = Number(precio) || 0
   const anticipoNum = Number(anticipo) || 0
   const saldo = Math.max(0, precioNum - anticipoNum)
+  // El pedido es SOLO para máquinas sin stock: agotadas (en inventario, 0 disponibles)
+  // o especiales de proveedor (sin inventario). Las que tienen stock se venden directo.
+  const equiposPedibles = equipos.filter(e => Number(e.stock_disponible || 0) === 0 && num(e.precio_venta) > 0)
   const anticipoMin = precioNum > 0 ? Math.round(precioNum * pctMin / 100 * 100) / 100 : 0
   const anticipoBajo = anticipoNum > 0 && anticipoMin > 0 && anticipoNum < anticipoMin
   // Sugerir el anticipo mínimo cuando ya hay precio y aún no se capturó (el común es el 60%).
@@ -5974,9 +5977,13 @@ function NuevoPedidoModal({ desde, equipos = [], empresas, onClose, onDone, noti
               <label className={label}>Equipo a pedir</label>
               <select value={equipoId} onChange={e => setEquipoId(e.target.value)} className={input}>
                 <option value="">Elige el equipo…</option>
-                {equipos.map(e => <option key={e.id} value={e.id}>{e.modelo}{typeof e.stock_disponible === 'number' ? (e.stock_disponible > 0 ? ` · ${e.stock_disponible} en stock` : ' · sin stock') : ''}</option>)}
+                {equiposPedibles.map(e => (
+                  <option key={e.id} value={e.id}>{e.modelo}{e.unidades_total ? ' · agotado' : ' · sobre pedido'}</option>
+                ))}
               </select>
-              <p className="text-[11px] text-mute mt-1">Para máquinas sin stock (agotadas o especiales de proveedor). Al llegar, se asigna la unidad.</p>
+              {equiposPedibles.length === 0
+                ? <p className="text-[11px] text-amber-600 dark:text-amber-400 mt-1">No hay máquinas sin stock. Solo se piden las agotadas o especiales; las que tienen stock se venden directo.</p>
+                : <p className="text-[11px] text-mute mt-1">Solo máquinas sin stock (agotadas o especiales de proveedor). Al llegar, se asigna la unidad.</p>}
             </div>
           )}
           <div className="grid grid-cols-2 gap-3">
@@ -6072,6 +6079,19 @@ function PedidosAdmin({ datos, reload, equipos, empresas, notify }: {
       notify(`Abono de ${money(monto)} registrado`)
       setAbonando(null); reload()
     } catch { /* el interceptor avisa */ }
+  }
+
+  // Liga de vinculación (como renta/venta): para clientes SIN cuenta. Al abrirla con
+  // su sesión, el pedido cae en SU "Mis compras" y puede seguirlo y liquidar el saldo.
+  async function generarLigaPedido(p: Pedido) {
+    try {
+      const res = await api.post<{ ruta: string }>(`/ventas/${p.id}/vinculo/`, {}, { fondo: true } as never)
+      const link = `${window.location.origin}${res.data.ruta}`
+      try { await navigator.clipboard.writeText(link) } catch { /* sin portapapeles: igual va por WhatsApp */ }
+      const wa = waLink(p.telefono_cliente, `Hola${p.nombre_cliente ? ' ' + p.nombre_cliente : ''}, aquí sigues tu pedido de ${p.equipo || 'tu máquina'} en REMALI y liquidas tu saldo: ${link}`)
+      if (wa) { window.open(wa, '_blank', 'noopener'); notify('Liga generada y copiada; abriendo WhatsApp') }
+      else notify('Liga de vinculación copiada al portapapeles')
+    } catch (e) { notify((e as { response?: { data?: { detalle?: string } } })?.response?.data?.detalle || 'No se pudo generar la liga', 'err') }
   }
 
   const FASES: { key: string; label: string }[] = [
@@ -6174,6 +6194,13 @@ function PedidosAdmin({ datos, reload, equipos, empresas, notify }: {
                     <button onClick={() => setAbonando(p)} className="h-8 px-3 rounded-lg bg-gold text-black text-[12px] font-bold hover:brightness-95 transition-all">+ Abono</button>
                   )}
                   <button onClick={() => toggle(p.id)} className="h-8 px-3 rounded-lg border border-edge text-[12px] font-bold text-ink hover:bg-surface-2 transition-colors">{abiertoP ? 'Ocultar' : 'Ver abonos'}</button>
+                  {!p.cuenta && (
+                    <button onClick={() => generarLigaPedido(p)} title="Genera una liga para que el cliente (sin cuenta) siga su pedido en Mis compras"
+                      className="h-8 px-3 rounded-lg border border-edge text-[12px] font-bold text-ink hover:bg-surface-2 transition-colors inline-flex items-center gap-1.5">
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7 0l2-2a5 5 0 0 0-7-7l-1 1" /><path d="M14 11a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 7 7l1-1" /></svg>
+                      Liga cliente
+                    </button>
+                  )}
                   {p.sobre_pedido && p.pedido_fase !== 'en_sucursal' && (
                     <button onClick={() => avanzarFase(p)} className="h-8 px-3 rounded-lg border border-edge text-[12px] font-bold text-ink hover:bg-surface-2 transition-colors">Avanzar seguimiento</button>
                   )}
