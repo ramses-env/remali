@@ -8615,13 +8615,21 @@ type OpcionMenu = { label: string; onClick: () => void; icono?: React.ReactNode;
  * recortado por él.
  */
 function MenuFila({ opciones }: { opciones: OpcionMenu[] }) {
-  const [pos, setPos] = useState<{ top: number; right: number } | null>(null)
+  const [pos, setPos] = useState<{ top?: number; bottom?: number; right: number } | null>(null)
   const btn = useRef<HTMLButtonElement | null>(null)
 
   const abrir = () => {
     const r = btn.current?.getBoundingClientRect()
     if (!r) return
-    setPos({ top: r.bottom + 6, right: Math.max(8, window.innerWidth - r.right) })
+    const right = Math.max(8, window.innerWidth - r.right)
+    const estimado = opciones.length * 50 + 16   // alto aproximado del menú
+    const espacioAbajo = window.innerHeight - r.bottom
+    // Si no cabe abajo pero sí arriba, abre hacia ARRIBA (evita que se corte "Eliminar").
+    if (espacioAbajo < estimado + 12 && r.top > espacioAbajo) {
+      setPos({ bottom: window.innerHeight - r.top + 6, right })
+    } else {
+      setPos({ top: r.bottom + 6, right })
+    }
   }
 
   useEffect(() => {
@@ -8648,8 +8656,8 @@ function MenuFila({ opciones }: { opciones: OpcionMenu[] }) {
       {pos && createPortal(
         <>
           <div className="fixed inset-0 z-[70]" onClick={() => setPos(null)} />
-          <div role="menu" style={{ top: pos.top, right: pos.right }}
-            className="fixed z-[71] min-w-[230px] bg-surface border border-edge rounded-2xl shadow-[0_16px_40px_rgba(33,29,22,0.18)] p-2">
+          <div role="menu" style={{ top: pos.top, bottom: pos.bottom, right: pos.right }}
+            className="fixed z-[71] min-w-[230px] max-h-[70vh] overflow-y-auto bg-surface border border-edge rounded-2xl shadow-[0_16px_40px_rgba(33,29,22,0.18)] p-2">
             {opciones.map((o, i) => (
               <button key={i} role="menuitem" disabled={o.deshabilitado}
                 title={o.deshabilitado ? o.razon : undefined}
@@ -8683,12 +8691,12 @@ function UsuariosAdmin({ usuarios, reload, notify, yoId }: {
   const activos = usuarios.filter(u => u.activo)
   const admins = activos.filter(u => u.es_admin)
   // Dos mundos separados: el equipo que opera el panel y los clientes de la tienda.
-  const [grupo, setGrupo] = useState<'todos' | 'equipo' | 'clientes'>('todos')
+  const [grupo, setGrupo] = useState<'equipo' | 'clientes'>('equipo')
   const [asignando, setAsignando] = useState<UsuarioPanel | null>(null)
   const equipo = usuarios.filter(u => !esCliente(u))
   const clientes = usuarios.filter(esCliente)
   const sinVerificar = clientes.filter(u => !u.email_verificado).length
-  const filtrados = (grupo === 'todos' ? usuarios : grupo === 'equipo' ? equipo : clientes).filter(u => {
+  const filtrados = (grupo === 'equipo' ? equipo : clientes).filter(u => {
     if (f.q.trim() && !`${u.nombre} ${u.username} ${u.rol || ''} ${u.puesto}`.toLowerCase().includes(f.q.toLowerCase().trim())) return false
     if (f.correo.trim() && !(u.email || '').toLowerCase().includes(f.correo.toLowerCase().trim())) return false
     if (f.tel.trim() && !(u.telefono || '').replace(/\D/g, '').includes(f.tel.replace(/\D/g, ''))) return false
@@ -8698,15 +8706,7 @@ function UsuariosAdmin({ usuarios, reload, notify, yoId }: {
   })
   const verificados = clientes.filter(u => u.email_verificado).length
   const inactivos = usuarios.length - activos.length
-  // En "Todos" la tabla muestra ambos mundos con un separador de sección.
-  const equipoF = filtrados.filter(u => !esCliente(u))
-  const clientesF = filtrados.filter(esCliente)
-  const filas: (UsuarioPanel | { sep: string })[] = grupo === 'todos'
-    ? [
-        ...(equipoF.length ? [{ sep: `Equipo de trabajo (${equipoF.length})` }] : []), ...equipoF,
-        ...(clientesF.length ? [{ sep: `Clientes (${clientesF.length})` }] : []), ...clientesF,
-      ]
-    : filtrados
+  const filas: (UsuarioPanel | { sep: string })[] = filtrados
 
   async function desactivar(u: UsuarioPanel) {
     const ok = await confirmar({
@@ -8829,14 +8829,14 @@ function UsuariosAdmin({ usuarios, reload, notify, yoId }: {
       <div className="bg-surface border border-edge rounded-2xl">
         <div className="px-4 sm:px-5 py-3.5 border-b border-edge flex flex-wrap items-center justify-between gap-3">
           <div className="flex border border-edge rounded-xl overflow-hidden shrink-0">
-            {([['todos', `Todos (${usuarios.length})`], ['equipo', `Equipo de trabajo (${equipo.length})`], ['clientes', `Clientes (${clientes.length})`]] as const).map(([g, etiqueta]) => (
+            {([['equipo', `Equipo de trabajo (${equipo.length})`], ['clientes', `Clientes (${clientes.length})`]] as const).map(([g, etiqueta]) => (
               <button key={g} onClick={() => setGrupo(g)}
                 className={`px-4 py-2.5 text-[13px] font-bold transition-colors ${grupo === g ? 'bg-ink text-app' : 'text-mute hover:text-ink hover:bg-surface-2'}`}>
                 {etiqueta}
               </button>
             ))}
           </div>
-          <span className="text-[13px] text-mute">{filtrados.length} de {(grupo === 'todos' ? usuarios : grupo === 'equipo' ? equipo : clientes).length}</span>
+          <span className="text-[13px] text-mute">{filtrados.length} de {(grupo === 'equipo' ? equipo : clientes).length}</span>
         </div>
 
         {filtrados.length === 0 ? (
