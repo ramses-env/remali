@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { Link, useNavigate } from 'react-router-dom'
 import QRCode from 'qrcode'
 import api from '../lib/api'
-import { formatMoney } from '../lib/utils'
+import { formatMoney, soloTelefono } from '../lib/utils'
 import DialogoHost, { confirmar, pedir, elegir } from '../components/Dialogo'
 
 import TicketModal from '../components/TicketModal'
@@ -2707,7 +2707,7 @@ function RentModal({ unit, equipo, onClose, onDone, notify }: {
             </div>
           )}
           <div><label className={label}>{obraId ? 'Encargado de la obra' : 'Cliente'} {empresaId ? '' : '*'}</label><input className={input} value={cliente} onChange={e => setCliente(e.target.value)} placeholder={obraId ? 'Encargado' : 'Nombre del cliente'} /></div>
-          <div><label className={label}>Teléfono{obraId ? ' del encargado' : ''}</label><input className={input} value={telefono} onChange={e => setTelefono(e.target.value)} placeholder="555-..." /></div>
+          <div><label className={label}>Teléfono{obraId ? ' del encargado' : ''}</label><input type="tel" inputMode="numeric" maxLength={10} className={input} value={telefono} onChange={e => setTelefono(soloTelefono(e.target.value))} placeholder="10 dígitos" /></div>
           <div><label className={label}>Dirección / ubicación de obra *</label><input className={input} value={direccion} onChange={e => setDireccion(e.target.value)} placeholder="Dónde estará el equipo" /></div>
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -2889,7 +2889,7 @@ function SellModal({ unit, equipo, onClose, onDone, notify }: {
             </select>
           </div>
           <div><label className={label}>Cliente</label><input className={input} value={cliente} onChange={e => setCliente(e.target.value)} placeholder="Nombre del comprador" /></div>
-          <div><label className={label}>Teléfono</label><input className={input} value={telefono} onChange={e => setTelefono(e.target.value)} placeholder="555-..." /></div>
+          <div><label className={label}>Teléfono</label><input type="tel" inputMode="numeric" maxLength={10} className={input} value={telefono} onChange={e => setTelefono(soloTelefono(e.target.value))} placeholder="10 dígitos" /></div>
           <div>
             <div className="flex items-center justify-between mb-1.5">
               <label className={`${label} mb-0`}>Método de pago</label>
@@ -4849,7 +4849,7 @@ function EmpresasAdmin({ empresas, reload, notify }: {
                       <Requerido k="uso_cfdi" />
                     </div>
                     <div><label className={lblErr('contacto')}>Contacto *</label><input className={inpErr('contacto')} value={form.contacto || ''} onChange={e => setCampo('contacto', e.target.value)} placeholder="Persona" /><Requerido k="contacto" /></div>
-                    <div><label className={lblErr('telefono')}>Teléfono *</label><input className={inpErr('telefono')} value={form.telefono || ''} onChange={e => setCampo('telefono', e.target.value)} placeholder="555-..." /><Requerido k="telefono" /></div>
+                    <div><label className={lblErr('telefono')}>Teléfono *</label><input type="tel" inputMode="numeric" maxLength={10} className={inpErr('telefono')} value={form.telefono || ''} onChange={e => setCampo('telefono', soloTelefono(e.target.value))} placeholder="10 dígitos" /><Requerido k="telefono" /></div>
                   </div>
                 </div>
               </div>
@@ -4988,7 +4988,7 @@ function ObrasModal({ empresa, onClose, onChanged, notify }: {
                   <option value="finalizada" className="bg-surface">Finalizada</option>
                 </select>
                 <div className="col-span-3"><input className={inpErr('responsable')} value={draft.responsable || ''} onChange={e => setCampo('responsable', e.target.value)} placeholder="Responsable *" /><Requerido k="responsable" /></div>
-                <div className="col-span-3"><input className={inpErr('telefono')} value={draft.telefono || ''} onChange={e => setCampo('telefono', e.target.value)} placeholder="Teléfono del responsable *" /><Requerido k="telefono" /></div>
+                <div className="col-span-3"><input type="tel" inputMode="numeric" maxLength={10} className={inpErr('telefono')} value={draft.telefono || ''} onChange={e => setCampo('telefono', soloTelefono(e.target.value))} placeholder="Teléfono del responsable *" /><Requerido k="telefono" /></div>
               </div>
 
               <div>
@@ -5521,7 +5521,7 @@ function NuevaOrdenModal({ empresas, unidades, notify, onClose, onCreated }: {
             <>
               <div className="grid grid-cols-2 gap-3">
                 <div><label className={label}>Cliente</label><input className={input} value={form.cliente_nombre} onChange={e => setForm({ ...form, cliente_nombre: e.target.value })} placeholder="Nombre del cliente" autoFocus /></div>
-                <div><label className={label}>Teléfono</label><input className={input} value={form.cliente_telefono} onChange={e => setForm({ ...form, cliente_telefono: e.target.value })} placeholder="Opcional" /></div>
+                <div><label className={label}>Teléfono</label><input type="tel" inputMode="numeric" maxLength={10} className={input} value={form.cliente_telefono} onChange={e => setForm({ ...form, cliente_telefono: soloTelefono(e.target.value) })} placeholder="Opcional" /></div>
               </div>
               <div>
                 <label className={label}>Empresa (opcional)</label>
@@ -6011,7 +6011,7 @@ function NuevoPedidoModal({ desde, equipos = [], empresas, onClose, onDone, noti
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div><label className={label}>Cliente</label><input value={cliente} onChange={e => setCliente(e.target.value)} placeholder="Nombre" className={input} /></div>
-            <div><label className={label}>Teléfono</label><input value={telefono} onChange={e => setTelefono(e.target.value)} placeholder="Opcional" className={input} /></div>
+            <div><label className={label}>Teléfono</label><input type="tel" inputMode="numeric" maxLength={10} value={telefono} onChange={e => setTelefono(soloTelefono(e.target.value))} placeholder="Opcional" className={input} /></div>
           </div>
           {desde ? (
             <p className="text-[11px] text-mute px-1">Se liga al cliente de la cotización #{desde.id} (verá su pedido en "Mis compras").</p>
@@ -9248,7 +9248,7 @@ function UsuarioModal({ usuario, roles, soyYo, onClose, onSaved, notify }: {
 
           <div className="grid sm:grid-cols-2 gap-4">
             <div><label className={etiqueta}>Correo</label><input className={campo} type="email" value={f.email} onChange={e => set('email', e.target.value)} placeholder="pedro@ejemplo.com" /></div>
-            <div><label className={etiqueta}>Teléfono</label><input className={campo} value={f.telefono} onChange={e => set('telefono', e.target.value)} placeholder="744..." /></div>
+            <div><label className={etiqueta}>Teléfono</label><input type="tel" inputMode="numeric" maxLength={10} className={campo} value={f.telefono} onChange={e => set('telefono', soloTelefono(e.target.value))} placeholder="10 dígitos" /></div>
           </div>
 
           <div>
@@ -9475,7 +9475,7 @@ function NegocioAdmin({ notify }: { notify: (m: string, t?: 'ok' | 'err') => voi
           <input className={`${campoCfg} sm:w-72`} value={cfg.negocio_nombre} onChange={e => set('negocio_nombre', e.target.value)} placeholder="REMALI" />
         </Ajuste>
         <Ajuste titulo="Teléfono" desc="El que ve el cliente en la cotización si tiene dudas.">
-          <input className={`${campoCfg} sm:w-56`} value={cfg.negocio_telefono} onChange={e => set('negocio_telefono', e.target.value)} placeholder="744 373 7201" />
+          <input type="tel" inputMode="numeric" maxLength={10} className={`${campoCfg} sm:w-56`} value={cfg.negocio_telefono} onChange={e => set('negocio_telefono', soloTelefono(e.target.value))} placeholder="10 dígitos" />
         </Ajuste>
         <Ajuste titulo="Correo" desc="Aparece en el encabezado de la cotización.">
           <input type="email" className={`${campoCfg} sm:w-72`} value={cfg.negocio_email} onChange={e => set('negocio_email', e.target.value)} placeholder="contacto@remali.mx" />
@@ -9884,7 +9884,7 @@ function PerfilAdmin({ notify }: { notify: (m: string, t?: 'ok' | 'err') => void
           </div>
           <div>
             <label className={labelG}>Teléfono</label>
-            <input className={inputG} value={form.telefono || ''} onChange={e => setForm({ ...form, telefono: e.target.value })} placeholder="744 000 0000" />
+            <input type="tel" inputMode="numeric" maxLength={10} className={inputG} value={form.telefono || ''} onChange={e => setForm({ ...form, telefono: soloTelefono(e.target.value) })} placeholder="10 dígitos" />
           </div>
           <div>
             <label className={labelG}>Puesto</label>
