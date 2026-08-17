@@ -301,6 +301,31 @@ La fusión de dos clientes reemplaza a `fusionar_cliente_adeudos` (que hoy vive 
 renta, solo funde rentas y agrupa por texto): mueve ventas, rentas, cotizaciones,
 obras y contactos, desactiva el origen y deja quién/cuándo/motivo.
 
+### 8.1 Preparar el terreno para permisos configurables
+
+El dueño pidió, para más adelante, **una pantalla donde el administrador encienda
+o apague capacidades por rol** sin que nadie toque código. Eso no se construye
+aquí, pero cambia cómo se declaran las capacidades nuevas.
+
+Hoy `puede_de()` calcula todo en Python: un diccionario derivado del nivel, más
+overrides fijos por puesto (`Cajero` con `rentar=False`, `Asesor` con
+`vender=False`). Cuando llegue el selector, esos overrides tienen que poder
+leerse de la base y caer en estos valores cuando no haya nada configurado.
+
+Por eso, dos reglas para la fase 2:
+
+1. **Las capacidades nuevas se declaran en un catálogo**, no sueltas: nombre
+   estable, etiqueta legible y nivel mínimo. Es exactamente lo que la pantalla
+   del selector necesitará para pintarse sola, y cuesta lo mismo hacerlo bien
+   desde ahora.
+2. **Nada de `if rol == 'Cajero'` disperso por las vistas.** La pregunta se le
+   hace siempre a la capacidad (`puede['ver_clientes']`), nunca al nombre del
+   puesto. Si el permiso se vuelve configurable, el código que pregunta por
+   capacidades sigue funcionando sin tocarse; el que pregunta por rol, no.
+
+Los overrides actuales de `Cajero` y `Asesor` quedan documentados como **valores
+por defecto**, no como la ley del sistema.
+
 ---
 
 ## 9. El panel de React, siempre
