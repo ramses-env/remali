@@ -91,14 +91,14 @@ class OrdenReparacionSerializer(serializers.ModelSerializer):
     cliente_display = serializers.CharField(read_only=True)
     equipo_display = serializers.CharField(read_only=True)
     unidad_codigo = serializers.CharField(source='unidad.codigo', read_only=True)
-    empresa_nombre = serializers.CharField(source='empresa.nombre', read_only=True)
+    cliente_padron_nombre = serializers.CharField(source='cliente.nombre', read_only=True)
     cuenta = serializers.SerializerMethodField()
 
     class Meta:
         model = OrdenReparacion
         fields = [
             'id', 'folio', 'tipo', 'estado',
-            'cliente_nombre', 'cliente_telefono', 'empresa', 'empresa_nombre',
+            'cliente_nombre', 'cliente_telefono', 'cliente', 'cliente_padron_nombre',
             'unidad', 'unidad_codigo', 'equipo_descripcion', 'numero_serie',
             'diagnostico', 'trabajo_realizado', 'costo_mano_obra', 'notas',
             'items', 'total_refacciones', 'total', 'cliente_display', 'equipo_display',

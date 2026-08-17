@@ -888,7 +888,7 @@ class CotizacionListCreate(generics.ListCreateAPIView):
     pagination_class = CotizacionPagination
 
     def get_queryset(self):
-        qs = Cotizacion.objects.all().select_related('empresa', 'usuario', 'atendida_por', 'cupon').prefetch_related('items', 'fotos', 'conversiones')
+        qs = Cotizacion.objects.all().select_related('cliente', 'usuario', 'atendida_por', 'cupon').prefetch_related('items', 'fotos', 'conversiones')
         p = self.request.query_params
         estado = (p.get('estado') or '').strip().lower()
         if estado == 'vencida':
@@ -897,7 +897,7 @@ class CotizacionListCreate(generics.ListCreateAPIView):
             qs = qs.filter(estado=estado)
         q = (p.get('q') or '').strip()
         if q:
-            qs = qs.filter(Q(folio__icontains=q) | Q(cliente_nombre__icontains=q) | Q(empresa__nombre__icontains=q))
+            qs = qs.filter(Q(folio__icontains=q) | Q(cliente_nombre__icontains=q) | Q(cliente__nombre__icontains=q))
         # Filtro por periodo (año/mes/rango) sobre la fecha de alta.
         from server.periodos import rango_periodo
         ini, fin = rango_periodo(p)
@@ -933,7 +933,7 @@ class CotizacionDetail(generics.RetrieveUpdateDestroyAPIView):
             )
 
     serializer_class = CotizacionSerializer
-    queryset = Cotizacion.objects.all().select_related('empresa', 'usuario', 'atendida_por', 'cupon').prefetch_related('items', 'fotos', 'conversiones')
+    queryset = Cotizacion.objects.all().select_related('cliente', 'usuario', 'atendida_por', 'cupon').prefetch_related('items', 'fotos', 'conversiones')
 
     def get_permissions(self):
         # Ver y trabajar la cotización: cualquiera que cotice (el asesor incluido).
@@ -1259,9 +1259,9 @@ def convertir_cotizacion(request, pk: int):
             # sesión, la venta queda ligada a su perfil y aparece en "Mis
             # compras" (igual que la renta liga su cuenta al concretarse).
             cliente_usuario=cot.usuario,
-            nombre_cliente=(cot.cliente_nombre or (cot.empresa.nombre if cot.empresa_id and cot.empresa else '')),
+            nombre_cliente=(cot.cliente_nombre or (cot.cliente.nombre if cot.cliente_id and cot.cliente else '')),
             telefono_cliente=cot.cliente_telefono,
-            empresa_id=cot.empresa_id,
+            cliente_id=cot.cliente_id,
             precio_maquina=cot.subtotal_venta,  # lo que se vende (precio con IVA incluido)
             metodo_pago=metodo,
             pagos=pagos,

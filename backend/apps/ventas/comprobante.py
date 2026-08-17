@@ -5,8 +5,8 @@ def datos_comprobante_venta(v) -> dict:
     meta = []
     if v.nombre_cliente:
         meta.append({'label': 'Cliente', 'value': v.nombre_cliente})
-    if v.empresa_id and v.empresa:
-        meta.append({'label': 'Empresa', 'value': v.empresa.nombre})
+    if v.cliente_id and v.cliente:
+        meta.append({'label': 'Cliente', 'value': v.cliente.nombre})
     if v.telefono_cliente:
         meta.append({'label': 'Tel', 'value': v.telefono_cliente})
 

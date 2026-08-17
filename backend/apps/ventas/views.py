@@ -40,7 +40,7 @@ def venta_mostrador(request):
                 nombre_cliente=(datos.get('nombre_cliente') or '').strip(),
                 telefono_cliente=(datos.get('telefono_cliente') or '').strip(),
                 metodo_pago=(datos.get('metodo_pago') or 'efectivo'),
-                empresa_id=(datos.get('empresa_id') or None),
+                cliente_id=(datos.get('cliente_id') or None),
                 # IVA siempre (lo fuerza el modelo). requiere_factura solo controla
                 # si se registra la solicitud en la bandeja "Por facturar" (abajo).
             )
@@ -79,7 +79,7 @@ def venta_mostrador(request):
                     from facturacion.models import SolicitudFactura
                     SolicitudFactura.registrar(
                         venta=venta,
-                        empresa=venta.empresa if venta.empresa_id else None,
+                        cliente=venta.cliente if venta.cliente_id else None,
                         receptor=datos.get('factura') or {},
                         forma_pago=venta.metodo_pago,
                         concepto='Venta de refacciones',
@@ -180,7 +180,7 @@ def exportar_ventas_csv(request):
     """Reporte de ventas en CSV (abre en Excel). Respeta ?estado=&desde=&hasta=."""
     estado = (request.query_params.get('estado') or '').strip().lower()
     desde, hasta = _rango_fechas(request.query_params)
-    qs = (Venta.objects.select_related('inventario__equipo', 'equipo', 'empresa', 'usuario', 'cotizacion')
+    qs = (Venta.objects.select_related('inventario__equipo', 'equipo', 'cliente', 'usuario', 'cotizacion')
           .prefetch_related('solicitudes_factura').order_by('-fecha'))
     if estado in ('activa', 'cancelada', 'apartada'):
         qs = qs.filter(estado=estado)
@@ -210,9 +210,9 @@ def exportar_ventas_csv(request):
         w.writerow([
             v.fecha.strftime('%Y-%m-%d %H:%M') if v.fecha else '',
             v.id,
-            v.nombre_cliente or (v.empresa.nombre if v.empresa_id else '') or 'Público general',
+            v.nombre_cliente or (v.cliente.nombre if v.cliente_id else '') or 'Público general',
             v.telefono_cliente or '',
-            v.empresa.nombre if v.empresa_id else '',
+            v.cliente.nombre if v.cliente_id else '',
             (inv.equipo.modelo if inv and inv.equipo else '') or (v.equipo.modelo if v.equipo_id else '') or 'Venta mostrador',
             inv.codigo if inv else '',
             v.get_metodo_pago_display(),
@@ -231,7 +231,7 @@ def exportar_ventas_csv(request):
 def listar_ventas(request):
     """Lista de ventas (incluye ventas de maquinaria con su unidad)."""
     qs = Venta.objects.all().select_related(
-        'inventario', 'inventario__equipo', 'equipo', 'usuario', 'cliente_usuario', 'empresa', 'cotizacion'
+        'inventario', 'inventario__equipo', 'equipo', 'usuario', 'cliente_usuario', 'cliente', 'cotizacion'
     ).prefetch_related('solicitudes_factura').order_by('-fecha')
 
     solo_maquinaria = (request.query_params.get('maquinaria') or '') in ('1', 'true', 'True')
@@ -261,7 +261,7 @@ def listar_ventas(request):
             'folio': v.folio,
             'nombre_cliente': v.nombre_cliente,
             'telefono_cliente': v.telefono_cliente,
-            'empresa': v.empresa.nombre if v.empresa_id else None,
+            'cliente': v.cliente.nombre if v.cliente_id else None,
             'estado': v.estado,
             'subtotal': str(v.subtotal),
             'iva': str(v.iva),
@@ -337,7 +337,7 @@ def _serialize_pedido(v):
         'folio': v.folio,
         'nombre_cliente': v.nombre_cliente,
         'telefono_cliente': v.telefono_cliente,
-        'empresa': v.empresa.nombre if v.empresa_id else None,
+        'cliente': v.cliente.nombre if v.cliente_id else None,
         'cuenta': ((v.cliente_usuario.get_full_name() or v.cliente_usuario.username)
                    if v.cliente_usuario_id else None),
         'estado': v.estado,
@@ -370,13 +370,13 @@ def pedidos_adeudos(request):
     Es la sección 'Pedidos y apartados'."""
     from decimal import Decimal
     qs = (Venta.objects.filter(estado='apartada')
-          .select_related('inventario', 'inventario__equipo', 'equipo', 'empresa', 'usuario', 'cliente_usuario')
+          .select_related('inventario', 'inventario__equipo', 'equipo', 'cliente', 'usuario', 'cliente_usuario')
           .order_by('fecha_estimada_entrega', '-fecha'))
     filas, total = [], Decimal('0')
     for v in qs:
         filas.append(_serialize_pedido(v))
         total += v.saldo_pendiente()
-    clientes = len({(f.get('cuenta') or f.get('empresa') or f.get('nombre_cliente') or str(f['id'])) for f in filas})
+    clientes = len({(f.get('cuenta') or f.get('cliente') or f.get('nombre_cliente') or str(f['id'])) for f in filas})
     return Response({'pedidos': filas, 'total': str(total), 'clientes': clientes})
 
 
@@ -577,7 +577,7 @@ def crear_pedido(request):
         cliente_usuario_id=(datos.get('cliente_usuario_id') or (cot.usuario_id if cot else None) or None),
         nombre_cliente=(datos.get('nombre_cliente') or '').strip(),
         telefono_cliente=(datos.get('telefono_cliente') or '').strip(),
-        empresa_id=(datos.get('empresa_id') or None),
+        cliente_id=(datos.get('cliente_id') or None),
         equipo=equipo,
         sobre_pedido=True,
         estado='apartada',
@@ -695,7 +695,7 @@ def mandar_por_facturar_venta(request, pk: int):
     (si lo llenó); lo que falte se completa en la bandeja."""
     from decimal import Decimal
     from facturacion.models import SolicitudFactura
-    v = Venta.objects.select_related('cliente_usuario', 'empresa').filter(pk=pk).first()
+    v = Venta.objects.select_related('cliente_usuario', 'cliente').filter(pk=pk).first()
     if not v:
         return Response({'detalle': 'Venta no encontrada'}, status=404)
     if v.estado == 'cancelada':
@@ -705,7 +705,7 @@ def mandar_por_facturar_venta(request, pk: int):
     perfil = getattr(v.cliente_usuario, 'perfil', None) if v.cliente_usuario_id else None
     fp = {'efectivo': '01', 'transferencia': '03', 'tarjeta': '04'}.get(v.metodo_pago, '')
     s = SolicitudFactura.objects.create(
-        tipo='venta', venta=v, empresa=v.empresa if v.empresa_id else None,
+        tipo='venta', venta=v, cliente=v.cliente if v.cliente_id else None,
         rfc=getattr(perfil, 'fiscal_rfc', '') or '',
         razon_social=getattr(perfil, 'fiscal_razon_social', '') or '',
         codigo_postal=getattr(perfil, 'fiscal_cp', '') or '',
@@ -785,7 +785,7 @@ def vinculo_venta(request, token: str):
 
 def _get_venta_full(pk):
     return Venta.objects.select_related(
-        'inventario', 'inventario__equipo', 'empresa'
+        'inventario', 'inventario__equipo', 'cliente'
     ).prefetch_related('items', 'items__refaccion').get(pk=pk)
 
 

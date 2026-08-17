@@ -57,7 +57,7 @@ class CotizacionSerializer(serializers.ModelSerializer):
     cliente_display = serializers.CharField(read_only=True)
     vigencia_hasta = serializers.DateField(read_only=True)
     vencida = serializers.BooleanField(read_only=True)
-    empresa_nombre = serializers.CharField(source='empresa.nombre', read_only=True)
+    cliente_padron_nombre = serializers.CharField(source='cliente.nombre', read_only=True)
     convertida = serializers.SerializerMethodField()
     venta_id = serializers.SerializerMethodField()
     renta_id = serializers.SerializerMethodField()
@@ -69,7 +69,7 @@ class CotizacionSerializer(serializers.ModelSerializer):
         model = Cotizacion
         fields = [
             'id', 'folio', 'tipo', 'estado', 'origen', 'datos_solicitud',
-            'cliente_nombre', 'cliente_telefono', 'cliente_email', 'empresa', 'empresa_nombre',
+            'cliente_nombre', 'cliente_telefono', 'cliente_email', 'cliente', 'cliente_padron_nombre',
             'vigencia_dias', 'aplica_iva', 'notas',
             'items', 'fotos', 'subtotal', 'subtotal_venta', 'subtotal_renta', 'base', 'iva', 'total', 'descuento_cupon', 'cupon',
             'cliente_display', 'vigencia_hasta', 'vencida', 'token_publico',

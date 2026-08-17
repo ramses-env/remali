@@ -54,10 +54,9 @@ class Venta(models.Model):
     folio = models.CharField(max_length=20, unique=True, editable=False, blank=True, null=True)
 
     # ── Cliente ──
-    # `cliente`/`contacto` son la identidad NUEVA (padrón único). Los campos de
-    # abajo —nombre_cliente, telefono_cliente, empresa, cliente_usuario— son la
-    # forma vieja: durante la fase 1 se conservan como espejo de solo lectura
-    # para poder revertir, y desaparecen en la fase 3.
+    # `cliente`/`contacto` son la identidad del padrón: la única. Los campos de
+    # texto de abajo se conservan como respaldo legible del documento (lo que se
+    # capturó el día de la venta), no como forma alterna de identificar a nadie.
     cliente = models.ForeignKey(
         'clientes.Cliente',
         null=True, blank=True,
@@ -73,12 +72,6 @@ class Venta(models.Model):
 
     nombre_cliente = models.CharField(max_length=255, blank=True, null=True)
     telefono_cliente = models.CharField(max_length=40, blank=True, default='')
-    empresa = models.ForeignKey(
-        'empresas.Empresa',
-        null=True, blank=True,
-        on_delete=models.SET_NULL,
-        related_name='ventas',
-    )
 
     metodo_pago = models.CharField(max_length=20, choices=METODO_PAGO, default='efectivo')
     # Pago combinado: lista [{'metodo': 'efectivo|tarjeta|transferencia', 'monto': '1234.50'}].

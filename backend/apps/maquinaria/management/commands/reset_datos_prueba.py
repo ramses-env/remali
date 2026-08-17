@@ -1,6 +1,6 @@
 """Deja la base lista para PRUEBAS LIMPIAS: conserva SOLO los usuarios (cuentas,
 roles, perfiles) y la configuración del sitio; borra TODO lo demás (catálogo,
-inventario, refacciones, empresas y todo lo transaccional).
+inventario, refacciones, el padrón de clientes y todo lo transaccional).
 
 Uso:
     python manage.py reset_datos_prueba --confirm
@@ -42,8 +42,7 @@ class Command(BaseCommand):
             Inventario, OrdenReparacion, OrdenReparacionItem, Mantenimiento, MantenimientoRefaccion,
         )
         from refacciones.models import Refaccion
-        from empresas.models import Empresa, Obra
-        from clientes.models import Cliente, Contacto
+        from clientes.models import Cliente, Contacto, Obra
         from maquinaria.models import Equipo, Categoria, Marca, Tipo, ImagenProducto, Notificacion, ObraCliente
 
         # ══════════════════════════════════════════════════════════════════
@@ -71,8 +70,7 @@ class Command(BaseCommand):
             ('Órdenes de reparación', OrdenReparacion),
             ('Mantenimientos', Mantenimiento),
             ('Obras guardadas del cliente', ObraCliente),
-            ('Obras de empresa', Obra),
-            ('Empresas', Empresa),
+            ('Obras', Obra),
             ('Contactos del padrón', Contacto),
             ('Clientes (padrón)', Cliente),
             ('Unidades de inventario', Inventario),

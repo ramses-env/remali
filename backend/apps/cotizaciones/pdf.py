@@ -244,7 +244,7 @@ def render_cotizacion_pdf(cot) -> bytes:
     obra = extra.get('obra') or {}
     izquierda = [
         cot.cliente_display,
-        extra.get('empresa') or (cot.empresa.nombre if cot.empresa_id and cot.empresa else ''),
+        extra.get('empresa') or (cot.cliente.nombre if cot.cliente_id and cot.cliente else ''),
         cot.cliente_telefono, cot.cliente_email,
         f"Obra: {obra.get('direccion')}" if obra.get('direccion') else '',
     ]

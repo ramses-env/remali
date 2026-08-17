@@ -378,7 +378,7 @@ def vender_unidad(request, pk: int):
             nombre_cliente=(datos.get('nombre_cliente') or '').strip(),
             telefono_cliente=(datos.get('telefono_cliente') or '').strip(),
             metodo_pago=metodo_principal,
-            empresa_id=(datos.get('empresa_id') or None),
+            cliente_id=(datos.get('cliente_id') or None),
             cliente_usuario=cotizacion.usuario if cotizacion and cotizacion.usuario_id else None,
             inventario=unidad,
             precio_maquina=precio,
@@ -480,7 +480,7 @@ def vender_unidad(request, pk: int):
                 equipo_nombre = unidad.equipo.modelo if unidad.equipo else 'Equipo'
                 SolicitudFactura.registrar(
                     venta=venta,
-                    empresa=venta.empresa if venta.empresa_id else None,
+                    cliente=venta.cliente if venta.cliente_id else None,
                     receptor=datos.get('factura') or {},
                     forma_pago=venta.metodo_pago,
                     concepto=f'Venta de {equipo_nombre} ({unidad.codigo})',
@@ -533,14 +533,14 @@ class OrdenReparacionListCreate(generics.ListCreateAPIView):
 
     def get_queryset(self):
         from django.db.models import Q
-        qs = OrdenReparacion.objects.all().select_related('empresa', 'unidad', 'unidad__equipo').prefetch_related('items', 'items__refaccion')
+        qs = OrdenReparacion.objects.all().select_related('cliente', 'unidad', 'unidad__equipo').prefetch_related('items', 'items__refaccion')
         p = self.request.query_params
         estado = (p.get('estado') or '').strip().lower()
         if estado in ('recibida', 'proceso', 'terminada', 'entregada'):
             qs = qs.filter(estado=estado)
         q = (p.get('q') or '').strip()
         if q:
-            qs = qs.filter(Q(folio__icontains=q) | Q(cliente_nombre__icontains=q) | Q(equipo_descripcion__icontains=q) | Q(empresa__nombre__icontains=q))
+            qs = qs.filter(Q(folio__icontains=q) | Q(cliente_nombre__icontains=q) | Q(equipo_descripcion__icontains=q) | Q(cliente__nombre__icontains=q))
         return qs
 
     def perform_create(self, serializer):
@@ -552,7 +552,7 @@ class OrdenReparacionListCreate(generics.ListCreateAPIView):
 class OrdenReparacionDetail(generics.RetrieveUpdateDestroyAPIView):
     serializer_class = OrdenReparacionSerializer
     permission_classes = [EsOperador]
-    queryset = OrdenReparacion.objects.all().select_related('empresa', 'unidad', 'unidad__equipo').prefetch_related('items', 'items__refaccion')
+    queryset = OrdenReparacion.objects.all().select_related('cliente', 'unidad', 'unidad__equipo').prefetch_related('items', 'items__refaccion')
 
     def perform_update(self, serializer):
         from django.utils import timezone
@@ -775,7 +775,7 @@ def _orden_pdf_response(orden):
 
 
 _ORDEN_PDF_QS = (OrdenReparacion.objects
-                 .select_related('unidad', 'unidad__equipo', 'empresa')
+                 .select_related('unidad', 'unidad__equipo', 'cliente')
                  .prefetch_related('items', 'items__refaccion'))
 
 # Mensaje único cuando la orden aún no puede descargarla el cliente.

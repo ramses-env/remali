@@ -19,8 +19,54 @@ persona confirmando, no una restricción de esquema.
 from django.conf import settings
 from django.db import models
 
-from empresas.models import DomicilioMixin
 from maquinaria.models import nombre_propio
+
+
+def formatear_domicilio(*, calle='', numero_exterior='', numero_interior='',
+                        colonia='', municipio='', entidad='', codigo_postal='') -> str:
+    """Arma una dirección legible a partir de las partes estructuradas.
+    Ej: 'Av Costera 120 Int. 3, Icacos, Acapulco, Guerrero, 39300'."""
+    linea1 = ' '.join(p for p in [calle.strip(), numero_exterior.strip()] if p).strip()
+    if numero_interior.strip():
+        linea1 = f'{linea1} Int. {numero_interior.strip()}'.strip()
+    partes = [linea1, colonia, municipio, entidad, codigo_postal]
+    return ', '.join(p.strip() for p in partes if p and p.strip())
+
+
+class DomicilioMixin(models.Model):
+    """Domicilio estructurado, compartido por Cliente y Obra.
+
+    El campo formateado destino difiere por modelo (Cliente.direccion,
+    Obra.ubicacion): cada subclase lo declara y lo nombra en CAMPO_DIRECCION.
+    Al guardar, si hay partes estructuradas, se re-arma y se escribe ahí.
+    Abstracto: no crea tabla.
+    """
+    calle = models.CharField(max_length=180, blank=True, default='')
+    numero_exterior = models.CharField(max_length=30, blank=True, default='')
+    numero_interior = models.CharField(max_length=30, blank=True, default='')
+    colonia = models.CharField(max_length=120, blank=True, default='')
+    municipio = models.CharField(max_length=120, blank=True, default='')
+    ciudad = models.CharField(max_length=120, blank=True, default='')
+    entidad = models.CharField(max_length=80, blank=True, default='', help_text='Estado / entidad federativa')
+    codigo_postal = models.CharField(max_length=10, blank=True, default='')
+    pais = models.CharField(max_length=80, blank=True, default='México')
+    referencias = models.CharField(max_length=255, blank=True, default='')
+    latitud = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
+    longitud = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
+
+    CAMPO_DIRECCION = 'direccion'
+
+    class Meta:
+        abstract = True
+
+    def save(self, *args, **kwargs):
+        armada = formatear_domicilio(
+            calle=self.calle, numero_exterior=self.numero_exterior, numero_interior=self.numero_interior,
+            colonia=self.colonia, municipio=self.municipio, entidad=self.entidad, codigo_postal=self.codigo_postal,
+        )
+        if armada:
+            setattr(self, self.CAMPO_DIRECCION, armada)
+        super().save(*args, **kwargs)
 
 
 class Cliente(DomicilioMixin):
@@ -178,3 +224,51 @@ class Contacto(models.Model):
         """Cuentas registradas en la tienda que nadie ha asignado todavía.
         Es la bandeja que REMALI resuelve; el aviso de "cuenta nueva" apunta aquí."""
         return cls.objects.filter(cliente__isnull=True, usuario__isnull=False)
+
+
+class Obra(DomicilioMixin):
+    """Dónde trabaja el cliente. Un cliente puede tener VARIAS.
+
+    Regla de negocio (dueño, ago-2026): tanto una persona como una constructora
+    pueden tener varias obras. Antes eran dos modelos —`empresas.Obra` colgada de
+    la empresa y `maquinaria.ObraCliente` colgada de la cuenta—, que era la misma
+    idea escrita dos veces y sin forma de pasar de una a otra. Aquí hay una sola,
+    y cuelga del cliente, que es lo único que ambas tenían en común.
+    """
+    ESTADOS = [
+        ('activa', 'Activa'),
+        ('pausada', 'Pausada'),
+        ('finalizada', 'Finalizada'),
+    ]
+
+    cliente = models.ForeignKey(Cliente, on_delete=models.CASCADE, related_name='obras')
+    nombre = models.CharField(max_length=180)
+    responsable = models.CharField(max_length=180, blank=True, default='')
+    telefono = models.CharField(max_length=40, blank=True, default='')  # del responsable
+
+    # Domicilio de la obra: partes en DomicilioMixin; aquí el formateado.
+    ubicacion = models.CharField(max_length=255, blank=True, default='',
+                                 help_text='Dirección formateada (se arma con las partes de abajo)')
+
+    estado = models.CharField(max_length=12, choices=ESTADOS, default='activa')
+    predeterminada = models.BooleanField(default=False, help_text='La que se propone al rentar.')
+    notas = models.TextField(blank=True, default='')
+    creada = models.DateTimeField(auto_now_add=True)
+
+    CAMPO_DIRECCION = 'ubicacion'
+
+    class Meta:
+        db_table = 'obras'
+        verbose_name = 'Obra'
+        verbose_name_plural = 'Obras'
+        ordering = ['-predeterminada', 'nombre']
+        unique_together = ('cliente', 'nombre')
+
+    def save(self, *args, **kwargs):
+        self.nombre = nombre_propio(self.nombre)
+        super().save(*args, **kwargs)
+        if self.predeterminada:
+            Obra.objects.filter(cliente=self.cliente).exclude(pk=self.pk).update(predeterminada=False)
+
+    def __str__(self):
+        return f'{self.nombre} ({self.cliente.nombre})'

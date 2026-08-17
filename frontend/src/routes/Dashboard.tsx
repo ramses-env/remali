@@ -12,11 +12,9 @@ import EtiquetaModal from '../components/EtiquetaModal'
 import OrdenCartaModal from '../components/OrdenCartaModal'
 import CotizacionCartaModal from '../components/CotizacionCartaModal'
 import FichaTecnicaModal from '../components/FichaTecnicaModal'
-import AddressAutocomplete from '../components/AddressAutocomplete'
 import ClientesAdmin from '../components/ClientesAdmin'
 import Dock, { type DockItem } from '../components/ui/dock'
-import { formatAddress, addressToFields, type AddressResult } from '../lib/geocoding'
-import { REGIMEN_FISCAL, USO_CFDI, RFC_PUBLICO_GENERAL } from '../lib/sat'
+import { REGIMEN_FISCAL, USO_CFDI } from '../lib/sat'
 import { usePrintSettings, charsPerLine } from '../lib/printSettings'
 import { invalidarConfigPublica, useConfigPublica } from '../lib/configPublica'
 import { AnimatePresence, motion } from 'framer-motion'
@@ -219,7 +217,7 @@ function BotonExportar({ onClick }: { onClick: () => void }) {
   )
 }
 
-type Section = 'resumen' | 'equipos' | 'inventario' | 'refacciones' | 'reparaciones' | 'cotizaciones' | 'catalogos' | 'clientes' | 'empresas' | 'rentas' | 'ventas' | 'pedidos' | 'facturacion' | 'adeudos' | 'cupones' | 'notificaciones' | 'perfil' | 'ubicaciones' | 'usuarios' | 'configuracion'
+type Section = 'resumen' | 'equipos' | 'inventario' | 'refacciones' | 'reparaciones' | 'cotizaciones' | 'catalogos' | 'clientes' | 'rentas' | 'ventas' | 'pedidos' | 'facturacion' | 'adeudos' | 'cupones' | 'notificaciones' | 'perfil' | 'ubicaciones' | 'usuarios' | 'configuracion'
 
 const SECTION_META: Record<Section, { title: string; subtitle: string }> = {
   resumen: { title: 'Resumen', subtitle: 'Monitorea tus métricas y gestiona tu operación.' },
@@ -237,7 +235,6 @@ const SECTION_META: Record<Section, { title: string; subtitle: string }> = {
   cupones: { title: 'Cupones', subtitle: 'Crea y administra códigos de descuento.' },
   notificaciones: { title: 'Notificaciones', subtitle: 'Eventos operativos y pendientes por resolver.' },
   clientes: { title: 'Clientes', subtitle: 'El padrón: a quién le vendes y le rentas, tenga cuenta o no.' },
-  empresas: { title: 'Empresas', subtitle: 'Clientes registrados y sus obras.' },
   perfil: { title: 'Perfil', subtitle: 'Tu información de cuenta.' },
   ubicaciones: { title: 'Mi jornada', subtitle: 'Dónde está cada máquina y qué espera en el taller.' },
   usuarios: { title: 'Usuarios', subtitle: 'Quién entra al panel y qué puede hacer.' },
@@ -532,7 +529,12 @@ export default function Dashboard() {
   }, [])
 
   const loadEmpresas = useCallback(() => {
-    api.get<Empresa[]>('/empresas/').then(r => setEmpresas(r.data || [])).catch(() => {})
+    // El padrón sustituyó a /empresas/. Se piden solo los activos y se
+    // adaptan a la forma que ya esperan los selectores, para no reescribir
+    // cinco formularios en el mismo movimiento.
+    api.get<{ clientes: { id: number; nombre: string; activo: boolean }[] }>('/clientes/?limite=100')
+      .then(r => setEmpresas((r.data?.clientes || []).map(c => ({ id: c.id, nombre: c.nombre, activa: c.activo }))))
+      .catch(() => {})
   }, [])
   const loadNotifs = useCallback(() => {
     api.get<{ notificaciones: Notif[]; no_leidas: number }>('/notificaciones/')
@@ -596,7 +598,7 @@ export default function Dashboard() {
   useEffect(() => conectarAvisos(m => notify(m, 'err')), [])  // eslint-disable-line react-hooks/exhaustive-deps
   useRecurso(['ventas'], loadVentas)
   useRecurso(['ventas'], loadPedidos)   // los apartados son ventas: abonos/entregas los refrescan
-  useRecurso(['empresas'], loadEmpresas)
+  useRecurso(['clientes'], loadEmpresas)
   useRecurso(['clientes'], loadClientesTotal)
 
   useEffect(() => {
@@ -633,7 +635,6 @@ export default function Dashboard() {
     // El mostrador es quien MÁS necesita el padrón, así que va con una
     // capacidad de nivel 1. Empresas (abajo) sigue siendo de administración.
     clientes: 'ver_clientes',
-    empresas: 'ver_dinero',
     cupones: 'editar_catalogo',
     catalogos: 'editar_catalogo',
     // El técnico opera todo desde "Mi jornada"; estos módulos de gestión son para
@@ -689,7 +690,6 @@ export default function Dashboard() {
       title: 'navgroup.clientes',
       items: [
         { key: 'clientes', label: 'Clientes', badge: clientesTotal, icon: <><circle cx="12" cy="8" r="3.5" /><path d="M5 20.5a7 7 0 0 1 14 0" /><path d="M17.5 4.5h4M19.5 2.5v4" /></> },
-        { key: 'empresas', label: 'Empresas', badge: empresas.length, icon: <><path d="M4.5 21.5h15" /><path d="M5.5 21.5V5.5a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v16" /><path d="M13.5 9.5h4a1 1 0 0 1 1 1v11" /><path d="M8.5 8h2M8.5 11.5h2M8.5 15h2" /></> },
       ],
     },
     {
@@ -1142,9 +1142,6 @@ export default function Dashboard() {
           )}
           {section === 'clientes' && (
             <ClientesAdmin puede={puede} notify={notify} reloadBadge={loadClientesTotal} />
-          )}
-          {section === 'empresas' && (
-            <EmpresasAdmin empresas={empresas} reload={loadEmpresas} notify={notify} />
           )}
           {section === 'ubicaciones' && <UbicacionesAdmin notify={notify} />}
           {section === 'usuarios' && <UsuariosAdmin usuarios={usuarios} reload={loadUsuarios} notify={notify} yoId={me?.id} />}
@@ -2603,7 +2600,7 @@ function RentModal({ unit, equipo, onClose, onDone, notify }: {
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
-    api.get('/empresas/').then(r => setEmpresas(Array.isArray(r.data) ? r.data : (r.data?.results || []))).catch(() => {})
+    api.get('/clientes/?limite=100').then(r => setEmpresas((r.data?.clientes || []).map((c: any) => ({ id: c.id, nombre: c.nombre, activa: c.activo })))).catch(() => {})
     // Cuentas de cliente, para vincular la renta a su panel ("Tus rentas").
     api.get<{ clientes: { id: number; nombre: string; empresa?: string }[] }>('/clientes-lookup/').then(r => setClientes(r.data.clientes || [])).catch(() => {})
     // Datos de la cotización que se está concretando (si aplica).
@@ -2619,7 +2616,7 @@ function RentModal({ unit, equipo, onClose, onDone, notify }: {
   }, [])
   useEffect(() => {
     if (!empresaId) { setObras([]); setObraId(''); return }
-    api.get(`/empresas/${empresaId}/obras/`).then(r => setObras(Array.isArray(r.data) ? r.data : (r.data?.results || []))).catch(() => setObras([]))
+    api.get(`/clientes/${empresaId}/`).then(r => setObras(r.data?.obras || [])).catch(() => setObras([]))
   }, [empresaId])
 
   // Al elegir empresa: rellena con el contacto/teléfono/domicilio guardados.
@@ -2668,7 +2665,7 @@ function RentModal({ unit, equipo, onClose, onDone, notify }: {
       inventario_id: unit.id, modalidad, duracion: Number(duracion) || 1,
       cliente: cliente.trim(), telefono_cliente: telefono.trim(), direccion: direccion.trim(),
       fecha_inicio: fechaInicio || undefined,
-      empresa_id: empresaId || undefined, obra_id: obraId || undefined, usuario_id: usuarioId || undefined,
+      cliente_id: empresaId || undefined, obra_id: obraId || undefined, usuario_id: usuarioId || undefined,
       cotizacion_id: deCot?.id || undefined,
       descuento: Number(descuento) || 0, deposito: Number(deposito) || 0,
       metodo_pago: metodo, pagos,
@@ -2842,7 +2839,7 @@ function SellModal({ unit, equipo, onClose, onDone, notify }: {
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
-    api.get('/empresas/').then(r => setEmpresas(Array.isArray(r.data) ? r.data : (r.data?.results || []))).catch(() => {})
+    api.get('/clientes/?limite=100').then(r => setEmpresas((r.data?.clientes || []).map((c: any) => ({ id: c.id, nombre: c.nombre, activa: c.activo })))).catch(() => {})
   }, [])
 
   // Al elegir empresa: rellena comprador y teléfono con los datos guardados.
@@ -2878,7 +2875,7 @@ function SellModal({ unit, equipo, onClose, onDone, notify }: {
     setBusy(true)
     api.post(`/unidades/${unit.id}/vender/`, {
       nombre_cliente: cliente.trim(), telefono_cliente: telefono.trim(),
-      metodo_pago: metodo, empresa_id: empresaId || undefined, total: precioNum,
+      metodo_pago: metodo, cliente_id: empresaId || undefined, total: precioNum,
       pagos,
       requiere_factura: requiereFactura, factura,
     })
@@ -4653,441 +4650,6 @@ function CuponesAdmin({ coupons, reload, notify }: {
 }
 
 /* ════════════════════════════════════════
-   MÓDULO EMPRESAS → OBRAS
-════════════════════════════════════════ */
-const obraEstadoStyle: Record<string, string> = {
-  activa: 'bg-emerald-500/10 text-emerald-500',
-  pausada: 'bg-amber-500/10 text-amber-500',
-  finalizada: 'bg-surface-2 text-mute',
-}
-
-function EmpresasAdmin({ empresas, reload, notify }: {
-  empresas: Empresa[]; reload: () => void; notify: (m: string, t?: 'ok' | 'err') => void
-}) {
-  const [q, setQ] = useState('')
-  const [formOpen, setFormOpen] = useState(false)
-  const [form, setForm] = useState<Empresa>({ nombre: '' })
-  const [busqueda, setBusqueda] = useState('')
-  const [errores, setErrores] = useState<Record<string, boolean>>({})
-  const [obrasEmpresa, setObrasEmpresa] = useState<Empresa | null>(null)
-  const editing = Boolean(form.id)
-
-  // Campo con error: etiqueta y borde en rojo; se limpia al escribir.
-  const lblErr = (k: string) => (errores[k] ? `${label} !text-red-500` : label)
-  const inpErr = (k: string) => (errores[k] ? `${input} !border-red-500` : input)
-  const setCampo = (k: keyof Empresa, v: any) => {
-    setForm(f => ({ ...f, [k]: v }))
-    if (errores[k as string]) setErrores(p => ({ ...p, [k]: false }))
-  }
-  const Requerido = ({ k }: { k: string }) => (errores[k] ? <p className="text-[11px] text-red-500 mt-1">Campo obligatorio</p> : null)
-  // Autocompletado: al elegir una dirección se llenan los campos del domicilio.
-  function fillDireccion(a: AddressResult) {
-    const campos = addressToFields(a)
-    setForm(f => ({ ...f, ...campos }))
-    setBusqueda(formatAddress(a))
-    setErrores(p => ({ ...p, calle: false, colonia: false, municipio: false, entidad: false, codigo_postal: false }))
-  }
-
-  const filtradas = empresas.filter(e => {
-    if (!q.trim()) return true
-    const t = `${e.nombre} ${e.contacto || ''} ${e.email || ''} ${(e.obras || []).map(o => o.nombre).join(' ')}`.toLowerCase()
-    return t.includes(q.trim().toLowerCase())
-  })
-  const totalObras = empresas.reduce((a, e) => a + (e.obras_count ?? (e.obras?.length || 0)), 0)
-  const obrasActivas = empresas.reduce((a, e) => a + (e.obras_activas ?? 0), 0)
-
-  function openNew() { setForm({ nombre: '', activa: true, pais: 'México' }); setBusqueda(''); setErrores({}); setFormOpen(true) }
-  function openEdit(e: Empresa) { setForm({ ...e }); setBusqueda(e.direccion || ''); setErrores({}); setFormOpen(true) }
-
-  // Campos obligatorios al crear un cliente facturable (CFDI + domicilio fiscal).
-  const REQUERIDOS: [string, string][] = [
-    ['nombre', 'Razón social'], ['rfc', 'RFC'], ['regimen_fiscal', 'Régimen fiscal'], ['uso_cfdi', 'Uso CFDI'],
-    ['contacto', 'Contacto'], ['telefono', 'Teléfono'],
-    ['calle', 'Calle'], ['colonia', 'Colonia'], ['municipio', 'Municipio'], ['entidad', 'Estado'], ['codigo_postal', 'CP'],
-  ]
-
-  function save() {
-    if (!editing) {
-      const faltan = REQUERIDOS.filter(([k]) => !((form as any)[k] || '').trim())
-      setErrores(Object.fromEntries(faltan.map(([k]) => [k, true])))
-      if (faltan.length) { notify(`Falta: ${faltan.map(([, l]) => l).join(', ')}`, 'err'); return }
-    } else if (!form.nombre.trim()) {
-      setErrores({ nombre: true })
-      notify('La razón social es obligatoria', 'err'); return
-    }
-    const body: any = {
-      nombre: form.nombre.trim(), rfc: (form.rfc || '').trim().toUpperCase(),
-      regimen_fiscal: form.regimen_fiscal || '', uso_cfdi: form.uso_cfdi || '',
-      contacto: (form.contacto || '').trim(), telefono: (form.telefono || '').trim(), email: form.email || '',
-      calle: (form.calle || '').trim(), numero_exterior: (form.numero_exterior || '').trim(),
-      numero_interior: (form.numero_interior || '').trim(), colonia: (form.colonia || '').trim(),
-      municipio: (form.municipio || '').trim(), ciudad: (form.ciudad || '').trim(),
-      entidad: (form.entidad || '').trim(), codigo_postal: (form.codigo_postal || '').trim(),
-      pais: (form.pais || 'México').trim(), referencias: (form.referencias || '').trim(),
-      latitud: form.latitud ?? null, longitud: form.longitud ?? null,
-      notas: form.notas || '', activa: form.activa ?? true,
-    }
-    const req = editing ? api.patch(`/empresas/${form.id}/`, body) : api.post('/empresas/', body)
-    req.then(() => { notify(editing ? 'Empresa actualizada' : 'Empresa creada'); setFormOpen(false); reload() })
-      .catch(err => {
-        const d = err?.response?.data || {}
-        const primer = Object.values(d)[0] as any
-        const msg = Array.isArray(primer) ? primer[0] : (d.detalle || 'Error al guardar')
-        notify(msg, 'err')
-      })
-  }
-
-  function del(e: Empresa) {
-    if (!confirm(`¿Eliminar "${e.nombre}" y todas sus obras?`)) return
-    api.delete(`/empresas/${e.id}/`)
-      .then(() => { notify('Empresa eliminada'); reload() })
-      .catch(err => notify(err?.response?.data?.detail || 'Error al eliminar', 'err'))
-  }
-
-  // Alternativa no destructiva al borrado: conserva el historial y la saca de
-  // los selectores de renta/venta/cotización.
-  function toggleActiva(e: Empresa) {
-    const activar = e.activa === false
-    if (!activar && !confirm(`¿Desactivar "${e.nombre}"?\n\nDejará de aparecer al crear rentas, ventas y cotizaciones, pero conservas todo su historial.`)) return
-    api.patch(`/empresas/${e.id}/`, { activa: activar })
-      .then(() => { notify(activar ? 'Empresa activada' : 'Empresa desactivada'); reload() })
-      .catch(err => notify(err?.response?.data?.detail || 'Error al actualizar', 'err'))
-  }
-
-  return (
-    <div className="space-y-5">
-      {/* KPIs */}
-      <KpiGrid
-        items={[
-          { label: 'Empresas', value: empresas.length, tone: 'default' },
-          { label: 'Obras totales', value: totalObras, tone: 'muted' },
-          { label: 'Obras activas', value: obrasActivas, tone: 'success' },
-        ]}
-      />
-
-      <Card className="overflow-hidden">
-        {/* Toolbar */}
-        <div className="px-5 py-4 border-b border-edge flex items-center gap-3 flex-wrap">
-          <h2 className="font-bold text-ink shrink-0">Empresas <span className="text-mute font-normal">({filtradas.length})</span></h2>
-          <div className="relative flex-1 sm:max-w-xs sm:ml-auto">
-            <svg className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-mute pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><circle cx="9" cy="9" r="6" /><path d="M15 15l3 3" strokeLinecap="round" /></svg>
-            <input value={q} onChange={e => setQ(e.target.value)} placeholder="Buscar empresa u obra..."
-              className="w-full bg-surface-2 border border-edge rounded-full pl-9 pr-3 py-2 text-sm text-ink placeholder-mute focus:outline-none focus:border-gold/50 transition-colors" />
-          </div>
-          <button onClick={openNew} className="shrink-0 inline-flex items-center gap-2 px-4 py-2 rounded-full bg-gold text-black text-sm font-bold hover:opacity-90 active:scale-[0.98] transition-[transform,opacity] duration-150">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5"><path strokeLinecap="round" d="M12 5v14M5 12h14" /></svg>
-            <span className="hidden sm:inline">Nueva empresa</span>
-          </button>
-        </div>
-
-        {/* Tabla */}
-        <div className="overflow-x-auto">
-          <table className="tabla-panel w-full min-w-[720px] text-left">
-            <thead>
-              <tr className="text-[10px] uppercase tracking-wider text-mute border-b border-edge">
-                <th className="font-semibold px-5 py-3">Empresa</th>
-                <th className="font-semibold px-3 py-3">Contacto</th>
-                <th className="font-semibold px-3 py-3">Obras</th>
-                <th className="font-semibold px-5 py-3 text-right">Acciones</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-edge">
-              {filtradas.map(e => (
-                <tr key={e.id} className={`hover:bg-surface-2 transition-colors group ${e.activa === false ? 'opacity-55' : ''}`}>
-                  <td className="px-5 py-3">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <span className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 font-black text-sm ${e.activa === false ? 'bg-ink/10 text-mute' : 'bg-gold-soft text-gold'}`}>{e.nombre[0]?.toUpperCase()}</span>
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2 min-w-0">
-                          <p className="text-sm font-bold text-ink truncate">{e.nombre}</p>
-                          {e.activa === false && <span className="shrink-0 text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-ink/10 text-mute">Inactiva</span>}
-                        </div>
-                        {e.rfc && <p className="text-[11px] text-mute font-mono">{e.rfc}</p>}
-                      </div>
-                    </div>
-                  </td>
-                  <td data-col="Contacto" className="px-3 py-3">
-                    <div>
-                      {e.contacto && <p className="text-sm text-ink truncate">{e.contacto}</p>}
-                      <p className="text-[11px] text-mute truncate">{[e.telefono, e.email].filter(Boolean).join(' · ') || '—'}</p>
-                    </div>
-                  </td>
-                  <td data-col="Obras" className="px-3 py-3">
-                    <button onClick={() => setObrasEmpresa(e)} className="inline-flex items-center gap-1.5 text-sm text-ink hover:text-gold transition-colors">
-                      <span className="min-w-6 h-6 px-2 rounded-md bg-surface-2 text-mute text-xs font-bold flex items-center justify-center">{e.obras_count ?? (e.obras?.length || 0)}</span>
-                      obras
-                    </button>
-                  </td>
-                  <td className="px-5 py-3">
-                    <div className="flex flex-wrap items-center justify-end gap-1.5">
-                      <button onClick={() => setObrasEmpresa(e)} className="px-3 h-8 rounded-lg bg-gold-soft text-gold text-xs font-semibold hover:bg-gold/20 transition-colors">Obras</button>
-                      <button onClick={() => openEdit(e)} title="Editar" className="w-8 h-8 rounded-lg border border-edge text-mute hover:text-ink hover:border-gold/40 transition-colors flex items-center justify-center">
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.8"><path strokeLinecap="round" strokeLinejoin="round" d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
-                      </button>
-                      <button onClick={() => toggleActiva(e)} title={e.activa === false ? 'Activar empresa' : 'Desactivar (conserva el historial)'} className="w-8 h-8 rounded-lg border border-edge text-mute hover:text-ink hover:border-gold/40 transition-colors flex items-center justify-center">
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.8"><path strokeLinecap="round" d="M12 3.5v8" /><path strokeLinecap="round" d="M6.8 7.2a7.5 7.5 0 1 0 10.4 0" /></svg>
-                      </button>
-                      <button onClick={() => del(e)} title="Eliminar" className="w-8 h-8 rounded-lg border border-red-500/20 text-red-400 hover:bg-red-500/10 transition-colors flex items-center justify-center">
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.8"><path strokeLinecap="round" strokeLinejoin="round" d="M3 6h18M8 6V4a1 1 0 011-1h6a1 1 0 011 1v2m2 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6" /></svg>
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {filtradas.length === 0 && (
-            <div className="py-16 text-center">
-              <p className="text-sm text-mute">{q ? 'Sin resultados.' : 'Aún no hay empresas.'}</p>
-              {!q && <button onClick={openNew} className="mt-3 text-sm font-semibold text-gold hover:opacity-80">+ Registrar la primera</button>}
-            </div>
-          )}
-        </div>
-      </Card>
-
-      {/* Modal empresa */}
-      {formOpen && (
-        <div className="fixed inset-0 z-[60] bg-black/40 backdrop-blur-[2px]" onClick={() => setFormOpen(false)}>
-          <motion.div
-            initial={{ x: '100%' }} animate={{ x: 0 }} transition={{ duration: 0.3, ease: [0.23, 1, 0.32, 1] }}
-            onClick={(ev: React.MouseEvent) => ev.stopPropagation()}
-            className="fixed inset-y-0 right-0 w-full sm:max-w-[640px] bg-surface border-l border-edge shadow-[-24px_0_60px_rgba(33,29,22,0.22)] flex flex-col"
-          >
-            <div className="px-6 py-4 border-b border-edge flex items-center justify-between shrink-0 bg-surface">
-              <h2 className="font-bold text-ink">{editing ? 'Editar cliente' : 'Nuevo cliente'}</h2>
-              <button onClick={() => setFormOpen(false)} className="text-mute hover:text-ink p-1"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" d="M6 6l12 12M18 6L6 18" /></svg></button>
-            </div>
-            <div className="flex-1 overflow-y-auto p-6 space-y-6">
-              {/* ── Datos fiscales ── */}
-              <div>
-                <p className="text-[11px] font-bold uppercase tracking-wide text-gold mb-3">Datos fiscales</p>
-                <div className="space-y-3">
-                  <div><label className={lblErr('nombre')}>Razón social / Nombre *</label><input className={inpErr('nombre')} value={form.nombre} onChange={e => setCampo('nombre', e.target.value)} placeholder="Ej. FEMZA S.A. de C.V." autoFocus /><Requerido k="nombre" /></div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className={lblErr('rfc')}>RFC *</label>
-                      <input className={`${inpErr('rfc')} font-mono`} value={form.rfc || ''} onChange={e => setCampo('rfc', e.target.value.toUpperCase())} placeholder="XAXX010101000" />
-                      <div className="flex justify-between"><Requerido k="rfc" /><button type="button" onClick={() => setCampo('rfc', RFC_PUBLICO_GENERAL)} className="text-[11px] text-gold hover:underline mt-1">Público general</button></div>
-                    </div>
-                    <div>
-                      <label className={label}>Email</label>
-                      <input type="email" className={input} value={form.email || ''} onChange={e => setCampo('email', e.target.value)} placeholder="correo@empresa.com" />
-                    </div>
-                    <div>
-                      <label className={lblErr('regimen_fiscal')}>Régimen fiscal *</label>
-                      <select className={inpErr('regimen_fiscal')} value={form.regimen_fiscal || ''} onChange={e => setCampo('regimen_fiscal', e.target.value)}>
-                        <option value="">— Selecciona —</option>
-                        {REGIMEN_FISCAL.map(o => <option key={o.code} value={o.code} className="bg-surface">{o.label}</option>)}
-                      </select>
-                      <Requerido k="regimen_fiscal" />
-                    </div>
-                    <div>
-                      <label className={lblErr('uso_cfdi')}>Uso CFDI *</label>
-                      <select className={inpErr('uso_cfdi')} value={form.uso_cfdi || ''} onChange={e => setCampo('uso_cfdi', e.target.value)}>
-                        <option value="">— Selecciona —</option>
-                        {USO_CFDI.map(o => <option key={o.code} value={o.code} className="bg-surface">{o.label}</option>)}
-                      </select>
-                      <Requerido k="uso_cfdi" />
-                    </div>
-                    <div><label className={lblErr('contacto')}>Contacto *</label><input className={inpErr('contacto')} value={form.contacto || ''} onChange={e => setCampo('contacto', e.target.value)} placeholder="Persona" /><Requerido k="contacto" /></div>
-                    <div><label className={lblErr('telefono')}>Teléfono *</label><input type="tel" inputMode="numeric" maxLength={10} className={inpErr('telefono')} value={form.telefono || ''} onChange={e => setCampo('telefono', soloTelefono(e.target.value))} placeholder="10 dígitos" /><Requerido k="telefono" /></div>
-                  </div>
-                </div>
-              </div>
-
-              {/* ── Domicilio fiscal ── */}
-              <div>
-                <p className="text-[11px] font-bold uppercase tracking-wide text-gold mb-3">Domicilio fiscal</p>
-                <div className="space-y-3">
-                  <div>
-                    <label className={label}>Buscar dirección</label>
-                    <AddressAutocomplete value={busqueda} onChange={setBusqueda} onSelect={fillDireccion} placeholder="Escribe para autocompletar (calle, colonia, CP…)" />
-                    <p className="text-[11px] text-mute mt-1">Elige una sugerencia y se llenan los campos; puedes ajustarlos.</p>
-                  </div>
-                  <div className="grid grid-cols-6 gap-3">
-                    <div className="col-span-4"><label className={lblErr('calle')}>Calle *</label><input className={inpErr('calle')} value={form.calle || ''} onChange={e => setCampo('calle', e.target.value)} /><Requerido k="calle" /></div>
-                    <div className="col-span-1"><label className={label}>No. ext</label><input className={input} value={form.numero_exterior || ''} onChange={e => setCampo('numero_exterior', e.target.value)} placeholder="S/N" /></div>
-                    <div className="col-span-1"><label className={label}>No. int</label><input className={input} value={form.numero_interior || ''} onChange={e => setCampo('numero_interior', e.target.value)} /></div>
-                    <div className="col-span-4"><label className={lblErr('colonia')}>Colonia *</label><input className={inpErr('colonia')} value={form.colonia || ''} onChange={e => setCampo('colonia', e.target.value)} /><Requerido k="colonia" /></div>
-                    <div className="col-span-2"><label className={lblErr('codigo_postal')}>C.P. *</label><input className={inpErr('codigo_postal')} value={form.codigo_postal || ''} onChange={e => setCampo('codigo_postal', e.target.value)} inputMode="numeric" /><Requerido k="codigo_postal" /></div>
-                    <div className="col-span-3"><label className={lblErr('municipio')}>Municipio *</label><input className={inpErr('municipio')} value={form.municipio || ''} onChange={e => setCampo('municipio', e.target.value)} /><Requerido k="municipio" /></div>
-                    <div className="col-span-3"><label className={label}>Ciudad</label><input className={input} value={form.ciudad || ''} onChange={e => setCampo('ciudad', e.target.value)} /></div>
-                    <div className="col-span-3"><label className={lblErr('entidad')}>Estado *</label><input className={inpErr('entidad')} value={form.entidad || ''} onChange={e => setCampo('entidad', e.target.value)} /><Requerido k="entidad" /></div>
-                    <div className="col-span-3"><label className={label}>País</label><input className={input} value={form.pais || 'México'} onChange={e => setCampo('pais', e.target.value)} /></div>
-                  </div>
-                  {form.latitud && form.longitud && <p className="text-[11px] text-mute">{Number(form.latitud).toFixed(5)}, {Number(form.longitud).toFixed(5)}</p>}
-                </div>
-              </div>
-
-              <div><label className={label}>Notas</label><textarea className={`${input} resize-none`} rows={2} value={form.notas || ''} onChange={e => setForm({ ...form, notas: e.target.value })} placeholder="Información adicional" /></div>
-            </div>
-            <div className="px-6 py-4 border-t border-edge flex justify-end gap-3 shrink-0 bg-surface">
-              <button onClick={() => setFormOpen(false)} className="px-6 py-2.5 rounded-full border border-edge text-ink text-sm font-semibold hover:bg-surface-2 transition-colors">Cancelar</button>
-              <button onClick={save} className="px-7 py-2.5 rounded-full bg-gold text-black font-bold text-sm hover:opacity-90 active:scale-[0.98] transition-[transform,opacity] duration-150">{editing ? 'Guardar' : 'Crear cliente'}</button>
-            </div>
-          </motion.div>
-        </div>
-      )}
-
-      {obrasEmpresa && <ObrasModal empresa={obrasEmpresa} onClose={() => setObrasEmpresa(null)} onChanged={reload} notify={notify} />}
-    </div>
-  )
-}
-
-/* ── Modal de obras de una empresa ── */
-function ObrasModal({ empresa, onClose, onChanged, notify }: {
-  empresa: Empresa; onClose: () => void; onChanged: () => void; notify: (m: string, t?: 'ok' | 'err') => void
-}) {
-  const [obras, setObras] = useState<Obra[]>([])
-  const [loading, setLoading] = useState(true)
-  const [editId, setEditId] = useState<number | 'new' | null>(null)
-  const [draft, setDraft] = useState<Partial<Obra>>({ nombre: '', estado: 'activa' })
-  const [busqueda, setBusqueda] = useState('')
-  const [errores, setErrores] = useState<Record<string, boolean>>({})
-
-  // Borde rojo + aviso "Obligatorio"; se limpia al escribir.
-  const inpErr = (k: string) => (errores[k] ? `${input} !border-red-500` : input)
-  const setCampo = (k: keyof Obra, v: any) => {
-    setDraft(d => ({ ...d, [k]: v }))
-    if (errores[k as string]) setErrores(p => ({ ...p, [k]: false }))
-  }
-  const Requerido = ({ k }: { k: string }) => (errores[k] ? <p className="text-[11px] text-red-500 mt-1">Obligatorio</p> : null)
-  function fillUbicacion(a: AddressResult) {
-    const campos = addressToFields(a)
-    setDraft(d => ({ ...d, ...campos }))
-    setBusqueda(formatAddress(a))
-    setErrores(p => ({ ...p, calle: false, colonia: false, municipio: false, entidad: false, codigo_postal: false }))
-  }
-
-  const load = useCallback(() => {
-    setLoading(true)
-    api.get<Obra[]>(`/empresas/${empresa.id}/obras/`).then(r => setObras(r.data || [])).catch(() => setObras([])).finally(() => setLoading(false))
-  }, [empresa.id])
-  useEffect(() => { load() }, [load])
-
-  function startNew() { setDraft({ nombre: '', responsable: '', telefono: '', estado: 'activa', pais: 'México' }); setBusqueda(''); setErrores({}); setEditId('new') }
-  function startEdit(o: Obra) { setDraft({ ...o }); setBusqueda(o.ubicacion || ''); setErrores({}); setEditId(o.id) }
-
-  const REQUERIDOS: [string, string][] = [
-    ['nombre', 'Nombre de la obra'], ['responsable', 'Responsable'], ['telefono', 'Teléfono'],
-    ['calle', 'Calle'], ['colonia', 'Colonia'], ['municipio', 'Municipio'], ['entidad', 'Estado'], ['codigo_postal', 'CP'],
-  ]
-
-  function saveDraft() {
-    if (editId === 'new') {
-      const faltan = REQUERIDOS.filter(([k]) => !((draft as any)[k] || '').trim())
-      setErrores(Object.fromEntries(faltan.map(([k]) => [k, true])))
-      if (faltan.length) { notify(`Falta: ${faltan.map(([, l]) => l).join(', ')}`, 'err'); return }
-    } else if (!draft.nombre?.trim()) {
-      setErrores({ nombre: true })
-      notify('Nombre de obra obligatorio', 'err'); return
-    }
-    const body: any = {
-      nombre: (draft.nombre || '').trim(), responsable: (draft.responsable || '').trim(), telefono: (draft.telefono || '').trim(),
-      calle: (draft.calle || '').trim(), numero_exterior: (draft.numero_exterior || '').trim(), numero_interior: (draft.numero_interior || '').trim(),
-      colonia: (draft.colonia || '').trim(), municipio: (draft.municipio || '').trim(), ciudad: (draft.ciudad || '').trim(),
-      entidad: (draft.entidad || '').trim(), codigo_postal: (draft.codigo_postal || '').trim(), pais: (draft.pais || 'México').trim(),
-      referencias: (draft.referencias || '').trim(), latitud: draft.latitud ?? null, longitud: draft.longitud ?? null,
-      estado: draft.estado || 'activa', notas: draft.notas || '',
-    }
-    const req = editId === 'new' ? api.post(`/empresas/${empresa.id}/obras/`, body) : api.patch(`/obras/${editId}/`, body)
-    req.then(() => { notify(editId === 'new' ? 'Obra agregada' : 'Obra actualizada'); setEditId(null); load(); onChanged() })
-      .catch(err => {
-        const d = err?.response?.data || {}
-        const primer = Object.values(d)[0] as any
-        notify(Array.isArray(primer) ? primer[0] : (d.detalle || 'Error al guardar'), 'err')
-      })
-  }
-
-  function delObra(o: Obra) {
-    if (!confirm(`¿Eliminar la obra "${o.nombre}"?`)) return
-    api.delete(`/obras/${o.id}/`)
-      .then(() => { notify('Obra eliminada'); load(); onChanged() })
-      .catch(err => notify(err?.response?.data?.detail || 'Error al eliminar', 'err'))
-  }
-
-  return (
-    <div className="modal-in fixed inset-0 z-[65] bg-black/60 backdrop-blur-sm flex items-start justify-center p-0 sm:p-6 overflow-y-auto" onClick={onClose}>
-      <div onClick={e => e.stopPropagation()} className="w-full sm:max-w-[820px] my-0 sm:my-auto bg-surface border border-edge rounded-none sm:rounded-2xl min-h-screen sm:min-h-0 max-h-screen sm:max-h-[88vh] flex flex-col">
-        <div className="px-6 py-4 border-b border-edge flex items-center justify-between gap-3">
-          <div className="min-w-0">
-            <p className="text-[11px] font-mono uppercase tracking-[0.2em] text-gold">Obras de</p>
-            <h2 className="font-black text-ink truncate">{empresa.nombre}</h2>
-          </div>
-          <button onClick={onClose} className="text-mute hover:text-ink p-1 shrink-0"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" d="M6 6l12 12M18 6L6 18" /></svg></button>
-        </div>
-
-        {/* Formulario obra (alta/edición) */}
-        <div className="px-6 py-4 border-b border-edge bg-surface-2/40">
-          {editId ? (
-            <div className="space-y-3">
-              <div className="grid grid-cols-6 gap-3">
-                <div className="col-span-4"><input className={inpErr('nombre')} value={draft.nombre || ''} onChange={e => setCampo('nombre', e.target.value)} placeholder="Nombre de la obra *" autoFocus /><Requerido k="nombre" /></div>
-                <select className={`${input} col-span-2`} value={draft.estado} onChange={e => setDraft(d => ({ ...d, estado: e.target.value as Obra['estado'] }))}>
-                  <option value="activa" className="bg-surface">Activa</option>
-                  <option value="pausada" className="bg-surface">Pausada</option>
-                  <option value="finalizada" className="bg-surface">Finalizada</option>
-                </select>
-                <div className="col-span-3"><input className={inpErr('responsable')} value={draft.responsable || ''} onChange={e => setCampo('responsable', e.target.value)} placeholder="Responsable *" /><Requerido k="responsable" /></div>
-                <div className="col-span-3"><input type="tel" inputMode="numeric" maxLength={10} className={inpErr('telefono')} value={draft.telefono || ''} onChange={e => setCampo('telefono', soloTelefono(e.target.value))} placeholder="Teléfono del responsable *" /><Requerido k="telefono" /></div>
-              </div>
-
-              <div>
-                <AddressAutocomplete value={busqueda} onChange={setBusqueda} onSelect={fillUbicacion} placeholder="Buscar dirección de la obra…" />
-                <p className="text-[11px] text-mute mt-1">Elige una sugerencia y se llenan los campos.</p>
-              </div>
-              <div className="grid grid-cols-6 gap-3">
-                <div className="col-span-4"><input className={inpErr('calle')} value={draft.calle || ''} onChange={e => setCampo('calle', e.target.value)} placeholder="Calle *" /><Requerido k="calle" /></div>
-                <div className="col-span-1"><input className={input} value={draft.numero_exterior || ''} onChange={e => setCampo('numero_exterior', e.target.value)} placeholder="Ext" /></div>
-                <div className="col-span-1"><input className={input} value={draft.numero_interior || ''} onChange={e => setCampo('numero_interior', e.target.value)} placeholder="Int" /></div>
-                <div className="col-span-4"><input className={inpErr('colonia')} value={draft.colonia || ''} onChange={e => setCampo('colonia', e.target.value)} placeholder="Colonia *" /><Requerido k="colonia" /></div>
-                <div className="col-span-2"><input className={inpErr('codigo_postal')} value={draft.codigo_postal || ''} onChange={e => setCampo('codigo_postal', e.target.value)} placeholder="C.P. *" inputMode="numeric" /><Requerido k="codigo_postal" /></div>
-                <div className="col-span-3"><input className={inpErr('municipio')} value={draft.municipio || ''} onChange={e => setCampo('municipio', e.target.value)} placeholder="Municipio *" /><Requerido k="municipio" /></div>
-                <div className="col-span-3"><input className={inpErr('entidad')} value={draft.entidad || ''} onChange={e => setCampo('entidad', e.target.value)} placeholder="Estado *" /><Requerido k="entidad" /></div>
-              </div>
-
-              <div className="flex gap-2">
-                <button onClick={() => setEditId(null)} className="px-4 py-2 rounded-full border border-edge text-mute text-sm font-medium hover:text-ink transition-colors">Cancelar</button>
-                <button onClick={saveDraft} className="flex-1 py-2 rounded-full bg-gold text-black text-sm font-bold hover:opacity-90 transition-opacity">{editId === 'new' ? 'Agregar obra' : 'Guardar'}</button>
-              </div>
-            </div>
-          ) : (
-            <button onClick={startNew} className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-full bg-gold text-black text-sm font-bold hover:opacity-90 active:scale-[0.99] transition-[transform,opacity] duration-150">
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5"><path strokeLinecap="round" d="M12 5v14M5 12h14" /></svg>
-              Agregar obra
-            </button>
-          )}
-        </div>
-
-        {/* Lista de obras */}
-        <div className="flex-1 overflow-y-auto divide-y divide-edge">
-          {loading && <p className="text-sm text-mute py-10 text-center">Cargando…</p>}
-          {!loading && obras.length === 0 && <p className="text-sm text-mute py-10 text-center">Esta empresa aún no tiene obras.</p>}
-          {obras.map(o => (
-            <div key={o.id} className="flex items-center gap-3 px-6 py-3.5 hover:bg-surface-2 transition-colors group">
-              <span className="w-9 h-9 rounded-lg bg-surface-2 text-mute flex items-center justify-center shrink-0">
-                <svg className="w-[18px] h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.7"><path d="M3 21h18M6 21V8l6-4 6 4v13" /><path d="M9 21v-5h6v5" /></svg>
-              </span>
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <p className="text-sm font-semibold text-ink truncate">{o.nombre}</p>
-                  <span className={`text-[10px] px-2 py-0.5 rounded-md font-semibold uppercase ${obraEstadoStyle[o.estado]}`}>{o.estado}</span>
-                </div>
-                <p className="text-xs text-mute truncate">{[o.ubicacion, o.responsable, o.telefono].filter(Boolean).join(' · ') || 'Sin detalles'}</p>
-              </div>
-              <div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-                <button onClick={() => startEdit(o)} className="w-8 h-8 rounded-lg border border-edge text-mute hover:text-gold transition-colors flex items-center justify-center"><svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.8"><path strokeLinecap="round" strokeLinejoin="round" d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4 9.5-9.5z" /></svg></button>
-                <button onClick={() => delObra(o)} className="w-8 h-8 rounded-lg border border-red-500/20 text-red-400 hover:bg-red-500/10 transition-colors flex items-center justify-center"><svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" d="M6 6l12 12M18 6L6 18" /></svg></button>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  )
-}
-
-/* ════════════════════════════════════════
    PERFIL DE USUARIO
 ════════════════════════════════════════ */
 type Perfil = {
@@ -5959,7 +5521,7 @@ function NuevoPedidoModal({ desde, equipos = [], empresas, onClose, onDone, noti
       precio: precioNum,
       nombre_cliente: cliente.trim(),
       telefono_cliente: telefono.trim(),
-      empresa_id: empresaId || undefined,
+      cliente_id: empresaId || undefined,
       cliente_usuario_id: clienteCuenta || undefined,
       anticipo: anticipoNum,
       metodo_pago: metodo,
@@ -6310,7 +5872,7 @@ function AdeudosAdmin({ datos, pedidos, reload, reloadApartados, notify }: {
   // Identidad de un grupo, tal como la espera el backend para fusionar.
   const spec = (g: GrupoAdeudo) =>
     g.tipo === 'cuenta' ? { usuario_id: g.usuarioId }
-      : g.tipo === 'empresa' ? { empresa_id: g.empresaId }
+      : g.tipo === 'empresa' ? { cliente_id: g.empresaId }
         : { nombre: g.nombre }
 
   /* Fusionar: "esta tarjeta ES la misma persona que aquella". Se eligen el

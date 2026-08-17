@@ -18,7 +18,7 @@ from django.contrib.contenttypes.models import ContentType
 from django.core.management.base import BaseCommand
 
 # Apps cuyos permisos administra el panel.
-APPS_PANEL = ['maquinaria', 'inventario', 'refacciones', 'renta', 'ventas', 'cotizaciones', 'empresas', 'facturacion']
+APPS_PANEL = ['maquinaria', 'inventario', 'refacciones', 'renta', 'ventas', 'cotizaciones', 'clientes', 'facturacion']
 
 ROLES = {
     'Administrador': 'todo',

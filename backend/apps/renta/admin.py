@@ -42,7 +42,7 @@ class RentaAdmin(admin.ModelAdmin):
     list_filter = ('estado', 'modalidad')
     search_fields = (
         'inventario__codigo', 'inventario__numero_serie',
-        'inventario__equipo__modelo', 'cliente_texto', 'empresa__nombre', 'direccion',
+        'inventario__equipo__modelo', 'cliente_texto', 'cliente__nombre', 'direccion',
     )
     readonly_fields = (
         'precio_unitario', 'subtotal', 'total', 'recargo',

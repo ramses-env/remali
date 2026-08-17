@@ -448,7 +448,6 @@ class OrdenReparacion(models.Model):
 
     cliente_nombre = models.CharField(max_length=200, blank=True, default='')
     cliente_telefono = models.CharField(max_length=40, blank=True, default='')
-    empresa = models.ForeignKey('empresas.Empresa', null=True, blank=True, on_delete=models.SET_NULL, related_name='ordenes_reparacion')
     # Cuenta de cliente ligada (por la liga de vinculación): habilita "Mis
     # reparaciones" en su panel. Distinta del cliente de mostrador (texto libre).
     usuario = models.ForeignKey(
@@ -518,8 +517,8 @@ class OrdenReparacion(models.Model):
 
     @property
     def cliente_display(self):
-        if self.empresa_id and self.empresa:
-            return self.empresa.nombre
+        if self.cliente_id and self.cliente:
+            return self.cliente.nombre
         return self.cliente_nombre or 'Cliente'
 
     @property

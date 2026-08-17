@@ -204,6 +204,9 @@ INSTALLED_APPS = [
     'refacciones',
     'ventas',
     'renta',
+    # `empresas` ya no tiene modelos (Empresa → clientes.Cliente, Obra →
+    # clientes.Obra). Se conserva instalada para que sus migraciones históricas
+    # sigan resolviendo; no le agregues modelos.
     'empresas',
     'facturacion',
     'cotizaciones',

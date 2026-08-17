@@ -59,7 +59,6 @@ class Cotizacion(models.Model):
     cliente_nombre = models.CharField(max_length=200, blank=True, default='')
     cliente_telefono = models.CharField(max_length=40, blank=True, default='')
     cliente_email = models.EmailField(blank=True, default='', help_text='Correo destino para enviar la cotización')
-    empresa = models.ForeignKey('empresas.Empresa', null=True, blank=True, on_delete=models.SET_NULL, related_name='cotizaciones')
     # Cliente dueño de la solicitud, si la mandó con sesión iniciada. Es lo que
     # permite mostrarle "Mis cotizaciones" en su cuenta. Anónimo => queda null.
     usuario = models.ForeignKey(
@@ -282,8 +281,8 @@ class Cotizacion(models.Model):
 
     @property
     def cliente_display(self):
-        if self.empresa_id and self.empresa:
-            return self.empresa.nombre
+        if self.cliente_id and self.cliente:
+            return self.cliente.nombre
         return self.cliente_nombre or 'Cliente'
 
     @property

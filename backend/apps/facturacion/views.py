@@ -15,7 +15,7 @@ CAMPOS_EDITABLES = ['rfc', 'razon_social', 'codigo_postal', 'regimen_fiscal', 'u
 
 
 def _qs(params):
-    qs = SolicitudFactura.objects.all().select_related('empresa', 'venta', 'renta')
+    qs = SolicitudFactura.objects.all().select_related('cliente', 'venta', 'renta')
     estado = (params.get('estado') or '').strip().lower()
     if estado in ('pendiente', 'facturada', 'cancelada'):
         qs = qs.filter(estado=estado)

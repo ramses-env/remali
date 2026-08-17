@@ -91,7 +91,7 @@ def _serialize_renta(r: Renta, ver_dinero: bool = True):
         'cliente': r.cliente_texto,
         'cliente_nombre': r.cliente_nombre,
         'telefono_cliente': r.telefono_cliente,
-        'empresa': {'id': r.empresa_id, 'nombre': r.empresa.nombre} if r.empresa_id else None,
+        'cliente_padron': {'id': r.cliente_id, 'nombre': r.cliente.nombre} if r.cliente_id else None,
         'obra': {
             'id': r.obra_id, 'nombre': r.obra.nombre,
             'responsable': r.obra.responsable, 'telefono': r.obra.telefono,
@@ -183,7 +183,7 @@ def exportar_rentas_csv(request):
     MOD = {'dia': 'Por día', 'semana': 'Por semana', 'mes': 'Por mes'}
     estado = (request.query_params.get('estado') or '').strip().lower()
     desde, hasta = _rango_fechas(request.query_params)
-    qs = (Renta.objects.select_related('inventario__equipo', 'empresa', 'obra', 'usuario')
+    qs = (Renta.objects.select_related('inventario__equipo', 'cliente', 'obra', 'usuario')
           .prefetch_related('evidencias').order_by('-creado_en'))
     if estado in ('reservada', 'activa', 'finalizada', 'cancelada'):
         qs = qs.filter(estado=estado)
@@ -206,7 +206,7 @@ def exportar_rentas_csv(request):
             ttot += r.total or 0; tpag += pagado; tsal += saldo
         w.writerow([
             r.id, r.cliente_texto or (r.usuario.get_full_name() if r.usuario_id else '') or '',
-            r.empresa.nombre if r.empresa_id else '',
+            r.cliente.nombre if r.cliente_id else '',
             (inv.equipo.modelo if inv and inv.equipo else '') if inv else '',
             inv.codigo if inv else '',
             MOD.get(r.modalidad, r.modalidad), r.duracion,
@@ -224,7 +224,7 @@ def exportar_rentas_csv(request):
 def exportar_adeudos_csv(request):
     """Reporte de cobranza: rentas con saldo pendiente, en CSV (Excel)."""
     qs = (Renta.objects.exclude(estado='cancelada')
-          .select_related('inventario__equipo', 'empresa', 'usuario'))
+          .select_related('inventario__equipo', 'cliente', 'usuario'))
     resp = HttpResponse(content_type='text/csv; charset=utf-8')
     resp['Content-Disposition'] = 'attachment; filename="reporte_adeudos.csv"'
     resp.write('﻿')
@@ -240,7 +240,7 @@ def exportar_adeudos_csv(request):
         cuenta = (f'{r.usuario.first_name} {r.usuario.last_name}'.strip() or r.usuario.get_username()) if r.usuario_id else ''
         inv = r.inventario
         filas.append([
-            r.cliente_texto or cuenta or (r.empresa.nombre if r.empresa_id else ''),
+            r.cliente_texto or cuenta or (r.cliente.nombre if r.cliente_id else ''),
             cuenta, r.telefono_cliente or '',
             (inv.equipo.modelo if inv and inv.equipo else '') if inv else '',
             inv.codigo if inv else '',
@@ -260,7 +260,7 @@ def exportar_adeudos_csv(request):
 def listar_rentas(request):
     estado = request.query_params.get('estado') or 'activa'
     qs = Renta.objects.all().select_related(
-        'inventario', 'inventario__equipo', 'empresa', 'obra', 'usuario'
+        'inventario', 'inventario__equipo', 'cliente', 'obra', 'usuario'
     ).prefetch_related('evidencias', 'solicitudes_factura')   # sin esto, contar las fotos sería 1 query por renta
     if estado in ('reservada', 'activa', 'finalizada', 'cancelada'):
         qs = qs.filter(estado=estado)
@@ -270,15 +270,15 @@ def listar_rentas(request):
 
 def _rentas_de_identidad(spec):
     """Todas las rentas de un 'cliente', según la identidad que lo agrupa:
-    cuenta > empresa > nombre de mostrador (mismo orden que la vista)."""
+    cuenta > cliente del padrón > nombre de mostrador (mismo orden que la vista)."""
     from maquinaria.models import nombre_propio
     if spec.get('usuario_id'):
         return Renta.objects.filter(usuario_id=spec['usuario_id'])
-    if spec.get('empresa_id'):
-        return Renta.objects.filter(empresa_id=spec['empresa_id'], usuario__isnull=True)
+    if spec.get('cliente_id'):
+        return Renta.objects.filter(cliente_id=spec['cliente_id'], usuario__isnull=True)
     nombre = (spec.get('nombre') or '').strip()
     if nombre:
-        return Renta.objects.filter(usuario__isnull=True, empresa__isnull=True,
+        return Renta.objects.filter(usuario__isnull=True, cliente__isnull=True,
                                     cliente_texto__iexact=nombre_propio(nombre))
     return Renta.objects.none()
 
@@ -295,11 +295,11 @@ def fusionar_cliente_adeudos(request):
 
     def clave(s):
         if s.get('usuario_id'): return f"u:{s['usuario_id']}"
-        if s.get('empresa_id'): return f"e:{s['empresa_id']}"
+        if s.get('cliente_id'): return f"c:{s['cliente_id']}"
         return f"n:{nombre_propio((s.get('nombre') or '').strip()).lower()}"
-    if not (origen.get('usuario_id') or origen.get('empresa_id') or (origen.get('nombre') or '').strip()):
+    if not (origen.get('usuario_id') or origen.get('cliente_id') or (origen.get('nombre') or '').strip()):
         return Response({'detalle': 'Falta identificar el cliente de origen.'}, status=400)
-    if not (destino.get('usuario_id') or destino.get('empresa_id') or (destino.get('nombre') or '').strip()):
+    if not (destino.get('usuario_id') or destino.get('cliente_id') or (destino.get('nombre') or '').strip()):
         return Response({'detalle': 'Falta identificar el cliente de destino.'}, status=400)
     if clave(origen) == clave(destino):
         return Response({'detalle': 'El origen y el destino son el mismo cliente.'}, status=400)
@@ -313,11 +313,11 @@ def fusionar_cliente_adeudos(request):
         campos = ['actualizado_en']
         if destino.get('usuario_id'):
             r.usuario_id = destino['usuario_id']; campos.append('usuario')
-        elif destino.get('empresa_id'):
-            r.empresa_id = destino['empresa_id']; r.usuario = None; campos += ['empresa', 'usuario']
+        elif destino.get('cliente_id'):
+            r.cliente_id = destino['cliente_id']; r.usuario = None; campos += ['cliente', 'usuario']
         else:
-            r.cliente_texto = nombre_propio(destino['nombre']); r.usuario = None; r.empresa = None
-            campos += ['cliente_texto', 'usuario', 'empresa']
+            r.cliente_texto = nombre_propio(destino['nombre']); r.usuario = None; r.cliente = None
+            campos += ['cliente_texto', 'usuario', 'cliente']
         r.actualizado_en = timezone.now()
         # save() normal para disparar señales (el latido repinta la vista).
         r.save(update_fields=list(set(campos)))
@@ -327,10 +327,10 @@ def fusionar_cliente_adeudos(request):
         from django.contrib.auth import get_user_model
         u = get_user_model().objects.filter(pk=destino['usuario_id']).first()
         nombre_dest = (u.get_full_name() or u.get_username()) if u else 'la cuenta'
-    elif destino.get('empresa_id'):
-        from empresas.models import Empresa
-        emp = Empresa.objects.filter(pk=destino['empresa_id']).first()
-        nombre_dest = emp.nombre if emp else 'la empresa'
+    elif destino.get('cliente_id'):
+        from clientes.models import Cliente
+        cli = Cliente.objects.filter(pk=destino['cliente_id']).first()
+        nombre_dest = cli.nombre if cli else 'el cliente'
     return Response({'detalle': f'{len(rentas)} renta(s) quedaron bajo {nombre_propio(nombre_dest)}.', 'movidas': len(rentas)})
 
 
@@ -343,7 +343,7 @@ def rentas_adeudos(request):
     carril aparte. Este es ese carril: nada se mezcla con el historial de
     ventas ni con las rentas activas."""
     qs = (Renta.objects.exclude(estado='cancelada')
-          .select_related('inventario', 'inventario__equipo', 'empresa', 'obra', 'usuario')
+          .select_related('inventario', 'inventario__equipo', 'cliente', 'obra', 'usuario')
           .prefetch_related('evidencias', 'solicitudes_factura'))
     filas, total = [], Decimal('0')
     for r in qs:
@@ -367,7 +367,7 @@ def mandar_por_facturar_renta(request, pk):
     la bandeja antes de timbrar afuera."""
     from decimal import Decimal
     from facturacion.models import SolicitudFactura
-    r = Renta.objects.select_related('usuario', 'empresa', 'inventario__equipo').filter(pk=pk).first()
+    r = Renta.objects.select_related('usuario', 'cliente', 'inventario__equipo').filter(pk=pk).first()
     if not r:
         return Response({'detalle': 'Renta no encontrada'}, status=404)
     if r.estado == 'cancelada':
@@ -381,7 +381,7 @@ def mandar_por_facturar_renta(request, pk):
     fp = {'efectivo': '01', 'transferencia': '03', 'tarjeta': '04'}.get(ult, '')
     eq = r.inventario.equipo.modelo if r.inventario_id and r.inventario.equipo_id else 'Equipo'
     s = SolicitudFactura.objects.create(
-        tipo='renta', renta=r, empresa=r.empresa if r.empresa_id else None,
+        tipo='renta', renta=r, cliente=r.cliente if r.cliente_id else None,
         rfc=getattr(perfil, 'fiscal_rfc', '') or '',
         razon_social=getattr(perfil, 'fiscal_razon_social', '') or '',
         codigo_postal=getattr(perfil, 'fiscal_cp', '') or '',
@@ -536,7 +536,7 @@ def alertas_renta(request):
     hoy = timezone.localdate()
     qs = Renta.objects.filter(
         estado='activa', fecha_fin__lt=hoy
-    ).select_related('inventario', 'inventario__equipo', 'empresa', 'obra', 'usuario').prefetch_related('evidencias', 'solicitudes_factura')
+    ).select_related('inventario', 'inventario__equipo', 'cliente', 'obra', 'usuario').prefetch_related('evidencias', 'solicitudes_factura')
     data = [_serialize_renta(r) for r in qs]
     return Response({'alertas': data, 'total': len(data)})
 
@@ -552,7 +552,7 @@ def crear_renta(request):
     direccion = (datos.get('direccion') or '').strip()
     cliente = (datos.get('cliente') or '').strip()
     telefono_cliente = (datos.get('telefono_cliente') or '').strip()
-    empresa_id = datos.get('empresa_id') or None
+    cliente_id = datos.get('cliente_id') or None
     obra_id = datos.get('obra_id') or None
 
     def _dec(v):
@@ -616,7 +616,7 @@ def crear_renta(request):
             direccion=direccion,
             cliente_texto=cliente,
             telefono_cliente=telefono_cliente,
-            empresa_id=empresa_id,
+            cliente_id=cliente_id,
             obra_id=obra_id,
             usuario_id=datos.get('usuario_id') or None,   # cuenta del cliente, para "Tus rentas"
             descuento=descuento,
@@ -734,7 +734,7 @@ def crear_renta(request):
                 equipo_nombre = inv.equipo.modelo if inv.equipo else 'Equipo'
                 SolicitudFactura.registrar(
                     renta=r,
-                    empresa=r.empresa if r.empresa_id else None,
+                    cliente=r.cliente if r.cliente_id else None,
                     receptor=datos.get('factura') or {},
                     concepto=f'Renta {r.modalidad} · {equipo_nombre} ({inv.codigo})',
                 )
@@ -826,7 +826,7 @@ def renovar_renta(request, pk: int):
             direccion=prev.direccion,
             cliente_texto=prev.cliente_texto,
             telefono_cliente=prev.telefono_cliente,
-            empresa_id=prev.empresa_id,
+            cliente_id=prev.cliente_id,
             obra_id=prev.obra_id,
             usuario_id=prev.usuario_id,          # sigue visible en "Tus rentas" del cliente
             descuento=_dec(datos.get('descuento')),
@@ -905,7 +905,7 @@ def renovar_renta(request, pk: int):
 @permission_classes([EsOperador])
 def devolver_renta(request, pk: int):
     try:
-        r = Renta.objects.select_related('inventario', 'inventario__equipo', 'empresa', 'obra', 'usuario').get(pk=pk)
+        r = Renta.objects.select_related('inventario', 'inventario__equipo', 'cliente', 'obra', 'usuario').get(pk=pk)
     except Renta.DoesNotExist:
         return Response({'detalle': 'Renta no encontrada'}, status=404)
     # Operadores ven todas; un cliente solo la suya.
@@ -952,7 +952,7 @@ def resolver_deposito_renta(request, pk: int):
       dejar a favor o marcar por devolver).
     """
     try:
-        r = Renta.objects.select_related('inventario__equipo', 'empresa', 'obra', 'usuario').get(pk=pk)
+        r = Renta.objects.select_related('inventario__equipo', 'cliente', 'obra', 'usuario').get(pk=pk)
     except Renta.DoesNotExist:
         return Response({'detalle': 'Renta no encontrada'}, status=404)
     d = request.data or {}
@@ -985,7 +985,7 @@ def cancelar_reserva_cliente(request, pk: int):
     no puede: ahí REMALI ya movió la máquina y cualquier cambio se habla con
     ellos."""
     r = (Renta.objects
-         .select_related('inventario__equipo', 'empresa', 'obra', 'usuario')
+         .select_related('inventario__equipo', 'cliente', 'obra', 'usuario')
          .filter(pk=pk, usuario=request.user).first())
     if not r:
         return Response({'detalle': 'Renta no encontrada'}, status=404)
@@ -1049,7 +1049,7 @@ def sustituir_unidad_renta(request, pk: int):
         if nueva.condicion == 'nueva' and not nueva.autorizada_para_renta:
             nota_aut = (
                 f'Sustitución por avería en renta #{r.id} '
-                f'(cliente {r.cliente_texto or r.empresa or "n/a"}).'
+                f'(cliente {r.cliente_nombre}).'
                 + (f' Motivo: {motivo}' if motivo else '')
             )[:255]
             nueva.autorizar_para_renta(
@@ -1083,7 +1083,7 @@ def sustituir_unidad_renta(request, pk: int):
 @permission_classes([IsAdminGroupOrStaff])
 def cancelar_renta(request, pk: int):
     try:
-        r = Renta.objects.select_related('inventario', 'inventario__equipo', 'empresa', 'obra', 'usuario').get(pk=pk)
+        r = Renta.objects.select_related('inventario', 'inventario__equipo', 'cliente', 'obra', 'usuario').get(pk=pk)
     except Renta.DoesNotExist:
         return Response({'detalle': 'Renta no encontrada'}, status=404)
     if r.estado in ('finalizada', 'cancelada'):
@@ -1103,7 +1103,7 @@ def cancelar_renta(request, pk: int):
 
 def _get_renta_full(pk):
     return Renta.objects.select_related(
-        'inventario', 'inventario__equipo', 'empresa', 'obra', 'usuario'
+        'inventario', 'inventario__equipo', 'cliente', 'obra', 'usuario'
     ).get(pk=pk)
 
 
@@ -1327,7 +1327,7 @@ def _lugar_de(r):
         'obra': obra.nombre if obra else None,
         'contacto': (obra.responsable if obra and obra.responsable else r.cliente_nombre) or '',
         'telefono': (obra.telefono if obra and obra.telefono else r.telefono_cliente) or '',
-        'empresa': r.empresa.nombre if r.empresa_id else None,
+        'cliente_padron': r.cliente.nombre if r.cliente_id else None,
     }
 
 
@@ -1350,7 +1350,7 @@ def mis_tareas(request):
 
     rentas = (Renta.objects
               .filter(estado__in=['activa', 'reservada'])
-              .select_related('inventario', 'inventario__equipo', 'empresa', 'obra', 'usuario')
+              .select_related('inventario', 'inventario__equipo', 'cliente', 'obra', 'usuario')
               .prefetch_related('evidencias', 'solicitudes_factura'))
 
     from decimal import Decimal as _D

@@ -36,13 +36,10 @@ class Renta(models.Model):
     )
 
     # ── Cliente ──
-    # `cliente`/`contacto` son la identidad NUEVA (padrón único). `empresa`,
-    # `obra`, `cliente_texto`, `telefono_cliente` y `usuario` son la forma vieja:
-    # espejo de solo lectura durante la fase 1, se van en la fase 3.
-    #
-    # OJO: `cliente` era el CharField que ahora se llama `cliente_texto`. Se
-    # renombró para que el FK se quede con el nombre bueno desde el principio y
-    # la fase 3 solo tenga que BORRAR, no volver a renombrar.
+    # `cliente`/`contacto` son la identidad del padrón: la única. `obra` cuelga
+    # de ese mismo cliente. `cliente_texto` y `telefono_cliente` se conservan
+    # como respaldo legible de lo que se capturó ese día, no como forma alterna
+    # de identificar a nadie.
     cliente = models.ForeignKey(
         'clientes.Cliente',
         null=True, blank=True,
@@ -56,14 +53,8 @@ class Renta(models.Model):
         related_name='rentas',
     )
 
-    empresa = models.ForeignKey(
-        'empresas.Empresa',
-        null=True, blank=True,
-        on_delete=models.SET_NULL,
-        related_name='rentas',
-    )
     obra = models.ForeignKey(
-        'empresas.Obra',
+        'clientes.Obra',
         null=True, blank=True,
         on_delete=models.SET_NULL,
         related_name='rentas',
@@ -309,12 +300,9 @@ class Renta(models.Model):
 
     @property
     def cliente_nombre(self) -> str:
-        # El padrón manda en cuanto la renta está migrada; si no, se cae a la
-        # forma vieja (empresa formal → texto libre) para no perder el nombre.
+        # El padrón manda; el texto es el respaldo de lo que se capturó ese día.
         if self.cliente_id and self.cliente:
             return self.cliente.nombre
-        if self.empresa_id and self.empresa:
-            return self.empresa.nombre
         return self.cliente_texto or 'Cliente'
 
     # ─────────────────────────────────────────────
