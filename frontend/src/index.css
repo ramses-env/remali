@@ -948,3 +948,51 @@ input[type="number"]::-webkit-outer-spin-button {
   -webkit-appearance: none;
   margin: 0;
 }
+
+/* ── Tablas del panel en celular ─────────────────────────────────────────────
+   Las tablas del admin traen `min-w-[760px]` y más: en escritorio se ven bien,
+   pero en un teléfono obligaban a hacer scroll horizontal para leer una fila.
+   Debajo de 768px cada FILA se convierte en una tarjeta apilada: se esconde el
+   thead y cada celda enseña su etiqueta (`data-col`) a la izquierda y el valor
+   a la derecha. Las celdas SIN `data-col` (la principal con el nombre y la de
+   acciones) se quedan a ancho completo, sin etiqueta.
+   Solo hay que ponerle `tabla-panel` al <table> y `data-col="Precio"` a los td
+   que necesiten etiqueta. De 768px para arriba no cambia absolutamente nada. */
+@media (max-width: 767px) {
+  .tabla-panel { display: block; min-width: 0 !important; }
+  .tabla-panel thead { display: none; }
+  .tabla-panel tbody { display: block; }
+  .tabla-panel tr { display: block; padding: 0.6rem 0; }
+  .tabla-panel td { display: block; padding: 0.28rem 0.9rem; white-space: normal; }
+  /* Una celda escondida con `hidden` sigue escondida: la regla de arriba tiene
+     más peso que la utilidad de Tailwind y sin esto reaparecería en celular. */
+  .tabla-panel td.hidden, .tabla-panel th.hidden { display: none; }
+  .tabla-panel td[data-col] {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    text-align: left;
+  }
+  .tabla-panel td[data-col]::before {
+    content: attr(data-col);
+    flex: 0 0 auto;
+    font-size: 10.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--c-mute);
+  }
+  /* El valor se pega a la derecha, frente a su etiqueta; si trae varias líneas
+     (fechas, montos) quedan alineadas entre sí y no ragged contra el borde. */
+  .tabla-panel td[data-col] > * { text-align: right; }
+  /* La celda del nombre manda: un poco más de aire arriba para que se lea como
+     el título de la tarjeta. */
+  .tabla-panel td:first-child { padding-top: 0.15rem; padding-bottom: 0.5rem; }
+  /* Los truncados y anchos máximos pensados para una columna estrecha estorban
+     cuando la celda ya ocupa toda la pantalla. */
+  .tabla-panel td.truncate,
+  .tabla-panel td .truncate { overflow: visible; text-overflow: clip; white-space: normal; }
+  .tabla-panel td[class*="max-w-["],
+  .tabla-panel td [class*="max-w-["] { max-width: none; }
+}

