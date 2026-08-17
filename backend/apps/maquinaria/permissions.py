@@ -174,8 +174,12 @@ CATALOGO = (
               'Dar de alta clientes y contactos. Los datos fiscales y fundir dos '
               'clientes siguen siendo de administración.', NIVEL_TECNICO),
     Capacidad('jornada_campo', 'Mi jornada',
-              'El escritorio del técnico de campo. Es un puesto, no un poder: '
-              'administración supervisa desde Rentas y Reparaciones.', None),
+              'El escritorio del técnico de campo: entregar, recoger y subir las '
+              'fotos. Es un puesto, no un poder, por eso no cascadea hacia arriba.', None),
+    Capacidad('ver_jornada', 'Ver la jornada del técnico',
+              'Mirar el tablero de campo (qué falta entregar, qué está vencido) sin '
+              'poder tocarlo. Supervisión: entregar y recoger se hace desde Rentas.',
+              NIVEL_ADMIN),
 )
 
 

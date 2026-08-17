@@ -245,3 +245,95 @@ class ModeloClienteTest(TestCase):
         u = User.objects.create_user(username='chuy', password='pass12345')
         Contacto.objects.create(cliente=c, nombre='Laura', usuario=u)
         self.assertTrue(c.tiene_cuenta)
+
+
+class BuscadorMostradorTest(TestCase):
+    """El buscador que usa quien atiende, con el cliente enfrente."""
+
+    def setUp(self):
+        from rest_framework.test import APIClient
+        u = User.objects.create_user(username='cajero1', password='pass12345')
+        u.groups.add(Group.objects.get_or_create(name='Cajero')[0])
+        self.api = APIClient()
+        self.api.force_authenticate(user=u)
+
+        self.constructora = Cliente.objects.create(
+            tipo=Cliente.MORAL, nombre='Constructora del Bajío', telefono='4770000000')
+        Contacto.objects.create(cliente=self.constructora, nombre='Laura', telefono='4771111111')
+
+    def test_encuentra_por_el_conmutador_y_por_el_celular_del_residente(self):
+        por_conmutador = self.api.get('/api/clientes/buscar/?telefono=477 000 0000')
+        por_celular = self.api.get('/api/clientes/buscar/?telefono=4771111111')
+
+        for r in (por_conmutador, por_celular):
+            self.assertEqual(len(r.data['clientes']), 1, r.data)
+            self.assertEqual(r.data['clientes'][0]['nombre'], 'Constructora del Bajío')
+
+    def test_trae_el_resumen_para_decidir_antes_de_vender(self):
+        r = self.api.get('/api/clientes/buscar/?telefono=4770000000')
+
+        resumen = r.data['clientes'][0]['resumen']
+        self.assertEqual(resumen['compras'], 0)
+        self.assertEqual(resumen['rentas_activas'], 0)
+        self.assertIn('cotizaciones', resumen)
+
+    def test_con_menos_de_dos_letras_no_devuelve_el_padron_entero(self):
+        r = self.api.get('/api/clientes/buscar/?q=c')
+        self.assertEqual(r.data['clientes'], [])
+
+    def test_un_cliente_inactivo_no_se_ofrece_en_mostrador(self):
+        self.constructora.activo = False
+        self.constructora.save()
+
+        r = self.api.get('/api/clientes/buscar/?telefono=4770000000')
+
+        self.assertEqual(r.data['clientes'], [])
+
+
+class ResolverClienteTest(TestCase):
+    """La regla que sostiene todo: nunca unir sin que una persona confirme."""
+
+    def test_con_cliente_id_se_usa_ese_y_no_se_crea_nada(self):
+        from clientes.resolucion import resolver_cliente
+        existente = Cliente.objects.create(tipo=Cliente.FISICA, nombre='Ana Torres')
+
+        cli, contacto = resolver_cliente(cliente_id=existente.pk, nombre='Otro Nombre')
+
+        self.assertEqual(cli, existente)
+        self.assertEqual(Cliente.objects.count(), 1)
+
+    def test_sin_cliente_id_se_crea_uno_nuevo_con_su_contacto(self):
+        from clientes.resolucion import resolver_cliente
+
+        cli, contacto = resolver_cliente(nombre='jesús ramírez', telefono='744 123 4567')
+
+        self.assertEqual(cli.nombre, 'Jesús Ramírez')
+        self.assertEqual(cli.telefono, '7441234567')
+        self.assertTrue(contacto.principal)
+
+    def test_un_telefono_repetido_NO_funde_los_clientes(self):
+        from clientes.resolucion import resolver_cliente
+        Cliente.objects.create(tipo=Cliente.FISICA, nombre='Jesús Ramírez', telefono='7441234567')
+
+        cli, _ = resolver_cliente(nombre='Otra Persona', telefono='7441234567')
+
+        self.assertEqual(Cliente.objects.count(), 2)     # dos, no uno
+        self.assertTrue(cli.requiere_revision)
+        self.assertIn('Jesús Ramírez', cli.revision_motivo)
+
+    def test_sin_nombre_ni_telefono_no_inventa_un_cliente(self):
+        """La caja vende un filtro de $300 sin preguntar nada, y está bien."""
+        from clientes.resolucion import resolver_cliente
+
+        cli, contacto = resolver_cliente()
+
+        self.assertIsNone(cli)
+        self.assertIsNone(contacto)
+        self.assertEqual(Cliente.objects.count(), 0)
+
+    def test_un_cliente_id_que_no_existe_no_tumba_la_venta(self):
+        from clientes.resolucion import resolver_cliente
+
+        cli, contacto = resolver_cliente(cliente_id=99999, nombre='Ana')
+
+        self.assertIsNone(cli)      # la venta se guarda sin cliente, no revienta

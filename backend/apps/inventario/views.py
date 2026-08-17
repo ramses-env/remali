@@ -22,6 +22,19 @@ logger = logging.getLogger(__name__)
 
 
 
+
+def _campos_cliente(datos):
+    """Los campos de cliente para construir un documento, resueltos en un solo
+    lugar (apps/clientes/resolucion.py). Si viene `cliente_id` se usa; si no, se
+    crea uno con lo capturado. Nunca se une por teléfono sin confirmación."""
+    from clientes.resolucion import resolver_cliente
+    cli, contacto = resolver_cliente(
+        cliente_id=datos.get('cliente_id') or None,
+        contacto_id=datos.get('contacto_id') or None,
+        nombre=datos.get('nombre_cliente') or '',
+        telefono=datos.get('telefono_cliente') or '',
+    )
+    return {'cliente': cli, 'contacto': contacto}
 class UnidadesPorEquipo(generics.ListCreateAPIView):
     """Lista y crea unidades de inventario de un equipo.
 
@@ -378,7 +391,7 @@ def vender_unidad(request, pk: int):
             nombre_cliente=(datos.get('nombre_cliente') or '').strip(),
             telefono_cliente=(datos.get('telefono_cliente') or '').strip(),
             metodo_pago=metodo_principal,
-            cliente_id=(datos.get('cliente_id') or None),
+            **_campos_cliente(datos),
             cliente_usuario=cotizacion.usuario if cotizacion and cotizacion.usuario_id else None,
             inventario=unidad,
             precio_maquina=precio,

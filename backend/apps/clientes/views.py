@@ -16,6 +16,7 @@ from rest_framework.response import Response
 from maquinaria.permissions import ExigeCapacidad, NIVEL_ADMIN, nivel_de
 
 from .models import Cliente, Contacto
+from .resolucion import resumen_de
 from .serializers import (
     CAMPOS_FISCALES, ClienteFichaSerializer, ClienteListaSerializer, ContactoSerializer,
 )
@@ -218,6 +219,51 @@ def contacto_detalle(request, pk: int):
 
 
 # ═══════════════════════════════════════════════════════════════════
+@api_view(['GET'])
+@permission_classes([PuedeVerClientes])
+def buscar(request):
+    """El buscador del MOSTRADOR: pocos resultados, con lo justo para decidir.
+
+    Distinto de la lista del padrón, que es para administrar. Aquí lo que
+    importa es contestar "¿es este?" en un vistazo, mientras el cliente espera.
+    Busca contra el teléfono del cliente Y el de sus contactos: en una
+    constructora, el vendedor teclea el número que trae a la mano, que tanto
+    puede ser el conmutador como el celular del residente.
+    """
+    telefono = _digitos(request.query_params.get('telefono') or '')
+    q = (request.query_params.get('q') or '').strip()
+
+    if telefono:
+        qs = Cliente.buscar_por_telefono(telefono)
+    elif len(q) >= 2:
+        digitos = _digitos(q)
+        filtro = Q(nombre__icontains=q) | Q(razon_social__icontains=q) | Q(contactos__nombre__icontains=q)
+        if digitos:
+            filtro |= Q(telefono__startswith=digitos) | Q(contactos__telefono__startswith=digitos)
+        qs = Cliente.objects.filter(filtro).distinct()
+    else:
+        # Con menos de dos letras cualquier cosa coincide: mejor no responder
+        # que llenarle la pantalla de candidatos al vendedor.
+        return Response({'clientes': []})
+
+    qs = qs.filter(activo=True).prefetch_related('contactos', 'obras')[:8]
+    return Response({'clientes': [
+        {
+            'id': c.id,
+            'nombre': c.nombre,
+            'tipo': c.tipo,
+            'tipo_display': c.get_tipo_display(),
+            'telefono': c.telefono,
+            'rfc': c.rfc,
+            'requiere_revision': c.requiere_revision,
+            'contactos': ContactoSerializer(c.contactos.all(), many=True).data,
+            'obras': [{'id': o.id, 'nombre': o.nombre, 'ubicacion': o.ubicacion} for o in c.obras.all()],
+            'resumen': resumen_de(c),
+        }
+        for c in qs
+    ]})
+
+
 @api_view(['GET'])
 @permission_classes([PuedeVerClientes])
 def catalogo(request):

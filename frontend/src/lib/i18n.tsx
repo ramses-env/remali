@@ -40,6 +40,10 @@ const ES: Dict = {
   'sec.rentas.sub': 'Gestiona rentas activas, reservas y devoluciones.',
   'sec.ubicaciones.title': 'Mi jornada',
   'sec.ubicaciones.sub': 'Tus entregas, recolecciones y reparaciones del día.',
+  // La MISMA sección vista por administración: es la jornada de otro, así que
+  // llamarla "mía" confunde a quien supervisa y no pisa la obra.
+  'sec.jornada_sup.title': 'Jornada del técnico',
+  'sec.jornada_sup.sub': 'Qué trae en mano el técnico hoy. Para entregar o recoger, entra a Rentas.',
   'sec.usuarios.title': 'Usuarios',
   'sec.usuarios.sub': 'Quién entra al panel y qué puede hacer.',
   'sec.ventas.title': 'Ventas',
@@ -106,6 +110,8 @@ const EN: Dict = {
   'sec.rentas.sub': 'Manage active rentals, reservations and returns.',
   'sec.ubicaciones.title': 'My shift',
   'sec.ubicaciones.sub': 'Your deliveries, pickups and repairs for the day.',
+  'sec.jornada_sup.title': "Technician's shift",
+  'sec.jornada_sup.sub': "What the technician has on hand today. To deliver or pick up, go to Rentals.",
   'sec.usuarios.title': 'Users',
   'sec.usuarios.sub': 'Who can access the panel and what they can do.',
   'sec.ventas.title': 'Sales',

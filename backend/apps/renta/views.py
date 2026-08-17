@@ -609,6 +609,15 @@ def crear_renta(request):
         # Si la renta inicia a futuro se agenda como RESERVA (no ocupa la unidad todavía)
         estado = 'reservada' if fecha_inicio > timezone.localdate() else 'activa'
 
+        # Un solo lugar decide a quién le estamos rentando (apps/clientes/
+        # resolucion.py). Si viene `cliente_id` se usa; si no, se crea uno con lo
+        # que se capturó. NUNCA se une por teléfono sin confirmación.
+        from clientes.resolucion import resolver_cliente
+        cli, contacto = resolver_cliente(
+            cliente_id=cliente_id, contacto_id=datos.get('contacto_id'),
+            nombre=cliente, telefono=telefono_cliente,
+        )
+
         r = Renta(
             inventario=inv,
             modalidad=modalidad,
@@ -616,7 +625,8 @@ def crear_renta(request):
             direccion=direccion,
             cliente_texto=cliente,
             telefono_cliente=telefono_cliente,
-            cliente_id=cliente_id,
+            cliente=cli,
+            contacto=contacto,
             obra_id=obra_id,
             usuario_id=datos.get('usuario_id') or None,   # cuenta del cliente, para "Tus rentas"
             descuento=descuento,

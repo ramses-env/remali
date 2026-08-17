@@ -15,6 +15,19 @@ logger = logging.getLogger(__name__)
 
 
 
+
+def _campos_cliente(datos):
+    """Los campos de cliente para construir un documento, resueltos en un solo
+    lugar (apps/clientes/resolucion.py). Si viene `cliente_id` se usa; si no, se
+    crea uno con lo capturado. Nunca se une por teléfono sin confirmación."""
+    from clientes.resolucion import resolver_cliente
+    cli, contacto = resolver_cliente(
+        cliente_id=datos.get('cliente_id') or None,
+        contacto_id=datos.get('contacto_id') or None,
+        nombre=datos.get('nombre_cliente') or '',
+        telefono=datos.get('telefono_cliente') or '',
+    )
+    return {'cliente': cli, 'contacto': contacto}
 @api_view(['POST'])
 @permission_classes([PuedeUsarCaja])   # la caja: cajero, gerente y administración; no el técnico de campo
 def venta_mostrador(request):
@@ -40,7 +53,7 @@ def venta_mostrador(request):
                 nombre_cliente=(datos.get('nombre_cliente') or '').strip(),
                 telefono_cliente=(datos.get('telefono_cliente') or '').strip(),
                 metodo_pago=(datos.get('metodo_pago') or 'efectivo'),
-                cliente_id=(datos.get('cliente_id') or None),
+                **_campos_cliente(datos),
                 # IVA siempre (lo fuerza el modelo). requiere_factura solo controla
                 # si se registra la solicitud en la bandeja "Por facturar" (abajo).
             )
@@ -577,7 +590,7 @@ def crear_pedido(request):
         cliente_usuario_id=(datos.get('cliente_usuario_id') or (cot.usuario_id if cot else None) or None),
         nombre_cliente=(datos.get('nombre_cliente') or '').strip(),
         telefono_cliente=(datos.get('telefono_cliente') or '').strip(),
-        cliente_id=(datos.get('cliente_id') or None),
+        **_campos_cliente(datos),
         equipo=equipo,
         sobre_pedido=True,
         estado='apartada',

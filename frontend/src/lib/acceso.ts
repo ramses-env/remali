@@ -32,6 +32,8 @@ export type Capacidades = {
   editar_clientes: boolean
   /** "Mi jornada": el escritorio del técnico de campo (no cascadea a admin). */
   jornada_campo: boolean
+  /** Mirar el tablero de campo sin poder tocarlo (supervisión de administración). */
+  ver_jornada: boolean
 }
 
 export type Yo = {
@@ -43,6 +45,10 @@ export type Yo = {
 
 export const CLAVE_NIVEL = 'remali_nivel'
 export const CLAVE_DUENO = 'remali_dueno'
+/** ¿Esta cuenta ACTÚA en campo? Decide en qué sección abre el panel, y hay que
+ *  saberlo antes de que llegue el perfil por red. El nivel no basta: el cajero y
+ *  el asesor comparten el nivel 1 con el técnico y no andan en campo. */
+export const CLAVE_JORNADA = 'remali_jornada'
 
 /** Con nivel 0 la cuenta existe pero no tiene rol: no entra al panel. */
 export function entraAlPanel(yo: Yo | null | undefined): boolean {
@@ -90,6 +96,7 @@ export function recordarAcceso(yo: Yo | null | undefined) {
   try {
     localStorage.setItem(CLAVE_NIVEL, String(nivel))
     localStorage.setItem(CLAVE_DUENO, dueno ? '1' : '0')
+    localStorage.setItem(CLAVE_JORNADA, yo?.puede?.jornada_campo ? '1' : '0')
   } catch { /* modo privado: se resuelve al cargar el perfil */ }
   document.documentElement.classList.toggle('tema-dueno', dueno)
 }
@@ -99,6 +106,7 @@ export function olvidarAcceso() {
   try {
     localStorage.removeItem(CLAVE_NIVEL)
     localStorage.removeItem(CLAVE_DUENO)
+    localStorage.removeItem(CLAVE_JORNADA)
   } catch { /* nada que limpiar */ }
   document.documentElement.classList.remove('tema-dueno')
 }

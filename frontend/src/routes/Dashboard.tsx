@@ -13,6 +13,7 @@ import OrdenCartaModal from '../components/OrdenCartaModal'
 import CotizacionCartaModal from '../components/CotizacionCartaModal'
 import FichaTecnicaModal from '../components/FichaTecnicaModal'
 import ClientesAdmin from '../components/ClientesAdmin'
+import BuscadorCliente, { SELECCION_VACIA, type SeleccionCliente } from '../components/BuscadorCliente'
 import Dock, { type DockItem } from '../components/ui/dock'
 import { REGIMEN_FISCAL, USO_CFDI } from '../lib/sat'
 import { usePrintSettings, charsPerLine } from '../lib/printSettings'
@@ -21,7 +22,7 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { useRecurso, invalidar, type Tema } from '../lib/realtime'
 import { useLatidoPanel } from '../lib/latido'
 import { conectarAvisos } from '../lib/avisos'
-import { CLAVE_NIVEL, recordarAcceso, ProveedorPermisos, usePuede, type Capacidades } from '../lib/acceso'
+import { CLAVE_JORNADA, recordarAcceso, ProveedorPermisos, usePuede, type Capacidades } from '../lib/acceso'
 import { buildTestTicket } from '../lib/escpos'
 import { METODOS, metodoSoportado, imprimirTermico, vincularMetodo, metodoVinculado, infoMetodo } from '../lib/printer'
 import { useAuth } from '../store/auth'
@@ -179,7 +180,11 @@ type DashMetrics = {
  */
 function seccionInicial(): Section {
   try {
-    return Number(localStorage.getItem(CLAVE_NIVEL) || '0') === 1 ? 'ubicaciones' : 'resumen'
+    // Quien ACTÚA en campo abre en su jornada. Se pregunta por la capacidad, no
+    // por el nivel: el cajero y el asesor también son nivel 1 y no andan en obra
+    // —abrirles ahí una sección que no les toca provocaba un parpadeo hasta que
+    // llegaba el perfil y el panel los rebotaba a su primera sección.
+    return localStorage.getItem(CLAVE_JORNADA) === '1' ? 'ubicaciones' : 'resumen'
   } catch {
     return 'resumen'
   }
@@ -626,7 +631,11 @@ export default function Dashboard() {
   // Qué capacidad exige cada sección del menú. Ojo: "vender" y "rentar" son
   // acciones que el técnico sí hace; las secciones de aquí son las LISTAS
   // (historial, montos), que son otra cosa.
-  const REQUIERE: Partial<Record<Section, keyof NonNullable<typeof puede>>> = {
+  type Cap = keyof NonNullable<typeof puede>
+  // Una sección puede pedir UNA capacidad o CUALQUIERA de varias (array). Lo
+  // segundo existe por "Mi jornada": el técnico entra a trabajar y
+  // administración entra a mirar, con capacidades distintas y la misma puerta.
+  const REQUIERE: Partial<Record<Section, Cap | Cap[]>> = {
     resumen: 'ver_dinero',
     ventas: 'ver_dinero',   // la LISTA de ventas es historial del negocio
     cotizaciones: 'cotizar',
@@ -646,13 +655,24 @@ export default function Dashboard() {
     refacciones: 'editar_catalogo',
     rentas: 'ver_dinero',
     reparaciones: 'ver_dinero',
-    ubicaciones: 'operar_inventario',   // "Mi jornada": esto sí lo ve el técnico
+    // "Mi jornada": el técnico la trabaja (`jornada_campo`), administración solo
+    // la mira (`ver_jornada`). Antes pedía `operar_inventario`, que cascadea
+    // hacia arriba desde el nivel 1: por eso el admin la veía completa, con
+    // botones de entregar y de subir fotos que no le tocan.
+    ubicaciones: ['jornada_campo', 'ver_jornada'],
     usuarios: 'gestionar_usuarios',
   }
   const seccionPermitida = (s: Section) => {
     const cap = REQUIERE[s]
-    return !cap || puedeVer(cap)
+    if (!cap) return true
+    return Array.isArray(cap) ? cap.some(puedeVer) : puedeVer(cap)
   }
+  // ¿Esta cuenta trabaja el tablero de campo, o solo lo supervisa? Decide los
+  // botones de acción dentro del módulo y cómo se llama la sección.
+  const jornadaPropia = puedeVer('jornada_campo')
+  /** Clave de textos de una sección. Solo "Mi jornada" cambia de nombre según
+   *  quién mira: para el técnico es la suya, para administración es la de otro. */
+  const claveSec = (s: Section) => (s === 'ubicaciones' && !jornadaPropia ? 'jornada_sup' : s)
   const ordenesAbiertas = ordenes.filter(o => o.estado !== 'entregada').length
   const facturasPendientes = solicitudes.filter(s => s.estado === 'pendiente').length
   const cotizacionesAbiertas = cotAbiertas
@@ -1004,7 +1024,7 @@ export default function Dashboard() {
                         <button
                           key={it.key}
                           onClick={() => go(it.key)}
-                          title={t(`sec.${it.key}.title`)}
+                          title={t(`sec.${claveSec(it.key)}.title`)}
                           className={`group relative w-full flex items-center gap-2.5 px-3 py-2.5 rounded-[10px] text-sm transition-colors ${colapsado ? 'lg:justify-center lg:px-2' : ''} ${
                             active ? 'bg-gold-soft text-gold font-medium' : 'text-ink hover:bg-surface-2 font-normal'
                           }`}
@@ -1012,7 +1032,7 @@ export default function Dashboard() {
                           <svg className={`w-[19px] h-[19px] shrink-0 transition-colors ${active ? 'text-gold' : 'text-mute group-hover:text-ink'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
                             {it.icon}
                           </svg>
-                          <span className={`flex-1 text-left ${colapsado ? 'lg:hidden' : ''}`}>{t(`sec.${it.key}.title`)}</span>
+                          <span className={`flex-1 text-left ${colapsado ? 'lg:hidden' : ''}`}>{t(`sec.${claveSec(it.key)}.title`)}</span>
                           {showBadge && it.key === 'notificaciones' && (<>
                             <span className={`min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[11px] font-bold flex items-center justify-center ${colapsado ? 'lg:hidden' : ''}`}>
                               {it.badge! > 9 ? '9+' : it.badge}
@@ -1055,10 +1075,10 @@ export default function Dashboard() {
                 <svg className="w-[18px] h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.7"><path strokeLinecap="round" strokeLinejoin="round" d="M3 11.4L12 4l9 7.4" /><path strokeLinecap="round" strokeLinejoin="round" d="M5.5 9.8V19a1.2 1.2 0 0 0 1.2 1.2h10.6A1.2 1.2 0 0 0 18.5 19V9.8" /></svg>
               </button>
               <span className="text-edge">›</span>
-              <span className="text-ink font-bold">{t(`sec.${section}.title`)}</span>
+              <span className="text-ink font-bold">{t(`sec.${claveSec(section)}.title`)}</span>
             </nav>
-            <h1 className="text-[26px] sm:text-[28px] font-extrabold tracking-tight text-ink leading-tight">{t(`sec.${section}.title`)}</h1>
-            <p className="text-[15px] text-mute mt-1.5">{t(`sec.${section}.sub`)}</p>
+            <h1 className="text-[26px] sm:text-[28px] font-extrabold tracking-tight text-ink leading-tight">{t(`sec.${claveSec(section)}.title`)}</h1>
+            <p className="text-[15px] text-mute mt-1.5">{t(`sec.${claveSec(section)}.sub`)}</p>
           </div>
 
           {/* Cargas de dinero que fallaron: sin este aviso, los totales en $0
@@ -2573,17 +2593,13 @@ function RentModal({ unit, equipo, onClose, onDone, notify }: {
   unit: Unidad; equipo: Equipo; onClose: () => void; onDone: () => void; notify: (m: string, t?: 'ok' | 'err') => void
 }) {
   const hoy = new Date().toISOString().slice(0, 10)
-  const [cliente, setCliente] = useState('')
-  const [telefono, setTelefono] = useState('')
+  const [sel, setSel] = useState<SeleccionCliente>(SELECCION_VACIA)
   const [direccion, setDireccion] = useState('')
   const [modalidad, setModalidad] = useState<'dia' | 'semana' | 'mes'>('dia')
   const [duracion, setDuracion] = useState('1')
   const [fechaInicio, setFechaInicio] = useState(hoy)
   const [descuento, setDescuento] = useState('')
   const [deposito, setDeposito] = useState('')
-  const [empresas, setEmpresas] = useState<Empresa[]>([])
-  const [empresaId, setEmpresaId] = useState('')
-  const [obras, setObras] = useState<Obra[]>([])
   const [obraId, setObraId] = useState('')
   const [requiereFactura, setRequiereFactura] = useState(false)
   const [factura, setFactura] = useState<FacturaData>(FACTURA_VACIA)
@@ -2600,14 +2616,17 @@ function RentModal({ unit, equipo, onClose, onDone, notify }: {
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
-    api.get('/clientes/?limite=100').then(r => setEmpresas((r.data?.clientes || []).map((c: any) => ({ id: c.id, nombre: c.nombre, activa: c.activo })))).catch(() => {})
     // Cuentas de cliente, para vincular la renta a su panel ("Tus rentas").
     api.get<{ clientes: { id: number; nombre: string; empresa?: string }[] }>('/clientes-lookup/').then(r => setClientes(r.data.clientes || [])).catch(() => {})
     // Datos de la cotización que se está concretando (si aplica).
     const puente = leerCotParaRenta()
     if (puente) {
-      if (puente.cliente) setCliente(puente.cliente)
-      if (puente.telefono) setTelefono(puente.telefono)
+      // La cotización trae nombre y teléfono como TEXTO: se precargan en el
+      // buscador para que el vendedor confirme de quién se trata, no se dan
+      // por buenos sin más.
+      if (puente.cliente || puente.telefono) {
+        setSel(v => ({ ...v, nombre: puente.cliente || v.nombre, telefono: soloTelefono(puente.telefono || v.telefono) }))
+      }
       if (puente.direccion) setDireccion(puente.direccion)
       if (puente.usuario_id) setUsuarioId(String(puente.usuario_id))
       if (puente.modalidad) setModalidad(puente.modalidad)
@@ -2615,29 +2634,23 @@ function RentModal({ unit, equipo, onClose, onDone, notify }: {
     }
   }, [])
   useEffect(() => {
-    if (!empresaId) { setObras([]); setObraId(''); return }
-    api.get(`/clientes/${empresaId}/`).then(r => setObras(r.data?.obras || [])).catch(() => setObras([]))
-  }, [empresaId])
+    /* las obras llegan con el cliente que devuelve el buscador */
+  }, [])
 
-  // Al elegir empresa: rellena con el contacto/teléfono/domicilio guardados.
-  function elegirEmpresa(id: string) {
-    setEmpresaId(id); setObraId('')
-    const em = empresas.find(e => String(e.id) === id)
-    if (em) {
-      setCliente(em.contacto || em.nombre || '')
-      setTelefono(em.telefono || '')
-      setDireccion(em.direccion || '')
-    }
+  function elegirCliente(v: SeleccionCliente) {
+    setSel(v)
+    if (!v.cliente) { setObraId(''); return }
+    // Con una sola obra se propone sola: es lo que pasa casi siempre y
+    // ahorra un clic con el cliente enfrente.
+    const unica = v.cliente.obras.length === 1 ? v.cliente.obras[0] : null
+    setObraId(unica ? String(unica.id) : '')
+    if (unica?.ubicacion) setDireccion(unica.ubicacion)
   }
-  // Al elegir obra: rellena con el ENCARGADO de la obra, su teléfono y la ubicación.
+  // Al elegir obra: la dirección de la renta es la de esa obra.
   function elegirObra(id: string) {
     setObraId(id)
-    const o = obras.find(ob => String(ob.id) === id)
-    if (o) {
-      if (o.responsable) setCliente(o.responsable)
-      if (o.telefono) setTelefono(o.telefono)
-      if (o.ubicacion) setDireccion(o.ubicacion)
-    }
+    const o = sel.cliente?.obras.find(ob => String(ob.id) === id)
+    if (o?.ubicacion) setDireccion(o.ubicacion)
   }
 
   const precio = modalidad === 'dia' ? equipo.precio_dia : modalidad === 'semana' ? equipo.precio_semana : equipo.precio_mes
@@ -2647,8 +2660,8 @@ function RentModal({ unit, equipo, onClose, onDone, notify }: {
   const esReserva = fechaInicio > hoy
 
   function submit() {
-    if ((!cliente.trim() && !empresaId) || !direccion.trim()) { notify('Cliente (o empresa) y dirección son obligatorios', 'err'); return }
-    const errFactura = validarFactura(requiereFactura, empresaId, factura)
+    if ((!sel.nombre.trim() && !sel.cliente) || !direccion.trim()) { notify('Cliente y dirección son obligatorios', 'err'); return }
+    const errFactura = validarFactura(requiereFactura, sel.cliente ? String(sel.cliente.id) : '', factura)
     if (errFactura) { notify(errFactura, 'err'); return }
     let pagos: { metodo: string; monto: number }[] | undefined
     if (splitPago) {
@@ -2663,9 +2676,9 @@ function RentModal({ unit, equipo, onClose, onDone, notify }: {
     setBusy(true)
     api.post('/rentas/crear/', {
       inventario_id: unit.id, modalidad, duracion: Number(duracion) || 1,
-      cliente: cliente.trim(), telefono_cliente: telefono.trim(), direccion: direccion.trim(),
+      cliente: sel.nombre.trim(), telefono_cliente: sel.telefono, direccion: direccion.trim(),
       fecha_inicio: fechaInicio || undefined,
-      cliente_id: empresaId || undefined, obra_id: obraId || undefined, usuario_id: usuarioId || undefined,
+      cliente_id: sel.cliente?.id || undefined, obra_id: obraId || undefined, usuario_id: usuarioId || undefined,
       cotizacion_id: deCot?.id || undefined,
       descuento: Number(descuento) || 0, deposito: Number(deposito) || 0,
       metodo_pago: metodo, pagos,
@@ -2705,19 +2718,15 @@ function RentModal({ unit, equipo, onClose, onDone, notify }: {
         </div>
         <div className="p-6 flex-1 overflow-y-auto">
         <div className="space-y-3">
-          <div>
-            <label className={label}>Empresa (cliente registrado)</label>
-            <select className={input} value={empresaId} onChange={e => elegirEmpresa(e.target.value)}>
-              <option value="" className="bg-surface">— Cliente de mostrador —</option>
-              {empresasActivas(empresas).map(em => <option key={em.id} value={em.id} className="bg-surface">{em.nombre}</option>)}
-            </select>
-          </div>
-          {empresaId && obras.length > 0 && (
+          {/* Se teclea el teléfono y, si ya está en el padrón, aparece con su
+              historial para confirmarlo. El sistema sugiere; quien atiende decide. */}
+          <BuscadorCliente valor={sel} onChange={elegirCliente} autoFocus />
+          {sel.cliente && sel.cliente.obras.length > 0 && (
             <div>
               <label className={label}>Obra</label>
               <select className={input} value={obraId} onChange={e => elegirObra(e.target.value)}>
                 <option value="" className="bg-surface">— Sin obra —</option>
-                {obras.map(o => <option key={o.id} value={o.id} className="bg-surface">{o.nombre}</option>)}
+                {sel.cliente.obras.map(o => <option key={o.id} value={o.id} className="bg-surface">{o.nombre}</option>)}
               </select>
             </div>
           )}
@@ -2730,8 +2739,6 @@ function RentModal({ unit, equipo, onClose, onDone, notify }: {
               </select>
             </div>
           )}
-          <div><label className={label}>{obraId ? 'Encargado de la obra' : 'Cliente'} {empresaId ? '' : '*'}</label><input className={input} value={cliente} onChange={e => setCliente(e.target.value)} placeholder={obraId ? 'Encargado' : 'Nombre del cliente'} /></div>
-          <div><label className={label}>Teléfono{obraId ? ' del encargado' : ''}</label><input type="tel" inputMode="numeric" maxLength={10} className={input} value={telefono} onChange={e => setTelefono(soloTelefono(e.target.value))} placeholder="10 dígitos" /></div>
           <div><label className={label}>Dirección / ubicación de obra *</label><input className={input} value={direccion} onChange={e => setDireccion(e.target.value)} placeholder="Dónde estará el equipo" /></div>
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -2792,7 +2799,7 @@ function RentModal({ unit, equipo, onClose, onDone, notify }: {
               </div>
             )}
           </div>
-          <FacturaFields requiere={requiereFactura} onRequiere={setRequiereFactura} factura={factura} onFactura={setFactura} empresaNombre={empresaId ? empresas.find(e => String(e.id) === empresaId)?.nombre : undefined} />
+          <FacturaFields requiere={requiereFactura} onRequiere={setRequiereFactura} factura={factura} onFactura={setFactura} empresaNombre={sel.cliente?.rfc ? sel.cliente.nombre : undefined} />
           {Number(precio) <= 0 && (
             <p className="text-[11px] text-amber-600 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2">
               Este equipo no tiene precio {modalidad === 'dia' ? 'por día' : modalidad === 'semana' ? 'por semana' : 'por mes'} configurado: el total sale en $0. Cárgalo en el producto o elige otra modalidad.
@@ -2823,8 +2830,6 @@ function RentModal({ unit, equipo, onClose, onDone, notify }: {
 function SellModal({ unit, equipo, onClose, onDone, notify }: {
   unit: Unidad; equipo: Equipo; onClose: () => void; onDone: () => void; notify: (m: string, t?: 'ok' | 'err') => void
 }) {
-  const [cliente, setCliente] = useState('')
-  const [telefono, setTelefono] = useState('')
   const [metodo, setMetodo] = useState<'efectivo' | 'tarjeta' | 'transferencia'>('efectivo')
   // Pago dividido: dos métodos que reparten el total con IVA (p. ej. efectivo + tarjeta).
   const [splitPago, setSplitPago] = useState(false)
@@ -2832,25 +2837,10 @@ function SellModal({ unit, equipo, onClose, onDone, notify }: {
   const [monto1, setMonto1] = useState('')
   const [monto2, setMonto2] = useState('')
   const [total, setTotal] = useState(String(equipo.precio_venta ?? ''))
-  const [empresas, setEmpresas] = useState<Empresa[]>([])
-  const [empresaId, setEmpresaId] = useState('')
+  const [sel, setSel] = useState<SeleccionCliente>(SELECCION_VACIA)
   const [requiereFactura, setRequiereFactura] = useState(false)
   const [factura, setFactura] = useState<FacturaData>(FACTURA_VACIA)
   const [busy, setBusy] = useState(false)
-
-  useEffect(() => {
-    api.get('/clientes/?limite=100').then(r => setEmpresas((r.data?.clientes || []).map((c: any) => ({ id: c.id, nombre: c.nombre, activa: c.activo })))).catch(() => {})
-  }, [])
-
-  // Al elegir empresa: rellena comprador y teléfono con los datos guardados.
-  function elegirEmpresa(id: string) {
-    setEmpresaId(id)
-    const em = empresas.find(e => String(e.id) === id)
-    if (em) {
-      setCliente(em.contacto || em.nombre || '')
-      setTelefono(em.telefono || '')
-    }
-  }
 
   // El precio se captura SIN IVA. En VENTAS el IVA (16%) se suma SIEMPRE
   // (a diferencia de la renta). El toggle de factura solo controla la bandeja.
@@ -2860,7 +2850,7 @@ function SellModal({ unit, equipo, onClose, onDone, notify }: {
 
   function submit() {
     if (precioNum <= 0) { notify('El precio debe ser mayor a 0', 'err'); return }
-    const errFactura = validarFactura(requiereFactura, empresaId, factura)
+    const errFactura = validarFactura(requiereFactura, sel.cliente ? String(sel.cliente.id) : '', factura)
     if (errFactura) { notify(errFactura, 'err'); return }
     let pagos: { metodo: string; monto: number }[] | undefined
     if (splitPago) {
@@ -2874,8 +2864,8 @@ function SellModal({ unit, equipo, onClose, onDone, notify }: {
     }
     setBusy(true)
     api.post(`/unidades/${unit.id}/vender/`, {
-      nombre_cliente: cliente.trim(), telefono_cliente: telefono.trim(),
-      metodo_pago: metodo, cliente_id: empresaId || undefined, total: precioNum,
+      nombre_cliente: sel.nombre.trim(), telefono_cliente: sel.telefono,
+      metodo_pago: metodo, cliente_id: sel.cliente?.id || undefined, total: precioNum,
       pagos,
       requiere_factura: requiereFactura, factura,
     })
@@ -2905,15 +2895,9 @@ function SellModal({ unit, equipo, onClose, onDone, notify }: {
         </div>
         <div className="p-6 flex-1 overflow-y-auto">
         <div className="space-y-3">
-          <div>
-            <label className={label}>Empresa (cliente registrado)</label>
-            <select className={input} value={empresaId} onChange={e => elegirEmpresa(e.target.value)}>
-              <option value="" className="bg-surface">— Cliente de mostrador —</option>
-              {empresasActivas(empresas).map(em => <option key={em.id} value={em.id} className="bg-surface">{em.nombre}</option>)}
-            </select>
-          </div>
-          <div><label className={label}>Cliente</label><input className={input} value={cliente} onChange={e => setCliente(e.target.value)} placeholder="Nombre del comprador" /></div>
-          <div><label className={label}>Teléfono</label><input type="tel" inputMode="numeric" maxLength={10} className={input} value={telefono} onChange={e => setTelefono(soloTelefono(e.target.value))} placeholder="10 dígitos" /></div>
+          {/* Una máquina no se vende a un desconocido: el teléfono trae su
+              ficha con lo que ya nos compró, antes de cerrar. */}
+          <BuscadorCliente valor={sel} onChange={setSel} autoFocus />
           <div>
             <div className="flex items-center justify-between mb-1.5">
               <label className={`${label} mb-0`}>Método de pago</label>
@@ -2963,7 +2947,7 @@ function SellModal({ unit, equipo, onClose, onDone, notify }: {
             <div className="flex items-center justify-between text-xs text-mute"><span>IVA (16%)</span><span>${ivaNum.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
             <div className="flex items-center justify-between pt-1 border-t border-edge"><span className="text-sm text-ink font-semibold">Total con IVA</span><span className="text-lg font-black text-price">${totalConIva.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span></div>
           </div>
-          <FacturaFields requiere={requiereFactura} onRequiere={setRequiereFactura} factura={factura} onFactura={setFactura} empresaNombre={empresaId ? empresas.find(e => String(e.id) === empresaId)?.nombre : undefined} />
+          <FacturaFields requiere={requiereFactura} onRequiere={setRequiereFactura} factura={factura} onFactura={setFactura} empresaNombre={sel.cliente?.rfc ? sel.cliente.nombre : undefined} />
         </div>
         </div>
         <div className="px-6 py-4 border-t border-edge flex justify-end gap-3 shrink-0">
@@ -7639,6 +7623,13 @@ const URGENCIA_TXT: Record<Urgencia, string> = {
 }
 
 function UbicacionesAdmin({ notify }: { notify: (m: string, t?: 'ok' | 'err') => void }) {
+  // Administración VE el tablero pero no lo toca: sin `jornada_campo` no hay
+  // botones de entregar/recoger, no se abre la sábana de fotos ni el modal de
+  // taller. Que el admin pudiera entregar desde aquí, sin estar en la obra ni
+  // tener las fotos, era pedir un desastre. Corregir sigue siendo posible, pero
+  // desde Rentas, donde el acto es deliberado.
+  const puede = usePuede()
+  const soloLectura = !puede('jornada_campo')
   const [tareas, setTareas] = useState<Tarea[]>([])
   const [resumen, setResumen] = useState<ResumenTareas>({ total: 0, entregar: 0, recoger: 0, reparar: 0, vencidas: 0, proximas: 0 })
   const [cargando, setCargando] = useState(true)
@@ -7713,9 +7704,15 @@ function UbicacionesAdmin({ notify }: { notify: (m: string, t?: 'ok' | 'err') =>
         )}
       </div>
 
+      {soloLectura && (
+        <p className="px-4 py-3 rounded-xl bg-surface-2 border border-edge text-[13px] text-mute">
+          Vista de supervisión: aquí solo se mira. Para entregar, recoger o subir fotos, entra a <b className="text-ink">Rentas</b>.
+        </p>
+      )}
+
       {/* La lista de tareas: una acción por card. */}
       {pendientes.map((t, i) => (
-        <TareaCard key={`${t.tipo}-${t.renta_id ?? t.orden_id}-${i}`} t={t}
+        <TareaCard key={`${t.tipo}-${t.renta_id ?? t.orden_id}-${i}`} t={t} soloLectura={soloLectura}
           onEntregar={() => setHoja(t)} onReparar={() => t.orden_id && setTrabajando(t.orden_id)} />
       ))}
 
@@ -7726,16 +7723,18 @@ function UbicacionesAdmin({ notify }: { notify: (m: string, t?: 'ok' | 'err') =>
         <div className="pt-2 space-y-2.5">
           <p className="text-[12px] font-bold text-mute uppercase tracking-wide px-1 mb-2">Próximas ({proximas.length})</p>
           {proximas.map((t, i) => (
-            <TareaCard key={`prox-${t.renta_id}-${i}`} t={t} atenuada
+            <TareaCard key={`prox-${t.renta_id}-${i}`} t={t} atenuada soloLectura={soloLectura}
               onEntregar={() => setHoja(t)} onReparar={() => {}} />
           ))}
         </div>
       )}
 
-      {hoja && (
+      {/* Los `!soloLectura` son cinturón: hoy sin botones nadie los abre, pero un
+          camino nuevo que llame a setHoja no debe destapar la sábana de fotos. */}
+      {hoja && !soloLectura && (
         <EntregaHoja tarea={hoja} onClose={() => setHoja(null)} onHecho={() => { setHoja(null); cargar() }} notify={notify} />
       )}
-      {trabajando !== null && (
+      {trabajando !== null && !soloLectura && (
         <TallerTrabajoModal ordenId={trabajando} onClose={() => setTrabajando(null)} onCambio={cargar} notify={notify} />
       )}
     </div>
@@ -7751,8 +7750,9 @@ function TareaResumenChip({ n, label, tipo }: { n: number; label: string; tipo: 
   )
 }
 
-function TareaCard({ t, atenuada, onEntregar, onReparar }: {
-  t: Tarea; atenuada?: boolean; onEntregar: () => void; onReparar: () => void
+function TareaCard({ t, atenuada, soloLectura, onEntregar, onReparar }: {
+  t: Tarea; atenuada?: boolean; soloLectura?: boolean
+  onEntregar: () => void; onReparar: () => void
 }) {
   // Fallback defensivo: si el backend emite un tipo de tarea que este panel aún
   // no conoce, se degrada con un estilo genérico en vez de tumbar TODO el panel
@@ -7823,7 +7823,15 @@ function TareaCard({ t, atenuada, onEntregar, onReparar }: {
           </span>
         )}
         <div className="flex-1" />
-        {t.tipo === 'reparar' ? (
+        {soloLectura ? (
+          // Supervisión: en vez del botón, qué se espera de esta tarea. Sin botón
+          // fantasma que se vea deshabilitado y invite a picarlo.
+          <span className="text-[12px] text-mute pl-1 font-medium">
+            {t.tipo === 'reparar' ? 'En taller'
+              : t.tipo === 'entrega_prometida' ? 'Compromiso de hoy'
+              : t.tipo === 'recoger' ? 'Por recoger' : 'Por entregar'}
+          </span>
+        ) : t.tipo === 'reparar' ? (
           <button onClick={onReparar} className="btn-acento h-9 px-4 rounded-full text-[13px] font-bold">Trabajar</button>
         ) : t.tipo === 'entrega_prometida' ? (
           // Compromiso informativo: todavía no es renta/venta, no hay nada que "entregar" en el sistema.
