@@ -6,6 +6,7 @@ import * as z from 'zod'
 import { Eye, EyeOff, Loader2 } from 'lucide-react'
 
 import api from '../lib/api'
+import { useAuth } from '../store/auth'
 import { AuthCabecera, AuthItem } from '@/components/ui/auth-split-screen'
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
@@ -22,6 +23,7 @@ type Valores = z.infer<typeof esquema>
 export default function Restablecer() {
   const { uid = '', token = '' } = useParams()
   const navigate = useNavigate()
+  const { logout } = useAuth()
   const [estado, setEstado] = useState<'cargando' | 'valido' | 'invalido'>('cargando')
   const [nombre, setNombre] = useState('')
   const [error, setError] = useState<string | undefined>(undefined)
@@ -45,15 +47,21 @@ export default function Restablecer() {
     setError(undefined)
     try {
       await api.post('/auth/password/restablecer/', { uid, token, password: datos.password })
-      // Entró: al login con un aviso de éxito. `replace` para que "atrás" no
-      // vuelva a este formulario con un token ya quemado.
+      // La contraseña cambió: si quedaba una sesión abierta (p. ej. el admin la
+      // olvidó pero seguía logueado en otra pestaña), se cierra para entrar
+      // limpio con la nueva y no dejar viva la anterior.
+      logout()
+      // Al login con un aviso de éxito. `replace` para que "atrás" no vuelva a
+      // este formulario con un token ya quemado.
       navigate('/login?restablecida=1', { replace: true })
     } catch (err: any) {
       const msg = err?.response?.data?.detail || 'No se pudo restablecer. Intenta de nuevo.'
       setError(msg)
       // Si el backend dice que el enlace ya no vale, cambiamos a la vista de
       // "enlace inválido" (pedir uno nuevo) en vez de dejar el formulario muerto.
-      if (err?.response?.status === 400 && /venci|no es válid/i.test(msg)) setEstado('invalido')
+      // Ojo: solo por el ENLACE. Un 400 por contraseña débil (los validadores de
+      // Django) debe quedarse aquí, con el mensaje, para poder corregirla.
+      if (err?.response?.status === 400 && /venci|inv[áa]lid|no es v[áa]lid/i.test(msg)) setEstado('invalido')
     }
   }
 

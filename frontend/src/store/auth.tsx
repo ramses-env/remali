@@ -18,22 +18,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [token, setToken] = useState<string | null>(() => leerToken())
 
   async function login(usuario: string, password: string, recordar = true) {
-    async function tryEndpoints() {
-      const attempts = [
-        { url: '/auth/token/', payload: { email: usuario, password } },
-        { url: '/auth/token/', payload: { username: usuario, password } },
-        { url: '/auth/login/', payload: { email: usuario, password } },
-      ]
-      for (const a of attempts) {
-        try {
-          const r = await api.post(a.url, a.payload as any)
-          const t = r.data?.access || r.data?.token || r.data?.key
-          if (typeof t === 'string' && t.length > 0) return t
-        } catch {}
-      }
-      throw new Error('auth')
-    }
-    const t = await tryEndpoints()
+    // Un solo endpoint: /auth/login/ acepta correo O usuario y deja el REFRESH en
+    // cookie httpOnly (los /auth/token/ de antes lo devolvían en el body y no
+    // ponían la cookie → el refresco silencioso no tendría de dónde renovar).
+    const r = await api.post('/auth/login/', { email: usuario, password })
+    const t = r.data?.access
+    if (typeof t !== 'string' || !t) throw new Error('auth')
     guardarToken(t, recordar)
     setToken(t)
   }
@@ -44,6 +34,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   function logout() {
+    // Cierra también en el SERVIDOR: borra la cookie httpOnly del refresh e
+    // invalida los tokens vivos. Fire-and-forget (va con el access aún en el
+    // header); la UI no espera y, aunque falle la red, se limpia local igual.
+    try { api.post('/auth/logout/', {}, { withCredentials: true }).catch(() => {}) } catch { /* noop */ }
     borrarToken()
     // El acento y el nivel son de esa cuenta, no del navegador: si no se limpian,
     // quien entre después vería el panel en negro y abriría en la sección del

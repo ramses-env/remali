@@ -73,7 +73,10 @@ export default function Login() {
     } catch (err: any) {
       const data = err?.response?.data
       if (data?.codigo === 'correo_sin_verificar') {
-        setPendiente(datos.usuario.includes('@') ? datos.usuario.trim().toLowerCase() : '')
+        // El backend manda el correo de la cuenta (la contraseña ya se validó, no
+        // hay filtración): así el aviso lo nombra y "Reenviar" funciona aunque
+        // haya entrado con su usuario en vez del correo.
+        setPendiente(data.email || (datos.usuario.includes('@') ? datos.usuario.trim().toLowerCase() : ''))
         return
       }
       if (data?.detail) {

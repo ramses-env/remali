@@ -32,3 +32,14 @@ export function borrarToken() {
     sessionStorage.removeItem(CLAVE)
   } catch { /* nada que limpiar */ }
 }
+
+/** ¿La sesión se guardó con "recordarme" (localStorage)? Se usa al renovar el
+ *  access en silencio para volver a guardarlo en el MISMO almacén y no cambiar
+ *  la duración que eligió el usuario. */
+export function esRecordado(): boolean {
+  try {
+    return localStorage.getItem(CLAVE) !== null
+  } catch {
+    return false
+  }
+}

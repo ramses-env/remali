@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 
 import { consultarYo, destinoTrasEntrar, recordarAcceso } from './acceso'
 import { useAuth } from '../store/auth'
@@ -40,10 +40,15 @@ export function useIrTrasEntrar(next: string) {
 export function useRedirigirSiHaySesion(next: string): boolean {
   const { token, logout } = useAuth()
   const nav = useNavigate()
-  const [verificando, setVerificando] = useState(() => Boolean(token))
+  const loc = useLocation()
+  // Restablecer contraseña DEBE funcionar aunque haya sesión abierta: el caso
+  // típico es que alguien la olvidó pero seguía logueado en otra pestaña. Si
+  // redirigiéramos al panel, jamás vería el formulario del enlace del correo.
+  const esReset = loc.pathname.startsWith('/restablecer')
+  const [verificando, setVerificando] = useState(() => !esReset && Boolean(token))
 
   useEffect(() => {
-    if (!token) return
+    if (esReset || !token) return
     let vivo = true
     consultarYo()
       .then(yo => {

@@ -207,6 +207,9 @@ INSTALLED_APPS = [
     'empresas',
     'facturacion',
     'cotizaciones',
+    # Va al final: importa DomicilioMixin de `empresas` y nombre_propio de
+    # `maquinaria` a nivel de módulo, así que ambas deben cargar antes.
+    'clientes',
 ]
 
 
@@ -442,6 +445,7 @@ REST_FRAMEWORK = {
         'registro': '5/hour',             # altas de cuenta de cliente por IP
         'cambio_password': '10/hour',     # cambios de contraseña propia, por cuenta
         'restablecer': '5/hour',          # solicitudes de "olvidé mi contraseña" por IP
+        'restablecer_uso': '20/hour',     # abrir/usar el enlace del correo por IP (anti barrido de tokens)
         'google_login': '10/min',         # inicio de sesión con Google por IP
         'cupon': '30/hour',               # validar/aplicar cupón, por cuenta
         'token_publico': '120/hour',      # acceso por liga/QR/PDF público por IP
@@ -454,7 +458,11 @@ REST_FRAMEWORK = {
 from datetime import timedelta
 SIMPLE_JWT = {
     'UPDATE_LAST_LOGIN': True,
-    'ACCESS_TOKEN_LIFETIME': timedelta(hours=12),
+    # Access CORTO: si lo roban, la ventana es chica y ya no es "12 h no
+    # revocables". El front lo renueva solo (refresco silencioso) con el refresh
+    # que vive en cookie httpOnly, así el usuario no nota nada y la sesión larga
+    # (7 días) sigue de pie. Configurable por si se quiere afinar.
+    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=int(os.environ.get('ACCESS_TOKEN_MINUTES', '60'))),
     'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
     # Rotación: cada refresh emite un refresh NUEVO e invalida el anterior.
     # Si un refresh se roba, solo sirve una vez; la próxima renovación legítima
@@ -472,6 +480,12 @@ SIMPLE_JWT = {
     'TOKEN_TYPE_CLAIM': 'token_type',
     'JTI_CLAIM': 'jti',
 }
+
+# Cookie httpOnly donde vive el REFRESH token: JS NO puede leerla, así un XSS no
+# roba la sesión larga (7 días). El access sí llega al front pero dura poco y se
+# renueva solo. Ver apps/maquinaria/views.py: _set_refresh_cookie / refrescar_token.
+REFRESH_COOKIE_NAME = os.environ.get('REFRESH_COOKIE_NAME', 'remali_refresh')
+REFRESH_COOKIE_PATH = '/api/auth/'  # solo se manda a refresh/logout, no a toda la API
 
 # ─────────────────────────────────────────────
 #  CACHE — listo para Redis
@@ -598,7 +612,11 @@ else:
     CSRF_COOKIE_SAMESITE = 'Lax'
     FRONTEND_URL = os.environ.get('FRONTEND_URL', 'http://localhost:5173')
     BACKEND_URL = os.environ.get('BACKEND_URL', 'http://localhost:8000')
-PASSWORD_RESET_TIMEOUT = int(os.environ.get('PASSWORD_RESET_TIMEOUT', '14400'))
+# Vigencia del enlace de "olvidé mi contraseña": 1 hora. Corto a propósito —
+# el enlace llega a un buzón de correo, y ese buzón puede quedar abierto en una
+# computadora compartida. Una hora alcanza de sobra para leer el correo y
+# cambiar la clave; lo que no alcanza es para que alguien lo encuentre mañana.
+PASSWORD_RESET_TIMEOUT = int(os.environ.get('PASSWORD_RESET_TIMEOUT', '3600'))
 EMAIL_VERIFICATION_TIMEOUT = int(os.environ.get('EMAIL_VERIFICATION_TIMEOUT', '14400'))
 
 if EMAIL_USE_SSL:

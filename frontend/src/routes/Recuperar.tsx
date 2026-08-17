@@ -21,6 +21,7 @@ type Valores = z.infer<typeof esquema>
 export default function Recuperar() {
   const [enviado, setEnviado] = useState(false)
   const [correo, setCorreo] = useState('')
+  const [error, setError] = useState<string | undefined>(undefined)
 
   const form = useForm<Valores>({
     resolver: zodResolver(esquema),
@@ -30,8 +31,27 @@ export default function Recuperar() {
 
   async function onSubmit(datos: Valores) {
     const email = datos.email.trim().toLowerCase()
-    // `fondo: true`: sin overlay global; el botón ya muestra su propio spinner.
-    try { await api.post('/auth/password/olvide/', { email }, { fondo: true } as never) } catch { /* respuesta neutra */ }
+    setError(undefined)
+    try {
+      // `fondo: true`: sin overlay global; el botón ya muestra su propio spinner.
+      await api.post('/auth/password/olvide/', { email }, { fondo: true } as never)
+    } catch (err: any) {
+      // Que la respuesta sea NEUTRA (no decir si la cuenta existe) no significa
+      // tragarse todo: si el correo ni siquiera salió, decírselo. Antes, un 429
+      // o un servidor caído mostraban "revisa tu correo" y la persona se quedaba
+      // esperando un mensaje que nunca iba a llegar.
+      const status = err?.response?.status
+      if (status === 429) {
+        setError('Ya pediste el enlace varias veces. Espera un rato antes de volver a intentarlo (y revisa Spam, quizá ya te llegó).')
+        return
+      }
+      if (!err?.response || status >= 500) {
+        setError('No pudimos enviar el enlace en este momento. Inténtalo de nuevo en unos minutos.')
+        return
+      }
+      // Cualquier otro 4xx (p. ej. correo que el backend no acepta): respuesta
+      // neutra, igual que si la cuenta no existiera.
+    }
     setCorreo(email)
     setEnviado(true)
   }
@@ -45,7 +65,7 @@ export default function Recuperar() {
         />
         <AuthItem>
           <div className="px-4 py-3 rounded-xl bg-gold-soft border border-gold/30 text-sm text-ink">
-            <p>Enviamos el enlace a <b>{correo}</b>. Vence en unas horas.</p>
+            <p>Enviamos el enlace a <b>{correo}</b>. Vence en 1 hora.</p>
             <p className="mt-1 text-mute">¿No lo ves? Revisa Spam o Promociones.</p>
           </div>
         </AuthItem>
@@ -62,6 +82,12 @@ export default function Recuperar() {
         title="¿Olvidaste tu contraseña?"
         description="Escribe tu correo y te enviamos un enlace para crear una nueva."
       />
+
+      {error && (
+        <AuthItem>
+          <div className="px-4 py-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-600 dark:text-red-400 text-sm">{error}</div>
+        </AuthItem>
+      )}
 
       <Form {...form}>
         <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">

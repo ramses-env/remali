@@ -191,9 +191,8 @@ Base: todas las rutas cuelgan de `/api/`. Autenticación por `Authorization: Bea
 
 | Método | Ruta | Permiso | Descripción |
 |--------|------|---------|-------------|
-| POST | `/api/auth/token/` | público | Obtener par de tokens (SimpleJWT) |
-| POST | `/api/auth/refresh/` | público | Refrescar access token |
-| POST | `/api/auth/login/` | público | Login flexible por username **o** email |
+| POST | `/api/auth/refresh/` | público | Refrescar access token (lee el refresh de la cookie httpOnly) |
+| POST | `/api/auth/login/` | público | Login flexible por username **o** email. Única puerta de entrada: freno de 10/min por IP, refresh en cookie httpOnly y candado de correo confirmado para clientes (403 `correo_sin_verificar`) |
 | GET | `/api/auth/me/` | autenticado | Datos del usuario actual |
 | GET/PUT/PATCH | `/api/auth/perfil/` | autenticado | Ver/editar perfil (avatar incluido) |
 
