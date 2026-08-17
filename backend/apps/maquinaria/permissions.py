@@ -33,6 +33,8 @@ La autorización vive AQUÍ, no en el frontend. El panel oculta lo que no aplica
 por comodidad, pero cualquiera puede llamar la API directamente: si un endpoint
 no declara su nivel, no está protegido.
 """
+from typing import NamedTuple, Optional
+
 from rest_framework import permissions
 
 ROL_ADMIN = 'Administrador'
@@ -120,61 +122,119 @@ def es_asesor(user) -> bool:
     return nivel_de(user) == NIVEL_TECNICO and ROL_ASESOR in _grupos(user)
 
 
+# ═══════════════════════════════════════════════════════════════════
+#  CATÁLOGO DE CAPACIDADES
+# ═══════════════════════════════════════════════════════════════════
+# Las capacidades son DATOS, no un diccionario escrito a mano dentro de una
+# función. Está así a propósito: el dueño pidió una pantalla donde el admin
+# encienda y apague capacidades por rol, y esa pantalla va a leer este catálogo
+# para pintarse sola —con su etiqueta y su explicación— en vez de que alguien
+# la mantenga sincronizada a mano cada vez que se agrega una.
+#
+# `nivel_minimo=None` significa "no se enciende por nivel": es un puesto, no un
+# poder que cascadee hacia arriba (ver `jornada_campo`).
+
+class Capacidad(NamedTuple):
+    nombre: str
+    etiqueta: str
+    descripcion: str
+    nivel_minimo: Optional[int]
+
+
+CATALOGO = (
+    Capacidad('gestionar_usuarios', 'Gestionar usuarios',
+              'Dar de alta al equipo y cambiarle el rol.', NIVEL_DUENO),
+    Capacidad('configurar_negocio', 'Configurar el negocio',
+              'Datos del negocio, correos de aviso, códigos de seguridad.', NIVEL_DUENO),
+    Capacidad('ver_dinero', 'Ver las cuentas del negocio',
+              'Ingresos, métricas e historial completo. Distinto de cobrar.', NIVEL_ADMIN),
+    Capacidad('ver_montos_operacion', 'Ver montos de lo que opera',
+              'Cobrar lo que uno mismo atiende: el técnico en campo, el cajero en '
+              'el mostrador. No incluye las cuentas del negocio.', NIVEL_TECNICO),
+    Capacidad('vender', 'Vender', 'Registrar ventas de maquinaria.', NIVEL_TECNICO),
+    Capacidad('rentar', 'Rentar', 'Levantar rentas y devoluciones.', NIVEL_TECNICO),
+    Capacidad('cotizar', 'Cotizar', 'Hacer presupuestos y mandarlos a autorizar.', NIVEL_ADMIN),
+    Capacidad('facturar', 'Facturar', 'Atender la bandeja de por facturar.', NIVEL_ADMIN),
+    Capacidad('editar_catalogo', 'Editar el catálogo',
+              'Equipos, marcas, precios de lista. Cambia el patrimonio.', NIVEL_ADMIN),
+    Capacidad('alta_inventario', 'Dar de alta unidades',
+              'Meter máquinas nuevas al inventario.', NIVEL_ADMIN),
+    Capacidad('operar_inventario', 'Mover unidades',
+              'Cambiar de ubicación y estado las unidades que ya existen.', NIVEL_TECNICO),
+    Capacidad('reparar', 'Reparar', 'Órdenes de reparación y mantenimiento.', NIVEL_TECNICO),
+    Capacidad('usar_caja', 'Usar la caja',
+              'Vender refacciones en el mostrador y cobrar.', NIVEL_ADMIN),
+    Capacidad('corte_caja', 'Hacer corte de caja',
+              'Arqueo del turno.', NIVEL_ADMIN),
+    # ── Padrón de clientes ──
+    Capacidad('ver_clientes', 'Ver clientes',
+              'Buscar en el padrón y abrir la ficha de un cliente. Sin esto, el '
+              'buscador del mostrador no sirve.', NIVEL_TECNICO),
+    Capacidad('editar_clientes', 'Editar clientes',
+              'Dar de alta clientes y contactos. Los datos fiscales y fundir dos '
+              'clientes siguen siendo de administración.', NIVEL_TECNICO),
+    Capacidad('jornada_campo', 'Mi jornada',
+              'El escritorio del técnico de campo. Es un puesto, no un poder: '
+              'administración supervisa desde Rentas y Reparaciones.', None),
+)
+
+
+# Ajustes por PUESTO, para los que comparten el nivel 1 y hacen trabajos
+# distintos. Son VALORES POR DEFECTO, no la ley del sistema: cuando exista la
+# pantalla de permisos configurables, leerá lo que el admin haya guardado y
+# caerá aquí solo si no hay nada configurado.
+AJUSTES_POR_PUESTO = {
+    # Mostrador de refacciones: vende y cobra, no anda en campo.
+    ROL_CAJERO: {'rentar': False, 'reparar': False, 'operar_inventario': False,
+                 'usar_caja': True, 'corte_caja': True},
+    # Mostrador de presupuestos: cotiza y manda a autorizar. No vende, no renta,
+    # no repara, no toca inventario ni precios ni las cuentas.
+    ROL_ASESOR: {'vender': False, 'rentar': False, 'reparar': False,
+                 'operar_inventario': False, 'cotizar': True},
+    # Técnico de campo puro (sin puesto especializado): suyo es Mi jornada.
+    None: {'jornada_campo': True},
+}
+
+
+def catalogo_capacidades() -> list:
+    """El catálogo como datos serializables, para que el panel lo pinte solo."""
+    return [c._asdict() for c in CATALOGO]
+
+
 def puede_de(user) -> dict:
-    """Capacidades derivadas del nivel, para que el panel oculte lo que no aplica.
+    """Capacidades del usuario, para que el panel oculte lo que no aplica.
 
     Es un espejo de lo que ya imponen las clases de permiso: informativo para la
     interfaz, nunca la única defensa.
 
-    El grueso sale del nivel (jerárquico, cascadea hacia arriba). Los puestos
-    especializados que comparten el nivel 1 —cajero, asesor— hacen un trabajo
-    acotado: se parte del cálculo por nivel y luego cada puesto enciende su cajón
-    y apaga lo que no le toca. Se distinguen por grupo, no por número.
+    El grueso sale del NIVEL (jerárquico, cascadea hacia arriba). Encima, los
+    puestos que comparten el nivel 1 aplican su ajuste. Se distinguen por grupo,
+    no por número, porque cajero, asesor y técnico son todos nivel 1.
     """
     n = nivel_de(user)
-    caps = {
-        'nivel': n,
-        'rol': rol_de(user),
-        'gestionar_usuarios': n >= NIVEL_DUENO,
-        'configurar_negocio': n >= NIVEL_DUENO,
-        # Cuentas del negocio (ingresos, métricas, historial completo).
-        'ver_dinero': n >= NIVEL_ADMIN,
-        # Cobrar lo que uno mismo opera: el técnico entrega y cobra en campo, el
-        # cajero cobra en el mostrador. Distinto de ver las cuentas del negocio.
-        'ver_montos_operacion': n >= NIVEL_TECNICO,
-        'vender': n >= NIVEL_TECNICO,
-        'rentar': n >= NIVEL_TECNICO,
-        'cotizar': n >= NIVEL_ADMIN,
-        'facturar': n >= NIVEL_ADMIN,
-        # Dar de alta equipo o tocar el catálogo cambia el patrimonio: solo
-        # administración. El técnico mueve las unidades que ya existen.
-        'editar_catalogo': n >= NIVEL_ADMIN,
-        'alta_inventario': n >= NIVEL_ADMIN,
-        'operar_inventario': n >= NIVEL_TECNICO,
-        'reparar': n >= NIVEL_TECNICO,
-        # La caja (POS de refacciones): el cajero y de administración para arriba.
-        'usar_caja': n >= NIVEL_ADMIN,
-        'corte_caja': n >= NIVEL_ADMIN,
-        # "Mi jornada": el escritorio del técnico de campo. No es poder que suba,
-        # es un puesto; administración supervisa desde Rentas y Reparaciones.
-        'jornada_campo': False,
-    }
-    # Puestos especializados de nivel 1: comparten el número con el técnico, pero
-    # su trabajo es otro. Se les enciende su cajón y se apaga lo que no les toca.
+    caps = {c.nombre: (c.nivel_minimo is not None and n >= c.nivel_minimo)
+            for c in CATALOGO}
+    caps['nivel'] = n
+    caps['rol'] = rol_de(user)
+
     if n == NIVEL_TECNICO:
-        if es_cajero(user):
-            # Mostrador de refacciones: vende y cobra, no anda en campo.
-            caps.update(rentar=False, reparar=False, operar_inventario=False,
-                        usar_caja=True, corte_caja=True)
-        elif es_asesor(user):
-            # Mostrador de presupuestos: cotiza y manda a autorizar. No vende, no
-            # renta, no repara, no toca inventario ni precios ni las cuentas.
-            caps.update(vender=False, rentar=False, reparar=False,
-                        operar_inventario=False, cotizar=True)
-        else:
-            # Técnico de campo puro: suyo es Mi jornada.
-            caps['jornada_campo'] = True
+        puesto = ROL_CAJERO if es_cajero(user) else (ROL_ASESOR if es_asesor(user) else None)
+        caps.update(AJUSTES_POR_PUESTO[puesto])
     return caps
+
+
+class ExigeCapacidad(permissions.BasePermission):
+    """Base: exige una CAPACIDAD del catálogo, no un nivel ni un puesto.
+
+    Es la forma preferida para todo lo nuevo. Preguntar por capacidad —y no por
+    `if rol == 'Cajero'`— es lo que va a permitir que la pantalla de permisos
+    configurables funcione sin ir cazando condicionales por las vistas.
+    """
+    capacidad = ''
+    message = 'No tienes permisos para esta acción.'
+
+    def has_permission(self, request, view):
+        return bool(puede_de(getattr(request, 'user', None)).get(self.capacidad))
 
 
 class _NivelMinimo(permissions.BasePermission):
