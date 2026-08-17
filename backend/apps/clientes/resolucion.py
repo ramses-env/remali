@@ -66,14 +66,20 @@ def resolver_cliente(*, cliente_id=None, contacto_id=None, nombre='', telefono='
 def resumen_de(cliente) -> dict:
     """Lo que el mostrador necesita ver ANTES de vender.
 
-    Por ahora son contadores; el dinero (saldo y crédito a favor) entra en la
-    entrega C, desde el mismo cálculo que la ficha, para que no haya dos
-    versiones de la misma cifra.
+    El dinero sale del MISMO cálculo que la ficha (`cuenta.estado_de_cuenta`),
+    no de una versión aparte: la cifra que el cliente ve en el mostrador es la
+    que alguien va a discutir, y no puede diferir de la del panel.
     """
+    from .cuenta import estado_de_cuenta
+    cuenta = estado_de_cuenta(cliente)
     return {
         'compras': cliente.ventas.exclude(estado='cancelada').count(),
         'rentas_activas': cliente.rentas.filter(estado__in=['activa', 'reservada']).count(),
         'rentas': cliente.rentas.exclude(estado='cancelada').count(),
         'cotizaciones': cliente.cotizaciones.count(),
         'reparaciones': cliente.reparaciones.count(),
+        'saldo': cuenta['saldo'],
+        'credito_a_favor': cuenta['credito_a_favor'],
+        'tiene_adeudo': cuenta['tiene_adeudo'],
+        'tiene_credito': cuenta['tiene_credito'],
     }

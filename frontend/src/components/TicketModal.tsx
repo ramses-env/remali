@@ -176,7 +176,7 @@ export default function TicketModal({ url, onClose }: { url: string; onClose: ()
               } catch { /* el toast global del interceptor ya avisa */ }
             }}
             disabled={animando}
-            className="py-2.5 rounded-full border border-gold/50 text-gold text-sm font-bold hover:bg-gold-soft transition-colors disabled:opacity-50">
+            className="py-2.5 rounded-full border border-gold/50 text-gold-ink text-sm font-bold hover:bg-gold-soft transition-colors disabled:opacity-50">
             Orden carta (PDF) — para el cliente
           </button>
           <button onClick={onClose} className="py-2 rounded-full text-mute text-sm font-medium hover:text-ink transition-colors">Cerrar</button>

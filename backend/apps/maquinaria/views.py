@@ -556,24 +556,46 @@ class PerfilDetail(generics.RetrieveUpdateAPIView):
         return perfil
 
 
+# La liga del correo no solo verifica: deja la sesión abierta. Eso la vuelve una
+# llave de la cuenta, y una llave que no caduca acaba olvidada en un buzón viejo.
+VERIFICACION_VIGENCIA = timedelta(hours=48)
+
+
+def _nuevo_token_verificacion(perfil):
+    """Emite (y sella con la hora) un token de verificación nuevo.
+
+    Vive aquí y no copiado en registro/reenviar porque el sello de tiempo es lo
+    que hace caducar la liga: un sitio que lo olvide emite una llave eterna.
+    """
+    perfil.email_token = token_urlsafe(24)
+    perfil.email_token_creado = timezone.now()
+    return perfil.email_token
+
+
 def _enviar_correo_verificacion(user, token):
     """Envía el correo con la liga para confirmar la cuenta.
 
-    Se dispara al registrarse y al pedir un reenvío. La liga apunta al endpoint
-    público del backend (GET) que marca el correo como verificado y muestra la
-    confirmación. Si el usuario no tiene correo o token, no hace nada.
+    Se dispara al registrarse y al pedir un reenvío. La liga apunta al FRONTEND
+    (no al backend): esa página confirma con un POST y entra sola con la sesión
+    que devuelve el backend. Va al front por dos razones — la pantalla de texto
+    pelón del backend no era presentable, y un GET lo abren solos los escáneres
+    de correo (SafeLinks, antivirus), que quemaban el token antes que el usuario.
+    Si el usuario no tiene correo o token, no hace nada.
     """
     if not user or not (getattr(user, 'email', None) or '').strip() or not token:
         return
     from django.conf import settings
     from .correo import enviar_async
 
-    url = f'{settings.BACKEND_URL.rstrip("/")}/api/auth/verificar-correo/{token}/'
+    url = f'{settings.FRONTEND_URL.rstrip("/")}/verificar/{token}'
+    horas = int(VERIFICACION_VIGENCIA.total_seconds() // 3600)
     nombre = user.get_full_name() or user.username
     cuerpo = (
         f'Hola {nombre}:\n\n'
         f'Gracias por crear tu cuenta en REMALI. Para activarla, confirma que este '
         f'correo es tuyo abriendo la siguiente liga:\n\n{url}\n\n'
+        f'La liga te deja dentro de tu cuenta y vence en {horas} horas. Si vence, '
+        f'puedes pedir una nueva desde la pantalla de inicio de sesión.\n\n'
         f'Si no creaste esta cuenta, puedes ignorar este mensaje.\n\n— REMALI'
     )
     enviar_async('Verifica tu correo · REMALI', cuerpo, [user.email])
@@ -634,7 +656,7 @@ def registro(request):
         user.groups.add(grupo)
         perfil, _ = PerfilUsuario.objects.get_or_create(usuario=user)
         perfil.telefono = (d.get('telefono') or '').strip()
-        perfil.email_token = token = token_urlsafe(24)
+        token = _nuevo_token_verificacion(perfil)
         perfil.save()
         espejar_obra_predeterminada(user)
 
@@ -899,29 +921,86 @@ def restablecer_password(request):
 @api_view(['GET'])
 @permission_classes([permissions.AllowAny])
 def verificar_correo_usuario(request, token: str):
+    """Puente para las ligas viejas (las que ya salieron por correo apuntando aquí).
+
+    Ya NO verifica nada: manda a la página del front, que es quien confirma con un
+    POST y abre la sesión. Así los correos anteriores siguen funcionando y, de
+    paso, los escáneres de correo que abren la liga solos dejan de quemar el token.
+    """
+    from django.conf import settings
+    from django.shortcuts import redirect
+
     token = (token or '').strip()
+    destino = f'{settings.FRONTEND_URL.rstrip("/")}/verificar/{token}' if token else \
+        f'{settings.FRONTEND_URL.rstrip("/")}/login'
+    return redirect(destino)
+
+
+@api_view(['POST'])
+@authentication_classes([])       # ver nota en solicitar_restablecer: un Bearer
+@permission_classes([permissions.AllowAny])   # vencido en el navegador tumbaría
+@throttle_classes([RestablecerUsoThrottle])   # esta vista pública con un 401
+def verificar_correo(request):
+    """Confirma el correo y, de una vez, deja la sesión abierta.
+
+    La liga del correo ya demuestra dos cosas: que el buzón es suyo y que quien la
+    abre tiene acceso a él. Pedirle además la contraseña justo después no protege
+    nada y sí pierde a gente en el camino, así que aquí se emite el mismo par de
+    JWT que el login (access en el body, refresh en cookie httpOnly).
+
+    Por eso mismo el token es de un solo uso y caduca: mientras vive, es la llave
+    de la cuenta.
+    """
+    token = (request.data.get('token') or '').strip()
     # Un token vacío haría match con TODOS los perfiles sin verificar (default='').
     if not token:
-        return HttpResponse('Token inválido.', status=404)
+        return Response({'detail': 'Liga inválida.', 'codigo': 'invalido'}, status=404)
     perfil = PerfilUsuario.objects.filter(email_token=token).select_related('usuario').first()
     if not perfil:
-        return HttpResponse('Token inválido.', status=404)
+        # Ya usado, inexistente o inventado: la misma respuesta para los tres. El
+        # front ofrece pedir una liga nueva, que resuelve el caso real.
+        return Response({'detail': 'Esta liga ya no sirve.', 'codigo': 'invalido'}, status=404)
+
+    # Sin sello de tiempo (tokens de antes de que la liga abriera sesión) se trata
+    # como vencido: no vamos a dejar entrar con una llave de origen desconocido.
+    creado = perfil.email_token_creado
+    if not creado or timezone.now() - creado > VERIFICACION_VIGENCIA:
+        return Response({'detail': 'Esta liga venció.', 'codigo': 'vencido'}, status=400)
+
+    user = perfil.usuario
     perfil.email_verificado = True
     perfil.email_verificado_en = timezone.now()
     perfil.email_token = ''  # de un solo uso: se invalida al verificar
+    perfil.email_token_creado = None
     # BUG previo: no se guardaba, así que el correo nunca quedaba verificado.
-    perfil.save(update_fields=['email_verificado', 'email_verificado_en', 'email_token'])
-    return HttpResponse('Correo verificado correctamente.', status=200)
+    perfil.save(update_fields=[
+        'email_verificado', 'email_verificado_en', 'email_token', 'email_token_creado',
+    ])
+
+    # El correo queda confirmado igual (es cierto y le sirve), pero la sesión no
+    # se abre: una cuenta desactivada no entra por ninguna puerta.
+    if not user.is_active:
+        return Response({'detail': 'Esta cuenta está desactivada.', 'codigo': 'inactiva'}, status=403)
+
+    refresh = TokenObtainPairSerializer.get_token(user)
+    resp = Response({
+        'ok': True,
+        'access': str(refresh.access_token),
+        'nombre': (user.first_name or '').strip() or user.get_full_name() or user.username,
+    })
+    return _set_refresh_cookie(resp, str(refresh))
 
 
 @api_view(['POST'])
 @permission_classes([permissions.IsAuthenticated])
 def reenviar_verificacion(request):
     perfil, _ = PerfilUsuario.objects.get_or_create(usuario=request.user)
-    perfil.email_token = token_urlsafe(24)
+    _nuevo_token_verificacion(perfil)
     perfil.email_verificado = False
     perfil.email_verificado_en = None
-    perfil.save(update_fields=['email_token', 'email_verificado', 'email_verificado_en'])
+    perfil.save(update_fields=[
+        'email_token', 'email_token_creado', 'email_verificado', 'email_verificado_en',
+    ])
     _enviar_correo_verificacion(request.user, perfil.email_token)
     return Response({'ok': True})
 
@@ -935,10 +1014,12 @@ def reenviar_verificacion_publica(request):
     user = User.objects.filter(email__iexact=email).first()
     if user:
         perfil, _ = PerfilUsuario.objects.get_or_create(usuario=user)
-        perfil.email_token = token_urlsafe(24)
+        _nuevo_token_verificacion(perfil)
         perfil.email_verificado = False
         perfil.email_verificado_en = None
-        perfil.save(update_fields=['email_token', 'email_verificado', 'email_verificado_en'])
+        perfil.save(update_fields=[
+            'email_token', 'email_token_creado', 'email_verificado', 'email_verificado_en',
+        ])
         _enviar_correo_verificacion(user, perfil.email_token)
     return Response({'ok': True})
 

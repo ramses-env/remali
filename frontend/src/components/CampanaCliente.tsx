@@ -278,7 +278,7 @@ export default function CampanaCliente() {
       <button
         onClick={toggle}
         aria-label={`Notificaciones${noLeidas ? `, ${noLeidas} sin leer` : ''}`}
-        className="relative w-9 h-9 rounded-full border border-edge bg-surface-2 text-mute hover:text-gold transition-colors flex items-center justify-center active:scale-95"
+        className="relative w-9 h-9 rounded-full border border-edge bg-surface-2 text-mute hover:text-gold-ink transition-colors flex items-center justify-center active:scale-95"
       >
         <svg className="w-[18px] h-[18px]" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.4-1.4A2 2 0 0 1 18 14.2V11a6 6 0 1 0-12 0v3.2a2 2 0 0 1-.6 1.4L4 17h5m6 0v.5a3 3 0 1 1-6 0V17" />
@@ -301,7 +301,7 @@ export default function CampanaCliente() {
           >
             <div className="px-5 py-4 border-b border-edge flex items-center justify-between gap-3">
               <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-full bg-gold-soft flex items-center justify-center text-gold">
+                <div className="w-8 h-8 rounded-full bg-gold-soft flex items-center justify-center text-gold-ink">
                   <svg viewBox="0 0 24 24" className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M15 17h5l-1.4-1.4A2 2 0 0 1 18 14.2V11a6 6 0 1 0-12 0v3.2a2 2 0 0 1-.6 1.4L4 17h5m6 0v.5a3 3 0 1 1-6 0V17" />
                   </svg>

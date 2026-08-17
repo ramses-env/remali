@@ -53,7 +53,7 @@ const MOD: Record<string, string> = { dia: 'por día', semana: 'por semana', mes
 
 const TIPO: Record<Deuda['tipo'], { label: string; cls: string }> = {
   renta: { label: 'Renta', cls: 'bg-blue-500/10 text-blue-600 dark:text-blue-400' },
-  apartado: { label: 'Apartado', cls: 'bg-gold/15 text-gold' },
+  apartado: { label: 'Apartado', cls: 'bg-gold/15 text-gold-ink' },
 }
 
 /** El carril del DINERO, aparte del historial: aquí vive TODO lo que el cliente
@@ -136,7 +136,7 @@ export default function MisAdeudos() {
       </header>
 
       {cargando ? (
-        <div className="flex justify-center py-20"><Loader2 className="h-7 w-7 animate-spin text-gold" /></div>
+        <div className="flex justify-center py-20"><Loader2 className="h-7 w-7 animate-spin text-gold-ink" /></div>
       ) : deudas.length === 0 ? (
         <div className="mt-8 rounded-2xl border border-edge bg-surface px-6 py-12 text-center">
           <CheckCircle2 className="mx-auto h-10 w-10 text-libre" />

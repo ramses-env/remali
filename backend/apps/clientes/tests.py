@@ -337,3 +337,98 @@ class ResolverClienteTest(TestCase):
         cli, contacto = resolver_cliente(cliente_id=99999, nombre='Ana')
 
         self.assertIsNone(cli)      # la venta se guarda sin cliente, no revienta
+
+
+class EstadoDeCuentaTest(TestCase):
+    """Lo que debe, lo que se le debe, y que las dos pantallas digan lo mismo."""
+
+    def setUp(self):
+        from decimal import Decimal
+        from rest_framework.test import APIClient
+        from inventario.models import Inventario
+        from maquinaria.models import Equipo
+
+        u = User.objects.create_user(username='cajero1', password='pass12345')
+        u.groups.add(Group.objects.get_or_create(name='Cajero')[0])
+        self.api = APIClient()
+        self.api.force_authenticate(user=u)
+
+        self.cli = Cliente.objects.create(tipo=Cliente.FISICA, nombre='Jesús Ramírez',
+                                          telefono='7441234567')
+        self.equipo = Equipo.objects.create(modelo='EXC-200', precio_dia=Decimal('100'))
+        self.inv = Inventario.objects.create(equipo=self.equipo, condicion='seminueva',
+                                             estado='disponible')
+
+    def _renta(self, **extra):
+        from django.utils import timezone
+        from renta.models import Renta
+        return Renta.objects.create(
+            inventario=self.inv, cliente=self.cli, modalidad='dia', duracion=3,
+            fecha_inicio=timezone.localdate(), direccion='Obra Centro', **extra)
+
+    def test_una_renta_sin_abonos_es_saldo_a_favor_de_remali(self):
+        self._renta()
+
+        r = self.api.get(f'/api/clientes/{self.cli.pk}/estado-cuenta/')
+
+        self.assertEqual(r.data['saldo'], '300.00')       # 100 x 3 días
+        self.assertEqual(r.data['credito_a_favor'], '0.00')
+        self.assertEqual(r.data['neto'], '300.00')
+        self.assertTrue(r.data['tiene_adeudo'])
+
+    def test_un_deposito_por_devolver_es_dinero_que_REMALI_debe(self):
+        from decimal import Decimal
+        renta = self._renta(deposito=Decimal('5000'))
+        renta.pagos = [{'monto': '300', 'metodo': 'efectivo'}]
+        renta.deposito_estado = 'por_devolver'
+        renta.deposito_reembolso = Decimal('5000')
+        renta.save()
+
+        r = self.api.get(f'/api/clientes/{self.cli.pk}/estado-cuenta/')
+
+        self.assertEqual(r.data['saldo'], '0.00')
+        self.assertEqual(r.data['credito_a_favor'], '5000.00')
+        self.assertEqual(r.data['neto'], '-5000.00')      # negativo: se le debe
+        self.assertTrue(r.data['tiene_credito'])
+
+    def test_un_deposito_ya_devuelto_no_cuenta_como_credito_vivo(self):
+        from decimal import Decimal
+        renta = self._renta(deposito=Decimal('5000'))
+        renta.deposito_estado = 'devuelto'
+        renta.deposito_reembolso = Decimal('5000')
+        renta.save()
+
+        r = self.api.get(f'/api/clientes/{self.cli.pk}/estado-cuenta/')
+
+        self.assertEqual(r.data['credito_a_favor'], '0.00')
+
+    def test_una_renta_cancelada_no_suma_deuda(self):
+        renta = self._renta()
+        renta.estado = 'cancelada'
+        renta.save(update_fields=['estado'])
+
+        r = self.api.get(f'/api/clientes/{self.cli.pk}/estado-cuenta/')
+
+        self.assertEqual(r.data['saldo'], '0.00')
+
+    def test_el_historial_junta_todo_de_lo_mas_nuevo_a_lo_mas_viejo(self):
+        from decimal import Decimal
+        from ventas.models import Venta
+        self._renta()
+        Venta.objects.create(cliente=self.cli, precio_maquina=Decimal('1000'))
+
+        r = self.api.get(f'/api/clientes/{self.cli.pk}/estado-cuenta/')
+
+        tipos = [d['tipo'] for d in r.data['documentos']]
+        self.assertEqual(len(tipos), 2)
+        self.assertIn('renta', tipos)
+        self.assertIn('venta', tipos)
+
+    def test_el_mostrador_ve_EXACTAMENTE_la_misma_cifra_que_la_ficha(self):
+        """La regla de la entrega C: un solo cálculo, dos pantallas."""
+        self._renta()
+
+        ficha = self.api.get(f'/api/clientes/{self.cli.pk}/estado-cuenta/')
+        mostrador = self.api.get('/api/clientes/buscar/?telefono=7441234567')
+
+        self.assertEqual(mostrador.data['clientes'][0]['resumen']['saldo'], ficha.data['saldo'])

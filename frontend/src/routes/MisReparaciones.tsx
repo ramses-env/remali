@@ -29,7 +29,7 @@ const fecha = (s?: string | null) =>
   s ? new Date(s).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'
 const PILL: Record<string, string> = {
   recibida: 'bg-surface-2 text-mute',
-  proceso: 'bg-gold-soft text-gold',
+  proceso: 'bg-gold-soft text-gold-ink',
   terminada: 'bg-blue-500/10 text-blue-500',
   entregada: 'bg-emerald-500/10 text-emerald-500',
 }
@@ -124,7 +124,7 @@ export default function MisReparaciones() {
       </header>
 
       {cargando ? (
-        <div className="flex justify-center py-20"><Loader2 className="h-7 w-7 animate-spin text-gold" style={{ animationDuration: '0.7s' }} /></div>
+        <div className="flex justify-center py-20"><Loader2 className="h-7 w-7 animate-spin text-gold-ink" style={{ animationDuration: '0.7s' }} /></div>
       ) : reparaciones.length === 0 ? (
         <div className="rounded-2xl border border-edge bg-surface px-6 py-14 text-center">
           <PackageOpen className="mx-auto h-10 w-10 text-mute" />

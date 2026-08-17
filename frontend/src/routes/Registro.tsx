@@ -160,7 +160,7 @@ export default function Registro() {
                         type="button"
                         onClick={() => setVerPass(v => !v)}
                         aria-label={verPass ? 'Ocultar contraseña' : 'Mostrar contraseña'}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-mute hover:text-gold transition-colors"
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-mute hover:text-gold-ink transition-colors"
                       >
                         {verPass ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                       </button>
@@ -221,7 +221,7 @@ export default function Registro() {
 
       <AuthItem className="text-center text-sm text-mute">
         ¿Ya tienes cuenta?{' '}
-        <Link to="/login" className="font-semibold text-gold hover:underline">
+        <Link to="/login" className="font-semibold text-gold-ink hover:underline">
           Inicia sesión
         </Link>
         .

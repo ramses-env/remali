@@ -370,7 +370,7 @@ export default function EquiposList() {
         </div>
 
         <div className="mb-4"><Migas items={[{ label: 'Inicio', to: '/' }, { label: 'Equipos' }]} /></div>
-        <p className="catalog-header-title text-[11px] font-mono text-gold uppercase tracking-[0.3em] mb-4">
+        <p className="catalog-header-title text-[11px] font-mono text-gold-ink uppercase tracking-[0.3em] mb-4">
           — Maquinaria ligera · Renta y venta
         </p>
         <div className="overflow-hidden mb-1">
@@ -379,7 +379,7 @@ export default function EquiposList() {
                 letra, pero el salto de línea solo cae ENTRE palabras completas
                 (antes la "E" de EQUIPOS se quedaba arriba y el resto abajo). */}
             <span className="inline-block whitespace-nowrap">{'CATÁLOGO'.split('').map((c, i) => <span key={i} className="char inline-block">{c}</span>)}</span>{' '}
-            <span className="text-gold"><span className="inline-block whitespace-nowrap">{'DE'.split('').map((c, i) => <span key={`d${i}`} className="char inline-block">{c}</span>)}</span>{' '}<span className="inline-block whitespace-nowrap">{'EQUIPOS'.split('').map((c, i) => <span key={`e${i}`} className="char inline-block">{c}</span>)}</span></span>
+            <span className="text-gold-ink"><span className="inline-block whitespace-nowrap">{'DE'.split('').map((c, i) => <span key={`d${i}`} className="char inline-block">{c}</span>)}</span>{' '}<span className="inline-block whitespace-nowrap">{'EQUIPOS'.split('').map((c, i) => <span key={`e${i}`} className="char inline-block">{c}</span>)}</span></span>
           </h1>
         </div>
         <p className="catalog-header-title text-mute text-sm md:text-base mt-4 max-w-xl leading-relaxed">
@@ -479,7 +479,7 @@ export default function EquiposList() {
             <button
               data-onboarding="filtros-flotantes"
               onClick={() => window.dispatchEvent(new Event('toggleFilters'))}
-              className={`md:hidden flex items-center gap-2 px-4 py-2.5 rounded-full border text-sm font-medium transition-colors ${activeFilterCount > 0 ? 'border-gold bg-gold-soft text-gold' : 'border-edge bg-surface-2 text-mute hover:text-ink hover:border-edge'}`}
+              className={`md:hidden flex items-center gap-2 px-4 py-2.5 rounded-full border text-sm font-medium transition-colors ${activeFilterCount > 0 ? 'border-gold bg-gold-soft text-gold-ink' : 'border-edge bg-surface-2 text-mute hover:text-ink hover:border-edge'}`}
             >
               <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M3 6h18M7 12h10M10 18h4" strokeLinecap="round" strokeLinejoin="round" />
@@ -602,10 +602,10 @@ export default function EquiposList() {
                 {activeFilterCount > 0 && (
                   <button
                     onClick={() => setFilters({})}
-                    className="text-xs text-gold hover:text-gold font-medium transition-colors flex items-center gap-1"
+                    className="text-xs text-gold-ink hover:text-gold-ink font-medium transition-colors flex items-center gap-1"
                   >
                     Limpiar
-                    <span className="w-4 h-4 rounded-full bg-gold/20 text-gold flex items-center justify-center font-bold">{activeFilterCount}</span>
+                    <span className="w-4 h-4 rounded-full bg-gold/20 text-gold-ink flex items-center justify-center font-bold">{activeFilterCount}</span>
                   </button>
                 )}
               </div>
@@ -637,7 +637,7 @@ export default function EquiposList() {
                 </p>
                 <button
                   onClick={() => { setFilters({}); setQuery(''); setInputValue('') }}
-                  className="px-6 py-3 rounded-full border border-gold/30 bg-gold-soft text-gold text-sm font-semibold hover:bg-gold/20 transition-colors"
+                  className="px-6 py-3 rounded-full border border-gold/30 bg-gold-soft text-gold-ink text-sm font-semibold hover:bg-gold/20 transition-colors"
                 >
                   Limpiar filtros
                 </button>

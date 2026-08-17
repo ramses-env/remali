@@ -91,7 +91,7 @@ function DockBoton({ item }: { item: DockItem }) {
     'transition-[color,background-color,transform] duration-150 ease-out',
     'active:scale-[0.94] motion-reduce:transition-none motion-reduce:active:scale-100',
     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40',
-    item.activo ? 'bg-gold-soft text-gold' : 'text-mute hover:text-ink',
+    item.activo ? 'bg-gold-soft text-gold-ink' : 'text-mute hover:text-ink',
   )
 
   // Extraer attrs data-* para onboarding y testing.

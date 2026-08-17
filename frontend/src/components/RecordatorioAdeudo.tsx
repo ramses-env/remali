@@ -100,7 +100,7 @@ export default function RecordatorioAdeudo() {
                 <span className="block text-sm font-bold text-ink">Tienes un adeudo de {formatMoney(deuda)}</span>
                 <span className="block text-[12.5px] leading-snug text-mute">Ver el detalle y cómo liquidarlo.</span>
               </span>
-              <ArrowRight className="ml-auto h-4 w-4 shrink-0 text-gold transition-transform group-hover:translate-x-0.5" />
+              <ArrowRight className="ml-auto h-4 w-4 shrink-0 text-gold-ink transition-transform group-hover:translate-x-0.5" />
             </Link>
             {/* Fuera del Link para no anidar controles: el × cierra, no navega. */}
             <button

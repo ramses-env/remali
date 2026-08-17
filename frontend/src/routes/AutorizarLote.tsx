@@ -110,7 +110,7 @@ export default function AutorizarLote() {
         ) : info ? (
           <>
             <div className="text-center">
-              <div className="w-16 h-16 mx-auto rounded-full bg-gold-soft text-gold flex items-center justify-center mb-5">
+              <div className="w-16 h-16 mx-auto rounded-full bg-gold-soft text-gold-ink flex items-center justify-center mb-5">
                 <svg className="w-7 h-7" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" strokeLinecap="round" strokeLinejoin="round"><path d="M9 12l2 2 4-4" /><path d="M12 3l7 3v5c0 4.5-3 8.2-7 10-4-1.8-7-5.5-7-10V6z" /></svg>
               </div>
               <h1 className="text-[22px] font-black text-ink leading-tight">Autorización de lote · {n} {n === 1 ? 'cotización' : 'cotizaciones'}</h1>

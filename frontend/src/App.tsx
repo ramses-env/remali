@@ -10,6 +10,7 @@ import Login from './routes/Login'
 import Registro from './routes/Registro'
 import Recuperar from './routes/Recuperar'
 import Restablecer from './routes/Restablecer'
+import VerificarCorreo from './routes/VerificarCorreo'
 import Perfil from './routes/Perfil'
 import MisCotizaciones from './routes/MisCotizaciones'
 import MisCotizacionEstado from './routes/MisCotizacionEstado'
@@ -52,7 +53,8 @@ function App() {
     location.pathname === '/login' ||
     location.pathname === '/registro' ||
     location.pathname === '/recuperar' ||
-    location.pathname.startsWith('/restablecer')
+    location.pathname.startsWith('/restablecer') ||
+    location.pathname.startsWith('/verificar')
 
   return (
     <I18nProvider>
@@ -68,6 +70,7 @@ function App() {
               <Route path="/registro" element={<Registro />} />
               <Route path="/recuperar" element={<Recuperar />} />
               <Route path="/restablecer/:uid/:token" element={<Restablecer />} />
+              <Route path="/verificar/:token" element={<VerificarCorreo />} />
             </Route>
             {/* /dashboard/* : cualquier subruta (bookmark viejo, refresh) cae al
                 panel en vez de renderizar una página en blanco. */}

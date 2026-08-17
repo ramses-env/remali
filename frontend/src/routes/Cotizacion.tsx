@@ -341,7 +341,7 @@ export default function Cotizacion() {
       <div className="bg-app min-h-screen text-ink">
         <div className="mx-auto max-w-xl px-6 pt-28 pb-20">
           <div className="rounded-3xl border border-edge bg-surface shadow-[0_24px_60px_rgba(17,24,39,0.10)] p-8 text-center">
-            <div className="w-16 h-16 mx-auto rounded-full bg-gold-soft text-gold flex items-center justify-center mb-5">
+            <div className="w-16 h-16 mx-auto rounded-full bg-gold-soft text-gold-ink flex items-center justify-center mb-5">
               <svg className="w-7 h-7" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" strokeLinecap="round" strokeLinejoin="round"><path d="M9 12l2 2 4-4" /><path d="M12 3l7 3v5c0 4.5-3 8.2-7 10-4-1.8-7-5.5-7-10V6z" /></svg>
             </div>
             <h1 className="text-[22px] font-black leading-tight">Lista para autorización</h1>
@@ -417,7 +417,7 @@ export default function Cotizacion() {
           <div className="rounded-[20px] border border-edge bg-surface px-6 sm:px-8 py-7">
             <div className="flex items-center justify-between gap-4 flex-wrap mb-6">
               <h2 className="text-[18px] font-extrabold">Qué sigue</h2>
-              <span className="text-[12.5px] font-semibold text-gold border border-gold/40 rounded-full px-3.5 py-1.5">Paso 2 de 4 · en revisión ahora</span>
+              <span className="text-[12.5px] font-semibold text-gold-ink border border-gold/40 rounded-full px-3.5 py-1.5">Paso 2 de 4 · en revisión ahora</span>
             </div>
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-x-6 gap-y-6">
               {pasos.map((p, i) => (
@@ -428,7 +428,7 @@ export default function Cotizacion() {
                     </span>
                     {i < pasos.length - 1 && <span className={`flex-1 h-px ${p.estado === 'ok' ? 'bg-emerald-500/40' : p.estado === 'activo' ? 'bg-gold/40' : 'bg-edge'}`} />}
                   </div>
-                  <p className={`text-[15px] font-bold ${p.estado === 'activo' ? 'text-gold' : ''}`}>{p.t}</p>
+                  <p className={`text-[15px] font-bold ${p.estado === 'activo' ? 'text-gold-ink' : ''}`}>{p.t}</p>
                   <p className="text-[13px] text-mute mt-1 leading-snug">{p.d}</p>
                   <p className={`${monoLabel} mt-2`}>{p.e}</p>
                 </div>
@@ -445,7 +445,7 @@ export default function Cotizacion() {
                   {sentResumen?.obra && <div><p className={monoLabel}>Obra</p><p className="text-[15px] font-bold mt-1 max-w-[260px] truncate">{sentResumen.obra}</p></div>}
                   <div><p className={monoLabel}>Total</p><p className="text-[15px] font-extrabold text-price mt-1">{money(sentResumen?.total ?? 0)}</p></div>
                 </div>
-                {sentLiga && <a href={sentLiga} target="_blank" rel="noopener noreferrer" className="text-[14px] font-semibold text-gold hover:opacity-80">Ver completa →</a>}
+                {sentLiga && <a href={sentLiga} target="_blank" rel="noopener noreferrer" className="text-[14px] font-semibold text-gold-ink hover:opacity-80">Ver completa →</a>}
               </div>
               {(sentResumen?.items || []).map(it => (
                 <div key={it.lineId} className="px-6 sm:px-8 py-4 border-b border-edge/60 flex items-center gap-4 justify-between">
@@ -464,7 +464,7 @@ export default function Cotizacion() {
               <div className="rounded-[20px] border border-edge bg-surface p-6">
                 <p className={`${monoLabel} mb-4`}>Tu contacto en REMALI</p>
                 <div className="flex items-center gap-3.5 mb-4">
-                  <div className="w-11 h-11 rounded-full bg-gold-soft text-gold grid place-items-center font-extrabold">R</div>
+                  <div className="w-11 h-11 rounded-full bg-gold-soft text-gold-ink grid place-items-center font-extrabold">R</div>
                   <div>
                     <p className="text-[15px] font-bold">{cfg.negocio_representante || cfg.negocio_nombre || 'REMALI'}</p>
                     <p className="text-[12.5px] text-mute">Acapulco, Gro.</p>
@@ -514,7 +514,7 @@ export default function Cotizacion() {
                 <p className="text-[12.5px] text-mute mt-0.5">Guarda versiones, baja el PDF de cada una, y envía a REMALI solo la elegida.</p>
               </div>
               {state.items.length > 0 && (
-                <button onClick={guardarBorrador} className="h-[40px] px-4 rounded-xl border border-gold/50 text-gold text-[13.5px] font-bold hover:bg-gold-soft transition-colors">
+                <button onClick={guardarBorrador} className="h-[40px] px-4 rounded-xl border border-gold/50 text-gold-ink text-[13.5px] font-bold hover:bg-gold-soft transition-colors">
                   + Guardar como borrador
                 </button>
               )}
@@ -535,7 +535,7 @@ export default function Cotizacion() {
                     {/* Acciones del borrador: a autorización (jefe) o directo a REMALI */}
                     <div className="absolute bottom-1.5 right-1.5 flex gap-1">
                       <button onClick={() => autorizarBorrador(b)} disabled={sending} title="Su jefe recibe una liga y al autorizar llega sola a REMALI"
-                        className="inline-flex items-center gap-1 h-6 px-2 rounded-full border border-gold/50 text-gold text-[10.5px] font-black hover:bg-gold-soft transition-colors disabled:opacity-50">
+                        className="inline-flex items-center gap-1 h-6 px-2 rounded-full border border-gold/50 text-gold-ink text-[10.5px] font-black hover:bg-gold-soft transition-colors disabled:opacity-50">
                         <svg viewBox="0 0 24 24" className="w-3 h-3 stroke-current fill-none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 12l2 2 4-4" /><path d="M12 3l7 3v5c0 4.5-3 8.2-7 10-4-1.8-7-5.5-7-10V6z" /></svg>
                         Autorizar
                       </button>
@@ -559,7 +559,7 @@ export default function Cotizacion() {
             {/* Equipos */}
             <div className="rounded-[20px] border border-edge bg-surface overflow-hidden">
               <div className="flex items-center justify-between gap-4 px-6 py-5 border-b border-edge">
-                <span className="text-[16px] font-bold">Equipos <span className="text-mute font-semibold">({state.items.length})</span>{tipoActual && <span className="ml-2 text-[11px] font-bold uppercase tracking-wide text-gold">{tipoActual}</span>}</span>
+                <span className="text-[16px] font-bold">Equipos <span className="text-mute font-semibold">({state.items.length})</span>{tipoActual && <span className="ml-2 text-[11px] font-bold uppercase tracking-wide text-gold-ink">{tipoActual}</span>}</span>
                 {state.items.length > 0 && (
                   <button onClick={() => dispatch({ type: 'clear' })} className="text-[13.5px] text-mute hover:text-red-500 transition-colors">Vaciar</button>
                 )}
@@ -620,7 +620,7 @@ export default function Cotizacion() {
             <div className="rounded-[20px] border border-edge bg-surface p-6">
               <div className="flex items-center justify-between gap-4 mb-5 flex-wrap">
                 <span className="text-[16px] font-bold">Datos de contacto y obra</span>
-                {prefilled && <span className="text-[11px] font-bold uppercase tracking-wide text-gold">✓ Desde tu perfil</span>}
+                {prefilled && <span className="text-[11px] font-bold uppercase tracking-wide text-gold-ink">✓ Desde tu perfil</span>}
               </div>
 
               {(obras.length > 0 || user) && (
@@ -646,7 +646,7 @@ export default function Cotizacion() {
                     ))}
                     {user && (
                       <button type="button" onClick={guardarObra}
-                        className="px-4 py-2.5 rounded-xl border border-dashed border-edge text-[13.5px] font-semibold text-mute hover:text-gold hover:border-gold/50 transition-colors">
+                        className="px-4 py-2.5 rounded-xl border border-dashed border-edge text-[13.5px] font-semibold text-mute hover:text-gold-ink hover:border-gold/50 transition-colors">
                         + Guardar esta obra
                       </button>
                     )}
@@ -716,7 +716,7 @@ export default function Cotizacion() {
                 </button>
                 {/* Camino con jefe: queda "por autorizar" y él recibe la liga */}
                 <button onClick={autorizarCarrito} disabled={sending}
-                  className="h-[44px] rounded-[13px] border border-gold/50 text-gold text-[13.5px] font-bold hover:bg-gold-soft transition-colors disabled:opacity-50">
+                  className="h-[44px] rounded-[13px] border border-gold/50 text-gold-ink text-[13.5px] font-bold hover:bg-gold-soft transition-colors disabled:opacity-50">
                   Mandar a autorizar (mi jefe decide)
                 </button>
                 <div className="grid grid-cols-2 gap-2.5">
@@ -745,7 +745,7 @@ export default function Cotizacion() {
                   'Autorizas y agendamos la entrega en tu obra.',
                 ].map((t, i) => (
                   <div key={i} className="flex gap-3 items-start">
-                    <span className="text-[11px] font-mono text-gold mt-0.5">{String(i + 1).padStart(2, '0')}</span>
+                    <span className="text-[11px] font-mono text-gold-ink mt-0.5">{String(i + 1).padStart(2, '0')}</span>
                     <p className="text-[13.5px] text-mute leading-relaxed">{t}</p>
                   </div>
                 ))}

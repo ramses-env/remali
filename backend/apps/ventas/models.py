@@ -3,8 +3,11 @@ from decimal import Decimal
 from django.db import models, transaction
 from django.conf import settings
 
-# IVA México. Los precios se capturan SIN IVA (son el subtotal). El IVA (16%)
-# solo se SUMA cuando el cliente pedirá factura (aplica_iva=True).
+# IVA México. En VENTAS los precios se capturan CON IVA INCLUIDO: son el precio al
+# público, así que nunca se les suma nada encima. `recalcular_total()` desglosa el
+# total (subtotal = total / 1.16) y `aplica_iva` es siempre True; el toggle de
+# factura solo decide si la venta entra a la bandeja de facturación.
+# Ojo: la RENTA es el caso contrario — ahí el IVA sí se SUMA cuando hay factura.
 IVA_RATE = Decimal('0.16')
 
 

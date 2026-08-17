@@ -38,7 +38,7 @@ type RenderItem = { kind: 'cot'; cot: CotMia } | { kind: 'lote'; token: string; 
 const monoLabel = 'text-[10.5px] font-mono tracking-[0.14em] text-mute uppercase'
 const UNIT_TXT: Record<string, string> = { venta: 'compra', dia: 'renta por día', semana: 'renta por semana', mes: 'renta por mes' }
 const PILL: Record<string, string> = {
-  enviada: 'text-gold border-gold/40 bg-gold-soft/40',
+  enviada: 'text-gold-ink border-gold/40 bg-gold-soft/40',
   aceptada: 'text-emerald-500 border-emerald-500/40 bg-emerald-500/10',
   rechazada: 'text-red-500 border-red-500/40 bg-red-500/10',
   vencida: 'text-mute border-edge bg-surface-2',
@@ -56,7 +56,7 @@ const LINEA_ESTADO: Record<string, string> = {
 }
 // Color de la línea "qué sigue" según el estado (igual criterio que los badges).
 const LINEA_TONO: Record<string, string> = {
-  enviada: 'text-gold',
+  enviada: 'text-gold-ink',
   aceptada: 'text-emerald-500',
   por_autorizar: 'text-amber-600 dark:text-amber-400',
   rechazada: 'text-mute',
@@ -190,7 +190,7 @@ function LoteAutorizarModal({ seleccion, onClose, onEnviado, notify }: {
                   ? <select value={obraId ?? ''} onChange={e => setObraId(Number(e.target.value))} className="w-full bg-surface-2 border border-edge rounded-xl px-4 py-2.5 text-sm text-ink focus:outline-none focus:border-gold/60 transition-colors">
                       {obras.map(o => <option key={o.id} value={o.id} className="bg-surface">{o.direccion || o.nombre}{o.responsable ? ` · ${o.responsable}` : ''}</option>)}
                     </select>
-                  : <p className="text-[13px] text-mute">No tienes obras guardadas. <Link to="/cotizacion" className="text-gold font-semibold">Guarda una en el armador</Link> y regresa.</p>}
+                  : <p className="text-[13px] text-mute">No tienes obras guardadas. <Link to="/cotizacion" className="text-gold-ink font-semibold">Guarda una en el armador</Link> y regresa.</p>}
               </div>
 
               <label className="flex items-center gap-2.5 text-sm text-ink cursor-pointer">
@@ -350,7 +350,7 @@ export default function MisCotizaciones() {
     ['vencida', 'Vencidas', null],
   ] as const
 
-  if (cargando) return <div className="bg-app min-h-screen grid place-items-center"><Loader2 className="w-8 h-8 text-gold animate-spin" /></div>
+  if (cargando) return <div className="bg-app min-h-screen grid place-items-center"><Loader2 className="w-8 h-8 text-gold-ink animate-spin" /></div>
 
   return (
     <div className="bg-app min-h-screen text-ink">
@@ -395,7 +395,7 @@ export default function MisCotizaciones() {
               <div className="flex items-center gap-4 shrink-0">
                 {borradoresVisibles.length >= 2 && !q && (
                   <button onClick={() => (seleccionando ? salirSeleccion() : setSeleccionando(true))}
-                    className={`text-[13px] font-bold transition-colors ${seleccionando ? 'text-mute hover:text-ink' : 'text-gold hover:opacity-80'}`}>
+                    className={`text-[13px] font-bold transition-colors ${seleccionando ? 'text-mute hover:text-ink' : 'text-gold-ink hover:opacity-80'}`}>
                     {seleccionando ? 'Cancelar' : 'Seleccionar para lote'}
                   </button>
                 )}
@@ -434,7 +434,7 @@ export default function MisCotizaciones() {
                 {!seleccionando && (
                   <div className="flex items-center gap-2 flex-wrap">
                     <button onClick={() => seguirEditando(b)} className="h-[40px] px-4 rounded-xl border border-edge text-[13.5px] font-semibold hover:bg-surface-2 transition-colors whitespace-nowrap">Seguir editando</button>
-                    <button onClick={() => autorizarBorradorRemali(b)} title="Tu jefe recibe una liga; al autorizar llega sola a REMALI" className="h-[40px] px-4 rounded-xl border border-gold/40 text-gold text-[13.5px] font-bold hover:bg-gold-soft transition-colors whitespace-nowrap">Mandar a autorizar</button>
+                    <button onClick={() => autorizarBorradorRemali(b)} title="Tu jefe recibe una liga; al autorizar llega sola a REMALI" className="h-[40px] px-4 rounded-xl border border-gold/40 text-gold-ink text-[13.5px] font-bold hover:bg-gold-soft transition-colors whitespace-nowrap">Mandar a autorizar</button>
                     <button onClick={() => enviarABorradorRemali(b)} className="h-[40px] px-4 rounded-xl bg-gold text-black text-[13.5px] font-bold hover:opacity-90 transition-opacity whitespace-nowrap btn-acento">Enviar a REMALI</button>
                     <button onClick={() => setConfirmando(confirmando === b.id ? null : b.id)} aria-label="Borrar borrador"
                       className="w-[38px] h-[38px] rounded-lg text-mute hover:text-red-500 hover:bg-red-500/10 transition-colors grid place-items-center">
@@ -502,14 +502,14 @@ export default function MisCotizaciones() {
                     </div>
                     <div className="flex items-center gap-3 shrink-0">
                       <span className="text-[14px] font-bold text-ink">{formatMoney(c.total)}</span>
-                      <Link to={`/mis-cotizaciones/${c.folio}`} className="text-[12.5px] text-gold font-semibold hover:opacity-80 transition-opacity">Ver</Link>
+                      <Link to={`/mis-cotizaciones/${c.folio}`} className="text-[12.5px] text-gold-ink font-semibold hover:opacity-80 transition-opacity">Ver</Link>
                     </div>
                   </div>
                 ))}
               </div>
               <div className="mt-4 pt-4 border-t border-edge flex flex-wrap items-center gap-2.5">
                 <button onClick={async () => { try { await navigator.clipboard.writeText(ligaLote); notify('Liga del lote copiada: mándasela a quien autoriza') } catch { notify('No se pudo copiar', 'x') } }}
-                  className="h-[40px] px-4 rounded-xl bg-gold-soft text-gold text-[13.5px] font-bold grid place-items-center hover:opacity-85 transition-opacity">Copiar liga del jefe</button>
+                  className="h-[40px] px-4 rounded-xl bg-gold-soft text-gold-ink text-[13.5px] font-bold grid place-items-center hover:opacity-85 transition-opacity">Copiar liga del jefe</button>
                 <a href={waLote} target="_blank" rel="noopener noreferrer" className="h-[40px] px-4 rounded-xl border border-[#25D366]/40 text-[#1c9d4d] dark:text-[#25D366] text-[13.5px] font-bold grid place-items-center hover:bg-[#25D366]/10 transition-colors">WhatsApp</a>
                 <span className="ml-auto text-[12.5px] text-mute">Una sola liga · tu jefe autoriza las {cots.length} juntas</span>
               </div>
@@ -535,7 +535,7 @@ export default function MisCotizaciones() {
               </div>
             </div>
             <div className="mt-4 pt-4 border-t border-edge flex flex-wrap items-center gap-2.5">
-              <Link to={`/mis-cotizaciones/${c.folio}`} className="h-[40px] px-4 rounded-xl bg-gold-soft text-gold text-[13.5px] font-bold grid place-items-center hover:opacity-85 transition-opacity">Ver estado</Link>
+              <Link to={`/mis-cotizaciones/${c.folio}`} className="h-[40px] px-4 rounded-xl bg-gold-soft text-gold-ink text-[13.5px] font-bold grid place-items-center hover:opacity-85 transition-opacity">Ver estado</Link>
               {c.liga_autorizacion && (
                 <button onClick={async () => { try { await navigator.clipboard.writeText(`${window.location.origin}${c.liga_autorizacion}`); notify('Liga copiada: mándasela a quien autoriza') } catch { notify('No se pudo copiar', 'x') } }}
                   className="h-[40px] px-4 rounded-xl border border-amber-500/40 text-amber-600 dark:text-amber-400 text-[13.5px] font-bold hover:bg-amber-500/10 transition-colors">

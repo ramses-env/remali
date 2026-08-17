@@ -62,7 +62,26 @@ export type ClienteFicha = ClienteFila & {
   tiene_cuenta: boolean
 }
 
+type DocumentoCuenta = {
+  tipo: 'venta' | 'renta' | 'cotizacion' | 'reparacion'
+  id: number; folio: string; fecha: string
+  concepto: string; total: string; saldo: string; estado: string
+}
+
+type Cuenta = {
+  saldo: string; credito_a_favor: string; neto: string
+  tiene_adeudo: boolean; tiene_credito: boolean
+  documentos: DocumentoCuenta[]
+}
+
 const POR_PAGINA = 25
+
+const pesos = (v: string | number) =>
+  `$${Number(v || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}`
+
+const ETIQUETA_DOC: Record<DocumentoCuenta['tipo'], string> = {
+  venta: 'Venta', renta: 'Renta', cotizacion: 'Cotización', reparacion: 'Reparación',
+}
 
 type Notify = (m: string, t?: 'ok' | 'err') => void
 
@@ -204,7 +223,7 @@ export default function ClientesAdmin({ puede, notify, reloadBadge }: {
                   <tr key={c.id} className="border-b border-edge last:border-0 hover:bg-surface-2/60 transition-colors">
                     <td className="px-5 py-3.5">
                       <button onClick={() => abrir(c.id)} className="text-left group">
-                        <span className="font-semibold text-ink group-hover:text-gold transition-colors">{c.nombre}</span>
+                        <span className="font-semibold text-ink group-hover:text-gold-ink transition-colors">{c.nombre}</span>
                         <span className="block text-[12px] text-mute">
                           {c.tipo_display}{c.rfc ? ` · ${c.rfc}` : ''}{c.activo === false ? ' · inactivo' : ''}
                         </span>
@@ -429,6 +448,13 @@ function FichaCliente({ ficha, puedeEditar, puedeFiscales, notify, onClose, onCh
 }) {
   const [nuevoContacto, setNuevoContacto] = useState(false)
   const [nc, setNc] = useState({ nombre: '', telefono: '', puesto: '' })
+  const [cuenta, setCuenta] = useState<Cuenta | null>(null)
+
+  useEffect(() => {
+    api.get<Cuenta>(`/clientes/${ficha.id}/estado-cuenta/`)
+      .then(r => setCuenta(r.data))
+      .catch(() => setCuenta(null))
+  }, [ficha.id])
 
   function agregarContacto() {
     if (!nc.nombre.trim()) { notify('El contacto necesita un nombre', 'err'); return }
@@ -461,6 +487,53 @@ function FichaCliente({ ficha, puedeEditar, puedeFiscales, notify, onClose, onCh
             </button>
           )}
         </div>
+      )}
+
+      {/* Estado de cuenta: es lo primero que se pregunta de un cliente */}
+      {cuenta && (cuenta.tiene_adeudo || cuenta.tiene_credito) && (
+        <section className="mb-6 rounded-xl border border-edge bg-surface-2 p-4">
+          <dl className="grid grid-cols-3 gap-3 text-center">
+            <div>
+              <dt className="text-[10.5px] uppercase tracking-wide text-mute">Le debe a REMALI</dt>
+              <dd className="text-lg font-black text-ink tabular-nums">{pesos(cuenta.saldo)}</dd>
+            </div>
+            <div>
+              <dt className="text-[10.5px] uppercase tracking-wide text-mute">REMALI le debe</dt>
+              <dd className="text-lg font-black tabular-nums text-[color:var(--c-libre)]">{pesos(cuenta.credito_a_favor)}</dd>
+            </div>
+            <div>
+              <dt className="text-[10.5px] uppercase tracking-wide text-mute">Neto</dt>
+              <dd className="text-lg font-black text-ink tabular-nums">{pesos(cuenta.neto)}</dd>
+            </div>
+          </dl>
+        </section>
+      )}
+
+      {/* Historial: la respuesta a "¿qué ha hecho este señor con nosotros?" */}
+      {cuenta && cuenta.documentos.length > 0 && (
+        <section className="mb-6">
+          <h3 className="text-[11px] uppercase tracking-wide text-mute font-medium mb-2">
+            Historial ({cuenta.documentos.length})
+          </h3>
+          <ul className="divide-y divide-edge border border-edge rounded-xl overflow-hidden">
+            {cuenta.documentos.map(d => (
+              <li key={`${d.tipo}-${d.id}`} className="px-3.5 py-2.5 flex items-center justify-between gap-3 bg-surface-2">
+                <div className="min-w-0">
+                  <p className="text-[13px] font-semibold text-ink truncate">
+                    <span className="text-mute font-normal">{ETIQUETA_DOC[d.tipo]}</span> {d.folio}
+                  </p>
+                  <p className="text-[12px] text-mute truncate">{d.concepto} · {d.estado}</p>
+                </div>
+                <div className="shrink-0 text-right tabular-nums">
+                  {d.total && <p className="text-[13px] font-semibold text-ink">{pesos(d.total)}</p>}
+                  {Number(d.saldo) > 0 && (
+                    <p className="text-[12px] font-bold text-[color:var(--c-price)]">debe {pesos(d.saldo)}</p>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
       )}
 
       {/* Contactos */}

@@ -11,7 +11,7 @@ import React from 'react'
    ES una zona bloqueada, así que la señalética de obra cae natural.
 
    Sin gradiente en el texto, sin burbujas genéricas. Usa los tokens del tema
-   (bg-app / text-ink / text-gold…), así que se ve bien en claro y en oscuro.
+   (bg-app / text-ink / text-gold-ink…), así que se ve bien en claro y en oscuro.
    Respeta prefers-reduced-motion. ──────────────────────────────────────── */
 
 type ErrorType = '404' | '500' | '403' | 'maintenance'
@@ -96,7 +96,7 @@ export default function ErrorPage({ type = '404' }: { type?: ErrorType }) {
         className="relative flex w-full max-w-lg flex-col items-center text-center"
       >
         {/* Glifo de obra en placa dorada suave */}
-        <div className="mb-7 grid h-16 w-16 sm:h-[72px] sm:w-[72px] place-items-center rounded-2xl bg-gold-soft text-gold ring-1 ring-[color:var(--c-gold)]/20">
+        <div className="mb-7 grid h-16 w-16 sm:h-[72px] sm:w-[72px] place-items-center rounded-2xl bg-gold-soft text-gold-ink ring-1 ring-[color:var(--c-gold)]/20">
           {cfg.glyph}
         </div>
 

@@ -29,7 +29,10 @@ export type ClienteEncontrado = {
   requiere_revision: boolean
   contactos: { id: number; nombre: string; telefono: string; principal: boolean; tiene_cuenta: boolean }[]
   obras: ObraBreve[]
-  resumen: { compras: number; rentas_activas: number; rentas: number; cotizaciones: number; reparaciones: number }
+  resumen: {
+    compras: number; rentas_activas: number; rentas: number; cotizaciones: number; reparaciones: number
+    saldo: string; credito_a_favor: string; tiene_adeudo: boolean; tiene_credito: boolean
+  }
 }
 
 /** Lo que el formulario de arriba necesita saber. */
@@ -97,6 +100,7 @@ export default function BuscadorCliente({ valor, onChange, autoFocus }: {
               {cliente.rfc ? ` · ${cliente.rfc}` : ''}
             </p>
             <p className="text-[12.5px] text-mute mt-1">{resumenTexto(r)}</p>
+            <Dinero r={r} />
           </div>
           <button
             type="button"
@@ -150,6 +154,7 @@ export default function BuscadorCliente({ valor, onChange, autoFocus }: {
               <div className="min-w-0">
                 <p className="text-sm font-semibold text-ink truncate">{c.nombre}</p>
                 <p className="text-[12.5px] text-mute">{resumenTexto(c.resumen)}</p>
+                <Dinero r={c.resumen} />
               </div>
               <button
                 type="button"
@@ -177,6 +182,23 @@ export default function BuscadorCliente({ valor, onChange, autoFocus }: {
         </p>
       )}
     </div>
+  )
+}
+
+/** El dinero va aparte del resumen y con peso visual propio: que el cliente
+ *  deba es lo que puede cambiar la decisión de venderle, y no debe leerse como
+ *  un dato más de la lista. */
+function Dinero({ r }: { r: ClienteEncontrado['resumen'] }) {
+  if (!r.tiene_adeudo && !r.tiene_credito) return null
+  return (
+    <p className="text-[12.5px] font-bold mt-1 flex flex-wrap gap-x-3">
+      {r.tiene_adeudo && (
+        <span className="text-[color:var(--c-price)]">Debe ${Number(r.saldo).toLocaleString('es-MX', { minimumFractionDigits: 2 })}</span>
+      )}
+      {r.tiene_credito && (
+        <span className="text-[color:var(--c-libre)]">A favor ${Number(r.credito_a_favor).toLocaleString('es-MX', { minimumFractionDigits: 2 })}</span>
+      )}
+    </p>
   )
 }
 

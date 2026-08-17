@@ -82,7 +82,7 @@ export default function RecordatorioPerfil() {
                 <span className="block text-sm font-bold text-ink">Completa tu perfil y obtén 5%</span>
                 <span className="block text-[12.5px] leading-snug text-mute">Tu descuento de bienvenida, de un solo uso, por darnos tus datos.</span>
               </span>
-              <ArrowRight className="ml-auto h-4 w-4 shrink-0 text-gold transition-transform group-hover:translate-x-0.5" />
+              <ArrowRight className="ml-auto h-4 w-4 shrink-0 text-gold-ink transition-transform group-hover:translate-x-0.5" />
             </Link>
             {/* Fuera del Link para no anidar controles: el × cierra, no navega. */}
             <button

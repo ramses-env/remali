@@ -89,11 +89,11 @@ function Tarjeta({ r, i, onCambio }: { r: RentaMia; i: number; onCambio: () => v
               descargarBlob(res.data as Blob, `orden-renta-${r.id}.pdf`)
             } catch { /* sin permiso o red: el interceptor avisa */ }
           }}
-          className="text-gold font-semibold hover:opacity-80 transition-opacity whitespace-nowrap shrink-0">↓ Orden</button>
+          className="text-gold-ink font-semibold hover:opacity-80 transition-opacity whitespace-nowrap shrink-0">↓ Orden</button>
         {r.direccion && <span className="truncate min-w-0 max-w-full">· {r.direccion}</span>}
         {r.estado !== 'cancelada' && total > 0 && (
           <button onClick={() => setAbierto(v => !v)}
-            className="ml-auto shrink-0 inline-flex items-center gap-1 text-[12px] font-bold text-gold hover:opacity-80 transition-opacity">
+            className="ml-auto shrink-0 inline-flex items-center gap-1 text-[12px] font-bold text-gold-ink hover:opacity-80 transition-opacity">
             {abierto ? 'Ocultar' : 'Detalle'}
             <svg className={`w-3 h-3 transition-transform ${abierto ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9l6 6 6-6" /></svg>
           </button>
@@ -217,7 +217,7 @@ export default function MisRentas() {
 
       {cargando ? (
         <div className="flex justify-center py-20">
-          <Loader2 className="h-7 w-7 animate-spin text-gold" style={{ animationDuration: '0.7s' }} />
+          <Loader2 className="h-7 w-7 animate-spin text-gold-ink" style={{ animationDuration: '0.7s' }} />
         </div>
       ) : rentas.length === 0 ? (
         <div className="rounded-2xl border border-edge bg-surface px-6 py-14 text-center">

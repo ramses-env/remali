@@ -20,7 +20,7 @@ export default function CambioTipoCotizacion() {
       onClick={() => dispatch({ type: 'conflicto-cancelar' })}>
       <div onClick={e => e.stopPropagation()}
         className="w-full max-w-sm bg-surface border border-edge rounded-2xl p-6 shadow-[0_24px_60px_rgba(0,0,0,0.45)]">
-        <p className="text-[11px] font-bold uppercase tracking-wide text-gold mb-2">Cotización de {tipoActual}</p>
+        <p className="text-[11px] font-bold uppercase tracking-wide text-gold-ink mb-2">Cotización de {tipoActual}</p>
         <h2 className="text-lg font-extrabold text-ink leading-snug">Las cotizaciones no mezclan venta y renta</h2>
         <p className="text-sm text-mute mt-2">
           Llevas <strong className="text-ink">{n} equipo{n === 1 ? '' : 's'} de {tipoActual}</strong>. Para cotizar

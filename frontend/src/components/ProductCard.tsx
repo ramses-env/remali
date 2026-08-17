@@ -119,7 +119,7 @@ export default function ProductCard({ id, title, price, priceOriginal, image, su
           la card quedaba muy "despegada" entre el texto y el precio. */}
       <div className="p-4 flex flex-col">
         {meta && <p className="text-[11px] text-mute truncate mb-1">{meta}</p>}
-        <h3 className="font-bold text-ink text-sm uppercase tracking-wide leading-snug line-clamp-2 group-hover:text-gold transition-colors">
+        <h3 className="font-bold text-ink text-sm uppercase tracking-wide leading-snug line-clamp-2 group-hover:text-gold-ink transition-colors">
           {title}
         </h3>
         {subtitle && <p className="text-xs text-mute mt-1 line-clamp-1">{subtitle}</p>}
@@ -134,7 +134,7 @@ export default function ProductCard({ id, title, price, priceOriginal, image, su
           </span>
           <div className="text-right shrink-0">
             <p className="text-[10px] text-mute font-mono uppercase leading-none">{modo === 'venta' ? 'Precio venta' : `desde /${unit}`}{priceOriginal ? <span className="ml-1.5 normal-case line-through text-[10.5px]">${priceOriginal.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span> : null}</p>
-            <p className="text-base font-black text-gold leading-tight mt-0.5">
+            <p className="text-base font-black text-gold-ink leading-tight mt-0.5">
               ${displayPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </p>
           </div>

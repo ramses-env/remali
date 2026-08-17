@@ -25,7 +25,7 @@ function Checkbox({ label, checked, onChange }: { label: string; checked: boolea
           <path d="M0 11l2-2 5 5L18 3l2 2L7 18z" />
         </svg>
       </div>
-      <span className={`text-sm transition-colors leading-none ${checked ? 'text-gold font-medium' : 'text-mute group-hover:text-mute'}`}>{label}</span>
+      <span className={`text-sm transition-colors leading-none ${checked ? 'text-gold-ink font-medium' : 'text-mute group-hover:text-mute'}`}>{label}</span>
     </label>
   )
 }
@@ -108,7 +108,7 @@ export default function FilterSidebar({ value, onChange }: Props) {
           ))}
           {marcas.length > 6 && (
             <button
-              className="mt-2 text-xs text-gold/70 hover:text-gold flex items-center gap-1 font-medium transition-colors"
+              className="mt-2 text-xs text-gold-ink/70 hover:text-gold-ink flex items-center gap-1 font-medium transition-colors"
               onClick={() => setExpanded(p => ({ ...p, 1000: !p[1000] }))}
             >
               {expanded[1000] ? 'Ver menos ↑' : `Ver más (${marcas.length - 6}) ↓`}
@@ -129,7 +129,7 @@ export default function FilterSidebar({ value, onChange }: Props) {
           ))}
           {categorias.length > 6 && (
             <button
-              className="mt-2 text-xs text-gold/70 hover:text-gold flex items-center gap-1 font-medium transition-colors"
+              className="mt-2 text-xs text-gold-ink/70 hover:text-gold-ink flex items-center gap-1 font-medium transition-colors"
               onClick={() => setExpanded(p => ({ ...p, 1001: !p[1001] }))}
             >
               {expanded[1001] ? 'Ver menos ↑' : `Ver más (${categorias.length - 6}) ↓`}
@@ -150,7 +150,7 @@ export default function FilterSidebar({ value, onChange }: Props) {
           ))}
           {tipos.length > 6 && (
             <button
-              className="mt-2 text-xs text-gold/70 hover:text-gold flex items-center gap-1 font-medium transition-colors"
+              className="mt-2 text-xs text-gold-ink/70 hover:text-gold-ink flex items-center gap-1 font-medium transition-colors"
               onClick={() => setExpanded(p => ({ ...p, 1002: !p[1002] }))}
             >
               {expanded[1002] ? 'Ver menos ↑' : `Ver más (${tipos.length - 6}) ↓`}
@@ -180,7 +180,7 @@ export default function FilterSidebar({ value, onChange }: Props) {
         </div>
         <button
           onClick={applyPrice}
-          className="mt-2 w-full py-2 rounded-lg bg-gold-soft border border-gold/30 text-gold text-xs font-semibold hover:bg-gold/20 transition-colors"
+          className="mt-2 w-full py-2 rounded-lg bg-gold-soft border border-gold/30 text-gold-ink text-xs font-semibold hover:bg-gold/20 transition-colors"
         >
           Aplicar
         </button>

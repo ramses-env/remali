@@ -28,7 +28,7 @@ function toneValue(tone: KpiTone) {
   switch (tone) {
     case 'warning': return 'text-amber-500'
     case 'danger': return 'text-destructive'
-    case 'gold': return 'text-gold'
+    case 'gold': return 'text-gold-ink'
     default: return 'text-ink'
   }
 }

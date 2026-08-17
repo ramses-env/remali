@@ -147,7 +147,7 @@ export default function FichaTecnicaModal({ equipo, onClose }: { equipo: Equipo;
         {/* Barra superior del modal: identidad + cerrar (no se imprime) */}
         <div className="oc-topbar flex items-center justify-between gap-3 px-4 py-3 border-b border-edge bg-surface shrink-0">
           <div className="flex items-center gap-2 min-w-0">
-            <span className="w-8 h-8 rounded-lg bg-gold/15 text-gold flex items-center justify-center shrink-0">
+            <span className="w-8 h-8 rounded-lg bg-gold/15 text-gold-ink flex items-center justify-center shrink-0">
               <FileText className="h-[18px] w-[18px]" />
             </span>
             <div className="min-w-0">

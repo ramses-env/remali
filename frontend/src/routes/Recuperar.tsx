@@ -70,7 +70,7 @@ export default function Recuperar() {
           </div>
         </AuthItem>
         <AuthItem className="text-center text-sm">
-          <Link to="/login" className="font-semibold text-gold hover:underline">Volver a iniciar sesión</Link>
+          <Link to="/login" className="font-semibold text-gold-ink hover:underline">Volver a iniciar sesión</Link>
         </AuthItem>
       </>
     )
@@ -122,7 +122,7 @@ export default function Recuperar() {
 
       <AuthItem className="text-center text-sm text-mute">
         ¿Ya la recordaste?{' '}
-        <Link to="/login" className="font-semibold text-gold hover:underline">Iniciar sesión</Link>
+        <Link to="/login" className="font-semibold text-gold-ink hover:underline">Iniciar sesión</Link>
       </AuthItem>
     </>
   )

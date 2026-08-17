@@ -345,16 +345,28 @@ def rentas_adeudos(request):
     qs = (Renta.objects.exclude(estado='cancelada')
           .select_related('inventario', 'inventario__equipo', 'cliente', 'obra', 'usuario')
           .prefetch_related('evidencias', 'solicitudes_factura'))
-    filas, total = [], Decimal('0')
+    filas, con_saldo, total = [], [], Decimal('0')
     for r in qs:
         pagado = sum((Decimal(str(p.get('monto', 0))) for p in (r.pagos or [])), Decimal('0'))
         saldo = (r.total or Decimal('0')) + (r.recargo or Decimal('0')) - pagado
         if saldo > 0:
             filas.append(_serialize_renta(r))
+            con_saldo.append(r)
             total += saldo
     filas.sort(key=lambda f: Decimal(f['saldo']), reverse=True)
-    clientes = len({(f.get('cuenta') or f.get('cliente') or str(f['id'])) for f in filas})
-    return Response({'rentas': filas, 'total': str(total), 'clientes': clientes})
+    # Cuántos clientes deben, de verdad. Antes se agrupaba por el TEXTO del
+    # nombre: "Naomi" y "Naomí Pérez" contaban como dos personas, y quien no
+    # traía nombre contaba como una distinta por cada renta. Ahora manda el
+    # padrón, y solo cae al texto lo que todavía no tiene ficha.
+    identidades = set()
+    for r in con_saldo:
+        if r.cliente_id:
+            identidades.add(f'c:{r.cliente_id}')
+        elif r.usuario_id:
+            identidades.add(f'u:{r.usuario_id}')
+        else:
+            identidades.add(f'n:{(r.cliente_texto or "").strip().lower() or r.id}')
+    return Response({'rentas': filas, 'total': str(total), 'clientes': len(identidades)})
 
 
 @api_view(['POST'])

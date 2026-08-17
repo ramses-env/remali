@@ -69,7 +69,20 @@ function Icono({ kind }: { kind: ToastKind }) {
 function ToastView({ toasts, quitar }: { toasts: Toast[]; quitar: (id: number) => void }) {
   const reduce = useReducedMotion()
   return (
-    <div className="fixed top-[76px] right-3 sm:right-5 z-[130] flex flex-col items-end gap-2.5 pointer-events-none max-w-[calc(100vw-1.5rem)]">
+    <>
+    {/* El aviso se va solo: quien usa lector de pantalla no tiene una segunda
+        oportunidad de enterarse. La región `polite` anuncia lo normal; los
+        errores se espejean en `alert` (assertive) para que interrumpan en vez
+        de esperar turno. Ambas van montadas siempre: una región live que
+        aparece junto con su contenido no se anuncia. */}
+    <div className="sr-only" role="alert" aria-live="assertive">
+      {toasts.filter(t => t.kind === 'x').slice(-1).map(t => <span key={t.id}>{t.message}</span>)}
+    </div>
+    <div
+      className="fixed top-[76px] right-3 sm:right-5 z-[130] flex flex-col items-end gap-2.5 pointer-events-none max-w-[calc(100vw-1.5rem)]"
+      role="status"
+      aria-live="polite"
+    >
       <AnimatePresence>
         {toasts.map(t => (
           <motion.div
@@ -95,5 +108,6 @@ function ToastView({ toasts, quitar }: { toasts: Toast[]; quitar: (id: number) =
         ))}
       </AnimatePresence>
     </div>
+    </>
   )
 }

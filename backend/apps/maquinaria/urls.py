@@ -53,7 +53,11 @@ urlpatterns = [
     path('auth/password/olvide/', views.solicitar_restablecer),
     path('auth/password/restablecer/', views.restablecer_password),
     path('auth/password/restablecer/<str:uidb64>/<str:token>/', views.verificar_token_restablecer),
-    path('auth/verificar-correo/<str:token>/', views.verificar_correo_usuario),  # público (link del correo)
+    # Confirmar el correo: lo consume la página del front (/verificar/:token), que
+    # con la sesión que devuelve entra sola. El GET de abajo es el puente para las
+    # ligas viejas que aún apuntan al backend: solo redirige al front.
+    path('auth/verificar-correo/', views.verificar_correo),
+    path('auth/verificar-correo/<str:token>/', views.verificar_correo_usuario),  # público (link viejo)
     path('auth/reenviar-verificacion/', views.reenviar_verificacion),
     path('auth/reenviar-verificacion-publica/', views.reenviar_verificacion_publica),
     # Onboarding — guía interactiva de primer uso

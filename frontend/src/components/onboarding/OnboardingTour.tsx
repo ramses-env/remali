@@ -80,7 +80,7 @@ function TourTooltip({
 
         <div className="p-5">
           <div className="flex items-start justify-between gap-3">
-            <span className="inline-flex items-center gap-1.5 text-[11px] font-black uppercase tracking-[0.12em] text-gold">
+            <span className="inline-flex items-center gap-1.5 text-[11px] font-black uppercase tracking-[0.12em] text-gold-ink">
               <span className="w-1.5 h-1.5 rounded-full bg-gold" />
               Paso {index + 1} de {size}
             </span>

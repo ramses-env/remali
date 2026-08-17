@@ -488,7 +488,7 @@ export default function Home() {
             </h1>
           </div>
           <div className="relative z-10 mb-14 overflow-hidden">
-            <h1 className="text-[clamp(4rem,11vw,9rem)] font-black leading-[0.9] tracking-tighter text-gold">
+            <h1 className="text-[clamp(4rem,11vw,9rem)] font-black leading-[0.9] tracking-tighter text-gold-ink">
               {"TU OBRA".split("").map((c, i) => (
                 <span key={i} className="char inline-block">
                   {c === " " ? " " : c}
@@ -545,7 +545,7 @@ export default function Home() {
               { v: "100%", l: "Garantía" },
             ].map((s) => (
               <div key={s.l}>
-                <p className="text-2xl font-black text-gold mb-1">{s.v}</p>
+                <p className="text-2xl font-black text-gold-ink mb-1">{s.v}</p>
                 <p className="text-[10px] text-mute uppercase tracking-widest font-mono">
                   {s.l}
                 </p>
@@ -634,12 +634,12 @@ export default function Home() {
         />
         <div className="contenedor">
           <div className="max-w-3xl">
-            <p className="text-gold text-xs font-mono uppercase tracking-[0.25em] mb-5">
+            <p className="text-gold-ink text-xs font-mono uppercase tracking-[0.25em] mb-5">
               — Nuestra plataforma
             </p>
             <h2 className="text-4xl sm:text-5xl md:text-[4.5rem] font-black leading-[1.03] tracking-tight text-ink text-balance">
               Renta y compra en minutos,{" "}
-              <span className="text-gold">en un solo clic.</span>
+              <span className="text-gold-ink">en un solo clic.</span>
             </h2>
             <p className="mt-6 max-w-xl text-base md:text-lg leading-relaxed text-mute">
               Explora el catálogo, compara precios por día, semana o mes y
@@ -697,7 +697,7 @@ export default function Home() {
         <div className="contenedor">
           <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-6 mb-16">
             <div>
-              <p className="text-gold text-[11px] font-mono uppercase tracking-[0.25em] mb-3">
+              <p className="text-gold-ink text-[11px] font-mono uppercase tracking-[0.25em] mb-3">
                 — Nuestro equipo
               </p>
               <h2 className="text-4xl md:text-5xl font-black leading-tight">
@@ -708,7 +708,7 @@ export default function Home() {
             </div>
             <Link
               to="/equipos"
-              className="group text-sm font-semibold text-mute hover:text-gold transition-colors flex items-center gap-2 shrink-0"
+              className="group text-sm font-semibold text-mute hover:text-gold-ink transition-colors flex items-center gap-2 shrink-0"
             >
               Ver catálogo completo
               <svg
@@ -781,14 +781,14 @@ export default function Home() {
                   />
                   <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
                     <div>
-                      <h3 className="text-2xl md:text-3xl font-black text-ink mb-1.5 group-hover:text-gold transition-colors duration-300">
+                      <h3 className="text-2xl md:text-3xl font-black text-ink mb-1.5 group-hover:text-gold-ink transition-colors duration-300">
                         {m.title}
                       </h3>
                       <p className="text-mute text-sm max-w-md">{m.desc}</p>
                     </div>
                     <Link
                       to="/equipos"
-                      className="shrink-0 inline-flex items-center gap-2 text-sm font-semibold text-mute group-hover:text-gold transition-colors"
+                      className="shrink-0 inline-flex items-center gap-2 text-sm font-semibold text-mute group-hover:text-gold-ink transition-colors"
                     >
                       Ver equipos →
                     </Link>
@@ -826,7 +826,7 @@ export default function Home() {
             ].map((t, i) => (
               <span
                 key={`${r}-${i}`}
-                className={`text-sm font-mono uppercase tracking-[0.2em] ${t === "·" ? "text-gold" : "text-mute"}`}
+                className={`text-sm font-mono uppercase tracking-[0.2em] ${t === "·" ? "text-gold-ink" : "text-mute"}`}
               >
                 {t}
               </span>
@@ -851,7 +851,7 @@ export default function Home() {
                   <span className="stat-count" data-target={s.target}>
                     0
                   </span>
-                  <span className="text-gold">{s.suffix}</span>
+                  <span className="text-gold-ink">{s.suffix}</span>
                 </p>
                 <p className="text-mute text-xs uppercase tracking-[0.2em] font-mono">
                   {s.label}
@@ -868,7 +868,7 @@ export default function Home() {
       <section className="features-section pb-28">
         <div className="contenedor">
           <div className="mb-14">
-            <p className="text-gold text-[11px] font-mono uppercase tracking-[0.25em] mb-3">
+            <p className="text-gold-ink text-[11px] font-mono uppercase tracking-[0.25em] mb-3">
               — Por qué elegirnos
             </p>
             <h2 className="text-4xl md:text-5xl font-black mb-6">
@@ -884,7 +884,7 @@ export default function Home() {
                 className="feature-card group p-8 border-r border-b border-edge hover:bg-surface-2 transition-all duration-500 cursor-default"
               >
                 <div className="w-8 h-0.5 bg-gold/40 mb-6 group-hover:w-14 group-hover:bg-gold transition-all duration-500" />
-                <h3 className="text-lg font-bold text-ink mb-3 group-hover:text-gold transition-colors">
+                <h3 className="text-lg font-bold text-ink mb-3 group-hover:text-gold-ink transition-colors">
                   {f.title}
                 </h3>
                 <p className="text-mute text-sm leading-relaxed group-hover:text-ink/80 transition-colors">

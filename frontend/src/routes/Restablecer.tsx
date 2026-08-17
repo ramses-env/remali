@@ -81,7 +81,7 @@ export default function Restablecer() {
       <>
         <AuthCabecera title="Enlace no válido" description="Este enlace ya venció o se usó. Pide uno nuevo y vuelve a intentarlo." />
         <AuthItem className="text-center text-sm">
-          <Link to="/recuperar" className="font-semibold text-gold hover:underline">Pedir un enlace nuevo</Link>
+          <Link to="/recuperar" className="font-semibold text-gold-ink hover:underline">Pedir un enlace nuevo</Link>
         </AuthItem>
         <AuthItem className="text-center text-sm text-mute">
           <Link to="/login" className="hover:underline">Volver a iniciar sesión</Link>

@@ -260,7 +260,7 @@ export default function CajaPOS({ notify }: { notify: Notify }) {
 
       {/* Barra de escaneo */}
       <div className="flex items-center gap-3.5 px-4 h-[68px] rounded-2xl border border-edge bg-surface">
-        <span className={`w-10 h-10 shrink-0 grid place-items-center rounded-xl transition-colors ${scanMsg === 'ok' ? 'bg-emerald-500/15 text-emerald-500' : scanMsg ? 'bg-red-500/15 text-red-400' : 'bg-gold/15 text-gold'}`}>
+        <span className={`w-10 h-10 shrink-0 grid place-items-center rounded-xl transition-colors ${scanMsg === 'ok' ? 'bg-emerald-500/15 text-emerald-500' : scanMsg ? 'bg-red-500/15 text-red-400' : 'bg-gold/15 text-gold-ink'}`}>
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.8"><path strokeLinecap="round" strokeLinejoin="round" d="M3 8V5.5A1.5 1.5 0 0 1 4.5 4H7M17 4h2.5A1.5 1.5 0 0 1 21 5.5V8M21 16v2.5a1.5 1.5 0 0 1-1.5 1.5H17M7 20H4.5A1.5 1.5 0 0 1 3 18.5V16" /><path strokeLinecap="round" d="M6.5 8.5v7M10 8.5v7M14 8.5v7M17.5 8.5v7" /></svg>
         </span>
         <input
@@ -287,7 +287,7 @@ export default function CajaPOS({ notify }: { notify: Notify }) {
                 <span className="text-[13px] text-mute">{lineas.length ? `${lineas.length} ${lineas.length === 1 ? 'partida' : 'partidas'} · ${piezas} pz` : 'Sin partidas'}</span>
               </div>
               <div className="flex items-center gap-2">
-                <button onClick={() => setMostrarCliente(v => !v)} className={`h-9 px-3 rounded-lg border text-[13px] font-semibold transition-colors ${cliente.trim() ? 'border-gold/50 text-gold' : 'border-edge text-ink hover:border-gold/50 hover:text-gold'}`}>
+                <button onClick={() => setMostrarCliente(v => !v)} className={`h-9 px-3 rounded-lg border text-[13px] font-semibold transition-colors ${cliente.trim() ? 'border-gold/50 text-gold-ink' : 'border-edge text-ink hover:border-gold/50 hover:text-gold-ink'}`}>
                   {cliente.trim() || '+ Asignar cliente'}
                 </button>
                 {lineas.length > 0 && !bloqueado && (
@@ -363,7 +363,7 @@ export default function CajaPOS({ notify }: { notify: Notify }) {
             <div className="flex flex-wrap gap-2 mt-3.5">
               {CATEGORIAS.map(c => (
                 <button key={c} onClick={() => setCat(c)}
-                  className={`h-8 px-3.5 rounded-full text-[13px] border transition-colors ${cat === c ? 'bg-gold/15 border-gold text-gold font-bold' : 'border-edge text-mute hover:text-ink font-medium'}`}>
+                  className={`h-8 px-3.5 rounded-full text-[13px] border transition-colors ${cat === c ? 'bg-gold/15 border-gold text-gold-ink font-bold' : 'border-edge text-mute hover:text-ink font-medium'}`}>
                   {c}
                 </button>
               ))}
@@ -387,10 +387,10 @@ export default function CajaPOS({ notify }: { notify: Notify }) {
                       className={`flex flex-col items-start gap-2.5 p-3.5 rounded-xl text-left border transition-[transform,border-color,background-color] active:scale-[0.98] ${n ? 'border-gold bg-gold/[0.06]' : 'border-edge bg-surface-2 hover:border-gold/40'} ${out ? 'opacity-45 cursor-not-allowed active:scale-100 hover:border-edge' : ''}`}
                     >
                       <div className="flex items-center justify-between gap-2 w-full">
-                        <span className={`text-[11px] font-bold px-2 py-1 rounded-md ${out ? 'bg-app text-mute' : low ? 'bg-gold/15 text-gold' : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'}`}>
+                        <span className={`text-[11px] font-bold px-2 py-1 rounded-md ${out ? 'bg-app text-mute' : low ? 'bg-gold/15 text-gold-ink' : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'}`}>
                           {out ? 'Agotada' : r.stock === 1 ? 'Última pieza' : low ? `Quedan ${r.stock}` : `${r.stock} pz`}
                         </span>
-                        {n > 0 && <span className="text-[11px] font-bold px-2 py-1 rounded-md bg-gold/15 text-gold">{n} en ticket</span>}
+                        {n > 0 && <span className="text-[11px] font-bold px-2 py-1 rounded-md bg-gold/15 text-gold-ink">{n} en ticket</span>}
                       </div>
                       <div className="w-full">
                         <div className="text-[14px] font-semibold text-ink leading-snug line-clamp-2">{r.nombre}</div>
@@ -590,7 +590,7 @@ function AbrirCaja({ notify, onAbierta }: { notify: Notify; onAbierta: (s: Sesio
   }
   return (
     <div className="max-w-md mx-auto mt-6 bg-surface border border-edge rounded-2xl p-6 text-center">
-      <div className="w-14 h-14 mx-auto rounded-2xl bg-gold/15 text-gold grid place-items-center mb-4">
+      <div className="w-14 h-14 mx-auto rounded-2xl bg-gold/15 text-gold-ink grid place-items-center mb-4">
         <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.7"><rect x="3.5" y="9" width="17" height="10.5" rx="1.5" /><path d="M6.6 9V6.4A1.8 1.8 0 0 1 8.4 4.6h3.2a1.8 1.8 0 0 1 1.6 1L14 9" /><path d="M3.5 12.7h17" /></svg>
       </div>
       <h2 className="text-xl font-black text-ink">Debes abrir una caja</h2>
@@ -795,7 +795,7 @@ function CerrarCaja({ sesion, notify, onVolver, onCerrada }: {
                     </div>
                   </div>
                 ) : (
-                  <button onClick={() => setMovOpen(true)} className="h-10 px-4 rounded-xl border border-edge text-ink text-[13.5px] font-semibold hover:border-gold/50 hover:text-gold transition-colors">+ Registrar movimiento</button>
+                  <button onClick={() => setMovOpen(true)} className="h-10 px-4 rounded-xl border border-edge text-ink text-[13.5px] font-semibold hover:border-gold/50 hover:text-gold-ink transition-colors">+ Registrar movimiento</button>
                 )}
               </div>
             </section>

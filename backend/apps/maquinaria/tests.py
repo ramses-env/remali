@@ -1,9 +1,12 @@
+from datetime import timedelta
 from decimal import Decimal
 
+from django.contrib.auth import get_user_model
 from django.test import TestCase
+from django.utils import timezone
 from rest_framework.test import APIClient
 
-from maquinaria.models import Equipo
+from maquinaria.models import Equipo, PerfilUsuario
 from inventario.models import Inventario
 
 
@@ -64,3 +67,50 @@ class EquipoCatalogoInventarioTest(TestCase):
         modelos = {item['modelo'] for item in resp.data}
         self.assertIn('APS-200', modelos)
         self.assertIn('ROD-90', modelos)
+
+
+class VerificarCorreoTest(TestCase):
+    """La liga del correo confirma la cuenta Y abre sesión.
+
+    Se prueba aquí porque es la única puerta del sistema que no pide contraseña:
+    lo que la sostiene es que el token sea de un solo uso y caduque.
+    """
+
+    def setUp(self):
+        self.client = APIClient()
+        User = get_user_model()
+        self.user = User.objects.create_user(
+            username='cliente', email='cliente@ejemplo.com', password='Contra5egura!',
+            first_name='Ramsés',
+        )
+        self.perfil, _ = PerfilUsuario.objects.get_or_create(usuario=self.user)
+        self.perfil.email_token = 'tok-bueno'
+        self.perfil.email_token_creado = timezone.now()
+        self.perfil.save()
+
+    def test_liga_valida_verifica_y_devuelve_sesion(self):
+        resp = self.client.post('/api/auth/verificar-correo/', {'token': 'tok-bueno'}, format='json')
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertTrue(resp.data.get('access'))
+        self.assertEqual(resp.data.get('nombre'), 'Ramsés')
+        self.perfil.refresh_from_db()
+        self.assertTrue(self.perfil.email_verificado)
+        self.assertEqual(self.perfil.email_token, '')
+
+    def test_liga_reusada_ya_no_sirve(self):
+        self.client.post('/api/auth/verificar-correo/', {'token': 'tok-bueno'}, format='json')
+        resp = self.client.post('/api/auth/verificar-correo/', {'token': 'tok-bueno'}, format='json')
+        self.assertEqual(resp.status_code, 404, resp.data)
+        self.assertEqual(resp.data.get('codigo'), 'invalido')
+
+    def test_liga_vencida_no_abre_sesion(self):
+        self.perfil.email_token_creado = timezone.now() - timedelta(hours=49)
+        self.perfil.save(update_fields=['email_token_creado'])
+        resp = self.client.post('/api/auth/verificar-correo/', {'token': 'tok-bueno'}, format='json')
+        self.assertEqual(resp.status_code, 400, resp.data)
+        self.assertEqual(resp.data.get('codigo'), 'vencido')
+        self.perfil.refresh_from_db()
+        # Ni verifica ni quema el token: la liga vencida no cambia nada, así el
+        # usuario puede pedir una nueva sin quedarse con la cuenta a medias.
+        self.assertFalse(self.perfil.email_verificado)
+        self.assertEqual(self.perfil.email_token, 'tok-bueno')

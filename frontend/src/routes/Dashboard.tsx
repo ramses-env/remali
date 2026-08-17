@@ -360,9 +360,9 @@ function CommandPalette({ equipos, unidades, rentas, ventas, go, onClose }: {
                   onClick={() => run(r)}
                   className={`w-full flex items-center gap-3 px-4 py-2.5 text-left transition-colors ${i === safeIdx ? 'bg-gold-soft' : 'hover:bg-ink/5'}`}
                 >
-                  <span className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 text-[11px] font-extrabold ${i === safeIdx ? 'bg-gold text-white' : 'bg-ink/10 text-mute'}`}>{r.group[0]}</span>
+                  <span className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 text-[11px] font-extrabold ${i === safeIdx ? 'bg-gold text-gold-on' : 'bg-ink/10 text-mute'}`}>{r.group[0]}</span>
                   <div className="flex-1 min-w-0">
-                    <div className={`text-[14px] font-semibold truncate ${i === safeIdx ? 'text-gold' : 'text-ink'}`}>{r.label}</div>
+                    <div className={`text-[14px] font-semibold truncate ${i === safeIdx ? 'text-gold-ink' : 'text-ink'}`}>{r.label}</div>
                     {r.sub && <div className="text-[12px] text-mute truncate">{r.sub}</div>}
                   </div>
                   {r.badge && <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-ink/10 text-mute shrink-0">{r.badge}</span>}
@@ -873,7 +873,7 @@ export default function Dashboard() {
               <button
                 ref={notifBtnRef}
                 onClick={toggleNotifPanel}
-                className={`relative w-9 h-9 rounded-lg bg-app hover:bg-surface-2 text-mute hover:text-gold active:scale-95 transition-[color,transform,background-color] duration-150 flex items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 ${notifOpen ? 'text-gold' : ''}`}
+                className={`relative w-9 h-9 rounded-lg bg-app hover:bg-surface-2 text-mute hover:text-gold-ink active:scale-95 transition-[color,transform,background-color] duration-150 flex items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 ${notifOpen ? 'text-gold-ink' : ''}`}
                 aria-label="Notificaciones" aria-haspopup="dialog" aria-expanded={notifOpen}
               >
                 <svg className="w-[18px] h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.8"><path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.4-1.4A2 2 0 0118 14.2V11a6 6 0 10-12 0v3.2c0 .5-.2 1-.6 1.4L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>
@@ -894,7 +894,7 @@ export default function Dashboard() {
                 >
                   <div className="px-5 py-4 border-b border-edge flex items-center justify-between gap-3">
                     <div className="text-lg font-extrabold text-ink">Notificaciones</div>
-                    <button onClick={marcarTodasNotifs} className="text-[13px] font-bold text-ink hover:text-gold transition-colors">Marcar todas leídas</button>
+                    <button onClick={marcarTodasNotifs} className="text-[13px] font-bold text-ink hover:text-gold-ink transition-colors">Marcar todas leídas</button>
                   </div>
                   <div className="max-h-[min(55vh,360px)] overflow-y-auto">
                     {notifsRecientes.length === 0 && (
@@ -944,8 +944,8 @@ export default function Dashboard() {
                   <div className="fixed inset-0 z-[55]" onClick={() => setLangOpen(false)} />
                   <div className="absolute right-0 top-full mt-2 w-40 bg-surface border border-edge rounded-xl shadow-[0_20px_50px_rgba(17,24,39,0.18)] z-[56] overflow-hidden py-1">
                     {(['ES', 'EN'] as const).map(l => (
-                      <button key={l} onClick={() => cambiarIdioma(l)} className={`w-full flex items-center gap-2 px-3.5 py-2.5 text-[13.5px] font-semibold text-left hover:bg-surface-2 transition-colors ${lang === l ? 'text-gold' : 'text-ink'}`}>
-                        {l === 'ES' ? '🇲🇽 Español' : '🇺🇸 English'}{lang === l && <span className="ml-auto text-gold">✓</span>}
+                      <button key={l} onClick={() => cambiarIdioma(l)} className={`w-full flex items-center gap-2 px-3.5 py-2.5 text-[13.5px] font-semibold text-left hover:bg-surface-2 transition-colors ${lang === l ? 'text-gold-ink' : 'text-ink'}`}>
+                        {l === 'ES' ? '🇲🇽 Español' : '🇺🇸 English'}{lang === l && <span className="ml-auto text-gold-ink">✓</span>}
                       </button>
                     ))}
                   </div>
@@ -994,7 +994,7 @@ export default function Dashboard() {
               )}
             </div>
 
-            <Link to="/" className="text-xs text-mute hover:text-gold transition-colors hidden lg:flex items-center gap-1.5" title="Ver sitio">
+            <Link to="/" className="text-xs text-mute hover:text-gold-ink transition-colors hidden lg:flex items-center gap-1.5" title="Ver sitio">
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
             </Link>
           </div>
@@ -1026,10 +1026,10 @@ export default function Dashboard() {
                           onClick={() => go(it.key)}
                           title={t(`sec.${claveSec(it.key)}.title`)}
                           className={`group relative w-full flex items-center gap-2.5 px-3 py-2.5 rounded-[10px] text-sm transition-colors ${colapsado ? 'lg:justify-center lg:px-2' : ''} ${
-                            active ? 'bg-gold-soft text-gold font-medium' : 'text-ink hover:bg-surface-2 font-normal'
+                            active ? 'bg-gold-soft text-gold-ink font-medium' : 'text-ink hover:bg-surface-2 font-normal'
                           }`}
                         >
-                          <svg className={`w-[19px] h-[19px] shrink-0 transition-colors ${active ? 'text-gold' : 'text-mute group-hover:text-ink'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+                          <svg className={`w-[19px] h-[19px] shrink-0 transition-colors ${active ? 'text-gold-ink' : 'text-mute group-hover:text-ink'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
                             {it.icon}
                           </svg>
                           <span className={`flex-1 text-left ${colapsado ? 'lg:hidden' : ''}`}>{t(`sec.${claveSec(it.key)}.title`)}</span>
@@ -1196,10 +1196,27 @@ export default function Dashboard() {
 
       <DialogoHost />
 
-      {/* ─── ALERTAS: pila (las nuevas abajo), círculo por tipo y barra de vida ─── */}
-      {toasts.length > 0 && (
-        <div className="fixed top-[76px] right-3 sm:right-5 z-[130] flex flex-col items-end gap-2.5 max-w-[calc(100vw-1.5rem)]">
-          {toasts.map(t => (
+      {/* ─── ALERTAS: pila (las nuevas abajo), círculo por tipo y barra de vida ───
+          `notify()` es el ÚNICO canal de todo lo que el panel le dice al usuario:
+          venta registrada, error al guardar, permiso denegado, red caída. Los
+          toasts se van solos a los 3.2s, así que quien usa lector de pantalla no
+          tiene una segunda oportunidad de enterarse. De ahí las dos regiones:
+
+          • El contenedor va montado SIEMPRE (aunque esté vacío) porque una región
+            live que aparece junto con su contenido no se anuncia: el lector tiene
+            que estar observándola de antes.
+          • Los errores además se espejean en una región `alert` (assertive) para
+            que interrumpan lo que el lector esté diciendo. Un "no se guardó" que
+            espera turno detrás de otra frase llega tarde. */}
+      <div className="sr-only" role="alert" aria-live="assertive">
+        {toasts.filter(t => t.type === 'err').slice(-1).map(t => <span key={t.id}>{t.msg}</span>)}
+      </div>
+      <div
+        className="fixed top-[76px] right-3 sm:right-5 z-[130] flex flex-col items-end gap-2.5 max-w-[calc(100vw-1.5rem)]"
+        role="status"
+        aria-live="polite"
+      >
+        {toasts.map(t => (
             <div key={t.id} className="toast-in relative overflow-hidden flex items-center gap-3 pl-3 pr-2.5 py-2.5 rounded-2xl border border-edge bg-alert shadow-[0_18px_50px_rgba(0,0,0,0.35)]">
               <span className={`w-7 h-7 rounded-full grid place-items-center shrink-0 ${({ ok: 'bg-emerald-500', err: 'bg-red-500', info: 'bg-violet-500', warning: 'bg-amber-500', primary: 'bg-neutral-400' } as Record<string, string>)[t.type]}`}>
                 {t.type === 'ok' && <svg viewBox="0 0 24 24" className="w-4 h-4 stroke-white fill-none" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round"><path d="M5 13l4 4L19 7" /></svg>}
@@ -1215,10 +1232,9 @@ export default function Dashboard() {
                 className={`absolute left-0 bottom-0 h-[3px] rounded-full ${({ ok: 'bg-emerald-500', err: 'bg-red-500', info: 'bg-violet-500', warning: 'bg-amber-500', primary: 'bg-neutral-400' } as Record<string, string>)[t.type]}`}
                 style={{ animation: 'toast-avance 3.2s linear forwards' }}
               />
-            </div>
-          ))}
-        </div>
-      )}
+          </div>
+        ))}
+      </div>
 
       {invEquipo && <InventoryModal equipo={invEquipo} onClose={() => setInvEquipo(null)} notify={notify} />}
 
@@ -1240,8 +1256,15 @@ export default function Dashboard() {
 
 /** Reloj del resumen con dígitos de marcador: cada dígito que cambia RUEDA
  *  (el viejo sale hacia arriba, el nuevo entra desde abajo). Los que no
- *  cambian no se mueven — al cambiar de minuto solo giran los necesarios. */
-function RelojVivo({ now }: { now: Date }) {
+ *  cambian no se mueven — al cambiar de minuto solo giran los necesarios.
+ *
+ *  El tic vive AQUÍ, no en Resumen. Cuando estaba arriba, cada segundo
+ *  repintaba las nueve tarjetas del resumen y volvía a recorrer unidades,
+ *  rentas, ventas y equipos (~17 pasadas por segundo) para pintar un reloj.
+ *  Con el tic dentro, solo se repinta el reloj. */
+function RelojVivo() {
+  const [now, setNow] = useState(() => new Date())
+  useEffect(() => { const t = setInterval(() => setNow(new Date()), 1000); return () => clearInterval(t) }, [])
   let h = now.getHours() % 12
   if (h === 0) h = 12
   const chars = [...`${h}:${String(now.getMinutes()).padStart(2, '0')}`]
@@ -1286,8 +1309,17 @@ function Resumen({ equipos, rentas, unidades, ventas, me, go, metrics, adeudos, 
   const money0 = (n: number) => '$' + Math.round(n).toLocaleString('en-US')
 
   // Reloj en vivo
+  // El resumen solo necesita saber QUÉ DÍA es, no qué segundo: la hora la lleva
+  // RelojVivo por su cuenta. Revisamos cada minuto y solo movemos el estado si
+  // de verdad cambió el día (panel abierto pasada la medianoche), así el resumen
+  // no se repinta ni una vez en una jornada normal.
   const [now, setNow] = useState(() => new Date())
-  useEffect(() => { const t = setInterval(() => setNow(new Date()), 1000); return () => clearInterval(t) }, [])
+  useEffect(() => {
+    const t = setInterval(() => {
+      setNow(prev => { const ahora = new Date(); return ahora.toDateString() === prev.toDateString() ? prev : ahora })
+    }, 60_000)
+    return () => clearInterval(t)
+  }, [])
   const dateStr = now.toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
   const nombre = me?.username || 'admin'
 
@@ -1406,11 +1438,11 @@ function Resumen({ equipos, rentas, unidades, ventas, me, go, metrics, adeudos, 
           <div className="min-w-0">
             <div className="text-[26px] font-extrabold text-ink">Bienvenido, {nombre}</div>
             <div className="text-[14.5px] text-mute mt-1.5">Listo para gestionar tu inventario hoy.</div>
-            <RelojVivo now={now} />
+            <RelojVivo />
             <div className="text-[13.5px] text-mute mt-1 capitalize">{dateStr}</div>
           </div>
           <div className="text-right shrink-0">
-            <div className="text-[12.5px] font-bold tracking-wide text-gold">INGRESOS HOY</div>
+            <div className="text-[12.5px] font-bold tracking-wide text-gold-ink">INGRESOS HOY</div>
             <div className="text-[30px] font-extrabold text-ink mt-2 tabular-nums">{money0(ingresosHoy)}</div>
             <div className="text-[13px] font-bold text-libre mt-1">{ventasActivas.length} ventas totales</div>
           </div>
@@ -1421,7 +1453,7 @@ function Resumen({ equipos, rentas, unidades, ventas, me, go, metrics, adeudos, 
           {overviewStats.map((s, i) => (
             <div key={i} className={`${panel} px-4 py-4`}>
               <div className="flex items-center justify-between mb-3.5">
-                <div className="w-[34px] h-[34px] rounded-[9px] bg-app flex items-center justify-center text-gold">
+                <div className="w-[34px] h-[34px] rounded-[9px] bg-app flex items-center justify-center text-gold-ink">
                   <svg className="w-[18px] h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">{s.icon}</svg>
                 </div>
                 <div className="flex gap-0.5">
@@ -1461,14 +1493,14 @@ function Resumen({ equipos, rentas, unidades, ventas, me, go, metrics, adeudos, 
             <div className="text-[13px] text-mute mt-1 mb-4">Gestiona tus pendientes del día</div>
             <div className="flex border border-edge rounded-[9px] overflow-hidden mb-4">
               {(['pend', 'done'] as const).map(t => (
-                <button key={t} onClick={() => setTaskTab(t)} className={`flex-1 py-2.5 text-[13px] font-bold transition-colors ${taskTab === t ? 'bg-gold text-white' : 'text-mute hover:bg-surface-2'}`}>
+                <button key={t} onClick={() => setTaskTab(t)} className={`flex-1 py-2.5 text-[13px] font-bold transition-colors ${taskTab === t ? 'bg-gold text-gold-on' : 'text-mute hover:bg-surface-2'}`}>
                   {t === 'pend' ? 'Pendientes' : 'Completadas'}
                 </button>
               ))}
             </div>
             <div className="flex gap-1.5 mb-4">
               <input value={taskInput} onChange={e => setTaskInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && addTask()} placeholder="Agregar una tarea..." className="flex-1 border border-edge rounded-lg px-3 py-2.5 text-[13.5px] bg-app text-ink placeholder-mute focus:outline-none focus:border-gold/50" />
-              <button onClick={addTask} className="w-10 h-10 rounded-lg bg-gold text-white flex items-center justify-center text-lg font-bold hover:opacity-90 shrink-0">+</button>
+              <button onClick={addTask} className="w-10 h-10 rounded-lg bg-gold text-gold-on flex items-center justify-center text-lg font-bold hover:opacity-90 shrink-0">+</button>
             </div>
             {visibleTasks.length === 0 ? (
               <div className="text-center py-6 text-mute text-[13.5px]">No hay tareas {taskTab === 'pend' ? 'pendientes' : 'completadas'}</div>
@@ -1496,7 +1528,7 @@ function Resumen({ equipos, rentas, unidades, ventas, me, go, metrics, adeudos, 
             </div>
             <div className="grid grid-cols-7 gap-0.5">
               {calCells.map((d, i) => (
-                <div key={i} className={`text-center py-1.5 rounded-md text-[13px] font-semibold ${d === today ? 'bg-gold text-white' : d ? 'text-ink hover:bg-surface-2' : ''}`}>{d || ''}</div>
+                <div key={i} className={`text-center py-1.5 rounded-md text-[13px] font-semibold ${d === today ? 'bg-gold text-gold-on' : d ? 'text-ink hover:bg-surface-2' : ''}`}>{d || ''}</div>
               ))}
             </div>
           </div>
@@ -1856,11 +1888,11 @@ function EquiposAdmin({ equipos, categorias, tipos, marcas, reload, notify }: {
                     <td data-col="Clasificación" className="px-3 py-3">
                       {(e.categoria || e.tipo || e.marca) ? (
                         <button onClick={() => clasificarEquipo(e)} className="text-left group/cl" title="Cambiar clasificación">
-                          <p className="text-xs text-ink group-hover/cl:text-gold transition-colors">{e.categoria?.nombre || '—'}</p>
+                          <p className="text-xs text-ink group-hover/cl:text-gold-ink transition-colors">{e.categoria?.nombre || '—'}</p>
                           <p className="text-[11px] text-mute">{[e.marca?.nombre, e.tipo?.nombre].filter(Boolean).join(' · ') || '—'}</p>
                         </button>
                       ) : (
-                        <button onClick={() => clasificarEquipo(e)} className="text-[11px] px-2.5 py-1 rounded-md border border-dashed border-edge text-mute hover:text-gold hover:border-gold/50 transition-colors">
+                        <button onClick={() => clasificarEquipo(e)} className="text-[11px] px-2.5 py-1 rounded-md border border-dashed border-edge text-mute hover:text-gold-ink hover:border-gold/50 transition-colors">
                           Asignar
                         </button>
                       )}
@@ -1892,7 +1924,7 @@ function EquiposAdmin({ equipos, categorias, tipos, marcas, reload, notify }: {
                     {/* Acciones */}
                     <td className="px-5 py-3">
                       <div className="flex items-center justify-end gap-1.5">
-                        <button onClick={() => setInvEquipo(e)} title="Inventario" className="px-3 py-1.5 rounded-lg bg-gold-soft text-gold text-xs font-semibold hover:bg-gold/20 transition-colors flex items-center gap-1.5">
+                        <button onClick={() => setInvEquipo(e)} title="Inventario" className="px-3 py-1.5 rounded-lg bg-gold-soft text-gold-ink text-xs font-semibold hover:bg-gold/20 transition-colors flex items-center gap-1.5">
                           <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" /></svg>
                           <span className="hidden lg:inline">Inventario</span>
                         </button>
@@ -1912,7 +1944,7 @@ function EquiposAdmin({ equipos, categorias, tipos, marcas, reload, notify }: {
           {filtrados.length === 0 && (
             <div className="py-16 text-center">
               <p className="text-sm text-mute">{q ? 'Sin resultados para tu búsqueda.' : 'Aún no hay productos.'}</p>
-              {!q && puedeEditar && <button onClick={openNew} className="mt-3 text-sm font-semibold text-gold hover:opacity-80">+ Crear el primero</button>}
+              {!q && puedeEditar && <button onClick={openNew} className="mt-3 text-sm font-semibold text-gold-ink hover:opacity-80">+ Crear el primero</button>}
             </div>
           )}
         </div>
@@ -1944,7 +1976,7 @@ function EquiposAdmin({ equipos, categorias, tipos, marcas, reload, notify }: {
               </div>
               {/* Al crear: la condición define qué precios aplican (nueva = solo venta) */}
               <div className="rounded-2xl border border-gold/20 bg-gold-soft/50 p-4">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-gold mb-1">Condición</p>
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-gold-ink mb-1">Condición</p>
                 <p className="text-xs text-mute mb-3"><b>Nueva</b> → se vende. <b>Seminueva</b> → se renta. Define en qué sección del catálogo aparece.</p>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
@@ -1984,7 +2016,7 @@ function EquiposAdmin({ equipos, categorias, tipos, marcas, reload, notify }: {
                     </div>
                     {esSobrePedido ? (
                       <div className="mt-2.5 flex items-start gap-2.5 rounded-xl border border-gold/25 bg-gold/[0.06] px-3.5 py-3">
-                        <svg className="w-4 h-4 text-gold shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9" /><path d="M12 8v4l2.5 2.5" /></svg>
+                        <svg className="w-4 h-4 text-gold-ink shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9" /><path d="M12 8v4l2.5 2.5" /></svg>
                         <p className="text-[12px] text-ink/80 leading-snug">Nace <b className="text-ink">sin stock</b>: se ofrece para pedir al proveedor y la unidad se asigna cuando llega. Al dar de alta stock, pasa a venta inmediata.</p>
                       </div>
                     ) : (
@@ -2030,7 +2062,7 @@ function EquiposAdmin({ equipos, categorias, tipos, marcas, reload, notify }: {
               <div>
                 <label className={label}>Imagen <span className="text-mute font-normal normal-case">(JPG, PNG, WebP)</span></label>
                 <input type="file" accept="image/jpeg,image/png,image/webp,image/gif,image/*" onChange={e => setImageFile(e.target.files?.[0] || null)}
-                  className="w-full text-xs text-mute file:mr-3 file:py-2 file:px-4 file:rounded-full file:border-0 file:bg-gold-soft file:text-gold file:text-xs file:font-semibold hover:file:bg-gold/20 file:cursor-pointer" />
+                  className="w-full text-xs text-mute file:mr-3 file:py-2 file:px-4 file:rounded-full file:border-0 file:bg-gold-soft file:text-gold-ink file:text-xs file:font-semibold hover:file:bg-gold/20 file:cursor-pointer" />
                 {editing && form.imagen && !imageFile && (
                   <img src={resolveMediaUrl(form.imagen)} alt="" className="mt-3 w-20 h-20 object-cover rounded-lg" />
                 )}
@@ -2040,11 +2072,11 @@ function EquiposAdmin({ equipos, categorias, tipos, marcas, reload, notify }: {
               <div>
                 <label className={label}>Ficha técnica <span className="text-mute font-normal normal-case">(PDF — la que descarga el cliente)</span></label>
                 <input type="file" accept="application/pdf,.pdf" onChange={e => setFichaFile(e.target.files?.[0] || null)}
-                  className="w-full text-xs text-mute file:mr-3 file:py-2 file:px-4 file:rounded-full file:border-0 file:bg-gold-soft file:text-gold file:text-xs file:font-semibold hover:file:bg-gold/20 file:cursor-pointer" />
+                  className="w-full text-xs text-mute file:mr-3 file:py-2 file:px-4 file:rounded-full file:border-0 file:bg-gold-soft file:text-gold-ink file:text-xs file:font-semibold hover:file:bg-gold/20 file:cursor-pointer" />
                 {fichaFile
                   ? <p className="mt-2 text-[11px] text-emerald-600">Nueva ficha: {fichaFile.name}</p>
                   : (editing && form.ficha_tecnica && (
-                    <a href={resolveMediaUrl(form.ficha_tecnica)} target="_blank" rel="noopener noreferrer" className="mt-2 inline-flex items-center gap-1.5 text-[11px] text-gold hover:underline">
+                    <a href={resolveMediaUrl(form.ficha_tecnica)} target="_blank" rel="noopener noreferrer" className="mt-2 inline-flex items-center gap-1.5 text-[11px] text-gold-ink hover:underline">
                       <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
                       Ver ficha actual
                     </a>
@@ -2073,12 +2105,12 @@ function EquiposAdmin({ equipos, categorias, tipos, marcas, reload, notify }: {
                 )}
                 <datalist id="spec-sugeridas">{SPEC_SUGERIDAS.map(s => <option key={s} value={s} />)}</datalist>
                 <div className="mt-3 flex items-center justify-between gap-3">
-                  <button type="button" onClick={addSpec} className="inline-flex items-center gap-1.5 text-sm font-semibold text-gold hover:opacity-80">
+                  <button type="button" onClick={addSpec} className="inline-flex items-center gap-1.5 text-sm font-semibold text-gold-ink hover:opacity-80">
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.2"><path strokeLinecap="round" d="M12 5v14M5 12h14" /></svg>
                     Agregar especificación
                   </button>
                   {form.modelo.trim() && (
-                    <button type="button" onClick={() => setPreviewFicha(true)} className="inline-flex items-center gap-1.5 text-sm font-semibold text-ink hover:text-gold transition-colors">
+                    <button type="button" onClick={() => setPreviewFicha(true)} className="inline-flex items-center gap-1.5 text-sm font-semibold text-ink hover:text-gold-ink transition-colors">
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.9"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" /><circle cx="12" cy="12" r="3" /></svg>
                       Vista previa de ficha
                     </button>
@@ -2100,7 +2132,7 @@ function EquiposAdmin({ equipos, categorias, tipos, marcas, reload, notify }: {
                   </div>
                 </div>
                 {Number(form.promo_pct) > 0 && (
-                  <p className="text-[12px] text-gold mt-2.5">
+                  <p className="text-[12px] text-gold-ink mt-2.5">
                     El cliente verá la etiqueta roja «PROMO −{Math.min(90, Math.max(0, Number(form.promo_pct) || 0))}%», el precio ya
                     rebajado y el precio original tachado. Ej.: $1,000 queda en ${(1000 * (1 - Math.min(90, Math.max(0, Number(form.promo_pct) || 0)) / 100)).toLocaleString('en-US', { minimumFractionDigits: 2 })}.
                   </p>
@@ -2365,7 +2397,7 @@ function InventoryModal({ equipo, onClose, notify }: {
               ))}
             </div>
             <input className={`${input} flex-1`} value={newSerie} onChange={e => setNewSerie(e.target.value)} placeholder="N° de serie (opcional)" />
-            <button onClick={() => { cargarProximo(); setConfirmando(true) }} className="shrink-0 px-5 py-2.5 rounded-xl border border-edge bg-surface-2 text-ink font-bold text-sm hover:border-gold/40 hover:text-gold transition-colors whitespace-nowrap">
+            <button onClick={() => { cargarProximo(); setConfirmando(true) }} className="shrink-0 px-5 py-2.5 rounded-xl border border-edge bg-surface-2 text-ink font-bold text-sm hover:border-gold/40 hover:text-gold-ink transition-colors whitespace-nowrap">
               Agregar
             </button>
           </div>
@@ -2378,7 +2410,7 @@ function InventoryModal({ equipo, onClose, notify }: {
             <div className="mt-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-2xl border border-edge px-4 py-3.5">
               <p className="text-[13px] text-ink leading-snug">
                 Se dará de alta una unidad <b>{newCond === 'nueva' ? 'nueva' : 'seminueva'}</b>
-                {proximoCodigo && <> como <span className="font-mono font-bold text-gold">{proximoCodigo}</span></>}
+                {proximoCodigo && <> como <span className="font-mono font-bold text-gold-ink">{proximoCodigo}</span></>}
                 {newSerie.trim() ? <>, con serie <b>{newSerie.trim()}</b>.</> : ', sin número de serie.'}
               </p>
               <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto">
@@ -2436,7 +2468,7 @@ function InventoryModal({ equipo, onClose, notify }: {
                     <button onClick={() => setRentUnit(u)} className="btn-renta px-4 h-9 rounded-lg text-[13px] font-bold">Rentar</button>
                   )}
                   {u.puede_venderse && (
-                    <button onClick={() => setSellUnit(u)} className="px-4 h-9 rounded-lg border border-edge text-ink text-[13px] font-bold hover:border-gold/40 hover:text-gold transition-colors">Vender</button>
+                    <button onClick={() => setSellUnit(u)} className="px-4 h-9 rounded-lg border border-edge text-ink text-[13px] font-bold hover:border-gold/40 hover:text-gold-ink transition-colors">Vender</button>
                   )}
                   <button
                     onClick={e => {
@@ -2759,7 +2791,7 @@ function RentModal({ unit, equipo, onClose, onDone, notify }: {
           <div>
             <div className="flex items-center justify-between mb-1.5">
               <label className={`${label} mb-0`}>Método de pago</label>
-              <button type="button" onClick={() => setSplitPago(s => !s)} className="text-[11px] font-bold text-gold hover:underline">
+              <button type="button" onClick={() => setSplitPago(s => !s)} className="text-[11px] font-bold text-gold-ink hover:underline">
                 {splitPago ? 'Un solo método' : 'Dividir en 2 métodos'}
               </button>
             </div>
@@ -2842,11 +2874,13 @@ function SellModal({ unit, equipo, onClose, onDone, notify }: {
   const [factura, setFactura] = useState<FacturaData>(FACTURA_VACIA)
   const [busy, setBusy] = useState(false)
 
-  // El precio se captura SIN IVA. En VENTAS el IVA (16%) se suma SIEMPRE
-  // (a diferencia de la renta). El toggle de factura solo controla la bandeja.
+  // En VENTAS el precio de catálogo YA INCLUYE IVA: es el precio al público y no
+  // se le suma nada encima. El IVA se DESGLOSA del total (total / 1.16), igual que
+  // hace el backend en Venta.recalcular_total() y que el POS y la cotización de
+  // venta. La renta es el caso contrario: ahí el IVA sí se suma si hay factura.
   const precioNum = Number(total) || 0
-  const ivaNum = Math.round(precioNum * 0.16 * 100) / 100
-  const totalConIva = precioNum + ivaNum
+  const baseNum = Math.round((precioNum / 1.16) * 100) / 100
+  const ivaNum = Math.round((precioNum - baseNum) * 100) / 100
 
   function submit() {
     if (precioNum <= 0) { notify('El precio debe ser mayor a 0', 'err'); return }
@@ -2857,8 +2891,8 @@ function SellModal({ unit, equipo, onClose, onDone, notify }: {
       const m1 = Number(monto1) || 0, m2 = Number(monto2) || 0
       if (metodo === metodo2) { notify('Elige dos métodos distintos para dividir el pago', 'err'); return }
       if (m1 <= 0 || m2 <= 0) { notify('Con pago dividido, ambos montos deben ser mayores a 0', 'err'); return }
-      if (Math.round((m1 + m2) * 100) / 100 !== Math.round(totalConIva * 100) / 100) {
-        notify(`Los dos montos deben sumar el total con IVA (${formatMoney(totalConIva)})`, 'err'); return
+      if (Math.round((m1 + m2) * 100) / 100 !== Math.round(precioNum * 100) / 100) {
+        notify(`Los dos montos deben sumar el total (${formatMoney(precioNum)})`, 'err'); return
       }
       pagos = [{ metodo, monto: m1 }, { metodo: metodo2, monto: m2 }]
     }
@@ -2901,7 +2935,7 @@ function SellModal({ unit, equipo, onClose, onDone, notify }: {
           <div>
             <div className="flex items-center justify-between mb-1.5">
               <label className={`${label} mb-0`}>Método de pago</label>
-              <button type="button" onClick={() => setSplitPago(s => !s)} className="text-[11px] font-bold text-gold hover:underline">
+              <button type="button" onClick={() => setSplitPago(s => !s)} className="text-[11px] font-bold text-gold-ink hover:underline">
                 {splitPago ? 'Un solo método' : 'Dividir en 2 métodos'}
               </button>
             </div>
@@ -2929,23 +2963,27 @@ function SellModal({ unit, equipo, onClose, onDone, notify }: {
                   </select>
                   <div className="w-[44%] flex gap-1">
                     <InputDinero valor={monto2} onValor={setMonto2} placeholder="Resto" className="flex-1" />
-                    <button type="button" onClick={() => { const m1 = Number(monto1) || 0; setMonto2(String(Math.max(0, Number((totalConIva - m1).toFixed(2))))) }}
+                    <button type="button" onClick={() => { const m1 = Number(monto1) || 0; setMonto2(String(Math.max(0, Number((precioNum - m1).toFixed(2))))) }}
                       className="px-2 rounded-lg border border-edge text-[11px] font-semibold text-mute hover:text-ink shrink-0 whitespace-nowrap">Resto</button>
                   </div>
                 </div>
                 {(() => {
                   const s = (Number(monto1) || 0) + (Number(monto2) || 0)
-                  const ok = Math.round(s * 100) / 100 === Math.round(totalConIva * 100) / 100
-                  return <p className={`text-[11px] ${ok ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}`}>{ok ? '✓ Los montos suman el total con IVA' : `Deben sumar ${formatMoney(totalConIva)} · llevas ${formatMoney(s)}`}</p>
+                  const ok = Math.round(s * 100) / 100 === Math.round(precioNum * 100) / 100
+                  return <p className={`text-[11px] ${ok ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}`}>{ok ? '✓ Los montos suman el total' : `Deben sumar ${formatMoney(precioNum)} · llevas ${formatMoney(s)}`}</p>
                 })()}
               </div>
             )}
           </div>
-          <div><label className={label}>Precio (sin IVA)</label><InputDinero valor={total} onValor={setTotal} placeholder="16,500" /></div>
+          <div>
+            <label className={label}>Precio de venta (IVA incluido)</label>
+            <InputDinero valor={total} onValor={setTotal} placeholder="16,500" />
+            <p className="text-[11px] text-mute mt-1">Es el precio al público. El IVA ya va dentro; abajo se desglosa para la factura.</p>
+          </div>
           <div className="px-4 py-3 rounded-xl bg-surface-2 space-y-1">
-            <div className="flex items-center justify-between text-xs text-mute"><span>Precio (sin IVA)</span><span>${precioNum.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+            <div className="flex items-center justify-between text-xs text-mute"><span>Subtotal (sin IVA)</span><span>${baseNum.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
             <div className="flex items-center justify-between text-xs text-mute"><span>IVA (16%)</span><span>${ivaNum.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
-            <div className="flex items-center justify-between pt-1 border-t border-edge"><span className="text-sm text-ink font-semibold">Total con IVA</span><span className="text-lg font-black text-price">${totalConIva.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span></div>
+            <div className="flex items-center justify-between pt-1 border-t border-edge"><span className="text-sm text-ink font-semibold">Total a cobrar</span><span className="text-lg font-black text-price">${precioNum.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span></div>
           </div>
           <FacturaFields requiere={requiereFactura} onRequiere={setRequiereFactura} factura={factura} onFactura={setFactura} empresaNombre={sel.cliente?.rfc ? sel.cliente.nombre : undefined} />
         </div>
@@ -3104,7 +3142,7 @@ function InventarioGlobal({ unidades, equipos, reload, notify, onEnviarTaller }:
                   {/* Acciones */}
                   <td className="px-5 py-3">
                     <div className="flex flex-wrap items-center justify-end gap-1.5">
-                      <button onClick={() => setLabelUnit(u)} title="Etiqueta / Imprimir" className="w-8 h-8 rounded-lg border border-edge text-mute hover:text-gold hover:border-gold/40 transition-colors flex items-center justify-center">
+                      <button onClick={() => setLabelUnit(u)} title="Etiqueta / Imprimir" className="w-8 h-8 rounded-lg border border-edge text-mute hover:text-gold-ink hover:border-gold/40 transition-colors flex items-center justify-center">
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.8"><path strokeLinecap="round" strokeLinejoin="round" d="M6 9V2h12v7M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2M6 14h12v8H6z" /></svg>
                       </button>
                       {u.estado === 'rentado' && <button onClick={() => devolver(u)} className="px-3 h-8 rounded-lg border border-blue-500/30 text-blue-500 text-xs font-semibold hover:bg-blue-500/10 transition-colors">Devolver</button>}
@@ -3161,7 +3199,7 @@ function EnviarTallerModal({ unit, onClose, onCreated, notify }: {
             <div className="text-[18px] font-extrabold text-ink leading-tight">Enviar a taller</div>
             <div className="text-[12.5px] text-mute mt-[3px]">Crea una orden de servicio interna</div>
           </div>
-          <span className="font-mono text-[11px] font-bold text-gold bg-gold-soft px-[11px] py-[5px] rounded-md shrink-0">{unit.codigo}</span>
+          <span className="font-mono text-[11px] font-bold text-gold-ink bg-gold-soft px-[11px] py-[5px] rounded-md shrink-0">{unit.codigo}</span>
         </div>
 
         {/* Equipo / Estado */}
@@ -3173,7 +3211,7 @@ function EnviarTallerModal({ unit, onClose, onCreated, notify }: {
           <div className="w-px h-[30px] bg-edge shrink-0" />
           <div className="flex-1 min-w-0">
             <div className="text-[10.5px] font-bold tracking-[0.5px] text-mute mb-1">ESTADO</div>
-            <div className="text-[14px] font-bold text-ink">Disponible <span className="text-edge">→</span> <span className="text-gold">Mantenimiento</span></div>
+            <div className="text-[14px] font-bold text-ink">Disponible <span className="text-edge">→</span> <span className="text-gold-ink">Mantenimiento</span></div>
           </div>
         </div>
 
@@ -3187,7 +3225,7 @@ function EnviarTallerModal({ unit, onClose, onCreated, notify }: {
         {/* Acciones */}
         <div className="flex gap-2.5 px-[26px] pt-5 pb-6">
           <button onClick={onClose} className="flex-1 py-3 rounded-[9px] border border-edge text-ink font-bold text-[13.5px] hover:bg-surface-2 transition-colors">Cancelar</button>
-          <button onClick={submit} disabled={busy} className="flex-1 py-3 rounded-[9px] bg-gold text-white font-bold text-[13.5px] hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center justify-center gap-2">
+          <button onClick={submit} disabled={busy} className="flex-1 py-3 rounded-[9px] bg-gold text-gold-on font-bold text-[13.5px] hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center justify-center gap-2">
             {busy ? <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" /> : null}
             Crear orden y enviar
           </button>
@@ -3252,7 +3290,7 @@ function LabelModal({ unit, onClose }: { unit: Unidad; onClose: () => void }) {
   return (
     <div className="modal-in fixed inset-0 z-[70] bg-black/70 backdrop-blur-sm flex items-center justify-center p-6" onClick={onClose}>
       <div onClick={e => e.stopPropagation()} className="bg-surface border border-edge rounded-3xl p-7 max-w-sm w-full">
-        <p className="text-[11px] font-mono uppercase tracking-[0.2em] text-gold mb-4">Etiqueta de identificación</p>
+        <p className="text-[11px] font-mono uppercase tracking-[0.2em] text-gold-ink mb-4">Etiqueta de identificación</p>
 
         {/* Vista previa de la etiqueta (estilo sticker, siempre claro) */}
         <div className="rounded-xl bg-white text-black border border-black/10 p-4 flex items-center gap-4">
@@ -3484,7 +3522,7 @@ function EvidenciasRenta({ rentaId }: { rentaId: number }) {
         <div className="flex items-center justify-between mb-2">
           <p className="text-[12px] font-bold text-ink">{titulo} <span className="text-mute font-normal">({suyas.length})</span></p>
           <button onClick={() => inputs.current[momento]?.click()} disabled={subiendo === momento}
-            className="text-[11.5px] font-bold text-gold hover:opacity-80 disabled:opacity-50">
+            className="text-[11.5px] font-bold text-gold-ink hover:opacity-80 disabled:opacity-50">
             {subiendo === momento ? 'Subiendo…' : '+ Agregar fotos'}
           </button>
           <input ref={el => { inputs.current[momento] = el }} type="file" accept="image/*" multiple className="hidden" onChange={e => subir(momento, e)} />
@@ -3733,7 +3771,7 @@ function RentaDetalleModal({ renta: r, onClose, onTicket, notify, onChanged }: {
     ) : null
   )
   const Titulo = ({ children }: { children: React.ReactNode }) => (
-    <p className="text-[11px] font-extrabold tracking-[0.5px] text-gold mb-3">{children}</p>
+    <p className="text-[11px] font-extrabold tracking-[0.5px] text-gold-ink mb-3">{children}</p>
   )
 
   return createPortal(
@@ -3774,7 +3812,7 @@ function RentaDetalleModal({ renta: r, onClose, onTicket, notify, onChanged }: {
                     <p className="text-[12px] text-mute">Cuenta en el sistema</p>
                     <p className={`text-[13.5px] font-bold mt-0.5 truncate ${cuenta ? 'text-ink' : 'text-mute'}`}>{cuenta || 'Sin vincular'}</p>
                   </div>
-                  <button onClick={vincularCuenta} className="shrink-0 px-3.5 py-2 rounded-[9px] border border-edge text-[12px] font-bold text-ink hover:border-gold/50 hover:text-gold transition-colors">
+                  <button onClick={vincularCuenta} className="shrink-0 px-3.5 py-2 rounded-[9px] border border-edge text-[12px] font-bold text-ink hover:border-gold/50 hover:text-gold-ink transition-colors">
                     {cuenta ? 'Cambiar' : 'Vincular cuenta'}
                   </button>
                 </div>
@@ -3794,7 +3832,7 @@ function RentaDetalleModal({ renta: r, onClose, onTicket, notify, onChanged }: {
                     })()}
                   </div>
                 ) : (
-                  <button onClick={generarLiga} disabled={genLiga} className="text-[12px] font-semibold text-mute hover:text-gold transition-colors disabled:opacity-50">
+                  <button onClick={generarLiga} disabled={genLiga} className="text-[12px] font-semibold text-mute hover:text-gold-ink transition-colors disabled:opacity-50">
                     {genLiga ? 'Generando…' : '＋ Generar liga para que el cliente la vincule solo'}
                   </button>
                 )}
@@ -3846,7 +3884,7 @@ function RentaDetalleModal({ renta: r, onClose, onTicket, notify, onChanged }: {
             {/* PAGOS: abonos del cliente y saldo (muchos pagan después) */}
             <div className="mt-4 pt-4 border-t border-edge">
               <div className="flex items-center justify-between gap-3 mb-2">
-                <p className="text-[11px] font-extrabold tracking-[0.5px] text-gold">PAGOS</p>
+                <p className="text-[11px] font-extrabold tracking-[0.5px] text-gold-ink">PAGOS</p>
                 {saldo <= 0 && tot > 0 ? (
                   <span className="inline-flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-600"><svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="3"><path d="M5 13l4 4L19 7" /></svg>Pagada</span>
                 ) : (
@@ -3870,7 +3908,7 @@ function RentaDetalleModal({ renta: r, onClose, onTicket, notify, onChanged }: {
               {abonando && <AbonoModal saldo={saldo} onClose={() => setAbonando(false)} onRegistrar={guardarAbono} />}
               {r.estado !== 'cancelada' && saldo > 0 && (
                 <button onClick={() => setAbonando(true)}
-                  className="mt-1 px-3.5 py-2 rounded-[9px] border border-edge text-[12px] font-bold text-ink hover:border-gold/50 hover:text-gold transition-colors">
+                  className="mt-1 px-3.5 py-2 rounded-[9px] border border-edge text-[12px] font-bold text-ink hover:border-gold/50 hover:text-gold-ink transition-colors">
                   + Registrar abono
                 </button>
               )}
@@ -3881,7 +3919,7 @@ function RentaDetalleModal({ renta: r, onClose, onTicket, notify, onChanged }: {
           <div className="px-6 sm:px-[26px] py-[18px] border-t border-edge">
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <div className="min-w-0 flex-1">
-                <p className="text-[11px] font-extrabold tracking-[0.5px] text-gold">FACTURACIÓN</p>
+                <p className="text-[11px] font-extrabold tracking-[0.5px] text-gold-ink">FACTURACIÓN</p>
                 <p className="text-[12px] text-mute mt-1 leading-relaxed">
                   {factura === 'facturada'
                     ? 'Factura emitida; quedó registrada en la bandeja.'
@@ -4020,7 +4058,7 @@ function VentasAdmin({ notify }: { notify: (m: string, t?: 'ok' | 'err') => void
             <input value={q} onChange={e => setQ(e.target.value)} placeholder="Buscar folio, cliente o equipo..."
               className="w-full bg-surface-2 border border-edge rounded-full pl-9 pr-3 py-2 text-sm text-ink placeholder-mute focus:outline-none focus:border-gold/50 transition-colors" />
           </div>
-          <button onClick={cargar} className="text-xs text-mute hover:text-gold transition-colors shrink-0">Actualizar</button>
+          <button onClick={cargar} className="text-xs text-mute hover:text-gold-ink transition-colors shrink-0">Actualizar</button>
           <BotonExportar onClick={() => {
             // El reporte respeta el periodo del selector (mes 0 = todo el año).
             const mm = String(mes).padStart(2, '0')
@@ -4049,7 +4087,7 @@ function VentasAdmin({ notify }: { notify: (m: string, t?: 'ok' | 'err') => void
                 <tr key={v.id} className="hover:bg-surface-2 transition-colors">
                   <td className="px-5 py-3">
                     <div className="flex items-center gap-2.5">
-                      <span className="w-8 h-8 rounded-lg bg-gold-soft text-gold flex items-center justify-center shrink-0 font-black text-sm">{(v.nombre_cliente?.[0] || '#').toUpperCase()}</span>
+                      <span className="w-8 h-8 rounded-lg bg-gold-soft text-gold-ink flex items-center justify-center shrink-0 font-black text-sm">{(v.nombre_cliente?.[0] || '#').toUpperCase()}</span>
                       <div className="min-w-0">
                         <span className="font-mono text-[10.5px] text-mute block">{v.folio || `#${v.id}`}</span>
                         <span className="text-sm font-semibold text-ink truncate block">{v.nombre_cliente || 'Cliente general'}</span>
@@ -4110,7 +4148,7 @@ function VentasAdmin({ notify }: { notify: (m: string, t?: 'ok' | 'err') => void
 const notifMeta: Record<Notif['tipo'], { color: string; icon: React.ReactNode }> = {
   alerta: { color: 'text-red-500 bg-red-500/10', icon: <><path d="M12 4.2l9 16.3H3z" /><path d="M12 9v4" /><path d="M12 16.9h.01" /></> },
   renta: { color: 'text-blue-500 bg-blue-500/10', icon: <><path d="M7 4.5v2.5M17 4.5v2.5" /><path d="M5.5 8h13" /><path d="M6.5 7.5h11a2 2 0 0 1 2 2v9.5a2 2 0 0 1-2 2h-11a2 2 0 0 1-2-2V9.5a2 2 0 0 1 2-2z" /><path d="M12 13v3l2 1" /></> },
-  venta: { color: 'text-gold bg-gold-soft', icon: <><path d="M6.5 9.5h15l-1.6 8.2a2 2 0 0 1-2 1.6H9.2a2 2 0 0 1-2-1.6z" /><path d="M6.5 9.5l-1.2-5h-3" /></> },
+  venta: { color: 'text-gold-ink bg-gold-soft', icon: <><path d="M6.5 9.5h15l-1.6 8.2a2 2 0 0 1-2 1.6H9.2a2 2 0 0 1-2-1.6z" /><path d="M6.5 9.5l-1.2-5h-3" /></> },
   inventario: { color: 'text-mute bg-surface-2', icon: <><rect x="5" y="5" width="6.25" height="6.25" rx="1.1" /><rect x="12.75" y="5" width="6.25" height="6.25" rx="1.1" /><rect x="5" y="12.75" width="6.25" height="6.25" rx="1.1" /><rect x="12.75" y="12.75" width="6.25" height="6.25" rx="1.1" /></> },
   sistema: { color: 'text-mute bg-surface-2', icon: <><path d="M12 7.5v5l3 1.8" /><path d="M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z" /></> },
 }
@@ -4186,7 +4224,7 @@ function NotificacionesAdmin({ notifs, reload, go, onOpen }: {
   const typePill: Record<Notif['tipo'], string> = {
     alerta: 'bg-red-500/10 text-red-500',
     renta: 'bg-blue-500/10 text-blue-500',
-    venta: 'bg-gold-soft text-gold',
+    venta: 'bg-gold-soft text-gold-ink',
     inventario: 'bg-surface-2 text-mute',
     sistema: 'bg-surface-2 text-mute',
   }
@@ -4215,7 +4253,7 @@ function NotificacionesAdmin({ notifs, reload, go, onOpen }: {
         <div className="flex items-center gap-2.5 shrink-0">
           <button
             onClick={reload}
-            className="h-10 px-4 rounded-xl border border-edge bg-surface-2 text-sm font-semibold text-ink hover:border-gold/40 hover:text-gold transition-colors active:scale-[0.98]"
+            className="h-10 px-4 rounded-xl border border-edge bg-surface-2 text-sm font-semibold text-ink hover:border-gold/40 hover:text-gold-ink transition-colors active:scale-[0.98]"
           >
             Actualizar
           </button>
@@ -4323,13 +4361,13 @@ function NotificacionesAdmin({ notifs, reload, go, onOpen }: {
                   {expanded && (
                     <div className="mx-1 mt-1.5 p-5 bg-surface border border-edge rounded-xl">
                       <div className="flex items-center justify-between mb-3">
-                        {!n.leida ? <span className="text-[11px] font-bold text-gold bg-gold-soft px-2 py-0.5 rounded-md uppercase">Nuevo</span> : <span />}
+                        {!n.leida ? <span className="text-[11px] font-bold text-gold-ink bg-gold-soft px-2 py-0.5 rounded-md uppercase">Nuevo</span> : <span />}
                         <span className="text-[12.5px] text-mute font-mono">{new Date(n.creada).toLocaleString('es-MX', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
                       </div>
                       {n.mensaje && <div className="text-[14.5px] leading-relaxed text-ink mb-4 whitespace-pre-wrap">{n.mensaje}</div>}
                       <div className="flex gap-1.5">
                         {!n.leida && <button onClick={() => marcarLeida(n)} className="flex-1 py-2.5 rounded-[9px] border border-edge font-bold text-[13px] hover:bg-surface-2 transition-colors">Marcar leído</button>}
-                        {n.seccion && <button onClick={() => abrir(n)} className="flex-1 py-2.5 rounded-[9px] bg-gold text-white font-bold text-[13px] hover:opacity-90 transition-opacity">Abrir</button>}
+                        {n.seccion && <button onClick={() => abrir(n)} className="flex-1 py-2.5 rounded-[9px] bg-gold text-gold-on font-bold text-[13px] hover:opacity-90 transition-opacity">Abrir</button>}
                       </div>
                     </div>
                   )}
@@ -4363,7 +4401,7 @@ function CatalogosAdmin({ categorias, tipos, marcas, equipos, reload, notify, go
   const usoMarca = count(e => e.marca?.id)
 
   const blocks = [
-    { title: 'Categorías', singular: 'categoría', endpoint: '/categorias/', data: categorias, uso: usoCat, accent: 'text-gold bg-gold-soft', icon: <path d="M4 4h7v7H4zM13 4h7v7h-7zM13 13h7v7h-7zM4 13h7v7H4z" /> },
+    { title: 'Categorías', singular: 'categoría', endpoint: '/categorias/', data: categorias, uso: usoCat, accent: 'text-gold-ink bg-gold-soft', icon: <path d="M4 4h7v7H4zM13 4h7v7h-7zM13 13h7v7h-7zM4 13h7v7H4z" /> },
     { title: 'Tipos', singular: 'tipo', endpoint: '/tipos/', data: tipos, uso: usoTipo, accent: 'text-blue-500 bg-blue-500/10', icon: <path d="M7 7h10M7 12h10M7 17h6M4 4h16v16H4z" /> },
     { title: 'Marcas', singular: 'marca', endpoint: '/marcas/', data: marcas, uso: usoMarca, accent: 'text-violet-500 bg-violet-500/10', icon: <path d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /> },
   ]
@@ -4381,7 +4419,7 @@ function CatalogosAdmin({ categorias, tipos, marcas, equipos, reload, notify, go
       {/* Encabezado */}
       <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
         <div>
-          <p className="text-gold text-[12px] font-bold tracking-wide mb-2">— TAXONOMÍA DEL CATÁLOGO</p>
+          <p className="text-gold-ink text-[12px] font-bold tracking-wide mb-2">— TAXONOMÍA DEL CATÁLOGO</p>
           <p className="text-[15px] text-mute max-w-2xl leading-relaxed">
             Organiza tus productos en <b className="text-ink">categorías</b>, <b className="text-ink">tipos</b> y <b className="text-ink">marcas</b>. Cada etiqueta muestra cuántos productos la usan.
           </p>
@@ -4545,7 +4583,7 @@ function CatalogBlock({ title, singular, endpoint, data, uso, accent, icon, relo
                     {n} prod.
                   </span>
                   <div className="flex items-center absolute right-5 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
-                    <button onClick={() => { setEditId(o.id); setEditVal(o.nombre) }} title="Renombrar" className="text-mute hover:text-gold active:scale-90 transition-transform duration-100 p-1">
+                    <button onClick={() => { setEditId(o.id); setEditVal(o.nombre) }} title="Renombrar" className="text-mute hover:text-gold-ink active:scale-90 transition-transform duration-100 p-1">
                       <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.8"><path strokeLinecap="round" strokeLinejoin="round" d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
                     </button>
                     <button onClick={() => del(o)} title={n > 0 ? `En uso (${n})` : 'Eliminar'} className={`active:scale-90 transition-transform duration-100 p-1 ${n > 0 ? 'text-mute/40 cursor-not-allowed' : 'text-mute hover:text-red-400'}`}>
@@ -4618,7 +4656,7 @@ function CuponesAdmin({ coupons, reload, notify }: {
             {coupons.map(c => (
               <div key={c.id} className="flex items-center justify-between px-6 py-4 hover:bg-surface-2 transition-colors group">
                 <div className="flex items-center gap-4">
-                  <span className="px-3 py-1.5 rounded-lg bg-gold-soft text-gold font-mono font-bold text-sm">{c.codigo}</span>
+                  <span className="px-3 py-1.5 rounded-lg bg-gold-soft text-gold-ink font-mono font-bold text-sm">{c.codigo}</span>
                   <span className="text-sm text-mute">{Math.round((c.descuento || 0) * 100)}% descuento</span>
                   {c.activo === false && <span className="text-xs text-mute">(inactivo)</span>}
                 </div>
@@ -4663,10 +4701,12 @@ function VenderRefaccionModal({ refaccion, notify, onClose, onSold }: {
   const [factura, setFactura] = useState<FacturaData>(FACTURA_VACIA)
   const [busy, setBusy] = useState(false)
   const cantN = Math.max(1, Number(cant) || 1)
-  // Ventas: el IVA (16%) se suma SIEMPRE. El toggle de factura solo va a la bandeja.
+  // El precio de la refacción YA INCLUYE IVA (es el precio al público). El backend
+  // desglosa el total en Venta.recalcular_total(); aquí solo lo espejeamos para que
+  // el mostrador cobre exactamente lo que se va a registrar.
   const total = (Number(refaccion.precio_venta) || 0) * cantN
-  const ivaRef = Math.round(total * 0.16 * 100) / 100
-  const totalConIva = total + ivaRef
+  const baseRef = Math.round((total / 1.16) * 100) / 100
+  const ivaRef = Math.round((total - baseRef) * 100) / 100
 
   function submit() {
     if (cantN > refaccion.stock) { notify(`Solo hay ${refaccion.stock} en stock`, 'err'); return }
@@ -4696,9 +4736,9 @@ function VenderRefaccionModal({ refaccion, notify, onClose, onSold }: {
             </select>
           </div>
           <div className="px-4 py-3 rounded-xl bg-surface-2 space-y-1">
-            <div className="flex items-center justify-between text-xs text-mute"><span>Precio (sin IVA)</span><span>${total.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span></div>
+            <div className="flex items-center justify-between text-xs text-mute"><span>Subtotal (sin IVA)</span><span>${baseRef.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span></div>
             <div className="flex items-center justify-between text-xs text-mute"><span>IVA (16%)</span><span>${ivaRef.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span></div>
-            <div className="flex items-center justify-between pt-1 border-t border-edge"><span className="text-sm text-ink font-semibold">Total con IVA</span><span className="text-lg font-black text-price">${totalConIva.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span></div>
+            <div className="flex items-center justify-between pt-1 border-t border-edge"><span className="text-sm text-ink font-semibold">Total a cobrar</span><span className="text-lg font-black text-price">${total.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span></div>
           </div>
           <FacturaFields requiere={requiereFactura} onRequiere={setRequiereFactura} factura={factura} onFactura={setFactura} />
         </div>
@@ -4820,7 +4860,7 @@ function RefaccionesAdmin({ refacciones, reload, notify }: {
                         <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.7"><rect x="3" y="7" width="18" height="10" rx="2" /><circle cx="12" cy="12" r="2.2" /></svg>
                         Vender
                       </button>
-                      <button onClick={() => setLabelRef(r)} title="Imprimir etiqueta de código de barras" className="w-8 h-8 rounded-lg border border-edge text-mute hover:text-gold hover:border-gold/40 transition-colors flex items-center justify-center">
+                      <button onClick={() => setLabelRef(r)} title="Imprimir etiqueta de código de barras" className="w-8 h-8 rounded-lg border border-edge text-mute hover:text-gold-ink hover:border-gold/40 transition-colors flex items-center justify-center">
                         <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.7" strokeLinecap="round"><path d="M4 7v10M7 7v10M9.5 7v10M12.5 7v10M15 7v10M17.5 7v10M20 7v10" /></svg>
                       </button>
                       <button onClick={() => openEdit(r)} title="Editar" className="w-8 h-8 rounded-lg border border-edge text-mute hover:text-ink hover:border-gold/40 transition-colors flex items-center justify-center">
@@ -4890,7 +4930,7 @@ function RefaccionesAdmin({ refacciones, reload, notify }: {
 ════════════════════════════════════════ */
 const OR_ESTADOS: { key: OrdenReparacion['estado']; label: string; cls: string; dot: string }[] = [
   { key: 'recibida', label: 'Recibida', cls: 'bg-blue-500/10 text-blue-500', dot: '#2B5FAD' },
-  { key: 'proceso', label: 'En proceso', cls: 'bg-gold-soft text-gold', dot: '#B8872E' },
+  { key: 'proceso', label: 'En proceso', cls: 'bg-gold-soft text-gold-ink', dot: '#B8872E' },
   { key: 'terminada', label: 'Terminada', cls: 'bg-emerald-500/10 text-emerald-500', dot: '#1F7A4D' },
   { key: 'entregada', label: 'Entregada', cls: 'bg-surface-2 text-mute', dot: '#6B7280' },
 ]
@@ -5007,7 +5047,7 @@ function ReparacionesAdmin({ ordenes, refacciones, unidades, empresas, reload, n
                     <td className="px-5 py-3 text-right" onClick={e => e.stopPropagation()}>
                       <div className="flex flex-wrap items-center justify-end gap-2">
                         <button onClick={() => setDetalle(o)} className="h-8 px-3 rounded-lg border border-edge text-mute text-xs font-semibold hover:text-ink hover:border-gold/40 transition-colors">Abrir</button>
-                        <button onClick={() => setCarta(o)} title="Imprimir orden (Carta)" className="w-8 h-8 rounded-lg border border-edge text-mute hover:text-gold hover:border-gold/40 transition-colors flex items-center justify-center">
+                        <button onClick={() => setCarta(o)} title="Imprimir orden (Carta)" className="w-8 h-8 rounded-lg border border-edge text-mute hover:text-gold-ink hover:border-gold/40 transition-colors flex items-center justify-center">
                           <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.7"><path d="M6 9V4h12v5M6 18H4v-6a2 2 0 012-2h12a2 2 0 012 2v6h-2M8 14h8v6H8z" /></svg>
                         </button>
                       </div>
@@ -5083,8 +5123,8 @@ function NuevaOrdenModal({ empresas, unidades, notify, onClose, onCreated }: {
         </div>
         <div className="p-6 space-y-4 flex-1 overflow-y-auto">
           <div className="grid grid-cols-2 gap-2">
-            <button onClick={() => setTipo('cliente')} className={`px-3 py-2.5 rounded-xl border text-sm font-semibold transition-colors ${tipo === 'cliente' ? 'border-gold bg-gold-soft text-gold' : 'border-edge text-mute hover:text-ink'}`}>Equipo de cliente</button>
-            <button onClick={() => setTipo('interna')} className={`px-3 py-2.5 rounded-xl border text-sm font-semibold transition-colors ${tipo === 'interna' ? 'border-gold bg-gold-soft text-gold' : 'border-edge text-mute hover:text-ink'}`}>Máquina propia</button>
+            <button onClick={() => setTipo('cliente')} className={`px-3 py-2.5 rounded-xl border text-sm font-semibold transition-colors ${tipo === 'cliente' ? 'border-gold bg-gold-soft text-gold-ink' : 'border-edge text-mute hover:text-ink'}`}>Equipo de cliente</button>
+            <button onClick={() => setTipo('interna')} className={`px-3 py-2.5 rounded-xl border text-sm font-semibold transition-colors ${tipo === 'interna' ? 'border-gold bg-gold-soft text-gold-ink' : 'border-edge text-mute hover:text-ink'}`}>Máquina propia</button>
           </div>
 
           {tipo === 'cliente' ? (
@@ -5283,8 +5323,8 @@ function OrdenDetalleModal({ orden, refacciones, notify, onClose, onChanged, onP
             {/* Agregar refacción */}
             <div className="border border-edge rounded-[9px] p-[13px]">
               <div className="flex gap-2 mb-2.5">
-                <button onClick={() => setOrigen('stock')} className={`flex-1 py-[9px] rounded-[7px] text-[13px] font-bold border-[1.5px] transition-colors ${origen === 'stock' ? 'border-gold text-gold bg-gold-soft' : 'border-edge text-ink hover:bg-surface-2'}`}>Del inventario</button>
-                <button onClick={() => setOrigen('externa')} className={`flex-1 py-[9px] rounded-[7px] text-[13px] font-bold border-[1.5px] transition-colors ${origen === 'externa' ? 'border-gold text-gold bg-gold-soft' : 'border-edge text-ink hover:bg-surface-2'}`}>Comprada / pedida aparte</button>
+                <button onClick={() => setOrigen('stock')} className={`flex-1 py-[9px] rounded-[7px] text-[13px] font-bold border-[1.5px] transition-colors ${origen === 'stock' ? 'border-gold text-gold-ink bg-gold-soft' : 'border-edge text-ink hover:bg-surface-2'}`}>Del inventario</button>
+                <button onClick={() => setOrigen('externa')} className={`flex-1 py-[9px] rounded-[7px] text-[13px] font-bold border-[1.5px] transition-colors ${origen === 'externa' ? 'border-gold text-gold-ink bg-gold-soft' : 'border-edge text-ink hover:bg-surface-2'}`}>Comprada / pedida aparte</button>
               </div>
               {origen === 'stock' ? (
                 <div className="flex gap-2 mb-2.5">
@@ -5347,7 +5387,7 @@ function OrdenDetalleModal({ orden, refacciones, notify, onClose, onChanged, onP
             <div className="border-t border-edge pt-3 flex justify-between text-[17px] font-extrabold text-ink mb-[18px]"><span>{o.tipo === 'interna' ? 'Costo interno' : 'Total'}</span><span className="text-price">{orMoney(totalOrden)}</span></div>
 
             <div className="flex flex-col gap-2">
-              <button onClick={guardarInfo} disabled={savingInfo} className="py-[11px] rounded-[9px] bg-gold text-white font-bold text-[13.5px] hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center justify-center gap-2">
+              <button onClick={guardarInfo} disabled={savingInfo} className="py-[11px] rounded-[9px] bg-gold text-gold-on font-bold text-[13.5px] hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center justify-center gap-2">
                 {savingInfo ? <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" /> : null}
                 Guardar cambios
               </button>
@@ -5416,7 +5456,7 @@ function agruparAdeudos(rentas: RentaFull[]): GrupoAdeudo[] {
 }
 
 const TIPO_ADEUDO: Record<GrupoAdeudo['tipo'], { label: string; cls: string }> = {
-  cuenta: { label: 'Cuenta', cls: 'bg-gold-soft text-gold' },
+  cuenta: { label: 'Cuenta', cls: 'bg-gold-soft text-gold-ink' },
   empresa: { label: 'Empresa', cls: 'bg-blue-500/10 text-blue-600' },
   mostrador: { label: 'Sin cuenta', cls: 'bg-surface-2 text-mute' },
 }
@@ -5567,7 +5607,7 @@ function NuevoPedidoModal({ desde, equipos = [], empresas, onClose, onDone, noti
           {precioNum > 0 && (
             <div className={`flex items-center justify-between gap-2 text-[11.5px] rounded-lg px-3 py-2 border ${anticipoBajo ? 'border-amber-500/30 bg-amber-500/[0.06] text-amber-700 dark:text-amber-300' : 'border-edge bg-surface-2 text-mute'}`}>
               <span>Anticipo mínimo <b>{pctMin}%</b> = {formatMoney(anticipoMin)}{anticipoBajo ? ' · va bajo, pide código' : ''}</span>
-              <button type="button" onClick={() => setAnticipo(String(anticipoMin))} className="font-bold text-gold hover:underline shrink-0 whitespace-nowrap">Usar {pctMin}%</button>
+              <button type="button" onClick={() => setAnticipo(String(anticipoMin))} className="font-bold text-gold-ink hover:underline shrink-0 whitespace-nowrap">Usar {pctMin}%</button>
             </div>
           )}
           <div>
@@ -6280,8 +6320,8 @@ function SolicitudFacturaModal({ solicitud, notify, onClose, onChanged }: {
           {/* Receptor */}
           <div>
             <div className="flex items-center justify-between mb-2">
-              <p className="text-[11px] font-bold uppercase tracking-wide text-gold">Datos del receptor</p>
-              <button onClick={copiarDatos} className="text-[11px] text-gold hover:underline">Copiar datos</button>
+              <p className="text-[11px] font-bold uppercase tracking-wide text-gold-ink">Datos del receptor</p>
+              <button onClick={copiarDatos} className="text-[11px] text-gold-ink hover:underline">Copiar datos</button>
             </div>
             <div className="grid grid-cols-2 gap-2">
               <input className={`${input} font-mono`} value={s.rfc} onChange={e => set('rfc', e.target.value.toUpperCase())} placeholder="RFC" disabled={facturada} />
@@ -6507,7 +6547,7 @@ function CotizacionesAdmin({ empresas, notify, irAInventario }: {
                     <td className="px-5 py-3 text-right" onClick={e => e.stopPropagation()}>
                       <div className="flex flex-wrap items-center justify-end gap-2">
                         <button onClick={() => setDetalle(c)} className="h-8 px-3 rounded-lg border border-edge text-mute text-xs font-semibold hover:text-ink hover:border-gold/40 transition-colors">Abrir</button>
-                        <button onClick={() => setCarta(c)} title="Imprimir cotización" className="w-8 h-8 rounded-lg border border-edge text-mute hover:text-gold hover:border-gold/40 transition-colors flex items-center justify-center">
+                        <button onClick={() => setCarta(c)} title="Imprimir cotización" className="w-8 h-8 rounded-lg border border-edge text-mute hover:text-gold-ink hover:border-gold/40 transition-colors flex items-center justify-center">
                           <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.7"><path d="M6 9V4h12v5M6 18H4v-6a2 2 0 012-2h12a2 2 0 012 2v6h-2M8 14h8v6H8z" /></svg>
                         </button>
                       </div>
@@ -7245,14 +7285,14 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
                   la ve en "Mis cotizaciones" y ÉL decide aceptarla. */}
               {!bloqueada && (c.usuario_nombre ? (
                 <button onClick={vincularCuentaCot}
-                  className="mb-2 text-[12px] font-bold text-gold hover:opacity-80 transition-opacity">
+                  className="mb-2 text-[12px] font-bold text-gold-ink hover:opacity-80 transition-opacity">
                   Cambiar cuenta
                 </button>
               ) : (
                 <div className="mb-2 flex items-center gap-3">
                   <button onClick={generarLigaVinculo} disabled={generandoLiga}
                     title={c.items.length === 0 ? 'Primero agrega las partidas' : undefined}
-                    className={`text-[12px] font-bold transition-opacity disabled:opacity-50 ${c.items.length === 0 ? 'text-mute cursor-not-allowed' : 'text-gold hover:opacity-80'}`}>
+                    className={`text-[12px] font-bold transition-opacity disabled:opacity-50 ${c.items.length === 0 ? 'text-mute cursor-not-allowed' : 'text-gold-ink hover:opacity-80'}`}>
                     {ligaVinculo ? '✓ Liga generada' : generandoLiga ? 'Generando…' : '+ Vincular por liga'}
                   </button>
                   <button onClick={vincularCuentaCot} className="text-[11px] font-semibold text-mute hover:text-ink transition-colors">
@@ -7313,7 +7353,7 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
             <div className="flex items-center justify-between mb-2 gap-3">
               <p className={`${labelCot} mb-0`}>Partidas</p>
               {conceptosBloqueados && !bloqueada
-                ? <span className="text-[12px] font-semibold text-gold">Las armó el cliente — solo lectura</span>
+                ? <span className="text-[12px] font-semibold text-gold-ink">Las armó el cliente — solo lectura</span>
                 : !bloqueada && <span className="text-[12px] text-mute">Toca cualquier celda para editar</span>}
             </div>
             <div className="rounded-xl border border-edge overflow-hidden">
@@ -7391,7 +7431,7 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
                     </div>
                   ))}
                   {!conceptosBloqueados && (
-                    <button onClick={agregarItem} disabled={busy} className="w-full flex items-center gap-2 px-5 py-3 text-[13px] font-bold text-gold hover:bg-gold-soft/60 transition active:scale-[0.995] disabled:opacity-50 border-t border-edge">
+                    <button onClick={agregarItem} disabled={busy} className="w-full flex items-center gap-2 px-5 py-3 text-[13px] font-bold text-gold-ink hover:bg-gold-soft/60 transition active:scale-[0.995] disabled:opacity-50 border-t border-edge">
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.2"><path strokeLinecap="round" d="M12 5v14M5 12h14" /></svg>
                       Agregar partida
                     </button>
@@ -7480,7 +7520,7 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
               <label className={`${labelCot} mb-0`}>Fotos ({fotos.length})</label>
               {!bloqueada && (
                 <button type="button" onClick={() => fotoInput.current?.click()} disabled={subiendoFotos || fotos.length >= 10}
-                  className="text-[12px] font-bold text-gold hover:opacity-80 transition active:scale-95 disabled:opacity-50">
+                  className="text-[12px] font-bold text-gold-ink hover:opacity-80 transition active:scale-95 disabled:opacity-50">
                   {subiendoFotos ? 'Subiendo…' : '+ Agregar fotos'}
                 </button>
               )}
@@ -7605,7 +7645,7 @@ type ResumenTareas = { total: number; entregar: number; recoger: number; reparar
 
 // Cada tipo de tarea tiene su color e ícono: se distingue de un vistazo sin leer.
 const TAREA_META: Record<TipoTarea, { label: string; anillo: string; icono: React.ReactNode }> = {
-  entregar: { label: 'Entregar', anillo: 'bg-gold-soft text-gold',
+  entregar: { label: 'Entregar', anillo: 'bg-gold-soft text-gold-ink',
     icono: <><path d="M12 19V5" /><path d="M6 11l6-6 6 6" /></> },
   recoger: { label: 'Recoger', anillo: 'bg-[var(--c-renta)]/12 text-[var(--c-renta)]',
     icono: <><path d="M12 5v14" /><path d="M6 13l6 6 6-6" /></> },
@@ -7613,7 +7653,7 @@ const TAREA_META: Record<TipoTarea, { label: string; anillo: string; icono: Reac
     icono: <><path d="M14.7 6.3a4 4 0 0 0-5.6 5.6l-6 6v3h3l6-6a4 4 0 0 0 5.6-5.6l-2.5 2.5-2.1-2.1z" /></> },
   // Entrega PROMETIDA: cotización aceptada con fecha de HOY, aún sin convertir a
   // renta/venta. Es un compromiso informativo (sin renta_id), no una acción.
-  entrega_prometida: { label: 'Prometida', anillo: 'bg-gold-soft text-gold',
+  entrega_prometida: { label: 'Prometida', anillo: 'bg-gold-soft text-gold-ink',
     icono: <><circle cx="12" cy="12" r="9" /><path d="M12 8v4l3 2" /></> },
 }
 // La urgencia tiñe solo la etiqueta de tiempo, no todo el card: el ruido cansa.
@@ -7807,13 +7847,13 @@ function TareaCard({ t, atenuada, soloLectura, onEntregar, onReparar }: {
       {/* Barra de acciones: llamar / mapa a la izquierda, la acción principal a la derecha */}
       <div className="px-5 sm:px-6 py-3 bg-surface-2/40 border-t border-edge flex items-center gap-2">
         {esCampo && tel && (
-          <a href={`tel:${tel}`} aria-label="Llamar" className="shrink-0 w-9 h-9 rounded-lg grid place-items-center border border-edge bg-surface text-ink hover:border-gold/40 hover:text-gold active:scale-95 transition-[transform,border-color,color] duration-150 motion-reduce:active:scale-100">
+          <a href={`tel:${tel}`} aria-label="Llamar" className="shrink-0 w-9 h-9 rounded-lg grid place-items-center border border-edge bg-surface text-ink hover:border-gold/40 hover:text-gold-ink active:scale-95 transition-[transform,border-color,color] duration-150 motion-reduce:active:scale-100">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.9"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a1 1 0 0 1-1 1A16 16 0 0 1 4 5a1 1 0 0 1 1-1z" /></svg>
           </a>
         )}
         {esCampo && (
           <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(t.lugar || '')}`} target="_blank" rel="noopener noreferrer" aria-label="Cómo llegar"
-            className="shrink-0 w-9 h-9 rounded-lg grid place-items-center border border-edge bg-surface text-ink hover:border-gold/40 hover:text-gold active:scale-95 transition-[transform,border-color,color] duration-150 motion-reduce:active:scale-100">
+            className="shrink-0 w-9 h-9 rounded-lg grid place-items-center border border-edge bg-surface text-ink hover:border-gold/40 hover:text-gold-ink active:scale-95 transition-[transform,border-color,color] duration-150 motion-reduce:active:scale-100">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.9"><path d="M12 21s7-5.5 7-11a7 7 0 1 0-14 0c0 5.5 7 11 7 11z" /><circle cx="12" cy="10" r="2.5" /></svg>
           </a>
         )}
@@ -7905,14 +7945,14 @@ function EntregaHoja({ tarea, onClose, onHecho, notify }: {
 
         <div className="px-6 py-5 overflow-y-auto flex-1 space-y-5">
           <div>
-            <p className="text-[11px] font-extrabold tracking-[0.5px] text-gold mb-1">FOTOS DEL EQUIPO</p>
+            <p className="text-[11px] font-extrabold tracking-[0.5px] text-gold-ink mb-1">FOTOS DEL EQUIPO</p>
             <p className="text-[12.5px] text-mute mb-3">
               {esRecoger ? 'Cómo regresó la máquina. Respalda el estado por si hay reclamo.' : 'El estado en que sale. Es tu respaldo si el cliente reporta un daño.'}
             </p>
             <input ref={inputRef} type="file" accept="image/*" capture="environment" multiple className="hidden" onChange={agregar} />
             <div className="grid grid-cols-4 gap-2">
               <button onClick={() => inputRef.current?.click()}
-                className="aspect-square rounded-xl border-2 border-dashed border-edge grid place-items-center text-mute hover:text-gold hover:border-gold/50 transition-colors">
+                className="aspect-square rounded-xl border-2 border-dashed border-edge grid place-items-center text-mute hover:text-gold-ink hover:border-gold/50 transition-colors">
                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.8"><path d="M12 8v8M8 12h8" strokeLinecap="round" /><rect x="3" y="5" width="18" height="15" rx="2.5" /><path d="M8 5l1.5-2h5L16 5" /></svg>
               </button>
               {previews.map((src, i) => (
@@ -7928,7 +7968,7 @@ function EntregaHoja({ tarea, onClose, onHecho, notify }: {
           </div>
 
           <div>
-            <label className="text-[11px] font-extrabold tracking-[0.5px] text-gold mb-2 block">NOTA (OPCIONAL)</label>
+            <label className="text-[11px] font-extrabold tracking-[0.5px] text-gold-ink mb-2 block">NOTA (OPCIONAL)</label>
             <input value={nota} onChange={e => setNota(e.target.value)} placeholder="Ej. Rayón en la tapa, tanque lleno…"
               className="w-full bg-surface-2 border border-edge rounded-xl px-3.5 py-2.5 text-sm text-ink placeholder-mute focus:outline-none focus:border-gold/50 transition-colors" />
           </div>
@@ -8068,7 +8108,7 @@ function TallerTrabajoModal({ ordenId, onClose, onCambio, notify }: {
         <div className="px-6 py-5 space-y-6 overflow-y-auto flex-1">
           {orden?.diagnostico && (
             <div>
-              <p className="text-[11px] font-extrabold tracking-[0.5px] text-gold mb-1.5">FALLA REPORTADA</p>
+              <p className="text-[11px] font-extrabold tracking-[0.5px] text-gold-ink mb-1.5">FALLA REPORTADA</p>
               <p className="text-[13.5px] text-ink leading-snug">{orden.diagnostico}</p>
             </div>
           )}
@@ -8085,7 +8125,7 @@ function TallerTrabajoModal({ ordenId, onClose, onCambio, notify }: {
             <>
               {/* Refacciones usadas */}
               <div>
-                <p className="text-[11px] font-extrabold tracking-[0.5px] text-gold mb-2">REFACCIONES USADAS</p>
+                <p className="text-[11px] font-extrabold tracking-[0.5px] text-gold-ink mb-2">REFACCIONES USADAS</p>
                 {orden && orden.items.length === 0 ? (
                   <p className="text-[13px] text-mute">Nada todavía. Abajo tomas lo que ocupes del inventario.</p>
                 ) : (
@@ -8106,7 +8146,7 @@ function TallerTrabajoModal({ ordenId, onClose, onCambio, notify }: {
 
               {/* Tomar del inventario */}
               <div>
-                <p className="text-[11px] font-extrabold tracking-[0.5px] text-gold mb-2">TOMAR DEL INVENTARIO</p>
+                <p className="text-[11px] font-extrabold tracking-[0.5px] text-gold-ink mb-2">TOMAR DEL INVENTARIO</p>
                 <div className="relative mb-2">
                   <svg className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-mute pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><circle cx="11" cy="11" r="7" /><path d="M20 20l-3.5-3.5" /></svg>
                   <input value={busqueda} onChange={e => setBusqueda(e.target.value)} placeholder="Buscar refacción…"
@@ -8119,7 +8159,7 @@ function TallerTrabajoModal({ ordenId, onClose, onCambio, notify }: {
                       className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl border border-edge hover:border-gold/40 disabled:opacity-40 transition-colors text-left">
                       <span className="text-sm text-ink flex-1 truncate">{ref.nombre}</span>
                       <span className={`text-[12px] ${ref.stock < 1 ? 'text-red-500' : 'text-mute'}`}>{ref.stock} en stock</span>
-                      <span className="text-gold font-black text-lg leading-none">+</span>
+                      <span className="text-gold-ink font-black text-lg leading-none">+</span>
                     </button>
                   ))}
                 </div>
@@ -8127,7 +8167,7 @@ function TallerTrabajoModal({ ordenId, onClose, onCambio, notify }: {
 
               {/* Qué se hizo: obligatorio para terminar */}
               <div>
-                <p className="text-[11px] font-extrabold tracking-[0.5px] text-gold mb-2">¿QUÉ LE HICISTE?</p>
+                <p className="text-[11px] font-extrabold tracking-[0.5px] text-gold-ink mb-2">¿QUÉ LE HICISTE?</p>
                 <textarea value={trabajo} onChange={e => setTrabajo(e.target.value)} onBlur={guardarTrabajo} rows={3}
                   placeholder="Ej. Cambié el filtro y limpié el carburador. Probada y funcionando."
                   className="w-full bg-surface-2 border border-edge rounded-xl px-3.5 py-2.5 text-sm text-ink placeholder-mute focus:outline-none focus:border-gold/50 transition-colors resize-none" />
@@ -8748,7 +8788,7 @@ function UsuarioDetalle({ u, soyYo, onClose, onEditar }: {
 
           {/* Datos de la cuenta */}
           <div className="px-6 sm:px-7 py-5 border-b border-edge">
-            <p className="text-[11px] font-extrabold tracking-[0.5px] text-gold mb-1">DATOS DE LA CUENTA</p>
+            <p className="text-[11px] font-extrabold tracking-[0.5px] text-gold-ink mb-1">DATOS DE LA CUENTA</p>
             <div className="divide-y divide-edge">
               <Dato k="Usuario" v={u.username} mono />
               <Dato k="Nombre completo" v={u.nombre} />
@@ -8761,7 +8801,7 @@ function UsuarioDetalle({ u, soyYo, onClose, onEditar }: {
 
           {/* Contacto */}
           <div className="px-6 sm:px-7 py-5">
-            <p className="text-[11px] font-extrabold tracking-[0.5px] text-gold mb-1">CONTACTO</p>
+            <p className="text-[11px] font-extrabold tracking-[0.5px] text-gold-ink mb-1">CONTACTO</p>
             <div className="divide-y divide-edge">
               <Dato k="Correo" v={u.email} mono />
               <Dato k="Teléfono" v={u.telefono} mono />
@@ -9058,7 +9098,7 @@ function NegocioAdmin({ notify }: { notify: (m: string, t?: 'ok' | 'err') => voi
         <Ajuste titulo="Números de respaldo" desc="No se muestran al cliente. Sirven para que otra persona pueda retomar una solicitud." apilado
           pie={
             <button onClick={() => setResp([...resp, { label: `Respaldo ${resp.length + 1}`, number: '' }])}
-              className="inline-flex items-center gap-1.5 text-[13px] font-black text-gold hover:opacity-80 transition-opacity">
+              className="inline-flex items-center gap-1.5 text-[13px] font-black text-gold-ink hover:opacity-80 transition-opacity">
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.2"><path strokeLinecap="round" d="M12 5v14M5 12h14" /></svg>
               Agregar respaldo
             </button>
@@ -9151,7 +9191,7 @@ function NegocioAdmin({ notify }: { notify: (m: string, t?: 'ok' | 'err') => voi
                   ? <span className="shrink-0 text-[10px] uppercase font-semibold px-2 py-1 rounded bg-emerald-500/10 text-emerald-600">Confirmado</span>
                   : <>
                       <span className="shrink-0 text-[10px] uppercase font-semibold px-2 py-1 rounded bg-amber-500/10 text-amber-700 dark:text-amber-500">Sin confirmar</span>
-                      <button onClick={() => reenviar(c.id)} className="shrink-0 text-[12px] font-black text-gold hover:opacity-80 transition-opacity">Reenviar</button>
+                      <button onClick={() => reenviar(c.id)} className="shrink-0 text-[12px] font-black text-gold-ink hover:opacity-80 transition-opacity">Reenviar</button>
                     </>}
                 <button onClick={() => eliminarCorreo(c)} aria-label={`Quitar ${c.email}`}
                   className="shrink-0 w-8 h-8 rounded-lg grid place-items-center text-mute hover:text-red-500 hover:bg-red-500/10 transition-colors">
@@ -9224,8 +9264,8 @@ function ConfiguracionAdmin({ notify, lang, onLang }: {
           const activa = tab === tb.key
           return (
             <button key={tb.key} onClick={() => setTab(tb.key)} aria-current={activa ? 'page' : undefined}
-              className={`flex items-center gap-2.5 px-3.5 py-3 rounded-xl text-[13.5px] font-bold text-left transition-colors whitespace-nowrap ${activa ? 'bg-gold-soft text-gold' : 'text-ink hover:bg-surface-2'}`}>
-              <svg className={`w-[18px] h-[18px] shrink-0 ${activa ? 'text-gold' : 'text-mute'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">{tb.icon}</svg>
+              className={`flex items-center gap-2.5 px-3.5 py-3 rounded-xl text-[13.5px] font-bold text-left transition-colors whitespace-nowrap ${activa ? 'bg-gold-soft text-gold-ink' : 'text-ink hover:bg-surface-2'}`}>
+              <svg className={`w-[18px] h-[18px] shrink-0 ${activa ? 'text-gold-ink' : 'text-mute'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">{tb.icon}</svg>
               {tb.label}
             </button>
           )
@@ -9332,7 +9372,7 @@ function PrintSettingsCard({ notify }: { notify: (m: string, t?: 'ok' | 'err') =
             return (
               <button key={m.key} disabled={!ok} onClick={() => setPs({ method: m.key })} aria-pressed={activo}
                 className={`text-left rounded-xl border p-3 transition-colors ${activo ? 'border-gold/40 bg-gold-soft' : 'border-edge bg-surface-2 hover:border-gold/40'} ${!ok ? 'opacity-40 cursor-not-allowed' : ''}`}>
-                <div className={`text-[13px] font-black ${activo ? 'text-gold' : 'text-ink'}`}>{m.label}</div>
+                <div className={`text-[13px] font-black ${activo ? 'text-gold-ink' : 'text-ink'}`}>{m.label}</div>
                 <div className="text-[11.5px] text-mute mt-0.5 leading-tight">{m.desc}</div>
                 {!ok && <div className="text-[11px] text-amber-700 dark:text-amber-500 mt-1">Solo Chrome, Edge o Brave</div>}
               </button>
@@ -9457,7 +9497,7 @@ function PerfilAdmin({ notify }: { notify: (m: string, t?: 'ok' | 'err') => void
               {avatarSrc ? (
                 <img src={avatarSrc} alt="avatar" className="w-full h-full object-cover" />
               ) : (
-                <span className="text-4xl font-black text-gold">{initial}</span>
+                <span className="text-4xl font-black text-gold-ink">{initial}</span>
               )}
             </div>
             <label className="absolute -bottom-1 -right-1 w-9 h-9 rounded-full bg-gold text-black flex items-center justify-center cursor-pointer hover:opacity-90 transition-opacity border-[3px] border-surface" title="Cambiar foto">
@@ -9471,9 +9511,9 @@ function PerfilAdmin({ notify }: { notify: (m: string, t?: 'ok' | 'err') => void
           <div className="min-w-0 flex-1 text-center sm:text-left">
             <h2 className="text-[24px] font-black text-ink leading-tight truncate">{fullName}</h2>
             <p className="text-[14px] text-mute mt-1 truncate">{perfil?.email || '—'}</p>
-            {avatarFile && <p className="mt-1.5 text-[12px] text-gold font-semibold">Nueva foto seleccionada — guarda para aplicar.</p>}
+            {avatarFile && <p className="mt-1.5 text-[12px] text-gold-ink font-semibold">Nueva foto seleccionada — guarda para aplicar.</p>}
           </div>
-          <span className="shrink-0 mx-auto sm:mx-0 inline-flex px-3.5 py-1.5 rounded-full bg-gold-soft text-gold text-[12.5px] font-bold uppercase tracking-wide">{rol}</span>
+          <span className="shrink-0 mx-auto sm:mx-0 inline-flex px-3.5 py-1.5 rounded-full bg-gold-soft text-gold-ink text-[12.5px] font-bold uppercase tracking-wide">{rol}</span>
         </div>
       </Card>
 

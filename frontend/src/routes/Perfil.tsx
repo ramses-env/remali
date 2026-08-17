@@ -291,7 +291,7 @@ export default function Perfil() {
               <span>{n.label}</span>
               {n.badge && (
                 <span className={`rounded-full px-2.5 py-0.5 text-[12px] font-bold whitespace-nowrap ${
-                  n.badge === 'Falta RFC' ? 'bg-gold-soft text-gold' : 'bg-surface-2 text-mute'
+                  n.badge === 'Falta RFC' ? 'bg-gold-soft text-gold-ink' : 'bg-surface-2 text-mute'
                 }`}>
                   {n.badge}
                 </span>
@@ -452,7 +452,7 @@ function AvisoArriba({ perfil, falta, oculto, onOcultar, onIr, pctCompleto }: {
   if (falta && !oculto) {
     return (
       <div className="flex flex-wrap items-center gap-4 rounded-[20px] border border-gold/40 bg-surface px-5 py-5 sm:px-6">
-        <div className="grid h-11 w-11 shrink-0 place-items-center rounded-[13px] bg-gold-soft text-[19px] font-extrabold text-gold">%</div>
+        <div className="grid h-11 w-11 shrink-0 place-items-center rounded-[13px] bg-gold-soft text-[19px] font-extrabold text-gold-ink">%</div>
         <button type="button" onClick={() => onIr(falta.id)} className="min-w-[200px] flex-1 text-left">
           <p className="text-[16px] font-bold text-ink">Completa tu perfil y obtén 5%</p>
           <p className="mt-0.5 text-sm leading-relaxed text-mute">
@@ -490,7 +490,7 @@ function AvisoArriba({ perfil, falta, oculto, onOcultar, onIr, pctCompleto }: {
     return (
       <div className="rounded-[20px] border border-gold/40 bg-gold-soft px-5 py-5 sm:px-6">
         <div className="flex items-center gap-2 text-ink">
-          <BadgePercent className="h-5 w-5 text-gold" />
+          <BadgePercent className="h-5 w-5 text-gold-ink" />
           <p className="text-sm font-bold">¡Ganaste {Math.round(cupon.descuento * 100)}% de bienvenida por completar tu perfil!</p>
         </div>
         <p className="mt-1 text-sm text-mute">Aplícalo una sola vez, en la compra o renta que tú elijas. Usa este código:</p>
@@ -606,7 +606,7 @@ function SeccionObras({ obras, onCambio }: { obras: Obra[]; onCambio: () => void
                   <p className="mt-1 text-[13.5px] leading-snug text-mute">{o.direccion}</p>
                 </div>
                 {o.predeterminada && (
-                  <span className="shrink-0 rounded-full bg-gold-soft px-2.5 py-1 text-[11.5px] font-bold text-gold whitespace-nowrap">Predeterminada</span>
+                  <span className="shrink-0 rounded-full bg-gold-soft px-2.5 py-1 text-[11.5px] font-bold text-gold-ink whitespace-nowrap">Predeterminada</span>
                 )}
               </div>
               {(o.responsable || o.telefono) && (
@@ -619,7 +619,7 @@ function SeccionObras({ obras, onCambio }: { obras: Obra[]; onCambio: () => void
                 <button type="button" onClick={() => usarPorDefecto(o)}
                   className={`h-9 rounded-[10px] px-3.5 text-[13px] font-semibold transition-colors ${
                     o.predeterminada
-                      ? 'cursor-default border border-gold/40 bg-gold-soft text-gold'
+                      ? 'cursor-default border border-gold/40 bg-gold-soft text-gold-ink'
                       : 'border border-edge bg-surface text-ink hover:bg-surface-2'
                   }`}>
                   {o.predeterminada ? '✓ Predeterminada' : 'Usar por defecto'}
@@ -728,7 +728,7 @@ function SeccionSeguridad({ perfil, onGuardado, onCerrarSesion, onReiniciarGuia 
   const CAMPO_P = 'h-[46px] w-full rounded-[12px] border border-edge bg-surface-2 px-4 pr-12 text-[14.5px] text-ink placeholder-mute outline-none transition-colors focus:border-gold/60 focus:bg-surface'
   const Ojo = () => (
     <button type="button" onClick={() => setVer(v => !v)} aria-label={ver ? 'Ocultar contraseñas' : 'Mostrar contraseñas'}
-      className="absolute right-3.5 top-1/2 -translate-y-1/2 text-mute transition-colors hover:text-gold">
+      className="absolute right-3.5 top-1/2 -translate-y-1/2 text-mute transition-colors hover:text-gold-ink">
       {ver ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
     </button>
   )
@@ -802,7 +802,7 @@ function SeccionSeguridad({ perfil, onGuardado, onCerrarSesion, onReiniciarGuia 
           <p className="mt-0.5 text-[13.5px] text-mute">Repetir el tour interactivo para recordar el sistema.</p>
         </div>
         <button type="button" onClick={onReiniciarGuia}
-          className="inline-flex h-[42px] items-center gap-2 rounded-[12px] border border-gold/60 bg-gold/10 px-4 text-sm font-bold text-gold transition-colors hover:bg-gold/20">
+          className="inline-flex h-[42px] items-center gap-2 rounded-[12px] border border-gold/60 bg-gold/10 px-4 text-sm font-bold text-gold-ink transition-colors hover:bg-gold/20">
           <RotateCcw className="h-4 w-4" />
           Repetir guía
         </button>

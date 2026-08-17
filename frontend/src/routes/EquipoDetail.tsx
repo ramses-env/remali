@@ -246,7 +246,7 @@ export default function EquipoDetail() {
             <div className="flex items-center gap-2.5 flex-wrap mb-4">
               {condiciones.includes('nueva') && <span className={`${mono} px-2.5 py-1.5 rounded-md border text-emerald-500 bg-emerald-500/10 border-emerald-500/25`}>NUEVO</span>}
               {condiciones.includes('seminueva') && <span className={`${mono} px-2.5 py-1.5 rounded-md border text-blue-500 bg-blue-500/10 border-blue-500/25`}>SEMINUEVO</span>}
-              <span className={`${mono} px-2.5 py-1.5 rounded-md text-gold bg-gold-soft border border-gold/25 uppercase`}>{availability}</span>
+              <span className={`${mono} px-2.5 py-1.5 rounded-md text-gold-ink bg-gold-soft border border-gold/25 uppercase`}>{availability}</span>
               {e.marca?.nombre && <span className={`${mono} px-2.5 py-1.5 rounded-md text-mute bg-surface-2 border border-edge uppercase`}>{e.marca.nombre}</span>}
             </div>
 
@@ -264,7 +264,7 @@ export default function EquipoDetail() {
                 ))}
                 {isAdmin && (
                   <button onClick={() => fileInputRef.current?.click()} title="Subir fotos" aria-label="Subir fotos"
-                    className="aspect-square rounded-xl border border-dashed border-edge text-mute grid place-items-center hover:text-gold hover:border-gold/40 transition-colors">
+                    className="aspect-square rounded-xl border border-dashed border-edge text-mute grid place-items-center hover:text-gold-ink hover:border-gold/40 transition-colors">
                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.6"><path strokeLinecap="round" d="M12 5v14M5 12h14" /></svg>
                   </button>
                 )}
@@ -296,7 +296,7 @@ export default function EquipoDetail() {
                 ))}
               </div>
             )}
-            {isAdmin && <button onClick={() => fileInputRef.current?.click()} className="md:hidden mt-3 text-sm font-semibold text-gold hover:opacity-80">+ Subir fotos</button>}
+            {isAdmin && <button onClick={() => fileInputRef.current?.click()} className="md:hidden mt-3 text-sm font-semibold text-gold-ink hover:opacity-80">+ Subir fotos</button>}
 
             {/* Tabs: especificaciones / condiciones de renta */}
             {hayTabs && (
@@ -347,12 +347,12 @@ export default function EquipoDetail() {
                       {condLista.map((c, i) => {
                         const encabezado = c.length <= 40 && c === c.toUpperCase() && /[A-ZÁÉÍÓÚÑ]/.test(c) && !/[.:]/.test(c)
                         if (encabezado) return (
-                          <li key={i} className="pt-7 first:pt-0 pb-1 text-[12px] font-black uppercase tracking-[0.14em] text-gold">{c}</li>
+                          <li key={i} className="pt-7 first:pt-0 pb-1 text-[12px] font-black uppercase tracking-[0.14em] text-gold-ink">{c}</li>
                         )
                         n += 1
                         return (
                           <li key={i} className="flex gap-4 items-start py-3.5 border-b border-edge/50 last:border-0">
-                            <span className="shrink-0 w-6 text-[13px] font-black text-gold tabular-nums leading-6">{String(n).padStart(2, '0')}</span>
+                            <span className="shrink-0 w-6 text-[13px] font-black text-gold-ink tabular-nums leading-6">{String(n).padStart(2, '0')}</span>
                             <p className="text-[14.5px] text-ink/90 leading-relaxed">{c}</p>
                           </li>
                         )
@@ -498,7 +498,7 @@ export default function EquipoDetail() {
             {/* Ficha técnica: catálogo comercial del producto, no de la unidad. */}
             {mostrarFicha && (
               <button onClick={descargarFicha}
-                className="flex items-center justify-center gap-2 border-t border-edge pt-4 text-[14px] font-semibold text-mute hover:text-gold transition-colors">
+                className="flex items-center justify-center gap-2 border-t border-edge pt-4 text-[14px] font-semibold text-mute hover:text-gold-ink transition-colors">
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.8"><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
                 Descargar ficha técnica (PDF)
               </button>
@@ -513,7 +513,7 @@ export default function EquipoDetail() {
               <h2 className="text-[24px] font-extrabold tracking-tight">
                 {esRenta ? 'Se renta junto con' : 'También te puede interesar'}
               </h2>
-              <Link to="/equipos" className="text-sm font-semibold text-gold hover:opacity-80">Ver catálogo →</Link>
+              <Link to="/equipos" className="text-sm font-semibold text-gold-ink hover:opacity-80">Ver catálogo →</Link>
             </div>
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
               {relacionados.map(r => {
@@ -533,7 +533,7 @@ export default function EquipoDetail() {
                       <div className="text-[14.5px] font-bold leading-snug line-clamp-1">{r.modelo}</div>
                       <div className="text-[12.5px] text-mute mt-0.5 capitalize">{rModo === 'venta' ? 'Venta' : 'Renta'}</div>
                       {rPrecio !== null && (
-                        <div className="text-[15px] font-extrabold text-gold mt-2.5">
+                        <div className="text-[15px] font-extrabold text-gold-ink mt-2.5">
                           ${formatCurrency(rPrecio)}{rModo === 'renta' ? ' / día' : ''}
                         </div>
                       )}

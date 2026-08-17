@@ -216,6 +216,10 @@ class PerfilUsuario(models.Model):
     obra_direccion = models.CharField(max_length=255, blank=True, default='')
     obra_responsable = models.CharField(max_length=180, blank=True, default='')
     email_token = models.CharField(max_length=64, blank=True, default='', editable=False)
+    # Cuándo se emitió el token de arriba. La liga del correo abre sesión sola, así
+    # que no puede valer para siempre: un correo viejo reenviado sería una llave a
+    # la cuenta. Con esta fecha, la vista de verificación la caduca (48 h).
+    email_token_creado = models.DateTimeField(null=True, blank=True, editable=False)
     email_verificado = models.BooleanField(default=False)
     email_verificado_en = models.DateTimeField(null=True, blank=True)
     recompensado = models.BooleanField(default=False)

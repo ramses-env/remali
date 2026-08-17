@@ -117,11 +117,11 @@ export default function MisCotizacionEstado() {
     : venc ? { txt: 'Vencida — vuelve a cotizar', cls: 'text-mute border-edge' }
     : entregado ? { txt: `Entregado · ${entregadoTxt}`, cls: 'text-emerald-500 border-emerald-500/40' }
     : ventaConv ? { txt: 'Completada · compra lista', cls: 'text-emerald-500 border-emerald-500/40' }
-    : rentaPorEntregar ? { txt: 'Paso 4 de 4 · pendiente de entrega', cls: 'text-gold border-gold/40' }
-    : entregaAgendada ? { txt: 'Paso 4 de 4 · pendiente de entrega', cls: 'text-gold border-gold/40' }
-    : acep ? { txt: 'Paso 3 de 4 · agendando fecha y hora', cls: 'text-gold border-gold/40' }
-    : porAutorizar ? { txt: 'Paso 1 de 4 · esperando autorización', cls: 'text-gold border-gold/40' }
-    : { txt: 'Paso 2 de 4 · revisando existencias', cls: 'text-gold border-gold/40' }
+    : rentaPorEntregar ? { txt: 'Paso 4 de 4 · pendiente de entrega', cls: 'text-gold-ink border-gold/40' }
+    : entregaAgendada ? { txt: 'Paso 4 de 4 · pendiente de entrega', cls: 'text-gold-ink border-gold/40' }
+    : acep ? { txt: 'Paso 3 de 4 · agendando fecha y hora', cls: 'text-gold-ink border-gold/40' }
+    : porAutorizar ? { txt: 'Paso 1 de 4 · esperando autorización', cls: 'text-gold-ink border-gold/40' }
+    : { txt: 'Paso 2 de 4 · revisando existencias', cls: 'text-gold-ink border-gold/40' }
 
   const wa = waLink(cfg.whatsapp_principal, `Hola REMALI, quiero seguimiento de mi cotización ${cot.folio}.`)
   const diasRestantes = cot.vence_el ? Math.ceil((new Date(cot.vence_el + 'T23:59:59').getTime() - Date.now()) / 86400000) : null
@@ -190,7 +190,7 @@ export default function MisCotizacionEstado() {
                       </span>
                       {i < pasos.length - 1 && <span className={`flex-1 h-px ${ok ? 'bg-emerald-500/40' : act ? 'bg-gold/40' : 'bg-edge'}`} />}
                     </div>
-                    <p className={`text-[15px] font-bold ${act ? 'text-gold' : ''}`}>{p.t}</p>
+                    <p className={`text-[15px] font-bold ${act ? 'text-gold-ink' : ''}`}>{p.t}</p>
                     <p className="text-[13px] text-mute mt-1 leading-snug">{p.d}</p>
                   </div>
                 )
@@ -208,7 +208,7 @@ export default function MisCotizacionEstado() {
                 {entrega && <div><p className={monoLabel}>Entrega</p><p className="text-[15px] font-bold mt-1 text-emerald-500">{entrega}</p></div>}
                 {cot.vence_el && <div><p className={monoLabel}>Vigencia</p><p className="text-[15px] font-bold mt-1">{cot.vence_el}</p></div>}
               </div>
-              {cot.pdf && <a href={cot.pdf} target="_blank" rel="noopener noreferrer" className="text-[14px] font-semibold text-gold hover:opacity-80">Ver completa →</a>}
+              {cot.pdf && <a href={cot.pdf} target="_blank" rel="noopener noreferrer" className="text-[14px] font-semibold text-gold-ink hover:opacity-80">Ver completa →</a>}
             </div>
             {(cot.carrito && cot.carrito.length > 0 ? cot.carrito : null)?.map((l, i) => {
               const foto = l.image || fotos[l.id]
@@ -236,7 +236,7 @@ export default function MisCotizacionEstado() {
             <div className="rounded-[20px] border border-edge bg-surface p-6">
               <p className={`${monoLabel} mb-4`}>Te está atendiendo</p>
               <div className="flex items-center gap-3.5 mb-4">
-                <div className="w-11 h-11 rounded-full bg-gold-soft text-gold grid place-items-center font-extrabold text-[15px]">
+                <div className="w-11 h-11 rounded-full bg-gold-soft text-gold-ink grid place-items-center font-extrabold text-[15px]">
                   {(cot.atendida_por || cfg.negocio_representante || 'R').split(' ').map(p => p[0]).slice(0, 2).join('').toUpperCase()}
                 </div>
                 <div>

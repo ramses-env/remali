@@ -143,7 +143,7 @@ export default function UnidadQR() {
               <p className="mt-5 text-[13.5px] text-mute">Sin renta en curso. {info.estado === 'disponible' ? 'Lista para rentarse o venderse.' : ''}</p>
             )}
 
-            <Link to="/dashboard" className="mt-5 inline-block text-[13px] font-bold text-gold hover:opacity-80">Abrir el panel →</Link>
+            <Link to="/dashboard" className="mt-5 inline-block text-[13px] font-bold text-gold-ink hover:opacity-80">Abrir el panel →</Link>
           </div>
         ) : null}
       </div>

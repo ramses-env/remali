@@ -68,7 +68,7 @@ export default function VincularCuenta({ tipo }: { tipo: 'venta' | 'renta' | 'co
           </div>
         ) : !sesion ? (
           <>
-            <div className="vc-pop w-16 h-16 mx-auto rounded-full bg-gold-soft text-gold flex items-center justify-center mb-5">
+            <div className="vc-pop w-16 h-16 mx-auto rounded-full bg-gold-soft text-gold-ink flex items-center justify-center mb-5">
               <svg className="w-7 h-7" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7" /><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7" /></svg>
             </div>
             <h1 className="vc-rise text-[22px] font-black text-ink leading-tight" style={{ animationDelay: '120ms' }}>Vincular {titulo} a tu cuenta</h1>
@@ -118,7 +118,7 @@ export default function VincularCuenta({ tipo }: { tipo: 'venta' | 'renta' | 'co
           </>
         ) : info ? (
           <>
-            <div className="vc-pop w-16 h-16 mx-auto rounded-full bg-gold-soft text-gold flex items-center justify-center mb-5">
+            <div className="vc-pop w-16 h-16 mx-auto rounded-full bg-gold-soft text-gold-ink flex items-center justify-center mb-5">
               <svg className="w-7 h-7" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7" /><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7" /></svg>
             </div>
             <h1 className="vc-rise text-[22px] font-black text-ink leading-tight" style={{ animationDelay: '120ms' }}>Vincular {titulo} a tu cuenta</h1>

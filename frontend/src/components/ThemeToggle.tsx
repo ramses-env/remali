@@ -9,7 +9,7 @@ export default function ThemeToggle({ className = '' }: { className?: string }) 
       onClick={toggle}
       aria-label={isDark ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro'}
       title={isDark ? 'Modo claro' : 'Modo oscuro'}
-      className={`relative w-9 h-9 rounded-full border border-edge bg-surface-2 text-mute hover:text-gold transition-colors flex items-center justify-center ${className}`}
+      className={`relative w-9 h-9 rounded-full border border-edge bg-surface-2 text-mute hover:text-gold-ink transition-colors flex items-center justify-center ${className}`}
     >
       {isDark ? (
         // Sol

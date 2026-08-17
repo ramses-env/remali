@@ -26,7 +26,7 @@ const PASOS = [
 const IDX: Record<string, number> = { recibida: 1, proceso: 2, terminada: 3, entregada: 4 }
 const CHIP: Record<string, { txt: string; cls: string }> = {
   recibida: { txt: 'Recibida', cls: 'text-mute border-edge' },
-  proceso: { txt: 'En proceso', cls: 'text-gold border-gold/40' },
+  proceso: { txt: 'En proceso', cls: 'text-gold-ink border-gold/40' },
   terminada: { txt: 'Lista para entrega', cls: 'text-emerald-500 border-emerald-500/40' },
   entregada: { txt: 'Entregada', cls: 'text-emerald-500 border-emerald-500/40' },
 }
@@ -120,7 +120,7 @@ export default function SeguirReparacion({ modo }: { modo: 'cuenta' | 'publico' 
             <div className={`w-12 h-12 rounded-full grid place-items-center shrink-0 ${lista ? 'bg-emerald-500/12' : 'bg-gold-soft'}`}>
               {lista
                 ? <svg className="w-6 h-6 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.2"><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
-                : <svg className="w-6 h-6 text-gold" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M14.7 6.3a4 4 0 0 0-5.6 5.6L3 18v3h3l6.1-6.1a4 4 0 0 0 5.6-5.6l-2.5 2.5-2.1-2.1z" /></svg>}
+                : <svg className="w-6 h-6 text-gold-ink" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M14.7 6.3a4 4 0 0 0-5.6 5.6L3 18v3h3l6.1-6.1a4 4 0 0 0 5.6-5.6l-2.5 2.5-2.1-2.1z" /></svg>}
             </div>
             <div>
               <h1 className="text-[26px] sm:text-[32px] font-extrabold tracking-tight leading-none">{rep.equipo || 'Tu equipo'}</h1>
@@ -165,7 +165,7 @@ export default function SeguirReparacion({ modo }: { modo: 'cuenta' | 'publico' 
                     </span>
                     {i < pasos.length - 1 && <span className={`flex-1 h-px ${ok ? 'bg-emerald-500/40' : 'bg-edge'}`} />}
                   </div>
-                  <p className={`text-[15px] font-bold ${act ? 'text-gold' : ''}`}>{p.t}</p>
+                  <p className={`text-[15px] font-bold ${act ? 'text-gold-ink' : ''}`}>{p.t}</p>
                   <p className="text-[13px] text-mute mt-1 leading-snug">{p.d}</p>
                 </div>
               )
@@ -187,7 +187,7 @@ export default function SeguirReparacion({ modo }: { modo: 'cuenta' | 'publico' 
         {rep.trabajo_realizado && (
           <div className="rounded-[20px] border border-edge bg-surface px-6 sm:px-8 py-6">
             <div className="flex items-center gap-2 mb-1.5">
-              <svg className="w-4 h-4 text-gold shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.9"><path strokeLinecap="round" strokeLinejoin="round" d="M14.7 6.3a4 4 0 0 0-5.6 5.6L3 18v3h3l6.1-6.1a4 4 0 0 0 5.6-5.6l-2.5 2.5-2.1-2.1z" /></svg>
+              <svg className="w-4 h-4 text-gold-ink shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.9"><path strokeLinecap="round" strokeLinejoin="round" d="M14.7 6.3a4 4 0 0 0-5.6 5.6L3 18v3h3l6.1-6.1a4 4 0 0 0 5.6-5.6l-2.5 2.5-2.1-2.1z" /></svg>
               <p className="text-[10.5px] font-mono tracking-[0.14em] text-mute uppercase">Diagnóstico y solución</p>
             </div>
             <p className="text-[14.5px] text-ink whitespace-pre-wrap leading-relaxed">{rep.trabajo_realizado}</p>

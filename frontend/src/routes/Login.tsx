@@ -133,7 +133,7 @@ export default function Login() {
             <p className="font-bold mb-0.5">Confirma tu correo para entrar.</p>
             <p>Te enviamos un link{pendiente ? <> a <b>{pendiente}</b></> : null}. Revisa también Spam o Promociones.</p>
             <button type="button" onClick={reenviarConfirmacion} disabled={reenviado}
-              className="mt-2 text-sm font-bold text-gold hover:opacity-80 disabled:opacity-60 transition-opacity">
+              className="mt-2 text-sm font-bold text-gold-ink hover:opacity-80 disabled:opacity-60 transition-opacity">
               {reenviado ? 'Correo reenviado ✓' : 'Reenviar correo'}
             </button>
           </div>
@@ -202,7 +202,7 @@ export default function Login() {
                         type="button"
                         onClick={() => setVerPass(v => !v)}
                         aria-label={verPass ? 'Ocultar contraseña' : 'Mostrar contraseña'}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-mute hover:text-gold transition-colors"
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-mute hover:text-gold-ink transition-colors"
                       >
                         {verPass ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                       </button>
@@ -211,7 +211,7 @@ export default function Login() {
                   <FormMessage />
                   {/* Enlace al flujo real de restablecimiento (correo → nueva).
                       Va junto al campo, que es donde surge la duda. */}
-                  <Link to="/recuperar" className="inline-block text-xs font-semibold text-gold hover:underline">
+                  <Link to="/recuperar" className="inline-block text-xs font-semibold text-gold-ink hover:underline">
                     ¿Olvidaste tu contraseña?
                   </Link>
                 </FormItem>
@@ -272,7 +272,7 @@ export default function Login() {
           no dice nada (un lector de pantalla los anuncia sueltos). */}
       <AuthItem className="text-center text-sm text-mute">
         ¿Todavía no tienes cuenta?{' '}
-        <Link to="/registro" className="font-semibold text-gold hover:underline">
+        <Link to="/registro" className="font-semibold text-gold-ink hover:underline">
           Crear una cuenta
         </Link>
       </AuthItem>

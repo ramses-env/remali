@@ -16,6 +16,7 @@ from rest_framework.response import Response
 from maquinaria.permissions import ExigeCapacidad, NIVEL_ADMIN, nivel_de
 
 from .models import Cliente, Contacto
+from .cuenta import estado_de_cuenta
 from .resolucion import resumen_de
 from .serializers import (
     CAMPOS_FISCALES, ClienteFichaSerializer, ClienteListaSerializer, ContactoSerializer,
@@ -219,6 +220,22 @@ def contacto_detalle(request, pk: int):
 
 
 # ═══════════════════════════════════════════════════════════════════
+@api_view(['GET'])
+@permission_classes([PuedeVerClientes])
+def estado_cuenta(request, pk: int):
+    """Lo que debe, lo que se le debe, y su historial completo.
+
+    Permiso `ver_clientes` (nivel 1) a propósito: esto es
+    `ver_montos_operacion` —cobrar lo que uno atiende—, no `ver_dinero`, que son
+    las cuentas del negocio. El cajero necesita saber que el cliente debe ANTES
+    de venderle otra cosa, no después.
+    """
+    cli = Cliente.objects.filter(pk=pk).first()
+    if cli is None:
+        return Response({'detalle': 'Cliente no encontrado.'}, status=404)
+    return Response(estado_de_cuenta(cli, con_documentos=True))
+
+
 @api_view(['GET'])
 @permission_classes([PuedeVerClientes])
 def buscar(request):

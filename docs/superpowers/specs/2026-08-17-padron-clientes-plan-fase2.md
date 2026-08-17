@@ -158,9 +158,16 @@ lugar**: de aquí comen el endpoint, la ficha y el resumen del buscador.
 
 Devuelve `saldo`, `credito_a_favor`, `neto` y los documentos ordenados por fecha.
 
-**C3 · La lista con anotaciones** — la columna de saldo en `GET /api/clientes/`
-se resuelve con agregados en el queryset, **no con un bucle** que pregunte cliente
-por cliente.
+**C3 · ~~La lista con anotaciones~~ — NO SE HACE.**
+
+La columna de saldo en la lista del padrón no se puede resolver con un agregado
+SQL: los abonos viven en un campo JSON (`Renta.pagos`, `Venta.pagos`), así que
+sumarlos exige recorrerlos en Python. Con 500 clientes eso es una consulta por
+renglón — exactamente lo que se evitó al paginar la lista.
+
+El saldo vive donde se decide: **la ficha del cliente y el buscador de
+mostrador**. Si algún día hace falta en la lista, el arreglo correcto es mover
+los abonos a su propia tabla, no meter un bucle aquí.
 
 **C4 · El resumen del buscador** gana las cifras (B1 las dejó pendientes).
 
