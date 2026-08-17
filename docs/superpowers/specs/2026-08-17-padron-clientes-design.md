@@ -7,6 +7,19 @@
 
 ## 1. El problema
 
+Don Chuy, en un año:
+
+| Cuándo | Qué hizo | Qué guardó el sistema |
+|---|---|---|
+| Mayo | Compró un filtro en mostrador | texto: `"chuy"` |
+| Julio | Rentó una revolvedora, dejó $5,000 de depósito | texto: `"Jesus Ramirez"` |
+| Sept. | Su hijo pidió cotización para la ferretería | texto: `"Ferretería Ramírez"` |
+| Nov. | Se hizo cuenta en la página | un usuario nuevo, vacío |
+
+Para el sistema son **cuatro desconocidos**. Nadie puede contestar "¿cuánto nos ha
+comprado don Chuy?" ni, peor, "¿ya le devolvimos sus $5,000?". Y cuando abre su
+cuenta en noviembre, ve una pantalla en blanco.
+
 Hoy no existe un modelo `Cliente`. Una misma persona puede estar representada de
 cuatro formas a la vez dentro de un solo documento, y ninguna es la autoridad:
 
