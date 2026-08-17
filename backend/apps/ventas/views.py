@@ -772,6 +772,10 @@ def vinculo_venta(request, token: str):
     # POST → reclamar
     if v.estado == 'cancelada':
         return Response({'detalle': 'Esta venta está cancelada; no se puede vincular.'}, status=400)
+    # Defensa: si ya está ligada a OTRA cuenta, no reasignar (evita robo si se
+    # regeneró un enlace sobre una venta ya vinculada). Igual que cotización/orden.
+    if v.cliente_usuario_id and v.cliente_usuario_id != request.user.id:
+        return Response({'detalle': 'Esta venta ya está ligada a otra cuenta.'}, status=409)
     v.cliente_usuario = request.user   # cuenta del CLIENTE (no el vendedor)
     v.token_vinculo = None             # un solo uso: se limpia al reclamar
     v.token_vinculo_expira = None

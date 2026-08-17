@@ -83,6 +83,18 @@ class RestablecerThrottle(AnonRateThrottle):
     scope = 'restablecer'
 
 
+class RestablecerUsoThrottle(AnonRateThrottle):
+    """Freno al USO del enlace de restablecimiento (validarlo y consumirlo), por IP.
+
+    El token de Django es fuerte, pero estos dos endpoints son públicos y sin
+    tope: quien quiera puede dispararles tokens a ciegas todo el día, y de paso
+    averiguar qué IDs de cuenta existen (uid bueno responde distinto que uno
+    inventado). Quien de verdad viene de su correo gasta 2 o 3 llamadas; veinte
+    por hora le sobran incluso recargando la página, y cierran el barrido.
+    """
+    scope = 'restablecer_uso'
+
+
 class GoogleLoginThrottle(AnonRateThrottle):
     """Freno al inicio de sesión con Google, por IP (igual que el login normal:
     acota fuerza bruta y credential stuffing con el token de Google)."""

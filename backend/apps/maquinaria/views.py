@@ -17,7 +17,9 @@ from django.utils.http import urlsafe_base64_decode, urlsafe_base64_encode
 
 from rest_framework import generics, permissions, status
 from rest_framework.filters import SearchFilter, OrderingFilter
-from rest_framework.decorators import api_view, permission_classes, parser_classes, throttle_classes
+from rest_framework.decorators import (
+    api_view, authentication_classes, permission_classes, parser_classes, throttle_classes,
+)
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.response import Response
 
@@ -26,6 +28,7 @@ from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from .throttling import (
     CuponThrottle, GoogleLoginThrottle, LoginThrottle,
     RegistroThrottle, CambioPasswordThrottle, RestablecerThrottle,
+    RestablecerUsoThrottle,
 )
 
 from .models import (
@@ -35,7 +38,7 @@ from .models import (
     ObraCliente, SelloTema, nombre_propio, espejar_obra_predeterminada,
     Favorito,
 )
-from .permissions import IsAdminGroupOrStaff, EsOperador, puede_de
+from .permissions import IsAdminGroupOrStaff, EsOperador, nivel_de, puede_de
 from .serializers import (
     EquipoSerializer, CategoriaSerializer, MarcaSerializer, TipoSerializer,
     CuponSerializer, NotificacionSerializer, PerfilUsuarioSerializer,
@@ -326,9 +329,11 @@ class CuponListCreate(generics.ListCreateAPIView):
     serializer_class = CuponSerializer
 
     def get_permissions(self):
-        if self.request.method == 'POST':
-            return [IsAdminGroupOrStaff()]
-        return [permissions.IsAuthenticated()]
+        # Solo administración: listar cupones exponía TODOS los códigos a cualquier
+        # cliente registrado (podía cosechar cupones genéricos reutilizables y
+        # aplicarlos sin habérsele emitido). El cliente valida su código puntual
+        # por `apply_coupon`, no necesita enumerar la lista.
+        return [IsAdminGroupOrStaff()]
 
 
 class CuponRetrieveUpdateDestroy(generics.RetrieveUpdateDestroyAPIView):
@@ -375,6 +380,53 @@ def apply_coupon(request):
 # ─────────────────────────────────────────────
 #  AUTENTICACIÓN / PERFIL
 # ─────────────────────────────────────────────
+
+def _set_refresh_cookie(response, refresh_str):
+    """Guarda el REFRESH token en una cookie httpOnly (JS no la lee → a prueba de
+    robo por XSS). `secure` solo en producción (en dev es http://localhost).
+    `SameSite=Lax` + `path` acotado a /api/auth/ = no viaja en el resto de la API
+    ni en peticiones cross-site (anti-CSRF)."""
+    from django.conf import settings
+    max_age = int(settings.SIMPLE_JWT['REFRESH_TOKEN_LIFETIME'].total_seconds())
+    response.set_cookie(
+        settings.REFRESH_COOKIE_NAME, refresh_str,
+        max_age=max_age, httponly=True, secure=not settings.DEBUG,
+        samesite='Lax', path=settings.REFRESH_COOKIE_PATH,
+    )
+    return response
+
+
+def _clear_refresh_cookie(response):
+    from django.conf import settings
+    response.delete_cookie(settings.REFRESH_COOKIE_NAME, path=settings.REFRESH_COOKIE_PATH)
+    return response
+
+
+@api_view(['POST'])
+@permission_classes([permissions.AllowAny])
+def refrescar_token(request):
+    """Renueva el access token usando el refresh de la cookie httpOnly.
+
+    El refresh NUNCA viaja en el body ni es legible por JS. Con rotación activada,
+    cada renovación emite un refresh nuevo (y quema el anterior): se re-guarda en
+    la cookie. Si el refresh no sirve (vencido/en lista negra), se borra la cookie
+    y el front manda a login."""
+    from django.conf import settings
+    from rest_framework_simplejwt.serializers import TokenRefreshSerializer
+    raw = request.COOKIES.get(settings.REFRESH_COOKIE_NAME) or (request.data or {}).get('refresh') or ''
+    if not raw:
+        return Response({'detail': 'Sin sesión que renovar.'}, status=401)
+    ser = TokenRefreshSerializer(data={'refresh': raw})
+    try:
+        ser.is_valid(raise_exception=True)
+    except Exception:
+        return _clear_refresh_cookie(Response({'detail': 'Sesión expirada.'}, status=401))
+    data = ser.validated_data
+    resp = Response({'access': data['access']})
+    if data.get('refresh'):
+        _set_refresh_cookie(resp, data['refresh'])
+    return resp
+
 @api_view(['POST'])
 @permission_classes([permissions.AllowAny])
 @throttle_classes([LoginThrottle])
@@ -411,11 +463,35 @@ def login(request):
     serializer = TokenObtainPairSerializer(data={'username': uname, 'password': password})
     try:
         serializer.is_valid(raise_exception=True)
-        return Response(serializer.validated_data)
+        data = serializer.validated_data
     except Exception:
-        # Intento adicional por authenticate para asegurar coherencia; nunca
-        # revelamos si la cuenta existe / está activa.
+        # Nunca revelamos si la cuenta existe / está activa: mismo mensaje para
+        # contraseña mala, cuenta inexistente y cuenta desactivada.
         return Response({'detail': 'credenciales inválidas'}, status=401)
+
+    # ── Candado de correo real ──
+    # El registro promete "confirma tu correo para entrar", y aquí se cumple: la
+    # cuenta de CLIENTE no entra hasta abrir la liga que le llegó. Va DESPUÉS de
+    # validar la contraseña, así que no sirve para averiguar qué correos existen.
+    # Al equipo NO se le aplica: sus cuentas las da de alta el panel (nadie se
+    # registra a sí mismo), y dejar al dueño fuera de su propio sistema por un
+    # correo sin confirmar sería peor que el problema que esto evita.
+    cuenta = serializer.user
+    if nivel_de(cuenta) <= 0:
+        perfil, _ = PerfilUsuario.objects.get_or_create(usuario=cuenta)
+        if not perfil.email_verificado:
+            # El correo se devuelve a propósito: quien llega aquí ya demostró que
+            # la contraseña es suya, así que no se filtra nada, y el front puede
+            # ofrecer "reenviar" sin pedirle que lo vuelva a teclear.
+            return Response({
+                'detail': 'Confirma tu correo para entrar. Te enviamos una liga cuando creaste la cuenta.',
+                'codigo': 'correo_sin_verificar',
+                'email': cuenta.email,
+            }, status=403)
+
+    # El refresh va en cookie httpOnly (no en el body): que JS no lo toque.
+    resp = Response({'access': data['access']})
+    return _set_refresh_cookie(resp, data['refresh'])
 
 
 @api_view(['GET'])
@@ -522,6 +598,19 @@ def registro(request):
         return Response({'detail': 'La contraseña debe tener al menos 8 caracteres.'}, status=400)
     if User.objects.filter(email__iexact=email).exists():
         return Response({'detail': 'Ya existe una cuenta con ese correo.'}, status=400)
+    # Las MISMAS reglas que cambiar o restablecer la contraseña: si aquí se cuela
+    # una clave débil, la cuenta nace con ella y nada la obliga a cambiarla.
+    from django.contrib.auth.password_validation import validate_password
+    try:
+        # Con un usuario (aún sin guardar) también se checa que la contraseña no
+        # sea el propio correo o nombre, que es lo que la gente teclea de prisa.
+        validate_password(password, user=User(
+            username=username, email=email,
+            first_name=(d.get('first_name') or d.get('nombre') or ''),
+            last_name=(d.get('last_name') or ''),
+        ))
+    except DjangoValidationError as e:
+        return Response({'detail': '; '.join(e.messages) if e.messages else 'Contraseña no válida.'}, status=400)
 
     base = username or 'cliente'
     candidato = base
@@ -534,6 +623,10 @@ def registro(request):
         user = User.objects.create_user(
             username=candidato,
             email=email,
+            # SIN esto la cuenta nacía con contraseña inutilizable: el cliente se
+            # registraba, y su propia clave no servía para entrar (login siempre
+            # "credenciales inválidas") sin más salida que "olvidé mi contraseña".
+            password=password,
             first_name=nombre_propio(d.get('first_name') or d.get('nombre') or ''),
             last_name=nombre_propio(d.get('last_name') or ''),
         )
@@ -546,7 +639,10 @@ def registro(request):
         espejar_obra_predeterminada(user)
 
     _enviar_correo_verificacion(user, token)
-    return Response({'ok': True, 'username': user.username, 'email_token': token}, status=201)
+    # NO devolvemos el email_token: es el token de verificación de correo. Si
+    # viaja en la respuesta, cualquiera podría "verificar" el correo sin tener
+    # acceso al buzón (anula la verificación). Sólo debe llegar por correo.
+    return Response({'ok': True, 'username': user.username}, status=201)
 
 
 @api_view(['POST'])
@@ -618,7 +714,8 @@ def google_login(request):
         return Response({'detail': 'Esta cuenta está desactivada.'}, status=403)
 
     refresh = TokenObtainPairSerializer.get_token(user)
-    return Response({'access': str(refresh.access_token), 'refresh': str(refresh)})
+    resp = Response({'access': str(refresh.access_token)})
+    return _set_refresh_cookie(resp, str(refresh))
 
 
 @api_view(['POST'])
@@ -657,7 +754,8 @@ def logout(request):
         from rest_framework_simplejwt.token_blacklist.models import (
             OutstandingToken, BlacklistedToken,
         )
-        refresh = (request.data or {}).get('refresh') or ''
+        from django.conf import settings
+        refresh = request.COOKIES.get(settings.REFRESH_COOKIE_NAME) or (request.data or {}).get('refresh') or ''
         if refresh:
             try:
                 RefreshToken(refresh).blacklist()
@@ -671,9 +769,13 @@ def logout(request):
                 pass
     except Exception:
         pass
-    return Response({'ok': True})
+    return _clear_refresh_cookie(Response({'ok': True}))
 
 @api_view(['POST'])
+# Sin autenticación: quien viene a restablecer puede traer en el navegador un
+# access token viejo o vencido. Si DRF intenta validarlo, contesta 401 ANTES de
+# llegar aquí y el usuario nunca ve el formulario, aunque la vista sea pública.
+@authentication_classes([])
 @permission_classes([permissions.AllowAny])
 @throttle_classes([RestablecerThrottle])
 def solicitar_restablecer(request):
@@ -701,7 +803,7 @@ def solicitar_restablecer(request):
             cuerpo = (
                 f'Hola {nombre}:\n\n'
                 f'Recibimos una solicitud para restablecer la contraseña de tu cuenta en REMALI.\n'
-                f'Abre este enlace para crear una nueva (vence en unas horas):\n\n{url}\n\n'
+                f'Abre este enlace para crear una nueva (vence en 1 hora):\n\n{url}\n\n'
                 f'Si no fuiste tú, ignora este correo: tu contraseña no cambia.\n\n— REMALI'
             )
             enviar_async('Restablece tu contraseña · REMALI', cuerpo, [user.email])
@@ -710,22 +812,53 @@ def solicitar_restablecer(request):
 
 
 @api_view(['GET'])
+@authentication_classes([])       # ver nota en solicitar_restablecer
 @permission_classes([permissions.AllowAny])
+@throttle_classes([RestablecerUsoThrottle])
 def verificar_token_restablecer(request, uidb64: str, token: str):
     User = get_user_model()
     try:
         uid = force_str(urlsafe_base64_decode(uidb64))
         user = User.objects.get(pk=uid)
     except Exception:
-        return Response({'valido': False, 'nombre': ''}, status=400)
+        # Mismo 200 "no vale" que un token malo: si el uid inexistente diera 400
+        # y el existente 200, la diferencia sirve para averiguar qué cuentas hay.
+        return Response({'valido': False, 'nombre': ''})
     valido = default_token_generator.check_token(user, token)
     nombre = (user.get_full_name() or user.username) if valido else ''
     return Response({'valido': valido, 'nombre': nombre})
 
 
+def _cerrar_sesiones_de(user) -> int:
+    """Invalida TODOS los refresh tokens vivos del usuario (cierra sus sesiones
+    en cualquier dispositivo/pestaña). Los access tokens ya emitidos siguen
+    valiendo hasta caducar (máx. su lifetime); sin refresh no se pueden renovar.
+    Nunca lanza: si el blacklist no está disponible, cambiar la contraseña NO
+    debe romperse por esto."""
+    try:
+        from rest_framework_simplejwt.token_blacklist.models import (
+            OutstandingToken, BlacklistedToken,
+        )
+        cerradas = 0
+        for t in OutstandingToken.objects.filter(user=user):
+            _, creado = BlacklistedToken.objects.get_or_create(token=t)
+            cerradas += int(creado)
+        return cerradas
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception(
+            'No se pudieron cerrar las sesiones tras cambiar la contraseña'
+        )
+        return 0
+
+
 @api_view(['POST'])
+@authentication_classes([])       # ver nota en solicitar_restablecer
 @permission_classes([permissions.AllowAny])
+@throttle_classes([RestablecerUsoThrottle])
 def restablecer_password(request):
+    from django.contrib.auth.password_validation import validate_password
+
     User = get_user_model()
     uidb64 = request.data.get('uid') or ''
     token = request.data.get('token') or ''
@@ -736,22 +869,48 @@ def restablecer_password(request):
         uid = force_str(urlsafe_base64_decode(uidb64))
         user = User.objects.get(pk=uid)
     except Exception:
-        return Response({'detail': 'Token inválido.'}, status=400)
+        return Response({'detail': 'El enlace no es válido o ya venció.'}, status=400)
     if not default_token_generator.check_token(user, token):
-        return Response({'detail': 'Token inválido o vencido.'}, status=400)
+        return Response({'detail': 'El enlace no es válido o ya venció.'}, status=400)
+    # Las MISMAS reglas que cambiar la contraseña desde el panel: sin esto, por
+    # correo se podía dejar una clave ("12345678") que el panel sí rechaza.
+    try:
+        validate_password(password, user=user)
+    except DjangoValidationError as e:
+        return Response({'detail': '; '.join(e.messages) if e.messages else 'Contraseña no válida.'}, status=400)
     user.set_password(password)
     user.save(update_fields=['password'])
+    # Restablecer la contraseña PRUEBA que el buzón es suyo: el enlace solo llegó
+    # ahí. Así que el correo queda confirmado — si no, el candado del login lo
+    # dejaría fuera después de haber hecho todo bien, sin salida visible.
+    perfil, _ = PerfilUsuario.objects.get_or_create(usuario=user)
+    if not perfil.email_verificado:
+        perfil.email_verificado = True
+        perfil.email_verificado_en = timezone.now()
+        perfil.email_token = ''
+        perfil.save(update_fields=['email_verificado', 'email_verificado_en', 'email_token'])
+    # La contraseña cambió: cierra TODAS las sesiones vivas de la cuenta (otros
+    # dispositivos/pestañas) invalidando sus refresh tokens. La sesión del
+    # navegador actual ya la cierra el frontend al terminar el restablecimiento.
+    _cerrar_sesiones_de(user)
     return Response({'ok': True})
 
 
 @api_view(['GET'])
 @permission_classes([permissions.AllowAny])
 def verificar_correo_usuario(request, token: str):
+    token = (token or '').strip()
+    # Un token vacío haría match con TODOS los perfiles sin verificar (default='').
+    if not token:
+        return HttpResponse('Token inválido.', status=404)
     perfil = PerfilUsuario.objects.filter(email_token=token).select_related('usuario').first()
     if not perfil:
         return HttpResponse('Token inválido.', status=404)
     perfil.email_verificado = True
     perfil.email_verificado_en = timezone.now()
+    perfil.email_token = ''  # de un solo uso: se invalida al verificar
+    # BUG previo: no se guardaba, así que el correo nunca quedaba verificado.
+    perfil.save(update_fields=['email_verificado', 'email_verificado_en', 'email_token'])
     return HttpResponse('Correo verificado correctamente.', status=200)
 
 
@@ -855,7 +1014,7 @@ def _sync_alertas_vencimiento():
     activas = Renta.objects.filter(estado='activa').select_related('inventario', 'inventario__equipo')
     for r in activas:
         equipo = r.inventario.equipo.modelo if r.inventario and r.inventario.equipo else 'Equipo'
-        cliente = r.cliente or 'Cliente'
+        cliente = r.cliente_nombre
         dias = (r.fecha_fin - hoy).days
         if dias < 0:
             crear_notificacion(
@@ -885,9 +1044,11 @@ def _tipos_broadcast_por_rol(user):
       - Cajero (nivel 1): venta, inventario, alerta, sistema, facturación.
       - Admin/Dueño (nivel ≥2): TODO.
     """
-    from maquinaria.permissions import nivel_de, NIVEL_ADMIN, NIVEL_GERENTE
+    from maquinaria.permissions import nivel_de, NIVEL_ADMIN
     n = nivel_de(user)
-    if n >= NIVEL_ADMIN or n >= NIVEL_GERENTE:
+    # Gerente ya es NIVEL_ADMIN (ver nivel_de), así que este umbral cubre
+    # Admin, Gerente y Dueño: todos ven todos los broadcasts.
+    if n >= NIVEL_ADMIN:
         return Q(usuario__isnull=True)
     if n <= 0:
         # cliente / sin acceso: sin broadcasts

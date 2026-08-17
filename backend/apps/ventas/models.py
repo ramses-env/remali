@@ -53,6 +53,24 @@ class Venta(models.Model):
     # Nace al crear la venta (save); los registros viejos sin folio caen a #id.
     folio = models.CharField(max_length=20, unique=True, editable=False, blank=True, null=True)
 
+    # ── Cliente ──
+    # `cliente`/`contacto` son la identidad NUEVA (padrón único). Los campos de
+    # abajo —nombre_cliente, telefono_cliente, empresa, cliente_usuario— son la
+    # forma vieja: durante la fase 1 se conservan como espejo de solo lectura
+    # para poder revertir, y desaparecen en la fase 3.
+    cliente = models.ForeignKey(
+        'clientes.Cliente',
+        null=True, blank=True,
+        on_delete=models.SET_NULL,
+        related_name='ventas',
+    )
+    contacto = models.ForeignKey(
+        'clientes.Contacto',
+        null=True, blank=True,
+        on_delete=models.SET_NULL,
+        related_name='ventas',
+    )
+
     nombre_cliente = models.CharField(max_length=255, blank=True, null=True)
     telefono_cliente = models.CharField(max_length=40, blank=True, default='')
     empresa = models.ForeignKey(

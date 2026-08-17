@@ -5,6 +5,7 @@ FK, texto libre, cuenta ligada, o nada. Este comando lee todo eso y construye el
 padrón, de lo más confiable a lo más dudoso:
 
   Empresa                     → Cliente moral            (1:1, sin ambigüedad)
+  Orden de reparación INTERNA → se salta (máquina propia, no tiene cliente)
   Cuenta con rol Cliente      → Cliente físico + Contacto (1:1)
   Documento con empresa FK    → apunta a ese cliente      (sin ambigüedad)
   Documento con cuenta ligada → apunta a ese cliente      (sin ambigüedad)
@@ -36,6 +37,7 @@ from django.db import transaction
 from clientes.models import Cliente, Contacto
 from cotizaciones.models import Cotizacion
 from empresas.models import Empresa, Obra
+from inventario.models import OrdenReparacion
 from maquinaria.models import ObraCliente
 from renta.models import Renta
 from ventas.models import Venta
@@ -297,6 +299,13 @@ class Command(BaseCommand):
         procesar(Cotizacion, Cotizacion.objects.all(), 'usuario',
                  'cliente_nombre', 'cliente_telefono', 'creada', 'cotizaciones')
 
+        # Las órdenes INTERNAS son máquinas propias en el taller: no tienen
+        # cliente y no deben quedar como "huérfanas" —no les falta nada—.
+        internas = OrdenReparacion.objects.filter(tipo='interna')
+        self.cuenta['reparaciones_internas'] = internas.count()
+        procesar(OrdenReparacion, OrdenReparacion.objects.filter(tipo='cliente'), 'usuario',
+                 'cliente_nombre', 'cliente_telefono', 'fecha_recibida', 'reparaciones')
+
         # ── Pasada 2: por teléfono ──
         # De lo más nuevo a lo más viejo: el nombre que gana es el más reciente,
         # que es el que el cliente usa hoy.
@@ -361,6 +370,7 @@ class Command(BaseCommand):
                 resumen['ventas_sueltas'] = Venta.objects.filter(cliente__isnull=False).update(cliente=None, contacto=None)
                 resumen['rentas_sueltas'] = Renta.objects.filter(cliente__isnull=False).update(cliente=None, contacto=None)
                 resumen['cotizaciones_sueltas'] = Cotizacion.objects.filter(cliente__isnull=False).update(cliente=None, contacto=None)
+                resumen['reparaciones_sueltas'] = OrdenReparacion.objects.filter(cliente__isnull=False).update(cliente=None, contacto=None)
                 resumen['contactos_borrados'] = Contacto.objects.count()
                 Contacto.objects.all().delete()
                 resumen['clientes_borrados'] = Cliente.objects.count()
@@ -413,6 +423,11 @@ class Command(BaseCommand):
                 ('Cotizaciones · por empresa', 'cotizaciones_por_empresa'),
                 ('Cotizaciones · por teléfono', 'cotizaciones_por_telefono'),
                 ('Cotizaciones · HUÉRFANAS (sin teléfono)', 'cotizaciones_huerfanas'),
+                ('Reparaciones · por cuenta ligada', 'reparaciones_por_cuenta'),
+                ('Reparaciones · por empresa', 'reparaciones_por_empresa'),
+                ('Reparaciones · por teléfono', 'reparaciones_por_telefono'),
+                ('Reparaciones · HUÉRFANAS (sin teléfono)', 'reparaciones_huerfanas'),
+                ('Reparaciones · internas (máquina propia)', 'reparaciones_internas'),
             ]),
         ]
         for encabezado, filas in bloques:
@@ -429,7 +444,8 @@ class Command(BaseCommand):
                 self.stdout.write(f'    … y {len(self.notas) - 20} más (búscalos con requiere_revision=True)')
             self.stdout.write('')
 
-        huerfanas = c['ventas_huerfanas'] + c['rentas_huerfanas'] + c['cotizaciones_huerfanas']
+        huerfanas = (c['ventas_huerfanas'] + c['rentas_huerfanas']
+                     + c['cotizaciones_huerfanas'] + c['reparaciones_huerfanas'])
         if huerfanas:
             self.stdout.write(
                 f'  {huerfanas} documentos se quedaron sin cliente porque no traen teléfono.\n'

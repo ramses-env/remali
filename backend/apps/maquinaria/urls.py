@@ -1,5 +1,4 @@
 from django.urls import path
-from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
 from . import views, views_usuarios
 
@@ -32,8 +31,18 @@ urlpatterns = [
     path('cupones/aplicar/', views.apply_coupon),
 
     # Autenticación / perfil
-    path('auth/token/', TokenObtainPairView.as_view()),
-    path('auth/refresh/', TokenRefreshView.as_view()),
+    # Login flexible: acepta correo O usuario (resuelve el correo al username),
+    # deja el refresh en cookie httpOnly y aplica el freno de intentos y el
+    # candado de correo confirmado.
+    #
+    # Ya NO se expone el /auth/token/ de SimpleJWT: era una segunda puerta sin
+    # freno de intentos que devolvía el refresh en el body, decía si la cuenta
+    # existe ("No active account found") y se saltaba el candado del correo. Nadie
+    # la usaba (el front entra por aquí); si algún día hace falta para un cliente
+    # externo, que pase por esta misma vista.
+    path('auth/login/', views.login),
+    # Renueva el access leyendo el refresh de la cookie httpOnly (no del body).
+    path('auth/refresh/', views.refrescar_token),
     path('auth/logout/', views.logout),
     path('auth/registro/', views.registro),
     path('auth/google/', views.google_login),

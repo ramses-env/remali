@@ -1,7 +1,7 @@
 # Padrón único de clientes
 
 **Fecha:** 17 de agosto de 2026
-**Estado:** fase 1 implementada · fases 2 y 3 pendientes
+**Estado:** fase 1 completa (incluida 1b) · fases 2 y 3 pendientes
 
 ---
 
@@ -449,8 +449,10 @@ sin vincular son pestañas de esa misma sección.
 | | Qué | Estado |
 |---|---|---|
 | **Fase 1** | App `clientes`, FK en los documentos, comando de migración, `Contacto.cliente` opcional, 27 pruebas | ✅ hecha |
-| **Fase 1b** | `OrdenReparacion` al padrón (se pasó por alto) | pendiente |
+| **Fase 1b** | `OrdenReparacion` al padrón; las órdenes internas se saltan | ✅ hecha |
 | **Fase 2** | Sección Clientes (alta manual, ficha, comprobantes, cuentas sin vincular), `<BuscadorCliente>` en los flujos, estado de cuenta, **garantías**, aviso de cuenta nueva, capacidades nuevas | pendiente |
+
+La fase 1 completa (1 + 1b) suma **31 pruebas propias** y 53 en todo el backend.
 | **Fase 3** | Se borran los campos espejo, `Empresa` muere, la sección Empresas desaparece, `Obra.cliente` pasa a `CASCADE` | pendiente |
 
 La fase 1 es deliberadamente **invisible**: si al abrir el panel algo se ve

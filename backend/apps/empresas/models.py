@@ -91,10 +91,28 @@ class Obra(DomicilioMixin):
         ('finalizada', 'Finalizada'),
     ]
 
+    # Deja de ser obligatorio: las obras que vienen de `ObraCliente` cuelgan de
+    # una persona física, que nunca tuvo Empresa. `cliente` es el dueño real a
+    # partir de ahora; este campo sobrevive la fase 1 solo para poder revertir.
     empresa = models.ForeignKey(
         Empresa,
+        null=True, blank=True,
         on_delete=models.CASCADE,
         related_name='obras'
+    )
+    # Dueño NUEVO de la obra: el padrón de clientes. Durante la fase 1 conviven
+    # los dos —`empresa` sigue siendo la fuente de verdad y `cliente` se llena
+    # con la migración— para que un problema en producción sea reversible.
+    # En la fase 3, cuando `Empresa` muera, este queda como único dueño.
+    # SET_NULL y no CASCADE MIENTRAS DURE LA FASE 1: revertir la migración borra
+    # todos los Clientes, y con CASCADE se llevaría por delante obras reales que
+    # solo estaban prestando su FK. Pasa a CASCADE en la fase 3, cuando el
+    # cliente sea el único dueño y borrarlo sí deba borrar sus obras.
+    cliente = models.ForeignKey(
+        'clientes.Cliente',
+        null=True, blank=True,
+        on_delete=models.SET_NULL,
+        related_name='obras',
     )
     nombre = models.CharField(max_length=180)
     responsable = models.CharField(max_length=180, blank=True, default='')
@@ -114,7 +132,12 @@ class Obra(DomicilioMixin):
         verbose_name = 'Obra'
         verbose_name_plural = 'Obras'
         ordering = ['nombre']
+        # Sigue siendo por empresa mientras dure la fase 1. OJO: en SQL dos NULL
+        # nunca chocan, así que las obras de personas físicas (empresa vacía) no
+        # quedan protegidas por esta restricción — pasa a ('cliente','nombre')
+        # en la fase 3, cuando `empresa` desaparezca.
         unique_together = ('empresa', 'nombre')
 
     def __str__(self):
-        return f'{self.nombre} ({self.empresa.nombre})'
+        dueno = self.empresa.nombre if self.empresa_id else (self.cliente.nombre if self.cliente_id else 's/dueño')
+        return f'{self.nombre} ({dueno})'

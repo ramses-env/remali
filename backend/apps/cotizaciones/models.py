@@ -39,6 +39,23 @@ class Cotizacion(models.Model):
     # sin ensuciar el esquema formal: {'empresa': ..., 'obra': {responsable, direccion, telefono, email}}
     datos_solicitud = models.JSONField(default=dict, blank=True)
 
+    # ── Cliente ──
+    # `cliente`/`contacto` son la identidad NUEVA (padrón único). Los campos
+    # cliente_nombre / cliente_telefono / cliente_email / empresa / usuario son
+    # la forma vieja: espejo de solo lectura en la fase 1, se van en la fase 3.
+    cliente = models.ForeignKey(
+        'clientes.Cliente',
+        null=True, blank=True,
+        on_delete=models.SET_NULL,
+        related_name='cotizaciones',
+    )
+    contacto = models.ForeignKey(
+        'clientes.Contacto',
+        null=True, blank=True,
+        on_delete=models.SET_NULL,
+        related_name='cotizaciones',
+    )
+
     cliente_nombre = models.CharField(max_length=200, blank=True, default='')
     cliente_telefono = models.CharField(max_length=40, blank=True, default='')
     cliente_email = models.EmailField(blank=True, default='', help_text='Correo destino para enviar la cotización')

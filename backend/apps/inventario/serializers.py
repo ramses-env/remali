@@ -53,7 +53,7 @@ class InventarioSerializer(serializers.ModelSerializer):
             return None
         return {
             'id': r.id,
-            'cliente': r.cliente,
+            'cliente': r.cliente_texto,
             'cliente_nombre': r.cliente_nombre,
             'telefono_cliente': r.telefono_cliente,
             'direccion': r.direccion,

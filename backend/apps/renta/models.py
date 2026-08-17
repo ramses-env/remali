@@ -35,7 +35,27 @@ class Renta(models.Model):
         related_name='rentas'
     )
 
-    # ── Cliente: empresa/obra formal, o texto libre para clientes de mostrador ──
+    # ── Cliente ──
+    # `cliente`/`contacto` son la identidad NUEVA (padrón único). `empresa`,
+    # `obra`, `cliente_texto`, `telefono_cliente` y `usuario` son la forma vieja:
+    # espejo de solo lectura durante la fase 1, se van en la fase 3.
+    #
+    # OJO: `cliente` era el CharField que ahora se llama `cliente_texto`. Se
+    # renombró para que el FK se quede con el nombre bueno desde el principio y
+    # la fase 3 solo tenga que BORRAR, no volver a renombrar.
+    cliente = models.ForeignKey(
+        'clientes.Cliente',
+        null=True, blank=True,
+        on_delete=models.SET_NULL,
+        related_name='rentas',
+    )
+    contacto = models.ForeignKey(
+        'clientes.Contacto',
+        null=True, blank=True,
+        on_delete=models.SET_NULL,
+        related_name='rentas',
+    )
+
     empresa = models.ForeignKey(
         'empresas.Empresa',
         null=True, blank=True,
@@ -48,7 +68,7 @@ class Renta(models.Model):
         on_delete=models.SET_NULL,
         related_name='rentas',
     )
-    cliente = models.CharField(
+    cliente_texto = models.CharField(
         max_length=255, blank=True, default='',
         help_text="Nombre del cliente (si no es una empresa registrada)"
     )
@@ -263,9 +283,9 @@ class Renta(models.Model):
     # ─────────────────────────────────────────────
     @transaction.atomic
     def save(self, *args, **kwargs):
-        if self.cliente:
+        if self.cliente_texto:
             from maquinaria.models import nombre_propio
-            self.cliente = nombre_propio(self.cliente)
+            self.cliente_texto = nombre_propio(self.cliente_texto)
         es_nueva = self.pk is None
         if not self.fecha_fin:
             self.fecha_fin = self.calcular_fecha_fin()
@@ -289,9 +309,13 @@ class Renta(models.Model):
 
     @property
     def cliente_nombre(self) -> str:
+        # El padrón manda en cuanto la renta está migrada; si no, se cae a la
+        # forma vieja (empresa formal → texto libre) para no perder el nombre.
+        if self.cliente_id and self.cliente:
+            return self.cliente.nombre
         if self.empresa_id and self.empresa:
             return self.empresa.nombre
-        return self.cliente or 'Cliente'
+        return self.cliente_texto or 'Cliente'
 
     # ─────────────────────────────────────────────
     #  TRANSICIONES DE CICLO DE VIDA

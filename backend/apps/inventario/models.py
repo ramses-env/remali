@@ -97,15 +97,18 @@ class Inventario(models.Model):
     # GENERADOR DE CÓDIGO
     # ============================
 
-    def generar_codigo(self):
+    @staticmethod
+    def proximo_codigo(equipo):
         """
-        Genera un código/etiqueta automático a partir del modelo.
+        Predice el código/etiqueta que se asignará a la próxima unidad de
+        `equipo`, SIN crear nada. Misma lógica que usa `generar_codigo` al
+        guardar, para poder mostrarlo en una confirmación antes del alta.
         Ejemplo: Taladro -> TAL-0001, HM-1810 -> HM1-0001
         """
         import re
 
         # Prefijo: primeros 3 caracteres alfanuméricos del modelo, en mayúsculas
-        limpio = re.sub(r'[^A-Za-z0-9]', '', self.equipo.modelo or '')
+        limpio = re.sub(r'[^A-Za-z0-9]', '', getattr(equipo, 'modelo', '') or '')
         prefijo = (limpio[:3] or 'EQ').upper()
 
         ultimo = Inventario.objects.filter(
@@ -122,6 +125,10 @@ class Inventario(models.Model):
             numero = 1
 
         return f"{prefijo}-{numero:04d}"
+
+    def generar_codigo(self):
+        """Código para ESTA unidad al guardarla (delega en `proximo_codigo`)."""
+        return Inventario.proximo_codigo(self.equipo)
 
     # ============================
     # SAVE OVERRIDE
@@ -254,8 +261,17 @@ class Inventario(models.Model):
         también es válida).
         """
         if self.estado != 'disponible':
+            # Quien lee esto es el técnico parado frente a la máquina, no un
+            # programador: el motivo va en su idioma y con la salida a la mano.
+            motivo = {
+                'rentado': 'ya está rentada en otra renta',
+                'apartado': 'está apartada por una venta con anticipo',
+                'mantenimiento': 'está en el taller',
+                'vendido': 'ya se vendió',
+            }.get(self.estado, f'está en estado {self.estado}')
             raise ValueError(
-                f"La unidad {self.codigo} no está disponible (estado actual: {self.estado})."
+                f'No se puede entregar la unidad {self.codigo}: {motivo}. '
+                f'Avisa a administración para que asigne otra unidad.'
             )
         if not self.puede_rentarse():
             detalle = (
@@ -273,6 +289,37 @@ class Inventario(models.Model):
             self._set_estado('disponible', ubicacion)
 
     # ── Apartado (venta con anticipo) ────────────────────────────────
+    def renta_comprometida(self):
+        """La renta activa o RESERVADA que ya tiene apalabrada esta unidad, si hay.
+
+        Una reserva a futuro no cambia el estado de la unidad —a propósito: que
+        esté apartada para el día 20 no impide rentarla hoy y recogerla el 19—,
+        así que el estado por sí solo no dice si la unidad ya tiene dueño. Para
+        eso hay que preguntarle a las rentas.
+        """
+        from renta.models import Renta
+        return (Renta.objects
+                .filter(inventario=self, estado__in=('activa', 'reservada'))
+                .order_by('fecha_inicio')
+                .first())
+
+    def _exigir_libre_de_renta(self, verbo):
+        """Impide llevarse una unidad que una renta ya tiene apalabrada.
+
+        Sin esto, el admin elegía APi-0001 para una renta del jueves, alguien la
+        vendía el martes, y el técnico se estrellaba al ir a entregarla: la
+        unidad ya no existía para rentar y la renta seguía viva.
+        """
+        r = self.renta_comprometida()
+        if r is None:
+            return
+        cuando = f'{r.fecha_inicio:%d/%m}' + (f' al {r.fecha_fin:%d/%m}' if r.fecha_fin else '')
+        estado = 'rentada' if r.estado == 'activa' else 'reservada'
+        raise ValueError(
+            f'La unidad {self.codigo} no se puede {verbo}: está {estado} '
+            f'en la renta #{r.id} ({cuando}). Cancela esa renta o elige otra unidad.'
+        )
+
     def apartar(self, ubicacion='Apartado (anticipo)'):
         """disponible -> apartado. Reserva la unidad para una venta con anticipo;
         deja de estar disponible para venta/renta hasta que se entregue o cancele."""
@@ -280,6 +327,7 @@ class Inventario(models.Model):
             raise ValueError(
                 f"La unidad {self.codigo} no está disponible (estado actual: {self.estado})."
             )
+        self._exigir_libre_de_renta('apartar')
         self._set_estado('apartado', ubicacion)
 
     def entregar_apartado(self):
@@ -298,9 +346,16 @@ class Inventario(models.Model):
     def salir_mantenimiento(self):
         self._set_estado('disponible', 'Bodega')
 
-    def marcar_vendido(self):
+    def marcar_vendido(self, forzar=False):
+        """disponible/apartado -> vendido.
+
+        `forzar` solo para casos donde la venta de una unidad comprometida sea
+        deliberada (y quede escrito quién lo decidió); por defecto se protege.
+        """
         if self.estado == 'vendido':
             return
+        if not forzar:
+            self._exigir_libre_de_renta('vender')
         self._set_estado('vendido')
 
     def marcar_rentado(self):
@@ -373,7 +428,24 @@ class OrdenReparacion(models.Model):
     folio = models.CharField(max_length=20, unique=True, editable=False, blank=True)
     tipo = models.CharField(max_length=10, choices=TIPOS, default='cliente')
 
-    # Cliente
+    # ── Cliente ──
+    # `cliente`/`contacto` son la identidad NUEVA (padrón único). Los campos de
+    # abajo —cliente_nombre, cliente_telefono, empresa, usuario— son la forma
+    # vieja: espejo de solo lectura durante la fase 1, se van en la fase 3.
+    # Las órdenes `tipo='interna'` (máquina propia) NUNCA llevan cliente.
+    cliente = models.ForeignKey(
+        'clientes.Cliente',
+        null=True, blank=True,
+        on_delete=models.SET_NULL,
+        related_name='reparaciones',
+    )
+    contacto = models.ForeignKey(
+        'clientes.Contacto',
+        null=True, blank=True,
+        on_delete=models.SET_NULL,
+        related_name='reparaciones',
+    )
+
     cliente_nombre = models.CharField(max_length=200, blank=True, default='')
     cliente_telefono = models.CharField(max_length=40, blank=True, default='')
     empresa = models.ForeignKey('empresas.Empresa', null=True, blank=True, on_delete=models.SET_NULL, related_name='ordenes_reparacion')

@@ -72,6 +72,15 @@ class UnidadesPorEquipo(generics.ListCreateAPIView):
         return Response({'creadas': data, 'cantidad': len(creadas)}, status=201)
 
 
+@api_view(['GET'])
+@permission_classes([IsAdminGroupOrStaff])
+def proximo_codigo_unidad(request, equipo_id: int):
+    """Devuelve el código que se asignará a la próxima unidad de este equipo,
+    para mostrarlo en la confirmación ANTES de dar de alta."""
+    equipo = get_object_or_404(Equipo, pk=equipo_id)
+    return Response({'codigo': Inventario.proximo_codigo(equipo)})
+
+
 class UnidadesGlobal(generics.ListAPIView):
     """Todas las unidades del inventario con filtros (vista global del admin)."""
     serializer_class = InventarioSerializer
@@ -738,6 +747,8 @@ ETAPA_LABEL_CLIENTE = {'recibida': 'Recibida', 'proceso': 'En proceso', 'termina
 def seguimiento_orden(request, token):
     """Liga PÚBLICA de seguimiento: el cliente sin cuenta ve el avance de su
     reparación (sin costos ni datos internos)."""
+    token = (token or '').strip()
+    o = OrdenReparacion.objects.filter(token_publico=token).first() if token else None
     if not o:
         return Response({'detalle': 'No encontramos esa reparación.'}, status=404)
     return Response({
@@ -796,6 +807,8 @@ def orden_reparacion_pdf_mia(request, pk):
 def orden_reparacion_pdf_publico(request, token):
     """Descarga del PDF por la liga PÚBLICA (el token secreto que comparte el
     admin con el cliente sin cuenta)."""
+    token = (token or '').strip()
+    orden = _ORDEN_PDF_QS.filter(token_publico=token).first() if token else None
     if not orden:
         return Response({'detalle': 'No encontramos esa reparación.'}, status=404)
     if not _orden_lista_para_cliente(orden):
@@ -842,7 +855,7 @@ def unidad_qr(request, codigo):
         datos['renta'] = {
             'id': r.id,
             'estado': r.estado,
-            'cliente': r.cliente or '',
+            'cliente': r.cliente_texto or '',
             'lugar': (r.obra.ubicacion if r.obra_id and r.obra.ubicacion else r.direccion) or '',
             'fecha_inicio': r.fecha_inicio,
             'fecha_fin': r.fecha_fin,

@@ -88,7 +88,7 @@ def _serialize_renta(r: Renta, ver_dinero: bool = True):
         'fecha_fin': r.fecha_fin,
         'fecha_devolucion_real': r.fecha_devolucion_real,
         # Cliente
-        'cliente': r.cliente,
+        'cliente': r.cliente_texto,
         'cliente_nombre': r.cliente_nombre,
         'telefono_cliente': r.telefono_cliente,
         'empresa': {'id': r.empresa_id, 'nombre': r.empresa.nombre} if r.empresa_id else None,
@@ -205,7 +205,7 @@ def exportar_rentas_csv(request):
         if r.estado != 'cancelada':
             ttot += r.total or 0; tpag += pagado; tsal += saldo
         w.writerow([
-            r.id, r.cliente or (r.usuario.get_full_name() if r.usuario_id else '') or '',
+            r.id, r.cliente_texto or (r.usuario.get_full_name() if r.usuario_id else '') or '',
             r.empresa.nombre if r.empresa_id else '',
             (inv.equipo.modelo if inv and inv.equipo else '') if inv else '',
             inv.codigo if inv else '',
@@ -240,7 +240,7 @@ def exportar_adeudos_csv(request):
         cuenta = (f'{r.usuario.first_name} {r.usuario.last_name}'.strip() or r.usuario.get_username()) if r.usuario_id else ''
         inv = r.inventario
         filas.append([
-            r.cliente or cuenta or (r.empresa.nombre if r.empresa_id else ''),
+            r.cliente_texto or cuenta or (r.empresa.nombre if r.empresa_id else ''),
             cuenta, r.telefono_cliente or '',
             (inv.equipo.modelo if inv and inv.equipo else '') if inv else '',
             inv.codigo if inv else '',
@@ -279,7 +279,7 @@ def _rentas_de_identidad(spec):
     nombre = (spec.get('nombre') or '').strip()
     if nombre:
         return Renta.objects.filter(usuario__isnull=True, empresa__isnull=True,
-                                    cliente__iexact=nombre_propio(nombre))
+                                    cliente_texto__iexact=nombre_propio(nombre))
     return Renta.objects.none()
 
 
@@ -316,8 +316,8 @@ def fusionar_cliente_adeudos(request):
         elif destino.get('empresa_id'):
             r.empresa_id = destino['empresa_id']; r.usuario = None; campos += ['empresa', 'usuario']
         else:
-            r.cliente = nombre_propio(destino['nombre']); r.usuario = None; r.empresa = None
-            campos += ['cliente', 'usuario', 'empresa']
+            r.cliente_texto = nombre_propio(destino['nombre']); r.usuario = None; r.empresa = None
+            campos += ['cliente_texto', 'usuario', 'empresa']
         r.actualizado_en = timezone.now()
         # save() normal para disparar señales (el latido repinta la vista).
         r.save(update_fields=list(set(campos)))
@@ -513,13 +513,16 @@ def vinculo_renta(request, token: str):
         return Response({
             'tipo': 'renta', 'id': r.id, 'total': str(r.total),
             'fecha_inicio': r.fecha_inicio, 'fecha_fin': r.fecha_fin,
-            'concepto': concepto, 'cliente': r.cliente or '',
+            'concepto': concepto, 'cliente': r.cliente_texto or '',
             'ya_ligada': bool(r.usuario_id),
         })
 
     # POST → reclamar
     if r.estado == 'cancelada':
         return Response({'detalle': 'Esta renta está cancelada; no se puede vincular.'}, status=400)
+    # Defensa: si ya está ligada a OTRA cuenta, no reasignar. Igual que cotización/orden.
+    if r.usuario_id and r.usuario_id != request.user.id:
+        return Response({'detalle': 'Esta renta ya está ligada a otra cuenta.'}, status=409)
     r.usuario = request.user
     r.token_vinculo = None            # un solo uso
     r.token_vinculo_expira = None
@@ -611,7 +614,7 @@ def crear_renta(request):
             modalidad=modalidad,
             duracion=max(duracion, 1),
             direccion=direccion,
-            cliente=cliente,
+            cliente_texto=cliente,
             telefono_cliente=telefono_cliente,
             empresa_id=empresa_id,
             obra_id=obra_id,
@@ -821,7 +824,7 @@ def renovar_renta(request, pk: int):
             modalidad=modalidad,
             duracion=duracion,
             direccion=prev.direccion,
-            cliente=prev.cliente,
+            cliente_texto=prev.cliente_texto,
             telefono_cliente=prev.telefono_cliente,
             empresa_id=prev.empresa_id,
             obra_id=prev.obra_id,
@@ -1046,7 +1049,7 @@ def sustituir_unidad_renta(request, pk: int):
         if nueva.condicion == 'nueva' and not nueva.autorizada_para_renta:
             nota_aut = (
                 f'Sustitución por avería en renta #{r.id} '
-                f'(cliente {r.cliente or r.empresa or "n/a"}).'
+                f'(cliente {r.cliente_texto or r.empresa or "n/a"}).'
                 + (f' Motivo: {motivo}' if motivo else '')
             )[:255]
             nueva.autorizar_para_renta(
@@ -1066,7 +1069,7 @@ def sustituir_unidad_renta(request, pk: int):
         equipo = r.inventario.equipo.modelo if r.inventario.equipo else 'Equipo'
         crear_notificacion(
             'sistema', f'Repuesto en renta: {vieja.codigo} → {nueva.codigo}',
-            f'{equipo} de {r.cliente or "cliente"} se cambió por avería. '
+            f'{equipo} de {r.cliente_texto or "cliente"} se cambió por avería. '
             f'{vieja.codigo} entró a mantenimiento; abre una orden de reparación si aplica.',
             seccion='rentas', ref=f'sustitucion-{r.id}-{nueva.pk}', data={'renta_id': r.id},
         )
@@ -1117,9 +1120,13 @@ def comprobante_renta(request, pk: int):
 
 
 @api_view(['GET'])
-@permission_classes([permissions.IsAuthenticated])
+@permission_classes([EsOperador])
 def ticket_renta(request, pk: int):
-    """Comprobante de renta en PDF (descarga/impresión alterna)."""
+    """Comprobante de renta en PDF (descarga/impresión alterna).
+
+    Solo personal (EsOperador), igual que `comprobante_renta` y `ticket_venta`.
+    Antes estaba en `IsAuthenticated`: cualquier cliente registrado podía sacar
+    el comprobante de CUALQUIER renta enumerando el id (IDOR con PII + montos)."""
     try:
         r = _get_renta_full(pk)
     except Renta.DoesNotExist:
@@ -1230,30 +1237,55 @@ def confirmar_entrega(request, pk: int):
     Body: {"entregado": true|false}. Deja constancia de quién y cuándo, y avisa
     a administración por notificación: así se enteran sin llamar a preguntar.
     """
-    try:
-        r = Renta.objects.select_related('inventario', 'inventario__equipo', 'obra').get(pk=pk)
-    except Renta.DoesNotExist:
-        return Response({'detalle': 'Renta no encontrada'}, status=404)
-    if r.estado in ('finalizada', 'cancelada'):
-        return Response({'detalle': f'La renta está {r.get_estado_display().lower()}; ya no se puede marcar la entrega.'}, status=400)
+    # TODO junto o nada. Antes se sellaba la entrega y DESPUÉS se ocupaba la
+    # unidad: si la unidad ya no estaba disponible (la vendieron, se fue al
+    # taller), reventaba con un 500 dejando la renta "entregada" pero sin
+    # activar y sin unidad marcada — y la tarea desaparecía de Mi jornada, así
+    # que el técnico ni siquiera podía reintentar.
+    with transaction.atomic():
+        try:
+            r = (Renta.objects.select_for_update()
+                 .select_related('inventario', 'inventario__equipo', 'obra').get(pk=pk))
+        except Renta.DoesNotExist:
+            return Response({'detalle': 'Renta no encontrada'}, status=404)
+        if r.estado in ('finalizada', 'cancelada'):
+            return Response({'detalle': f'La renta está {r.get_estado_display().lower()}; ya no se puede marcar la entrega.'}, status=400)
 
-    entregado = request.data.get('entregado', True)
-    if not entregado:
-        r.entregada_en, r.entregada_por = None, None
+        entregado = request.data.get('entregado', True)
+        if not entregado:
+            r.entregada_en, r.entregada_por = None, None
+            r.save(update_fields=['entregada_en', 'entregada_por', 'actualizado_en'])
+            return Response({'detalle': 'Se quitó la marca de entrega', 'renta': _serialize_renta(r)})
+
+        if r.entregada_en:
+            return Response({'detalle': 'Ya estaba marcada como entregada', 'renta': _serialize_renta(r)}, status=200)
+
+        # La unidad se bloquea aquí: dos técnicos entregando a la vez no pueden
+        # ocuparla los dos.
+        if r.inventario_id:
+            Inventario.objects.select_for_update().filter(pk=r.inventario_id).exists()
+        try:
+            # Entregada = la renta ya corre: si era RESERVA, pasa a activa y ocupa
+            # la unidad ahí mismo, sin esperar al cron de la fecha de inicio. Las
+            # fechas pactadas no se mueven (el vencimiento sigue siendo el acordado).
+            if r.estado == 'reservada':
+                r.activar()
+            elif r.inventario_id and r.inventario.estado == 'disponible':
+                # Renta ya activa cuya unidad quedó libre en el stock: rezago de
+                # una entrega a medias del bug anterior. Se reconcilia al entregar
+                # en vez de dejar la máquina "en bodega" mientras está en obra.
+                r.inventario.ocupar_por_renta(r.direccion or 'Cliente (en renta)')
+        except ValueError as e:
+            # El técnico ve el motivo real ("está vendida", "está en taller") en
+            # vez de un "algo falló de nuestro lado", y nada quedó a medias.
+            return Response({'detalle': str(e)}, status=400)
+
+        r.entregada_en = timezone.now()
+        r.entregada_por = request.user if request.user.is_authenticated else None
         r.save(update_fields=['entregada_en', 'entregada_por', 'actualizado_en'])
-        return Response({'detalle': 'Se quitó la marca de entrega', 'renta': _serialize_renta(r)})
 
-    if r.entregada_en:
-        return Response({'detalle': 'Ya estaba marcada como entregada', 'renta': _serialize_renta(r)}, status=200)
-
-    r.entregada_en = timezone.now()
-    r.entregada_por = request.user if request.user.is_authenticated else None
-    r.save(update_fields=['entregada_en', 'entregada_por', 'actualizado_en'])
-    # Entregada = la renta ya corre: si era RESERVA, pasa a activa y ocupa la
-    # unidad ahí mismo, sin esperar al cron de la fecha de inicio. Las fechas
-    # pactadas no se mueven (el vencimiento sigue siendo el acordado).
-    if r.estado == 'reservada':
-        r.activar()
+    # Los avisos van FUERA de la transacción: que falle una notificación no
+    # puede deshacer una entrega que ya ocurrió en el mundo real.
     _avisar_movimiento(r, 'entregó', request.user)
     # Aviso PERSONAL al cliente ligado a la renta.
     if r.usuario_id:

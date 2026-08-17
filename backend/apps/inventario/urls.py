@@ -4,6 +4,7 @@ from . import views
 urlpatterns = [
     path('unidades/', views.UnidadesGlobal.as_view()),
     path('equipos/<int:equipo_id>/unidades/', views.UnidadesPorEquipo.as_view()),
+    path('equipos/<int:equipo_id>/unidades/proximo-codigo/', views.proximo_codigo_unidad),
     path('equipos/<int:equipo_id>/inventario-resumen/', views.resumen_inventario),
     path('unidades/qr/<str:codigo>/', views.unidad_qr),
     path('unidades/<int:pk>/', views.UnidadDetail.as_view()),

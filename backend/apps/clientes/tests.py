@@ -16,7 +16,7 @@ from django.utils import timezone
 from clientes.models import Cliente, Contacto
 from cotizaciones.models import Cotizacion
 from empresas.models import Empresa, Obra
-from inventario.models import Inventario
+from inventario.models import Inventario, OrdenReparacion
 from maquinaria.models import Equipo, ObraCliente, PerfilUsuario
 from renta.models import Renta
 from ventas.models import Venta
@@ -290,6 +290,65 @@ class MigracionMostradorTest(TestCase):
 
         c.refresh_from_db()
         self.assertEqual(c.cliente.nombre, 'Ana Torres')
+
+
+class MigracionReparacionesTest(TestCase):
+    """La orden de reparación es el quinto documento: se pasó por alto en la
+    primera vuelta y es justo donde llega quien va a reclamar una garantía."""
+
+    def test_la_orden_de_un_cliente_entra_al_padron(self):
+        o = OrdenReparacion.objects.create(
+            tipo='cliente', cliente_nombre='Ana Torres', cliente_telefono='4774441111',
+            equipo_descripcion='Revolvedora Marca X',
+        )
+
+        _migrar('--aplicar')
+
+        o.refresh_from_db()
+        self.assertEqual(o.cliente.nombre, 'Ana Torres')
+        self.assertEqual(o.cliente_nombre, 'Ana Torres')   # el texto sigue ahí
+
+    def test_la_orden_interna_no_es_huerfana_ni_inventa_cliente(self):
+        """Una máquina propia en el taller no tiene cliente y no le falta uno."""
+        equipo = Equipo.objects.create(modelo='EXC-200')
+        inv = Inventario.objects.create(equipo=equipo, condicion='seminueva', estado='disponible')
+        o = OrdenReparacion.objects.create(tipo='interna', unidad=inv)
+
+        salida = _migrar('--aplicar')
+
+        o.refresh_from_db()
+        self.assertIsNone(o.cliente)
+        self.assertEqual(Cliente.objects.count(), 0)
+        self.assertIn('internas (máquina propia)', salida)
+
+    def test_la_reparacion_comparte_cliente_con_la_venta_del_mismo_telefono(self):
+        """El escenario real: compró aquí y viene a reclamar. Debe ser el MISMO
+        cliente, o el mostrador no puede ver su historial completo."""
+        Venta.objects.create(nombre_cliente='Jesús Ramírez', telefono_cliente='7441234567',
+                             precio_maquina=Decimal('180000'))
+        o = OrdenReparacion.objects.create(
+            tipo='cliente', cliente_nombre='Jesus Ramirez', cliente_telefono='744 123 4567',
+        )
+
+        _migrar('--aplicar')
+
+        o.refresh_from_db()
+        self.assertEqual(Cliente.objects.count(), 1)
+        self.assertEqual(o.cliente, Venta.objects.get().cliente)
+
+    def test_revertir_tambien_suelta_las_reparaciones(self):
+        o = OrdenReparacion.objects.create(
+            tipo='cliente', cliente_nombre='Ana Torres', cliente_telefono='4774441111',
+        )
+        _migrar('--aplicar')
+        o.refresh_from_db()
+        self.assertIsNotNone(o.cliente)
+
+        _migrar('--revertir', '--aplicar')
+
+        o.refresh_from_db()
+        self.assertIsNone(o.cliente)
+        self.assertEqual(o.cliente_nombre, 'Ana Torres')
 
 
 class MigracionRentaTest(TestCase):
