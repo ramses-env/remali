@@ -22,6 +22,11 @@ class Command(BaseCommand):
         parser.add_argument('--confirm', action='store_true',
                             help='Requerido para borrar de verdad. Sin esto solo muestra el plan.')
         parser.add_argument(
+            '--solo-superusuario',
+            action='store_true',
+            help='Además borra las cuentas que NO son superusuario (para arrancar de cero).',
+        )
+        parser.add_argument(
             '--conservar-clasificacion',
             action='store_true',
             help='Conserva categorías, marcas y tipos además de usuarios y configuración.',
@@ -38,6 +43,7 @@ class Command(BaseCommand):
         )
         from refacciones.models import Refaccion
         from empresas.models import Empresa, Obra
+        from clientes.models import Cliente, Contacto
         from maquinaria.models import Equipo, Categoria, Marca, Tipo, ImagenProducto, Notificacion, ObraCliente
 
         # ══════════════════════════════════════════════════════════════════
@@ -67,6 +73,8 @@ class Command(BaseCommand):
             ('Obras guardadas del cliente', ObraCliente),
             ('Obras de empresa', Obra),
             ('Empresas', Empresa),
+            ('Contactos del padrón', Contacto),
+            ('Clientes (padrón)', Cliente),
             ('Unidades de inventario', Inventario),
             ('Refacciones', Refaccion),
             ('Imágenes de producto', ImagenProducto),
@@ -74,6 +82,9 @@ class Command(BaseCommand):
             ('Equipos (catálogo)', Equipo),
         ]
         conservados = ['usuarios', 'roles', 'perfiles', 'configuración del sitio']
+        if opts['solo_superusuario']:
+            from django.contrib.auth.models import User
+            conservados[0] = f'SOLO superusuarios ({User.objects.filter(is_superuser=True).count()})'
 
         if opts['conservar_clasificacion']:
             conservados.extend(['categorías', 'marcas', 'tipos'])
@@ -101,6 +112,14 @@ class Command(BaseCommand):
             for etiqueta, modelo in plan:
                 borrados, _ = modelo.objects.all().delete()
                 self.stdout.write(f'  ✓ {etiqueta}: {borrados} eliminados')
+            if opts['solo_superusuario']:
+                # Al final: si se borraran antes, los documentos que apuntan a
+                # esas cuentas cambiarían de estado mientras se recorre el plan.
+                from django.contrib.auth.models import User
+                fuera = User.objects.filter(is_superuser=False)
+                n = fuera.count()
+                fuera.delete()
+                self.stdout.write(f'  ✓ Cuentas que no son superusuario: {n} eliminadas')
 
         resumen = 'solo usuarios + config'
         if opts['conservar_clasificacion']:
