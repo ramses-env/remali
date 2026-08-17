@@ -333,7 +333,7 @@ sin vincular son pestañas de esa misma sección.
 
 | | Qué | Estado |
 |---|---|---|
-| **Fase 1** | App `clientes`, FK en los documentos, comando de migración, 24 pruebas | ✅ hecha · falta `Contacto.cliente` opcional |
+| **Fase 1** | App `clientes`, FK en los documentos, comando de migración, `Contacto.cliente` opcional, 27 pruebas | ✅ hecha |
 | **Fase 2** | Sección Clientes (alta manual, ficha, comprobantes, cuentas sin vincular), `<BuscadorCliente>` en los 4 flujos, estado de cuenta, aviso de cuenta nueva, capacidades nuevas | pendiente |
 | **Fase 3** | Se borran los campos espejo, `Empresa` muere, la sección Empresas desaparece, `Obra.cliente` pasa a `CASCADE` | pendiente |
 
