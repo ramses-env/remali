@@ -24,6 +24,8 @@ REGISTRO = {
     'inventario.OrdenReparacion': ('reparaciones',),
     'inventario.OrdenReparacionItem': ('reparaciones',),
     'refacciones.Refaccion': ('refacciones',),
+    'clientes.Cliente': ('clientes',),
+    'clientes.Contacto': ('clientes',),
     'empresas.Empresa': ('empresas',),
     'empresas.Obra': ('empresas',),
     'cotizaciones.Cotizacion': ('cotizaciones', 'metricas'),

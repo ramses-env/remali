@@ -22,7 +22,7 @@ import { useEffect } from 'react'
 export type Tema =
   | 'equipos' | 'unidades' | 'catalogos' | 'cupones' | 'rentas' | 'ventas'
   | 'cotizaciones' | 'refacciones' | 'reparaciones' | 'facturacion'
-  | 'empresas' | 'notificaciones' | 'metricas' | 'config' | 'usuarios'
+  | 'empresas' | 'clientes' | 'notificaciones' | 'metricas' | 'config' | 'usuarios'
 
 /** Primer segmento de la ruta → tema. Lo que no aparezca aquí se ignora. */
 const RUTA_A_TEMA: Record<string, Tema> = {
@@ -30,6 +30,7 @@ const RUTA_A_TEMA: Record<string, Tema> = {
   unidades: 'unidades',
   categorias: 'catalogos', tipos: 'catalogos', marcas: 'catalogos',
   cupones: 'cupones',
+  clientes: 'clientes',
   rentas: 'rentas',
   ventas: 'ventas',
   cotizaciones: 'cotizaciones',
@@ -60,6 +61,7 @@ const ARRASTRA: Record<Tema, Tema[]> = {
   refacciones: ['refacciones', 'metricas'],
   facturacion: ['facturacion', 'metricas'],
   empresas: ['empresas'],
+  clientes: ['clientes'],
   notificaciones: ['notificaciones'],
   metricas: ['metricas'],
   config: ['config'],

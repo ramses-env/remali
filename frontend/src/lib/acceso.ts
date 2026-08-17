@@ -25,6 +25,11 @@ export type Capacidades = {
   usar_caja: boolean
   /** Cerrar el turno de caja (arqueo). */
   corte_caja: boolean
+  /** Buscar en el padrón y abrir la ficha de un cliente. Nivel 1: el
+   *  mostrador es quien más lo necesita. */
+  ver_clientes: boolean
+  /** Dar de alta clientes y contactos. Los fiscales siguen siendo de admin. */
+  editar_clientes: boolean
   /** "Mi jornada": el escritorio del técnico de campo (no cascadea a admin). */
   jornada_campo: boolean
 }

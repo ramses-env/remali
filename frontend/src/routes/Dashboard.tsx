@@ -13,6 +13,7 @@ import OrdenCartaModal from '../components/OrdenCartaModal'
 import CotizacionCartaModal from '../components/CotizacionCartaModal'
 import FichaTecnicaModal from '../components/FichaTecnicaModal'
 import AddressAutocomplete from '../components/AddressAutocomplete'
+import ClientesAdmin from '../components/ClientesAdmin'
 import Dock, { type DockItem } from '../components/ui/dock'
 import { formatAddress, addressToFields, type AddressResult } from '../lib/geocoding'
 import { REGIMEN_FISCAL, USO_CFDI, RFC_PUBLICO_GENERAL } from '../lib/sat'
@@ -218,7 +219,7 @@ function BotonExportar({ onClick }: { onClick: () => void }) {
   )
 }
 
-type Section = 'resumen' | 'equipos' | 'inventario' | 'refacciones' | 'reparaciones' | 'cotizaciones' | 'catalogos' | 'empresas' | 'rentas' | 'ventas' | 'pedidos' | 'facturacion' | 'adeudos' | 'cupones' | 'notificaciones' | 'perfil' | 'ubicaciones' | 'usuarios' | 'configuracion'
+type Section = 'resumen' | 'equipos' | 'inventario' | 'refacciones' | 'reparaciones' | 'cotizaciones' | 'catalogos' | 'clientes' | 'empresas' | 'rentas' | 'ventas' | 'pedidos' | 'facturacion' | 'adeudos' | 'cupones' | 'notificaciones' | 'perfil' | 'ubicaciones' | 'usuarios' | 'configuracion'
 
 const SECTION_META: Record<Section, { title: string; subtitle: string }> = {
   resumen: { title: 'Resumen', subtitle: 'Monitorea tus métricas y gestiona tu operación.' },
@@ -235,6 +236,7 @@ const SECTION_META: Record<Section, { title: string; subtitle: string }> = {
   adeudos: { title: 'Adeudos', subtitle: 'Rentas con saldo pendiente: quién debe, cuánto y desde cuándo. Registra abonos hasta liquidar.' },
   cupones: { title: 'Cupones', subtitle: 'Crea y administra códigos de descuento.' },
   notificaciones: { title: 'Notificaciones', subtitle: 'Eventos operativos y pendientes por resolver.' },
+  clientes: { title: 'Clientes', subtitle: 'El padrón: a quién le vendes y le rentas, tenga cuenta o no.' },
   empresas: { title: 'Empresas', subtitle: 'Clientes registrados y sus obras.' },
   perfil: { title: 'Perfil', subtitle: 'Tu información de cuenta.' },
   ubicaciones: { title: 'Mi jornada', subtitle: 'Dónde está cada máquina y qué espera en el taller.' },
@@ -418,6 +420,7 @@ export default function Dashboard() {
   const [notifs, setNotifs] = useState<Notif[]>([])
   const [noLeidas, setNoLeidas] = useState(0)
   const [empresas, setEmpresas] = useState<Empresa[]>([])
+  const [clientesTotal, setClientesTotal] = useState(0)
   const [toasts, setToasts] = useState<{ id: number; msg: string; type: 'ok' | 'err' | 'info' | 'warning' | 'primary' }[]>([])
 
   const notifBtnRef = useRef<HTMLButtonElement | null>(null)
@@ -521,6 +524,13 @@ export default function Dashboard() {
   const loadVentas = useCallback(() => {
     api.get<{ ventas: Venta[] }>('/ventas/lista/').then(r => { setVentas(r.data?.ventas || []); marcarCarga('ventas', true) }).catch(err => { const st = err?.response?.status; if (st !== 401 && st !== 403) marcarCarga('ventas', false) })
   }, [marcarCarga])
+  // Solo el CONTADOR para el badge del menú: la lista la trae ClientesAdmin
+  // paginada. Pedir el padrón entero aquí sería justo lo que no debe hacerse.
+  const loadClientesTotal = useCallback(() => {
+    api.get<{ total: number }>('/clientes/?limite=1')
+      .then(r => setClientesTotal(r.data?.total || 0)).catch(() => {})
+  }, [])
+
   const loadEmpresas = useCallback(() => {
     api.get<Empresa[]>('/empresas/').then(r => setEmpresas(r.data || [])).catch(() => {})
   }, [])
@@ -587,6 +597,7 @@ export default function Dashboard() {
   useRecurso(['ventas'], loadVentas)
   useRecurso(['ventas'], loadPedidos)   // los apartados son ventas: abonos/entregas los refrescan
   useRecurso(['empresas'], loadEmpresas)
+  useRecurso(['clientes'], loadClientesTotal)
 
   useEffect(() => {
     if (!pendingEquipoId) return
@@ -619,6 +630,9 @@ export default function Dashboard() {
     cotizaciones: 'cotizar',
     facturacion: 'facturar',
     adeudos: 'ver_dinero',   // cobranza: dinero, no operación de campo
+    // El mostrador es quien MÁS necesita el padrón, así que va con una
+    // capacidad de nivel 1. Empresas (abajo) sigue siendo de administración.
+    clientes: 'ver_clientes',
     empresas: 'ver_dinero',
     cupones: 'editar_catalogo',
     catalogos: 'editar_catalogo',
@@ -674,6 +688,7 @@ export default function Dashboard() {
     {
       title: 'navgroup.clientes',
       items: [
+        { key: 'clientes', label: 'Clientes', badge: clientesTotal, icon: <><circle cx="12" cy="8" r="3.5" /><path d="M5 20.5a7 7 0 0 1 14 0" /><path d="M17.5 4.5h4M19.5 2.5v4" /></> },
         { key: 'empresas', label: 'Empresas', badge: empresas.length, icon: <><path d="M4.5 21.5h15" /><path d="M5.5 21.5V5.5a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v16" /><path d="M13.5 9.5h4a1 1 0 0 1 1 1v11" /><path d="M8.5 8h2M8.5 11.5h2M8.5 15h2" /></> },
       ],
     },
@@ -1124,6 +1139,9 @@ export default function Dashboard() {
           )}
           {section === 'cupones' && (
             <CuponesAdmin coupons={coupons} reload={loadCoupons} notify={notify} />
+          )}
+          {section === 'clientes' && (
+            <ClientesAdmin puede={puede} notify={notify} reloadBadge={loadClientesTotal} />
           )}
           {section === 'empresas' && (
             <EmpresasAdmin empresas={empresas} reload={loadEmpresas} notify={notify} />

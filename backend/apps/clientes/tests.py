@@ -28,6 +28,161 @@ def _migrar(*extra):
     return salida.getvalue()
 
 
+class ApiPadronTest(TestCase):
+    """La API que usa la sección Clientes del panel."""
+
+    def setUp(self):
+        from rest_framework.test import APIClient
+        # Cajero: nivel 1. Es la prueba que importa — el mostrador DEBE poder
+        # ver el padrón, a diferencia de Empresas, que hoy no puede.
+        self.cajero = User.objects.create_user(username='cajero1', password='pass12345')
+        self.cajero.groups.add(Group.objects.get_or_create(name='Cajero')[0])
+        self.admin = User.objects.create_user(username='admin1', password='pass12345', is_staff=True)
+        self.api = APIClient()
+        self.api.force_authenticate(user=self.cajero)
+
+    def test_el_cajero_ve_el_padron(self):
+        Cliente.objects.create(tipo=Cliente.MORAL, nombre='Constructora del Bajío')
+
+        r = self.api.get('/api/clientes/')
+
+        self.assertEqual(r.status_code, 200, r.data)
+        self.assertEqual(r.data['total'], 1)
+        self.assertEqual(r.data['clientes'][0]['nombre'], 'Constructora del Bajío')
+
+    def test_un_cliente_sin_acceso_no_ve_nada(self):
+        from rest_framework.test import APIClient
+        fuera = APIClient()
+        fuera.force_authenticate(user=User.objects.create_user(username='juanp', password='pass12345'))
+
+        self.assertEqual(fuera.get('/api/clientes/').status_code, 403)
+
+    def test_alta_crea_su_contacto_principal(self):
+        r = self.api.post('/api/clientes/', {
+            'tipo': 'fisica', 'nombre': 'juan PEREZ', 'telefono': '(477) 123-45-67',
+        }, format='json')
+
+        self.assertEqual(r.status_code, 201, r.data)
+        self.assertEqual(r.data['nombre'], 'Juan Perez')
+        self.assertEqual(r.data['telefono'], '4771234567')
+        # Toda ficha nace con contacto principal, así el resto del sistema
+        # nunca pregunta si es física o moral.
+        self.assertEqual(len(r.data['contactos']), 1)
+        self.assertTrue(r.data['contactos'][0]['principal'])
+
+    def test_alta_sin_nombre_se_rechaza(self):
+        r = self.api.post('/api/clientes/', {'nombre': '   '}, format='json')
+        self.assertEqual(r.status_code, 400)
+        self.assertEqual(Cliente.objects.count(), 0)
+
+    def test_alta_con_telefono_repetido_se_crea_y_se_marca(self):
+        """No se une por teléfono sin confirmación: se crea y se hace visible."""
+        Cliente.objects.create(tipo=Cliente.FISICA, nombre='Juan Pérez', telefono='4771234567')
+
+        r = self.api.post('/api/clientes/', {'nombre': 'Otro Juan', 'telefono': '4771234567'},
+                          format='json')
+
+        self.assertEqual(r.status_code, 201)
+        self.assertEqual(Cliente.objects.count(), 2)      # NO se fundieron
+        self.assertTrue(r.data['requiere_revision'])
+        self.assertIn('Juan Pérez', r.data['revision_motivo'])
+
+    def test_el_nivel_1_no_puede_capturar_ni_editar_fiscales(self):
+        # Al dar de alta se ignoran…
+        r = self.api.post('/api/clientes/', {'nombre': 'Ana Torres', 'rfc': 'TOAA800101AA1'},
+                          format='json')
+        self.assertEqual(r.status_code, 201)
+        self.assertEqual(r.data['rfc'], '')
+
+        # …y al editar se rechaza con un motivo, no en silencio.
+        r2 = self.api.patch(f'/api/clientes/{r.data["id"]}/', {'rfc': 'TOAA800101AA1'}, format='json')
+        self.assertEqual(r2.status_code, 403)
+        self.assertIn('factura', r2.data['detalle'])
+
+    def test_administracion_si_captura_fiscales(self):
+        self.api.force_authenticate(user=self.admin)
+
+        r = self.api.post('/api/clientes/', {
+            'tipo': 'moral', 'nombre': 'Constructora del Bajío', 'rfc': 'cbj010101aa1',
+        }, format='json')
+
+        self.assertEqual(r.status_code, 201, r.data)
+        self.assertEqual(r.data['rfc'], 'CBJ010101AA1')
+
+    def test_busqueda_por_telefono_aunque_venga_con_guiones(self):
+        Cliente.objects.create(tipo=Cliente.FISICA, nombre='Ana Torres', telefono='4774441111')
+
+        r = self.api.get('/api/clientes/?q=477 444')
+
+        self.assertEqual(r.data['total'], 1)
+        self.assertEqual(r.data['clientes'][0]['nombre'], 'Ana Torres')
+
+    def test_busqueda_encuentra_por_el_nombre_de_un_contacto(self):
+        c = Cliente.objects.create(tipo=Cliente.MORAL, nombre='Constructora del Bajío')
+        Contacto.objects.create(cliente=c, nombre='Laura Méndez')
+
+        r = self.api.get('/api/clientes/?q=laura')
+
+        self.assertEqual(r.data['total'], 1)
+        self.assertEqual(r.data['clientes'][0]['nombre'], 'Constructora del Bajío')
+
+    def test_la_lista_pagina_y_no_se_deja_pedir_todo(self):
+        for i in range(30):
+            Cliente.objects.create(tipo=Cliente.FISICA, nombre=f'Cliente {i:02d}')
+
+        r = self.api.get('/api/clientes/?limite=9999')
+
+        self.assertEqual(r.data['total'], 30)
+        self.assertEqual(r.data['limite'], 100)          # techo duro
+        self.assertEqual(len(r.data['clientes']), 30)
+
+    def test_filtro_de_revision_y_su_contador(self):
+        Cliente.objects.create(tipo=Cliente.FISICA, nombre='Limpio')
+        Cliente.objects.create(tipo=Cliente.FISICA, nombre='Dudoso',
+                               requiere_revision=True, revision_motivo='teléfono repetido')
+
+        r = self.api.get('/api/clientes/?revision=1')
+
+        self.assertEqual(r.data['total'], 1)
+        self.assertEqual(r.data['en_revision'], 1)
+        self.assertEqual(r.data['clientes'][0]['nombre'], 'Dudoso')
+
+    def test_la_ficha_dice_que_contacto_tiene_cuenta(self):
+        c = Cliente.objects.create(tipo=Cliente.MORAL, nombre='Constructora del Bajío')
+        u = User.objects.create_user(username='laura', password='pass12345', email='laura@bajio.mx')
+        Contacto.objects.create(cliente=c, nombre='Laura', usuario=u)
+        Contacto.objects.create(cliente=c, nombre='Chuy')
+
+        r = self.api.get(f'/api/clientes/{c.pk}/')
+
+        por_nombre = {x['nombre']: x for x in r.data['contactos']}
+        self.assertTrue(por_nombre['Laura']['tiene_cuenta'])
+        self.assertEqual(por_nombre['Laura']['cuenta_correo'], 'laura@bajio.mx')
+        self.assertFalse(por_nombre['Chuy']['tiene_cuenta'])
+        self.assertTrue(r.data['tiene_cuenta'])
+
+    def test_no_se_borra_un_contacto_con_cuenta(self):
+        c = Cliente.objects.create(tipo=Cliente.MORAL, nombre='Constructora del Bajío')
+        u = User.objects.create_user(username='laura', password='pass12345')
+        ct = Contacto.objects.create(cliente=c, nombre='Laura', usuario=u)
+
+        r = self.api.delete(f'/api/clientes/contactos/{ct.pk}/')
+
+        self.assertEqual(r.status_code, 400)
+        self.assertIn('Desvincúlala', r.data['detalle'])
+        self.assertTrue(Contacto.objects.filter(pk=ct.pk).exists())
+
+    def test_un_campo_no_editable_no_se_cuela_en_el_patch(self):
+        c = Cliente.objects.create(tipo=Cliente.FISICA, nombre='Ana')
+
+        self.api.patch(f'/api/clientes/{c.pk}/',
+                       {'nombre': 'Ana Torres', 'requiere_revision': True}, format='json')
+
+        c.refresh_from_db()
+        self.assertEqual(c.nombre, 'Ana Torres')
+        self.assertFalse(c.requiere_revision)   # lista blanca: no entró
+
+
 class ModeloClienteTest(TestCase):
     def test_persona_fisica_normaliza_el_nombre_la_moral_no(self):
         persona = Cliente.objects.create(tipo=Cliente.FISICA, nombre='juan PEREZ de la cruz')
@@ -174,7 +329,7 @@ class MigracionCuentasTest(TestCase):
     def test_el_equipo_interno_no_entra_al_padron(self):
         User.objects.create_user(username='admin1', password='pass12345', is_staff=True)
         tecnico = User.objects.create_user(username='tec1', password='pass12345')
-        tecnico.groups.add(Group.objects.create(name='Técnico'))
+        tecnico.groups.add(Group.objects.get_or_create(name='Técnico')[0])
 
         _migrar('--aplicar')
 
