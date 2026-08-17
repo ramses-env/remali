@@ -33,6 +33,9 @@ export default function UnidadQR() {
   const [cargando, setCargando] = useState(true)
   const [error, setError] = useState('')
   const [marcando, setMarcando] = useState(false)
+  // Fallo al marcar la entrega. Va aparte de `error` (que pinta la pantalla de
+  // "unidad no encontrada"): aquí la unidad sí existe, lo que falló es la acción.
+  const [avisoEntrega, setAvisoEntrega] = useState('')
 
   const cargar = () => api.get<Info>(`/unidades/qr/${codigo}/`, { fondo: true } as never)
     .then(r => setInfo(r.data))
@@ -43,10 +46,16 @@ export default function UnidadQR() {
   const marcarEntregada = async () => {
     if (!info?.renta) return
     setMarcando(true)
+    setAvisoEntrega('')
     try {
       await api.post(`/rentas/${info.renta.id}/entregar/`, { entregado: true })
       await cargar()
-    } catch { /* el interceptor avisa */ } finally { setMarcando(false) }
+    } catch (e: any) {
+      // El interceptor global solo avisa de red caída y 5xx. Un 400 ("la unidad
+      // está vendida", "está en taller") se quedaba mudo: el técnico picaba el
+      // botón y no pasaba nada visible. El motivo se muestra aquí.
+      setAvisoEntrega(e?.response?.data?.detalle || 'No se pudo marcar la entrega. Inténtalo de nuevo.')
+    } finally { setMarcando(false) }
   }
 
   const wa = (cfg.whatsapp_principal || '').replace(/\D/g, '')
@@ -113,6 +122,11 @@ export default function UnidadQR() {
                 {info.renta.adeudo && (
                   <p className="flex items-center gap-2 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/30 text-[13px] font-bold text-red-600 dark:text-red-400">
                     Adeudo: cobrar ${Number(info.renta.adeudo).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                  </p>
+                )}
+                {avisoEntrega && (
+                  <p className="px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/30 text-[13px] text-red-600 dark:text-red-400">
+                    {avisoEntrega}
                   </p>
                 )}
                 {!info.renta.entregada && (
