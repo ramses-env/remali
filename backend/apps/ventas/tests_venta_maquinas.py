@@ -106,3 +106,56 @@ class VentaDeVariasMaquinasTest(TestCase):
         ItemVenta.objects.create(venta=venta, refaccion=ref, cantidad=2, precio_unitario=Decimal('600'))
         venta.refresh_from_db()
         self.assertEqual(venta.total, Decimal('149200'))
+
+
+class EntregaParcialTest(TestCase):
+    """Llegaron 2 de 3: se entregan las que están, la venta espera por la otra."""
+
+    def setUp(self):
+        from ventas.models import VentaMaquina
+        self.equipo = _equipo()
+        self.u1 = Inventario.objects.create(equipo=self.equipo, condicion='nueva')
+        self.u2 = Inventario.objects.create(equipo=self.equipo, condicion='nueva')
+        self.u3 = Inventario.objects.create(equipo=self.equipo, condicion='nueva')
+        self.venta = Venta.objects.create(nombre_cliente='Constructora X', estado='apartada')
+        for u in (self.u1, self.u2, self.u3):
+            VentaMaquina.objects.create(venta=self.venta, inventario=u, precio=Decimal('50000'))
+        self.venta.refresh_from_db()
+
+    def _liquidar(self):
+        self.venta.pagos = [{'monto': '150000', 'metodo': 'efectivo'}]
+        self.venta.save()
+
+    def test_no_sale_ninguna_maquina_sin_liquidar(self):
+        with self.assertRaises(ValueError) as e:
+            self.venta.entregar()
+        self.assertIn('saldo', str(e.exception).lower())
+        self.u1.refresh_from_db()
+        self.assertEqual(self.u1.estado, 'apartado')
+
+    def test_entrega_de_dos_deja_la_venta_esperando_la_tercera(self):
+        self._liquidar()
+        self.venta.entregar(unidades=[self.u1, self.u2])
+        self.venta.refresh_from_db()
+        self.assertEqual(self.venta.estado, 'apartada', 'la venta se cerró con una máquina pendiente')
+        self.u1.refresh_from_db(); self.u2.refresh_from_db(); self.u3.refresh_from_db()
+        self.assertEqual((self.u1.estado, self.u2.estado), ('vendido', 'vendido'))
+        self.assertEqual(self.u3.estado, 'apartado', 'la que no ha llegado no debe salir del apartado')
+
+    def test_al_entregar_la_ultima_la_venta_se_cierra(self):
+        self._liquidar()
+        self.venta.entregar(unidades=[self.u1, self.u2])
+        self.venta.entregar(unidades=[self.u3])
+        self.venta.refresh_from_db()
+        self.assertEqual(self.venta.estado, 'activa')
+        self.assertIsNotNone(self.venta.entregada_en)
+        self.assertEqual(self.venta.maquinas.filter(entregada_en__isnull=True).count(), 0)
+
+    def test_entregar_sin_decir_cuales_entrega_todas(self):
+        self._liquidar()
+        self.venta.entregar()
+        self.venta.refresh_from_db()
+        self.assertEqual(self.venta.estado, 'activa')
+        for u in (self.u1, self.u2, self.u3):
+            u.refresh_from_db()
+            self.assertEqual(u.estado, 'vendido')

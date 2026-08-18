@@ -246,28 +246,78 @@ class Venta(models.Model):
         return self.saldo_pendiente() <= 0
 
     @transaction.atomic
-    def entregar(self, unidad=None, user=None):
-        """Cierra un apartado: exige saldo 0; asigna y marca vendida la unidad
-        (si es sobre pedido) o marca vendida la ya apartada; pasa a 'activa'."""
+    def entregar(self, unidad=None, unidades=None, user=None):
+        """Entrega máquinas de un apartado. Exige saldo cero, como siempre.
+
+        Puede entregar TODAS o solo las que ya llegaron: un pedido de tres
+        revolvedoras rara vez aterriza completo el mismo día, y hacer esperar al
+        cliente por la que falta no le sirve a nadie. La venta se cierra sola
+        cuando ya no queda ninguna pendiente.
+
+        `unidades`: lista de unidades a entregar (o de repuesto, para renglones
+        sobre pedido que aún no tienen máquina asignada). Sin lista, se entregan
+        todas las que faltan. `unidad` es la forma vieja, de una sola.
+        """
         if self.estado != 'apartada':
             raise ValueError('Solo se puede entregar una venta apartada.')
         if self.saldo_pendiente() > 0:
             raise ValueError(f'Falta liquidar el saldo (${self.saldo_pendiente()}).')
         from django.utils import timezone
-        if self.sobre_pedido or not self.inventario:
-            if unidad is None:
-                raise ValueError('Se requiere una unidad para entregar un pedido sobre pedido.')
-            if not unidad.puede_venderse():
-                raise ValueError(f'La unidad {unidad.codigo} no está disponible.')
-            self.inventario = unidad
-            unidad.marcar_vendido()
+
+        por_entregar = list(unidades or ([unidad] if unidad is not None else []))
+        pendientes = list(self.maquinas_vivas().filter(entregada_en__isnull=True))
+        if not pendientes:
+            raise ValueError('Esta venta ya no tiene máquinas por entregar.')
+
+        # Sin lista: se entrega todo lo que ya tiene máquina asignada. Un renglón
+        # sobre pedido sin unidad no se puede entregar a ciegas.
+        if not por_entregar:
+            elegidos = [r for r in pendientes if r.inventario_id]
+            if not elegidos:
+                raise ValueError('Elige la unidad que llegó para entregar el pedido.')
         else:
-            self.inventario.entregar_apartado()
-        self.estado = 'activa'
-        self.entregada_en = timezone.now()
-        if user is not None and getattr(user, 'is_authenticated', False):
-            self.entregada_por = user
-        self.save(update_fields=['inventario', 'estado', 'entregada_en', 'entregada_por'])
+            elegidos = []
+            ids = {u.id for u in por_entregar}
+            for renglon in pendientes:
+                if renglon.inventario_id in ids:
+                    elegidos.append(renglon)
+                    ids.discard(renglon.inventario_id)
+            # Las que sobran son máquinas nuevas para renglones sobre pedido.
+            sobrantes = [u for u in por_entregar if u.id in ids]
+            huecos = [r for r in pendientes if not r.inventario_id]
+            for renglon, nueva in zip(huecos, sobrantes):
+                if self.equipo_id and nueva.equipo_id != self.equipo_id:
+                    raise ValueError(f'La unidad {nueva.codigo} no corresponde al equipo pedido.')
+                if renglon.equipo_id and nueva.equipo_id != renglon.equipo_id:
+                    raise ValueError(f'La unidad {nueva.codigo} no corresponde al equipo pedido.')
+                if not nueva.puede_venderse():
+                    raise ValueError(f'La unidad {nueva.codigo} no está disponible.')
+                renglon.inventario = nueva
+                renglon.save(update_fields=['inventario'])
+                elegidos.append(renglon)
+            if not elegidos:
+                raise ValueError('Ninguna de esas unidades pertenece a esta venta.')
+
+        ahora = timezone.now()
+        for renglon in elegidos:
+            unidad_renglon = renglon.inventario
+            if unidad_renglon.estado == 'apartado':
+                unidad_renglon.entregar_apartado()
+            else:
+                unidad_renglon.marcar_vendido()
+            renglon.entregada_en = ahora
+            renglon.save(update_fields=['entregada_en'])
+
+        # La venta se cierra solo cuando NO queda ninguna máquina pendiente. Si
+        # falta una, sigue apartada: el pedido no está completo.
+        campos = ['inventario', 'precio_maquina']
+        if not self.maquinas_vivas().filter(entregada_en__isnull=True).exists():
+            self.estado = 'activa'
+            self.entregada_en = ahora
+            if user is not None and getattr(user, 'is_authenticated', False):
+                self.entregada_por = user
+            campos += ['estado', 'entregada_en', 'entregada_por']
+        self.save(update_fields=campos)
 
     @transaction.atomic
     def save(self, *args, **kwargs):
