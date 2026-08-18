@@ -8,6 +8,10 @@ class Refaccion(models.Model):
     precio_venta = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     stock = models.PositiveIntegerField(default=0, help_text="Cantidad disponible en el taller")
     stock_minimo = models.PositiveIntegerField(default=0, help_text="Umbral para alertar reorden (0 = sin alerta)")
+    # Las refacciones normalmente NO llevan garantía; el campo existe por si
+    # alguna cara sí la lleva. El modelo Garantia ya la soporta.
+    garantia_meses = models.PositiveSmallIntegerField(
+        default=0, help_text='Meses de garantía al comprador. 0 = sin garantía.')
     para_venta = models.BooleanField(
         default=True,
         help_text="Se vende al público (caja/POS). Todas las refacciones son vendibles; el campo se conserva para el módulo de caja."

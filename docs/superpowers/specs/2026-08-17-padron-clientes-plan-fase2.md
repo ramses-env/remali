@@ -224,8 +224,9 @@ correcta y esa persona ve el historial completo de su empresa al entrar.
 
 ### Backend
 
-**E1 · Meses en el catálogo** — `Equipo.garantia_meses` (default a definir
-contigo) y `Refaccion.garantia_meses` (default `0`).
+**E1 · Meses en el catálogo** — `Equipo.garantia_meses` (default **3**, decidido
+con el dueño: es lo normal, y se ajusta por máquina) y `Refaccion.garantia_meses`
+(default `0`).
 
 **E2 · Garantía del proveedor** — `Venta.garantia_proveedor_meses` y
 `garantia_proveedor_nota`, capturables al levantar un pedido sobre pedido. Dato
@@ -260,9 +261,8 @@ Se vende una máquina con 12 meses, y al buscar a ese cliente el mostrador ve
 | La lista de clientes crece más que ninguna | Paginada y con agregados desde A2 |
 | Cuatro flujos escribiendo cliente = cuatro formas de hacerlo mal | Un helper compartido en backend, un componente en front |
 | Duplicados por captura a mano | `requiere_revision` + su pestaña, desde B2 |
-| Meses de garantía por defecto | **Pendiente de definir contigo** antes de empezar E |
+| Meses de garantía por defecto | Resuelto: **3**, ajustable por máquina |
 
-## Lo único que falta decidir
+## Nada pendiente de decidir
 
-`Equipo.garantia_meses` necesita un valor por defecto para las máquinas que ya
-están en el catálogo. No lo invento: se define antes de empezar la entrega E.
+`Equipo.garantia_meses` quedó en **3 meses**, ajustable por máquina.

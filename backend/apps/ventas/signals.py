@@ -24,6 +24,29 @@ def _emitir_venta_eventos(venta: Venta | None, accion: str):
 @omitir_en_restauracion
 def venta_guardada(sender, instance, created, **kwargs):
     _emitir_venta_eventos(instance, 'creada' if created else 'actualizada')
+    if created:
+        _emitir_garantia(instance)
+
+
+def _emitir_garantia(venta: Venta):
+    """Toda venta de maquinaria nace con su garantía, si el catálogo dice que
+    esa máquina la lleva (`Equipo.garantia_meses`, 3 por defecto).
+
+    Va en una señal y no en cada endpoint a propósito: hay tres formas de
+    registrar una venta —desde inventario, desde una cotización y desde el
+    mostrador— y una garantía que dependa de cuál se usó es una garantía que
+    algún cliente va a reclamar y no vamos a encontrar.
+
+    Nunca tumba la venta: si algo falla aquí, la venta ya está hecha y esa es la
+    operación que importa.
+    """
+    if venta.estado == 'cancelada':
+        return
+    try:
+        from clientes.models import Garantia
+        Garantia.emitir(venta)
+    except Exception:
+        pass
 
 
 @receiver(post_delete, sender=Venta)

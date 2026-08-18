@@ -642,3 +642,110 @@ class ComprobantesTest(TestCase):
         r = self.api.get(f'/api/clientes/{self.cli.pk}/')
 
         self.assertEqual(r.data['documentos_vencidos'], 1)
+
+
+class GarantiaTest(TestCase):
+    """La pregunta que llega al mostrador: "¿todavía está en garantía?"."""
+
+    def setUp(self):
+        from decimal import Decimal
+        from rest_framework.test import APIClient
+        from inventario.models import Inventario
+        from maquinaria.models import Equipo
+
+        u = User.objects.create_user(username='cajero1', password='pass12345')
+        u.groups.add(Group.objects.get_or_create(name='Cajero')[0])
+        self.api = APIClient()
+        self.api.force_authenticate(user=u)
+
+        self.cli = Cliente.objects.create(tipo=Cliente.FISICA, nombre='Jesús Ramírez',
+                                          telefono='7441234567')
+        self.equipo = Equipo.objects.create(modelo='EXC-200', precio_venta=Decimal('180000'))
+        self.inv = Inventario.objects.create(equipo=self.equipo, condicion='nueva',
+                                             estado='disponible', numero_serie='4471')
+
+    def _vender(self, **extra):
+        from decimal import Decimal
+        from ventas.models import Venta
+        return Venta.objects.create(cliente=self.cli, inventario=self.inv,
+                                    precio_maquina=Decimal('180000'), **extra)
+
+    def test_una_venta_nace_con_su_garantia_de_3_meses(self):
+        from clientes.models import Garantia
+        self.assertEqual(self.equipo.garantia_meses, 3)   # el default acordado
+
+        venta = self._vender()
+
+        g = Garantia.objects.get(venta=venta)
+        self.assertEqual(g.meses, 3)
+        self.assertTrue(g.vigente)
+        self.assertIn('EXC-200', g.descripcion)
+        self.assertIn('4471', g.descripcion)              # snapshot con la serie
+
+    def test_una_maquina_sin_garantia_no_emite_nada(self):
+        """Mejor ninguna garantía que una de cero días que alguien interprete."""
+        from clientes.models import Garantia
+        self.equipo.garantia_meses = 0
+        self.equipo.save(update_fields=['garantia_meses'])
+
+        venta = self._vender()
+
+        self.assertFalse(Garantia.objects.filter(venta=venta).exists())
+
+    def test_los_meses_son_por_maquina_no_una_regla_global(self):
+        from clientes.models import Garantia
+        self.equipo.garantia_meses = 12
+        self.equipo.save(update_fields=['garantia_meses'])
+
+        venta = self._vender()
+
+        self.assertEqual(Garantia.objects.get(venta=venta).meses, 12)
+
+    def test_la_vigencia_se_calcula_contra_hoy_no_se_guarda(self):
+        from datetime import timedelta
+        from django.utils import timezone
+        from clientes.models import Garantia
+        venta = self._vender()
+        g = Garantia.objects.get(venta=venta)
+
+        g.vence = timezone.localdate() - timedelta(days=1)
+        g.save(update_fields=['vence'])
+
+        self.assertFalse(g.vigente)      # nadie tuvo que marcarla como vencida
+
+    def test_una_garantia_anulada_deja_de_valer_aunque_no_haya_vencido(self):
+        from django.utils import timezone
+        from clientes.models import Garantia
+        g = Garantia.objects.get(venta=self._vender())
+
+        g.anulada_en = timezone.now()
+        g.anulada_motivo = 'uso indebido'
+        g.save()
+
+        self.assertFalse(g.vigente)
+
+    def test_el_mostrador_la_ve_al_buscar_por_telefono(self):
+        self._vender()
+
+        r = self.api.get('/api/clientes/buscar/?telefono=7441234567')
+
+        vigentes = r.data['clientes'][0]['resumen']['garantias_vigentes']
+        self.assertEqual(len(vigentes), 1)
+        self.assertIn('EXC-200', vigentes[0]['descripcion'])
+        self.assertGreater(vigentes[0]['dias_restantes'], 0)
+
+    def test_una_venta_cancelada_no_emite_garantia(self):
+        from clientes.models import Garantia
+        venta = self._vender(estado='cancelada')
+        self.assertFalse(Garantia.objects.filter(venta=venta).exists())
+
+    def test_sumar_meses_no_se_rompe_a_fin_de_mes(self):
+        """31 de enero + 1 mes debe ser 28/29 de febrero, no reventar."""
+        from datetime import date
+        from clientes.models import Garantia
+        venta = self._vender()
+        Garantia.objects.filter(venta=venta).delete()
+
+        g = Garantia.emitir(venta, meses=1, inicia=date(2026, 1, 31))
+
+        self.assertEqual(g.vence, date(2026, 2, 28))

@@ -332,7 +332,9 @@ mostrador. Está ahí para que quien pidió la máquina pueda consultarlo despu�
 ### 8.2 La del cliente
 
 Los meses viven en el **catálogo**, no se teclean en cada venta:
-`Equipo.garantia_meses` (0 = sin garantía). Al vender se crea sola, y quien vende
+`Equipo.garantia_meses`, con **3 meses por defecto** —que es lo normal en REMALI—
+y ajustable máquina por máquina, porque no todas se garantizan igual. En 0, esa
+máquina se vende sin garantía. Al vender se crea sola, y quien vende
 puede ajustarla si el caso lo amerita. Nadie escribe lo mismo cien veces ni se le
 olvida.
 

@@ -344,6 +344,16 @@ class Marca(models.Model):
 class Equipo(models.Model):
     # Catálogo maestro del producto. La operación real vive en Inventario: qué
     # unidad existe, en qué condición está y si hoy puede rentarse o venderse.
+
+    # Meses de garantía que REMALI le da al COMPRADOR. Por defecto 3, que es lo
+    # normal; se ajusta por máquina porque no todas se garantizan igual. En 0 =
+    # esta máquina se vende sin garantía.
+    # NO confundir con el "depósito en garantía" de las rentas, que es dinero
+    # retenido, ni con la garantía que el PROVEEDOR le da a REMALI (esa vive en
+    # la venta sobre pedido).
+    garantia_meses = models.PositiveSmallIntegerField(
+        default=3, help_text='Meses de garantía al comprador. 0 = se vende sin garantía.')
+
     CONDICIONES = [('nueva', 'Nueva'), ('seminueva', 'Seminueva')]
     ESTADOS_VENTA = [
         ('sin_venta', 'Sin venta'),

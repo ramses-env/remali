@@ -32,6 +32,7 @@ export type ClienteEncontrado = {
   resumen: {
     compras: number; rentas_activas: number; rentas: number; cotizaciones: number; reparaciones: number
     saldo: string; credito_a_favor: string; tiene_adeudo: boolean; tiene_credito: boolean
+    garantias_vigentes: { id: number; descripcion: string; vence: string; dias_restantes: number }[]
   }
 }
 
@@ -101,6 +102,7 @@ export default function BuscadorCliente({ valor, onChange, autoFocus }: {
             </p>
             <p className="text-[12.5px] text-mute mt-1">{resumenTexto(r)}</p>
             <Dinero r={r} />
+            <Garantias r={r} />
           </div>
           <button
             type="button"
@@ -155,6 +157,7 @@ export default function BuscadorCliente({ valor, onChange, autoFocus }: {
                 <p className="text-sm font-semibold text-ink truncate">{c.nombre}</p>
                 <p className="text-[12.5px] text-mute">{resumenTexto(c.resumen)}</p>
                 <Dinero r={c.resumen} />
+                <Garantias r={c.resumen} />
               </div>
               <button
                 type="button"
@@ -188,6 +191,20 @@ export default function BuscadorCliente({ valor, onChange, autoFocus }: {
 /** El dinero va aparte del resumen y con peso visual propio: que el cliente
  *  deba es lo que puede cambiar la decisión de venderle, y no debe leerse como
  *  un dato más de la lista. */
+function Garantias({ r }: { r: ClienteEncontrado['resumen'] }) {
+  const g = r.garantias_vigentes || []
+  if (!g.length) return null
+  return (
+    <ul className="mt-1 space-y-0.5">
+      {g.map(x => (
+        <li key={x.id} className="text-[12.5px] text-[color:var(--c-libre)] font-semibold">
+          🛡 {x.descripcion} · en garantía hasta {x.vence}
+        </li>
+      ))}
+    </ul>
+  )
+}
+
 function Dinero({ r }: { r: ClienteEncontrado['resumen'] }) {
   if (!r.tiene_adeudo && !r.tiene_credito) return null
   return (

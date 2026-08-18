@@ -324,3 +324,97 @@ class DocumentoCliente(models.Model):
 
     def __str__(self):
         return f'{self.get_tipo_display()} · {self.cliente.nombre}'
+
+
+class Garantia(models.Model):
+    """La garantía que REMALI le dio a un CLIENTE al venderle.
+
+    Ojo con el nombre: en este código "garantía" ya significaba otra cosa —el
+    depósito en garantía de las rentas, que es dinero retenido—. Nada que ver.
+    Y tampoco es la que el proveedor le da a REMALI, que vive en la venta sobre
+    pedido como dato de referencia.
+
+    Sirve para una sola pregunta, que es la que llega al mostrador: el cliente
+    aparece con su máquina descompuesta, se teclea su teléfono y hay que poder
+    contestar "sí, vence el 15/03/2027" o "no, venció hace cuatro meses".
+
+    Decisión del dueño: el sistema SOLO informa. No levanta orden de reparación
+    en garantía ni registra el reclamo; eso lo resuelve una persona.
+    """
+    venta = models.ForeignKey('ventas.Venta', on_delete=models.CASCADE, related_name='garantias')
+    cliente = models.ForeignKey(Cliente, null=True, blank=True,
+                                on_delete=models.SET_NULL, related_name='garantias')
+    inventario = models.ForeignKey('inventario.Inventario', null=True, blank=True,
+                                   on_delete=models.SET_NULL, related_name='garantias')
+
+    # SNAPSHOT legible de qué cubre. La unidad puede venderse otra vez, darse de
+    # baja o cambiar de código; la garantía tiene que seguir diciendo qué ampara.
+    descripcion = models.CharField(max_length=200)
+
+    inicia = models.DateField()
+    meses = models.PositiveSmallIntegerField()
+    vence = models.DateField(db_index=True)
+
+    anulada_en = models.DateTimeField(null=True, blank=True)
+    anulada_motivo = models.CharField(max_length=200, blank=True, default='')
+
+    creada = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'clientes_garantia'
+        verbose_name = 'Garantía'
+        verbose_name_plural = 'Garantías'
+        ordering = ['-vence']
+
+    @property
+    def vigente(self) -> bool:
+        """Se CALCULA, no se guarda. Una garantía marcada 'vigente' en la base
+        que en realidad venció ayer es peor que no tener el dato: alguien la
+        haría válida en el mostrador."""
+        from django.utils import timezone
+        return self.anulada_en is None and self.vence >= timezone.localdate()
+
+    @property
+    def dias_restantes(self) -> int:
+        from django.utils import timezone
+        return (self.vence - timezone.localdate()).days
+
+    def __str__(self):
+        return f'{self.descripcion} · vence {self.vence}'
+
+    @classmethod
+    def emitir(cls, venta, *, inventario=None, meses=None, descripcion='', inicia=None):
+        """Nace con la venta, si el catálogo dice que esa máquina lleva garantía.
+
+        Devuelve None cuando no aplica (meses=0), en vez de crear una garantía de
+        cero días que después alguien tendría que interpretar.
+        """
+        from datetime import date
+        from django.utils import timezone
+
+        inv = inventario or venta.inventario
+        equipo = (inv.equipo if inv and inv.equipo_id else
+                  (venta.equipo if venta.equipo_id else None))
+        if meses is None:
+            meses = getattr(equipo, 'garantia_meses', 0) or 0
+        if not meses:
+            return None
+
+        inicia = inicia or timezone.localdate()
+        # Sumar meses sin dependencias: se normaliza el mes y se recorta el día
+        # si el mes destino es más corto (31 de enero + 1 mes = 28 de febrero).
+        total = inicia.month - 1 + int(meses)
+        anio, mes = inicia.year + total // 12, total % 12 + 1
+        dia = min(inicia.day, [31, 29 if anio % 4 == 0 and (anio % 100 != 0 or anio % 400 == 0) else 28,
+                               31, 30, 31, 30, 31, 31, 30, 31, 30, 31][mes - 1])
+
+        if not descripcion:
+            modelo = getattr(equipo, 'modelo', '') or 'Equipo'
+            serie = getattr(inv, 'numero_serie', '') or getattr(inv, 'codigo', '')
+            descripcion = f'{modelo}{f" · {serie}" if serie else ""}'
+
+        return cls.objects.create(
+            venta=venta, cliente=venta.cliente, inventario=inv,
+            descripcion=descripcion[:200], inicia=inicia, meses=meses,
+            vence=date(anio, mes, dia),
+        )

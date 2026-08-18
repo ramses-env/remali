@@ -47,6 +47,8 @@ type Equipo = {
   precio_semana?: number | string | null
   precio_mes?: number | string | null
   precio_venta?: number | string | null
+  /** Meses de garantía al comprador. 3 por defecto, ajustable por máquina. */
+  garantia_meses?: number | string | null
   imagen?: string | null
   ficha_tecnica?: string | null
   especificaciones?: { etiqueta: string; valor: string }[]
@@ -1686,7 +1688,7 @@ function EquiposAdmin({ equipos, categorias, tipos, marcas, reload, notify }: {
       reload()
     } catch { notify('No se pudo guardar la clasificación', 'err') }
   }
-  const empty: Equipo = { modelo: '', descripcion: '', precio_dia: '', precio_semana: '', precio_mes: '', precio_venta: '', especificaciones: [], que_incluye: [], promo_pct: 0, dias_entrega_pedido: '' }
+  const empty: Equipo = { modelo: '', descripcion: '', precio_dia: '', precio_semana: '', precio_mes: '', precio_venta: '', especificaciones: [], que_incluye: [], promo_pct: 0, dias_entrega_pedido: '', garantia_meses: 3 }
   const [form, setForm] = useState<Equipo>(empty)
   // Helpers del editor de especificaciones técnicas (etiqueta → valor)
   const specs = form.especificaciones || []
@@ -1742,6 +1744,12 @@ function EquiposAdmin({ equipos, categorias, tipos, marcas, reload, notify }: {
     for (const k of camposPrecio) {
       const v = form[k]
       if (v !== '' && v != null) fd.append(k, String(v))
+    }
+    // Garantía al comprador. Se manda siempre, incluso en 0: dejar de mandarla
+    // haría imposible QUITARLE la garantía a una máquina que ya la tenía.
+    const meses = (form as any).garantia_meses
+    if (meses !== '' && meses != null) {
+      fd.append('garantia_meses', String(Math.max(0, Math.min(120, Number(meses) || 0))))
     }
     if (form.categoria?.id) fd.append('categoria_id', String(form.categoria.id))
     if (form.tipo?.id) fd.append('tipo_id', String(form.tipo.id))
@@ -2040,6 +2048,19 @@ function EquiposAdmin({ equipos, categorias, tipos, marcas, reload, notify }: {
                 <div className={cond === 'seminueva' ? '' : 'col-span-2'}>
                   <label className={label}>Precio venta{cond === 'seminueva' ? ' (interno)' : ''}</label>
                   <input type="number" className={input} value={form.precio_venta ?? ''} onChange={e => setForm({ ...form, precio_venta: e.target.value })} placeholder="0.00" />
+                </div>
+                {/* Los meses son POR MÁQUINA: 3 es lo normal, no una regla fija. */}
+                <div className="col-span-2">
+                  <label className={label}>Garantía al comprador (meses)</label>
+                  <input
+                    type="number" min={0} max={120} className={input}
+                    value={(form as any).garantia_meses ?? ''}
+                    onChange={e => setForm({ ...form, garantia_meses: e.target.value } as any)}
+                    placeholder="3"
+                  />
+                  <p className="text-[11px] text-mute mt-1">
+                    Se aplica sola al vender. En <b>0</b> esta máquina se vende sin garantía.
+                  </p>
                 </div>
                 {cond === 'nueva' && (
                   <p className="col-span-2 text-[11px] text-mute -mt-1">Las <b>nuevas</b> solo se venden, por eso no se piden precios de renta.</p>

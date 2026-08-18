@@ -155,6 +155,13 @@ class Venta(models.Model):
         related_name='ventas_sobre_pedido',
     )
     fecha_estimada_entrega = models.DateField(null=True, blank=True)
+    # Garantía que el PROVEEDOR le da a REMALI al pedirle la máquina. Es un dato
+    # de referencia para quien la pidió: no dispara nada, no aparece en el
+    # mostrador y no tiene que ver con la que se le da al cliente (esa sale del
+    # catálogo del equipo, ver maquinaria.Equipo.garantia_meses).
+    garantia_proveedor_meses = models.PositiveSmallIntegerField(
+        default=0, help_text='Meses que el proveedor nos garantiza esta máquina.')
+    garantia_proveedor_nota = models.CharField(max_length=200, blank=True, default='')
     # Seguimiento del SOBRE PEDIDO para el cliente: confirmado (anticipo dado) →
     # en_camino (surtido con el proveedor) → en_sucursal (llegó, listo para
     # recoger/entregar). Al entregar, la venta pasa a 'activa' y el seguimiento

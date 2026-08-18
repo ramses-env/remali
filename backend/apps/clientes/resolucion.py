@@ -82,7 +82,20 @@ def resumen_de(cliente) -> dict:
         'credito_a_favor': cuenta['credito_a_favor'],
         'tiene_adeudo': cuenta['tiene_adeudo'],
         'tiene_credito': cuenta['tiene_credito'],
+        'garantias_vigentes': garantias_vigentes(cliente),
     }
+
+
+def garantias_vigentes(cliente) -> list:
+    """Las garantías vivas del cliente. Es la pregunta que llega al mostrador:
+    "se me descompuso, ¿todavía está en garantía?"."""
+    from django.utils import timezone
+    hoy = timezone.localdate()
+    return [
+        {'id': g.id, 'descripcion': g.descripcion, 'vence': g.vence,
+         'dias_restantes': g.dias_restantes}
+        for g in cliente.garantias.filter(anulada_en__isnull=True, vence__gte=hoy)
+    ]
 
 
 def registrar_cuenta_nueva(user):
