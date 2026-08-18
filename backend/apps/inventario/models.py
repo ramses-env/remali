@@ -358,6 +358,16 @@ class Inventario(models.Model):
             self._exigir_libre_de_renta('vender')
         self._set_estado('vendido')
 
+    def liberar_venta(self, ubicacion='Bodega'):
+        """vendido/apartado -> disponible (al cancelar la venta o quitar la máquina).
+
+        Es el espejo público de `marcar_vendido`/`apartar`. Existe para que la
+        venta no tenga que llamar al `_set_estado` privado: la regla de qué
+        estados pueden regresar al patio vive aquí, con las demás.
+        """
+        if self.estado in ('vendido', 'apartado'):
+            self._set_estado('disponible', ubicacion)
+
     def marcar_rentado(self):
         """Compatibilidad hacia atrás: delega en la vía central."""
         self.ocupar_por_renta()

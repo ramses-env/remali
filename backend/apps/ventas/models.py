@@ -277,6 +277,11 @@ class Venta(models.Model):
 
         # Validar la venta de máquina ANTES de persistir
         if es_nueva and self.inventario:
+            # Del disco, no de la memoria: quien llama suele reusar la misma
+            # instancia de Python para dos ventas seguidas, y esa copia se quedó
+            # con el estado de antes. Sin este refresco, la segunda venta de la
+            # misma máquina pasaba la validación sin chistar.
+            self.inventario.refresh_from_db(fields=['estado'])
             if not self.inventario.puede_venderse():
                 raise ValueError(
                     f"La unidad {self.inventario.codigo} no está disponible para venta."
@@ -306,14 +311,73 @@ class Venta(models.Model):
         else:
             super().save(*args, **kwargs)
 
-        # Fuente única: la venta transiciona la unidad según su estado.
+        # Puente entre las dos formas de crear una venta de maquinaria:
+        #  · la vieja (`Venta(inventario=u)`) sigue viva en la caja, el admin y
+        #    `vender_unidad`, y aquí se le arma su renglón;
+        #  · la nueva crea los renglones y aquí se sella el espejo.
+        # Los dos caminos terminan en la misma tabla, así que las reglas de abajo
+        # (ocupar la unidad, cancelar, entregar) solo tienen que mirar renglones.
+        if es_nueva:
+            self._sembrar_renglon_inicial()
+        self._sellar_espejo()
+
+        # Fuente única: la venta transiciona cada unidad según su estado.
         #  • activa   → vendida de inmediato (venta normal / liquidada).
         #  • apartada → reservada (apartado); se marca vendida al entregar.
-        if es_nueva and self.inventario:
-            if self.estado == 'apartada':
-                self.inventario.apartar()
-            else:
-                self.inventario.marcar_vendido()
+        if es_nueva:
+            for renglon in self.maquinas.select_related('inventario').all():
+                if not renglon.inventario_id or not renglon.viva:
+                    continue
+                if self.estado == 'apartada':
+                    renglon.inventario.apartar()
+                else:
+                    renglon.inventario.marcar_vendido()
+
+    # ─────────────────────────────────────────────
+    #  RENGLONES DE MÁQUINA
+    # ─────────────────────────────────────────────
+    def maquinas_vivas(self):
+        """Los renglones que siguen contando: ni quitados de la venta."""
+        return self.maquinas.filter(cancelada_en__isnull=True).select_related(
+            'inventario', 'inventario__equipo', 'equipo',
+        )
+
+    def _sembrar_renglon_inicial(self):
+        """Le arma su renglón a una venta creada con la forma vieja.
+
+        Sin esto, todo lo que hoy hace `Venta(inventario=u)` —la caja, el admin,
+        `vender_unidad`— quedaría fuera del modelo nuevo y tendríamos dos
+        verdades sobre la misma venta.
+        """
+        if not self.inventario_id or self.maquinas.exists():
+            return
+        VentaMaquina.objects.create(
+            venta=self,
+            inventario_id=self.inventario_id,
+            equipo_id=(self.inventario.equipo_id if self.inventario else None),
+            precio=self.precio_maquina or Decimal('0.00'),
+            entregada_en=self.entregada_en,
+        )
+
+    def _sellar_espejo(self):
+        """Deja `inventario`/`precio_maquina` apuntando al primer renglón vivo.
+
+        Son la forma vieja de preguntar "¿qué máquina se vendió?" y los leen
+        decenas de puntos (listados, tickets, CSV, el panel). Mientras existan,
+        tienen que decir la verdad, así que se recalculan solos.
+        """
+        primero = self.maquinas_vivas().first()
+        campos = []
+        nuevo_inv = primero.inventario_id if primero else None
+        if self.inventario_id != nuevo_inv:
+            self.inventario_id = nuevo_inv
+            campos.append('inventario')
+        nuevo_precio = primero.precio if primero else Decimal('0.00')
+        if (self.precio_maquina or Decimal('0.00')) != nuevo_precio and primero:
+            self.precio_maquina = nuevo_precio
+            campos.append('precio_maquina')
+        if campos:
+            super().save(update_fields=campos)
 
     # ─────────────────────────────────────────────
     #  CANCELACIÓN (reversa)
@@ -329,11 +393,14 @@ class Venta(models.Model):
             if ref:
                 ref.stock = (ref.stock or 0) + item.cantidad
                 ref.save(update_fields=['stock'])
-        # Devolver la máquina a inventario (vendida o apartada). Un apartado
-        # sobre pedido sin unidad no toca inventario. Los abonos NO se borran:
-        # quedan como rastro; el reembolso del anticipo es una acción manual.
-        if self.inventario and self.inventario.estado in ('vendido', 'apartado'):
-            self.inventario._set_estado('disponible', 'Bodega')
+        # Devolver TODAS las máquinas al patio (vendidas o apartadas). Antes solo
+        # volvía `self.inventario`, así que una venta de dos máquinas cancelada
+        # dejaba la segunda marcada como vendida para siempre. Un renglón sobre
+        # pedido sin unidad no toca inventario. Los abonos NO se borran: quedan
+        # como rastro; el reembolso del anticipo es una acción manual.
+        for renglon in self.maquinas_vivas():
+            if renglon.inventario_id:
+                renglon.inventario.liberar_venta('Bodega')
         self.estado = 'cancelada'
         self.save(update_fields=['estado'])
         # Saca la venta de la bandeja "Por facturar" (no se factura algo cancelado).
@@ -441,6 +508,72 @@ class ItemVenta(models.Model):
         ordering = ['id']
 
 
+class VentaMaquina(models.Model):
+    """Una máquina dentro de una venta.
+
+    Existe por lo mismo que existe `ItemVenta` para las refacciones: una venta es
+    UNA operación comercial (un folio, un ticket, un cliente) y adentro puede
+    llevar varias cosas. La diferencia es que una máquina no se cuenta por
+    cantidad: es una pieza única con número de serie, así que cada una ocupa su
+    propio renglón, con su precio y su entrega.
+
+    Antes la venta guardaba una sola unidad (`Venta.inventario`). Cuando la
+    conversión de una cotización entregaba dos máquinas, la segunda salía del
+    patio marcada como vendida sin ninguna venta que la nombrara, y cancelar no
+    la devolvía nunca.
+    """
+
+    venta = models.ForeignKey(
+        'ventas.Venta', on_delete=models.CASCADE, related_name='maquinas',
+    )
+    # PROTECT: una unidad que ya se vendió no se borra del inventario. El
+    # historial de una venta no puede quedarse sin la máquina que vendió.
+    inventario = models.ForeignKey(
+        'inventario.Inventario', on_delete=models.PROTECT,
+        null=True, blank=True, related_name='renglones_venta',
+    )
+    # Qué se pidió cuando la unidad todavía no llega (venta sobre pedido): al
+    # entregar se asigna la unidad física y este campo queda como el respaldo.
+    equipo = models.ForeignKey(
+        'maquinaria.Equipo', on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='+',
+    )
+    # Precio de ESTA máquina, IVA incluido (igual que el resto de ventas). Es una
+    # foto del momento: si mañana sube la lista, la venta vieja no cambia.
+    precio = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'))
+    entregada_en = models.DateTimeField(null=True, blank=True)
+
+    # Quitar una máquina de la venta NO borra el renglón: lo sella. El dinero y
+    # las decisiones dejan rastro, aunque la máquina haya vuelto a la bodega.
+    cancelada_en = models.DateTimeField(null=True, blank=True)
+    cancelada_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name='+',
+    )
+    cancelada_motivo = models.CharField(max_length=200, blank=True, default='')
+
+    creada_en = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'venta_maquinas'
+        verbose_name = 'Máquina vendida'
+        verbose_name_plural = 'Máquinas vendidas'
+        ordering = ['creada_en', 'id']
+
+    @property
+    def viva(self) -> bool:
+        """Sigue siendo parte de la venta (no se quitó)."""
+        return self.cancelada_en is None
+
+    @property
+    def entregada(self) -> bool:
+        return self.entregada_en is not None
+
+    def __str__(self):
+        cod = self.inventario.codigo if self.inventario_id else 'sin unidad'
+        return f'{cod} · ${self.precio}'
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # CAJA · SESIÓN · MOVIMIENTOS
 #
@@ -542,6 +675,11 @@ class MovimientoCaja(models.Model):
     concepto = models.CharField(max_length=200, blank=True)
     referencia = models.CharField(max_length=80, blank=True)
     venta = models.ForeignKey('ventas.Venta', on_delete=models.PROTECT, null=True, blank=True, related_name='movimientos_caja')
+    # La caja también cobra RENTAS (si el negocio lo enciende). Sin esta llave un
+    # movimiento de renta no tendría a qué colgarse: el corte no podría
+    # desglosarlo por origen y una cancelación futura no sabría a qué generarle
+    # el movimiento inverso.
+    renta = models.ForeignKey('renta.Renta', on_delete=models.PROTECT, null=True, blank=True, related_name='movimientos_caja')
     creado_en = models.DateTimeField(auto_now_add=True)
 
     class Meta:

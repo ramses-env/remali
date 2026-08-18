@@ -266,10 +266,25 @@ def _notif(tipo, titulo, mensaje, seccion, data=None):
 @api_view(['POST'])
 @permission_classes([EsOperador])   # el técnico también vende en campo
 def vender_unidad(request, pk: int):
-    """Registra la venta de una unidad de maquinaria."""
+    """Registra la venta de una unidad de maquinaria.
+
+    Con `desde_caja: true` la venta además queda colgada del turno de caja del
+    operador (abriéndolo si no había), para que el arqueo del mostrador la
+    espere. Sin esa bandera se comporta exactamente como siempre: Inventario y
+    la venta en campo no se enteran de la caja.
+    """
     from ventas.models import Venta
     from cotizaciones.models import Cotizacion
+    from ventas.caja_views import caja_permite, registrar_cobro_en_caja
     datos = request.data or {}
+    desde_caja = bool(datos.get('desde_caja'))
+    turno_abierto_ahora = False
+    if desde_caja and not caja_permite('venta'):
+        return Response(
+            {'detalle': 'Vender maquinaria desde la caja está apagado. Enciéndelo en Ajustes → Caja.',
+             'codigo': 'caja_venta_apagada'},
+            status=400,
+        )
     with transaction.atomic():
         try:
             unidad = Inventario.objects.select_for_update().select_related('equipo').get(pk=pk)
@@ -430,6 +445,16 @@ def vender_unidad(request, pk: int):
                 venta.save(update_fields=['pagos', 'metodo_pago'])
             except Exception:
                 pass
+            # El cobro entra al turno DENTRO de la misma transacción que la venta:
+            # una venta registrada sin su movimiento dejaría el arqueo corto y
+            # nadie se enteraría hasta el corte.
+            if desde_caja:
+                _mov, turno_abierto_ahora = registrar_cobro_en_caja(
+                    request.user,
+                    monto=venta.total, metodo_pago=venta.metodo_pago,
+                    concepto=f'Venta {venta.folio or ("#" + str(venta.id))} · {unidad.codigo}',
+                    venta=venta,
+                )
         except ValueError as e:
             return Response({'detalle': str(e)}, status=400)
         try:
@@ -505,6 +530,8 @@ def vender_unidad(request, pk: int):
     unidad.refresh_from_db()
     return Response({
         'detalle': 'Apartado registrado' if es_apartado else 'Venta registrada',
+        # La caja lo usa para avisar "se abrió tu turno con fondo $0".
+        'turno_abierto': bool(desde_caja and turno_abierto_ahora),
         'venta': {
             'id': venta.id,
             'nombre_cliente': venta.nombre_cliente,

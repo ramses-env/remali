@@ -114,19 +114,25 @@ def venta_mostrador(request):
 @api_view(['GET'])
 @permission_classes([PuedeUsarCaja])
 def corte_caja(request):
-    """Corte de caja (arqueo) de las ventas de mostrador de un día.
+    """Corte del día: lo que pasó por la CAJA, desglosado por origen.
+
+    Antes leía `Venta` filtrando `inventario__isnull=True`, es decir, solo
+    refacciones: la caja era el mostrador y la maquinaria vivía aparte. Desde que
+    el negocio puede encender la venta de maquinaria y las rentas en la caja, ese
+    filtro escondía dinero que sí está en el cajón. Ahora la fuente son los
+    MOVIMIENTOS de caja, que es donde queda registrado todo lo que se cobró ahí,
+    venga de donde venga.
 
     El cajero ve solo lo suyo; de administración para arriba se ve la caja de
-    todos, o la de un cajero en concreto (?cajero=<id>). Solo ventas de mostrador
-    (refacciones) y activas: la caja es el mostrador, no la venta de maquinaria.
+    todos, o la de un cajero en concreto (?cajero=<id>).
 
-    Devuelve lo esperado por método (efectivo/tarjeta/transferencia), el total y
-    los tickets del día; el conteo físico y la diferencia los pone la interfaz.
-    Los pagos combinados se cuentan por su método dominante, que es lo que guarda
-    la venta; el desglose fino de un pago mixto no se reparte aquí.
+    Devuelve lo esperado por método (efectivo/tarjeta/transferencia), el desglose
+    por origen (refacciones / maquinaria / rentas / depósitos) y el detalle; el
+    conteo físico y la diferencia los pone la interfaz.
     """
     from decimal import Decimal
     from django.utils import timezone
+    from .models import MovimientoCaja
 
     dia = timezone.localdate()
     pedida = (request.query_params.get('fecha') or '').strip()
@@ -136,11 +142,11 @@ def corte_caja(request):
         except ValueError:
             pass
 
-    qs = (Venta.objects.filter(estado='activa', inventario__isnull=True, fecha__date=dia)
-          .select_related('usuario').prefetch_related('items').order_by('-fecha'))
+    qs = (MovimientoCaja.objects
+          .filter(creado_en__date=dia, tipo__in=[MovimientoCaja.VENTA, MovimientoCaja.ENTRADA])
+          .select_related('usuario', 'venta', 'venta__inventario', 'renta')
+          .order_by('-creado_en'))
 
-    # Quien no ve las cuentas del negocio (el cajero) solo ve SU caja. Arriba de
-    # ahí se ve la de todos, o la de un cajero puntual.
     ver_todo = bool(puede_de(request.user).get('ver_dinero'))
     if ver_todo:
         cid = (request.query_params.get('cajero') or '').strip()
@@ -149,28 +155,47 @@ def corte_caja(request):
     else:
         qs = qs.filter(usuario=request.user)
 
+    def origen_de(m):
+        """De dónde salió el dinero, para que el corte lo pueda desglosar."""
+        if m.renta_id:
+            return 'depositos' if m.tipo == MovimientoCaja.ENTRADA else 'rentas'
+        if m.venta_id:
+            # Una venta con unidad de inventario es maquinaria; sin ella, mostrador.
+            return 'maquinaria' if m.venta.inventario_id else 'refacciones'
+        return 'otros'
+
     metodos = {'efectivo': [0, Decimal('0')], 'tarjeta': [0, Decimal('0')], 'transferencia': [0, Decimal('0')]}
+    origenes = {k: [0, Decimal('0')] for k in ('refacciones', 'maquinaria', 'rentas', 'depositos', 'otros')}
     movimientos = []
     total = Decimal('0')
-    for v in qs:
-        m = v.metodo_pago if v.metodo_pago in metodos else 'efectivo'
-        importe = v.total or Decimal('0')
-        metodos[m][0] += 1
-        metodos[m][1] += importe
+    for m in qs:
+        met = m.metodo_pago if m.metodo_pago in metodos else 'efectivo'
+        importe = m.monto or Decimal('0')
+        org = origen_de(m)
+        metodos[met][0] += 1
+        metodos[met][1] += importe
+        origenes[org][0] += 1
+        origenes[org][1] += importe
         total += importe
+        v = m.venta
         movimientos.append({
-            'id': v.id, 'folio': v.folio, 'hora': v.fecha,
-            'cliente': v.nombre_cliente or 'Público general',
-            'metodo_pago': v.metodo_pago,
-            'piezas': sum(i.cantidad for i in v.items.all()),
+            'id': m.id,
+            'folio': (v.folio if v else None) or (f'renta #{m.renta_id}' if m.renta_id else None),
+            'hora': m.creado_en,
+            'cliente': (v.nombre_cliente if v else None) or 'Público general',
+            'metodo_pago': m.metodo_pago,
+            'origen': org,
+            'afecta_efectivo': m.afecta_efectivo,
+            'concepto': m.concepto,
             'total': str(importe),
-            'cajero': getattr(v.usuario, 'username', None),
+            'cajero': getattr(m.usuario, 'username', None),
         })
 
     return Response({
         'fecha': dia,
         'ver_todo': ver_todo,
-        'por_metodo': {k: {'tickets': c, 'total': str(s)} for k, (c, s) in metodos.items()},
+        'por_metodo': {k: {'tickets': c, 'total': str(sm)} for k, (c, sm) in metodos.items()},
+        'por_origen': {k: {'movimientos': c, 'total': str(sm)} for k, (c, sm) in origenes.items() if c},
         'tickets': len(movimientos),
         'total': str(total),
         'movimientos': movimientos,

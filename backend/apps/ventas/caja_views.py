@@ -34,6 +34,81 @@ def sesion_abierta_de(user):
     return SesionCaja.objects.filter(usuario=user, estado=SesionCaja.ABIERTA).select_related('caja').first()
 
 
+def caja_por_defecto():
+    """La caja activa del negocio; si no hay ninguna, crea la principal.
+
+    Un negocio de una sola caja nunca tuvo que darla de alta, así que no se puede
+    exigir que exista antes del primer cobro."""
+    caja = Caja.objects.filter(activa=True).order_by('id').first()
+    if not caja:
+        caja, _ = Caja.objects.get_or_create(nombre='Caja principal', defaults={'activa': True})
+    return caja
+
+
+def asegurar_sesion_abierta(user):
+    """Devuelve (sesion, abierta_ahora).
+
+    Si el usuario ya tiene turno abierto, lo devuelve tal cual. Si no, abre uno
+    con fondo $0 en vez de rechazar el cobro.
+
+    Por qué se abre solo y no se deja el movimiento "pendiente de asignar": el
+    dinero cobrado está en el cajón EN ESE MOMENTO. Colgarlo del turno siguiente
+    haría que el arqueo dejara de responder "¿lo que hay en el cajón es lo que
+    debería haber?", que es lo único para lo que sirve un corte. Abrirlo al vuelo
+    da la misma comodidad —el mostrador no se detiene con el cliente enfrente—
+    sin el hueco de conciliación. El fondo inicial se corrige al cerrar.
+    """
+    sesion = sesion_abierta_de(user)
+    if sesion:
+        return sesion, False
+    caja = caja_por_defecto()
+    with transaction.atomic():
+        sesion = SesionCaja.objects.create(caja=caja, usuario=user, monto_inicial=Decimal('0'))
+        MovimientoCaja.objects.create(
+            sesion=sesion, caja=caja, usuario=user, tipo=MovimientoCaja.APERTURA,
+            afecta_efectivo=True, monto=Decimal('0'),
+            concepto='Apertura automática al registrar un cobro',
+        )
+    return sesion, True
+
+
+def caja_permite(que):
+    """¿El negocio dejó encendido cobrar `que` desde la caja? ('venta' | 'renta')
+
+    Se consulta EN EL SERVIDOR, no solo escondiendo el botón: si el switch solo
+    viviera en la interfaz, apagarlo sería decorativo y cualquiera con la sesión
+    abierta podría llamar al endpoint igual.
+    """
+    from maquinaria.models import ConfiguracionSitio
+    cfg = ConfiguracionSitio.get_solo()
+    return bool(cfg.caja_vende_maquinaria if que == 'venta' else cfg.caja_renta_maquinaria)
+
+
+def registrar_cobro_en_caja(user, *, monto, metodo_pago, concepto, venta=None, renta=None,
+                            tipo=None):
+    """Cuelga un cobro del turno del usuario, abriéndolo si hacía falta.
+
+    Devuelve (movimiento, turno_abierto_ahora) para que la interfaz pueda avisar
+    que se abrió el turno sola. Solo el EFECTIVO toca el arqueo del cajón; tarjeta
+    y transferencia se registran para el corte del turno pero no se cuentan como
+    billete —mismo criterio que la venta de refacciones.
+
+    `tipo` permite distinguir lo que NO es una venta. El caso real es el depósito
+    en garantía de una renta: es dinero que entra al cajón (y el arqueo lo tiene
+    que esperar) pero no es ingreso —es del cliente, y algún día se le devuelve—.
+    Va como ENTRADA para que cuente en el efectivo esperado sin inflar el total
+    de ventas del turno.
+    """
+    sesion, abierta_ahora = asegurar_sesion_abierta(user)
+    mov = MovimientoCaja.objects.create(
+        sesion=sesion, caja=sesion.caja, usuario=user,
+        tipo=tipo or MovimientoCaja.VENTA, metodo_pago=metodo_pago or 'efectivo',
+        afecta_efectivo=(metodo_pago == 'efectivo'),
+        monto=monto, venta=venta, renta=renta, concepto=concepto,
+    )
+    return mov, abierta_ahora
+
+
 def _sesion_dict(s, con_movimientos=False, ligero=False) -> dict:
     d = {
         'id': s.id,
