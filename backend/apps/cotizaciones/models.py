@@ -386,3 +386,13 @@ class CotizacionFoto(models.Model):
 
     def __str__(self):
         return f'{self.cotizacion_id} · foto {self.pk}'
+
+
+# Los borradores del cliente viven en su propio módulo: son otro mundo (otro
+# dueño, otro ciclo de vida, y REMALI no los ve). Se importan aquí para que
+# Django los registre como modelos de esta app.
+from .models_borrador import (  # noqa: E402,F401
+    BorradorCliente,
+    BorradorItem,
+    PaqueteAutorizacion,
+)
