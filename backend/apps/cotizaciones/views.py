@@ -790,9 +790,14 @@ def convertir_cotizacion(request, pk: int):
     from inventario.models import Inventario as _Inv
     unidades = []
     requeridas_por_equipo = {}
+    precio_por_equipo = {}
     for item in partidas_venta:
         if item.equipo_id:
             requeridas_por_equipo[item.equipo_id] = requeridas_por_equipo.get(item.equipo_id, 0) + max(item.cantidad or 0, 0)
+            # Precio de CADA máquina de ese equipo (IVA incluido, como toda venta).
+            # Sale de la partida, no de dividir el total: sin divisiones no hay
+            # centavos perdidos.
+            precio_por_equipo[item.equipo_id] = item.precio_unitario
     elegidas_por_equipo = {}
     unidades_vistas = set()
     for uid in (request.data.get('unidad_ids') or []):
@@ -822,6 +827,22 @@ def convertir_cotizacion(request, pk: int):
         return Response({'detalle': 'Esta cotización ya se convirtió.', 'venta_id': existente.id, 'cotizacion': CotizacionSerializer(cot).data}, status=200)
 
     with transaction.atomic():
+        # Con el candado puesto y releyendo el estado: hasta aquí la revisión de
+        # arriba fue optimista (sin bloqueo), y dos conversiones simultáneas
+        # podían llevarse la misma máquina.
+        if unidades:
+            bloqueadas = {
+                u.id: u for u in _Inv.objects.select_for_update()
+                .select_related('equipo').filter(id__in=[x.id for x in unidades])
+            }
+            unidades = [bloqueadas[x.id] for x in unidades if x.id in bloqueadas]
+            for u in unidades:
+                if u.estado != 'disponible':
+                    return Response(
+                        {'detalle': f'La unidad {u.codigo} ya no está disponible (está {u.estado}).'},
+                        status=400,
+                    )
+
         venta = Venta.objects.create(
             usuario=request.user if request.user.is_authenticated else None,
             # Cuenta del COMPRADOR: si la cotización la pidió un cliente con
@@ -831,14 +852,31 @@ def convertir_cotizacion(request, pk: int):
             nombre_cliente=(cot.cliente_nombre or (cot.cliente.nombre if cot.cliente_id and cot.cliente else '')),
             telefono_cliente=cot.cliente_telefono,
             cliente_id=cot.cliente_id,
-            precio_maquina=cot.subtotal_venta,  # lo que se vende (precio con IVA incluido)
+            # Sin unidades (o con ellas), el importe de la cotización es el que
+            # manda: los renglones de abajo reparten ese mismo dinero por máquina.
+            precio_maquina=(Decimal('0.00') if unidades else cot.subtotal_venta),
             metodo_pago=metodo,
             pagos=pagos,
-            inventario=unidades[0] if unidades else None,
             cotizacion=cot,                    # IVA: lo fuerza el modelo Venta (toda venta con IVA)
         )
-        for u in unidades:
-            u.marcar_vendido()
+        # UN RENGLÓN POR MÁQUINA: cada unidad queda amarrada a esta venta, con su
+        # precio y su número de serie. Antes solo la primera se guardaba y las
+        # demás salían del patio sin venta que las respaldara; cancelar no las
+        # devolvía nunca.
+        from ventas.models import VentaMaquina
+        restante = Decimal(cot.subtotal_venta)
+        for i, u in enumerate(unidades):
+            precio = precio_por_equipo.get(u.equipo_id)
+            if precio is None or i == len(unidades) - 1:
+                # La última se lleva lo que quede: así la suma de los renglones
+                # cuadra al centavo con el total de la cotización.
+                precio = restante
+            precio = Decimal(precio)
+            restante -= precio
+            try:
+                VentaMaquina.objects.create(venta=venta, inventario=u, precio=precio)
+            except ValueError as e:
+                return Response({'detalle': str(e)}, status=400)
 
     cot.refresh_from_db()
     pendientes = len(cot.items.all()) - len(partidas_venta)

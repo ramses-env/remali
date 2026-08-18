@@ -312,6 +312,7 @@ class ConfiguracionSitioSerializer(serializers.ModelSerializer):
             'negocio_nombre', 'negocio_telefono', 'negocio_direccion', 'negocio_email', 'negocio_web',
             'negocio_rfc', 'negocio_representante', 'negocio_footer',
             'cotizacion_condiciones', 'cotizacion_condiciones_renta', 'datos_bancarios', 'cotizacion_cierre',
+            'caja_vende_maquinaria', 'caja_renta_maquinaria',
             'actualizada',
         ]
         read_only_fields = ['actualizada']

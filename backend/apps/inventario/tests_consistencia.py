@@ -7,7 +7,6 @@ recorren el ciclo completo de cada operación y verifican, en cada paso, que el
 estado de la unidad concuerde con lo que dicen sus rentas y sus ventas.
 """
 
-import unittest
 from datetime import timedelta
 from decimal import Decimal
 
@@ -225,11 +224,6 @@ class CotizacionMultiUnidadTest(TestCase):
         )
         self.cot.refresh_from_db()
 
-    # FALLA A PROPÓSITO (defecto conocido, pendiente de decisión):
-    # `Venta` guarda UNA sola unidad (`inventario` es FK, no lista), pero
-    # `convertir_cotizacion` marca vendidas TODAS las elegidas. De la segunda en
-    # adelante, la máquina sale del patio sin una venta que la respalde.
-    @unittest.expectedFailure
     def test_cada_unidad_vendida_queda_ligada_a_una_venta(self):
         resp = self.client.post(
             f'/api/cotizaciones/{self.cot.id}/convertir/',
@@ -239,13 +233,18 @@ class CotizacionMultiUnidadTest(TestCase):
         self.u1.refresh_from_db(); self.u2.refresh_from_db()
         self.assertEqual((self.u1.estado, self.u2.estado), ('vendido', 'vendido'))
 
+        # Cada máquina que salió del patio tiene que tener su renglón: es lo que
+        # la ata a una venta, a un precio y a un cliente.
+        from ventas.models import VentaMaquina
         huerfanas = [u.codigo for u in (self.u1, self.u2)
-                     if not Venta.objects.filter(inventario=u).exists()]
+                     if not VentaMaquina.objects.filter(inventario=u, cancelada_en__isnull=True).exists()]
         self.assertEqual(huerfanas, [], f'unidades vendidas sin venta que las respalde: {huerfanas}')
+        venta = Venta.objects.get(pk=resp.data['venta_id'])
+        self.assertEqual(venta.maquinas.count(), 2)
+        # El dinero de la cotización se reparte entre las máquinas, sin perder centavos.
+        self.assertEqual(sum(r.precio for r in venta.maquinas.all()), self.cot.subtotal_venta)
+        self.assertEqual(venta.total, self.cot.subtotal_venta)
 
-    # FALLA A PROPÓSITO (misma causa): al cancelar solo regresa la unidad ligada;
-    # las demás quedan 'vendido' para siempre, sin camino de vuelta.
-    @unittest.expectedFailure
     def test_cancelar_la_venta_devuelve_TODAS_las_unidades(self):
         resp = self.client.post(
             f'/api/cotizaciones/{self.cot.id}/convertir/',

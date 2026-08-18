@@ -556,7 +556,24 @@ def alertas_renta(request):
 @api_view(['POST'])
 @permission_classes([EsOperador])   # el técnico cierra la renta al entregar
 def crear_renta(request):
+    """Levanta una renta.
+
+    Con `desde_caja: true` el cobro además queda colgado del turno del operador
+    (abriéndolo si no había). Se registran DOS movimientos: la renta como venta y
+    el depósito en garantía como entrada de efectivo, porque el depósito entra al
+    cajón pero no es ingreso del negocio.
+    """
+    from ventas.caja_views import caja_permite, registrar_cobro_en_caja
+    from ventas.models import MovimientoCaja
     datos = request.data or {}
+    desde_caja = bool(datos.get('desde_caja'))
+    turno_abierto_ahora = False
+    if desde_caja and not caja_permite('renta'):
+        return Response(
+            {'detalle': 'Levantar rentas desde la caja está apagado. Enciéndelo en Ajustes → Caja.',
+             'codigo': 'caja_renta_apagada'},
+            status=400,
+        )
     inventario_id = datos.get('inventario_id')
     cotizacion_id = datos.get('cotizacion_id')
     modalidad = (datos.get('modalidad') or '').lower()
@@ -764,9 +781,34 @@ def crear_renta(request):
                 # La venta/renta ya quedó registrada; que no truene por facturación.
                 logger.exception('No se pudo registrar la solicitud de factura de la renta')
 
+        if desde_caja:
+            # Lo cobrado AHORA: los pagos capturados. El total de la renta puede
+            # ser mayor (queda saldo), y lo que el cajón tiene que esperar es lo
+            # que de verdad entró.
+            cobrado = sum((Decimal(str(pg.get('monto', 0))) for pg in pagos_limpios), Decimal('0'))
+            if cobrado > 0:
+                _mov, turno_abierto_ahora = registrar_cobro_en_caja(
+                    request.user,
+                    monto=cobrado, metodo_pago=metodo_pago_uno,
+                    concepto=f'Renta #{r.id} · {inv.codigo}',
+                    renta=r,
+                )
+            # El depósito es dinero del CLIENTE que el negocio retiene: entra al
+            # cajón (el arqueo lo espera) pero no es una venta.
+            if deposito and deposito > 0:
+                _movd, abierto2 = registrar_cobro_en_caja(
+                    request.user,
+                    monto=deposito, metodo_pago=metodo_pago_uno,
+                    concepto=f'Depósito en garantía · renta #{r.id}',
+                    renta=r, tipo=MovimientoCaja.ENTRADA,
+                )
+                turno_abierto_ahora = turno_abierto_ahora or abierto2
+
         return Response({
             'renta': _serialize_renta(r),
             'ticket_url': f'/api/rentas/{r.id}/ticket/',
+            # La caja lo usa para avisar "se abrió tu turno con fondo $0".
+            'turno_abierto': bool(desde_caja and turno_abierto_ahora),
         }, status=201)
 
 

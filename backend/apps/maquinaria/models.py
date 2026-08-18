@@ -810,6 +810,19 @@ class ConfiguracionSitio(models.Model):
     # Anticipo MÍNIMO (%) para apartar/pedir una máquina. Un anticipo menor
     # requiere el código de autorización (codigo_ajuste).
     anticipo_minimo_pct = models.PositiveSmallIntegerField(default=60)
+    # ── Qué puede cobrarse desde la CAJA (mostrador) ──
+    # La caja nació como POS de refacciones. Estos interruptores la amplían a
+    # maquinaria y rentas cuando el negocio quiera; nacen apagados para que nada
+    # cambie hasta que alguien lo decida. Son del NEGOCIO, no del rol: quien
+    # alcanza la caja ya es nivel operador y el backend no necesita más permisos.
+    # Se validan en el servidor, no solo escondiendo el botón, o apagarlos sería
+    # decorativo.
+    caja_vende_maquinaria = models.BooleanField(
+        default=False,
+        help_text='Permite vender unidades de maquinaria desde la caja del mostrador.')
+    caja_renta_maquinaria = models.BooleanField(
+        default=False,
+        help_text='Permite levantar rentas desde la caja del mostrador.')
     # Código de 6 dígitos que autoriza AJUSTAR el precio a mano al vender (fuera
     # del descuento de contado). Se guarda hasheado; nunca se devuelve en claro.
     codigo_ajuste = models.CharField(max_length=128, blank=True, default='', editable=False)
