@@ -32,6 +32,8 @@ MAX_BORRADORES = 20
 MAX_POR_PAQUETE = 20
 # Días sin actividad tras los que se purga un espacio de invitado.
 DIAS_PURGA = 90
+# Días de silencio de quien autoriza tras los que se le avisa AL CLIENTE.
+DIAS_RECORDATORIO = 5
 
 
 def nuevo_token():
@@ -88,6 +90,9 @@ class PaqueteAutorizacion(DuenoMixin):
     # Quién resolvió (lo escribe él mismo en la liga; no tiene cuenta) y cuándo.
     autorizada_por = models.CharField(max_length=120, blank=True, default='')
     resuelto_en = models.DateTimeField(null=True, blank=True)
+    # Cuándo se le recordó AL CLIENTE que su autorizador no ha contestado. Se
+    # guarda para no repetirlo: un recordatorio que llega tres veces se ignora.
+    recordatorio_en = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         db_table = 'cotizacion_paquetes'
@@ -134,7 +139,11 @@ class BorradorCliente(DuenoMixin):
         ('rechazado', 'Rechazado por su autorizador'),
         ('entregado', 'Ya se mandó a REMALI'),
     ]
-    DECISIONES = [('autorizado', 'Autorizado'), ('rechazado', 'Rechazado')]
+    DECISIONES = [
+        ('autorizado', 'Autorizado'),
+        ('rechazado', 'Rechazado'),
+        ('cambios', 'Le pidieron cambios'),
+    ]
 
     # La etiqueta que le pone el cliente para distinguir sus versiones
     # ("Obra Norte — opción 2"). Vacía = la lista muestra la fecha.
@@ -157,6 +166,10 @@ class BorradorCliente(DuenoMixin):
     # suya; en modo 'opciones' la que no eligió queda rechazada sola.
     decision = models.CharField(max_length=10, choices=DECISIONES, blank=True, default='')
     rechazo_motivo = models.TextField(blank=True, default='')
+    # Lo que quien autoriza pidió CAMBIAR. Vive aparte del rechazo porque no es
+    # un "no": es un "sí, pero". El borrador vuelve a manos del cliente con esta
+    # nota pegada, y se limpia en cuanto la atiende.
+    cambios_pedidos = models.TextField(blank=True, default='')
 
     # La cotización que nació de este borrador (si llegó a nacer). Es el único
     # hilo que cruza la frontera, y va en este sentido: del lado privado hacia el

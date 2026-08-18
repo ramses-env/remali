@@ -89,6 +89,7 @@ def _ser_borrador(b, *, con_items=True):
         'total': str(b.total),
         'decision': b.decision,
         'rechazo_motivo': b.rechazo_motivo,
+        'cambios_pedidos': b.cambios_pedidos,
         'paquete': b.paquete_id,
         'cotizacion': b.cotizacion_id,
         'folio': b.cotizacion.folio if b.cotizacion_id and b.cotizacion else None,
@@ -215,6 +216,10 @@ def borrador_detalle(request, pk: int):
         b.datos_contacto = d['datos_contacto'] or {}
     if 'obra' in d:
         b.obra = d['obra'] or {}
+    # Si estaba marcado con cambios pedidos y el cliente ya lo editó, el aviso
+    # cumplió su función: se retira solo en vez de quedarse ahí para siempre.
+    b.cambios_pedidos = ''
+    b.decision = ''
     b.save()
     if 'items' in d:
         _reemplazar_items(b, d['items'])
@@ -390,7 +395,7 @@ def _avisar_a_remali(cotizaciones, *, firmante):
         pass
 
 
-def _avisar_al_cliente(paquete, autorizadas, rechazadas):
+def _avisar_al_cliente(paquete, autorizadas, rechazadas, cambios=()):
     """La campanita del cliente. Esto sí es asunto suyo, aunque REMALI no lo vea."""
     if not paquete.usuario_id:
         return
@@ -398,6 +403,10 @@ def _avisar_al_cliente(paquete, autorizadas, rechazadas):
     if autorizadas:
         titulo = f'{paquete.autorizada_por} autorizó {len(autorizadas)} de tus cotizaciones'
         mensaje = 'Ya están con REMALI; te contactan pronto.'
+    elif cambios:
+        titulo = f'{paquete.autorizada_por} te pidió cambios'
+        detalle = next((b.cambios_pedidos for b in cambios if b.cambios_pedidos), '')
+        mensaje = (f'«{detalle}» · ' if detalle else '') + 'Tu borrador volvió a estar editable.'
     else:
         titulo = f'{paquete.autorizada_por} rechazó lo que le mandaste'
         mensaje = 'Puedes duplicar tu borrador, ajustarlo y volver a mandarlo.'
@@ -450,6 +459,8 @@ def autorizacion(request, token):
 
     autorizados = [b for b in borradores_p
                    if (decisiones.get(b.id) or {}).get('accion') == 'autorizar']
+    con_cambios = [b for b in borradores_p
+                   if (decisiones.get(b.id) or {}).get('accion') == 'cambios']
     if p.modo == 'opciones' and len(autorizados) > 1:
         return _error('Son opciones de lo mismo: autoriza una sola.', 'opciones_una_sola')
 
@@ -463,6 +474,15 @@ def autorizacion(request, token):
                 nuevas.append(cotizacion_desde_borrador(b, autorizada_por=firmante))
                 continue
             d = decisiones.get(b.id) or {}
+            if b in con_cambios:
+                # No es un "no": es un "sí, pero". Vuelve a manos del cliente,
+                # editable y con el precio siguiendo otra vez al catálogo.
+                b.estado = 'armando'
+                b.decision = 'cambios'
+                b.paquete = None
+                b.cambios_pedidos = (d.get('motivo') or '').strip() or 'Sin detalle'
+                b.save(update_fields=['estado', 'decision', 'paquete', 'cambios_pedidos', 'actualizado'])
+                continue
             # En modo 'opciones' las que no eligió mueren solas; si no, se quedaban
             # esperando para siempre a una respuesta que ya no va a llegar.
             motivo = (d.get('motivo') or '').strip()
@@ -482,15 +502,17 @@ def autorizacion(request, token):
     # A REMALI solo le llega lo autorizado. Lo que el jefe mató no existió nunca
     # para el negocio: sin notificación, sin correo, sin folio.
     _avisar_a_remali(nuevas, firmante=firmante)
-    _avisar_al_cliente(p, nuevas, rechazadas)
+    _avisar_al_cliente(p, nuevas, rechazadas, con_cambios)
 
     return Response({
         'detalle': ('Autorizada: REMALI la recibió.' if nuevas
+                    else 'Cambios pedidos. Le avisamos a quien te la mandó.' if con_cambios
                     else 'Rechazada. Le avisamos a quien te la mandó.'),
         'ya_resuelto': False,
         'folios': [c.folio for c in nuevas],
         'autorizadas': len(nuevas),
         'rechazadas': len(rechazadas),
+        'cambios': len(con_cambios),
     })
 
 

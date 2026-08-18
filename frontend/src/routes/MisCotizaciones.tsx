@@ -553,11 +553,17 @@ export default function MisCotizaciones() {
                       <span className="text-[16.5px] font-bold tracking-tight">{formatMoney(totalBorrador(b))}</span>
                       {b.estado === 'rechazado'
                         ? <span title={b.rechazo_motivo} className="text-[11px] font-bold tracking-wide px-2.5 py-1 rounded-full bg-red-500/10 text-red-500 border border-red-500/30 whitespace-nowrap">No autorizada</span>
+                        : b.cambios_pedidos
+                        ? <span className="text-[11px] font-bold tracking-wide px-2.5 py-1 rounded-full bg-gold-soft text-gold-ink border border-gold/40 whitespace-nowrap">Te pidieron cambios</span>
                         : <span className="text-[11px] font-bold tracking-wide px-2.5 py-1 rounded-full bg-surface-2 text-mute border border-edge whitespace-nowrap">Sin mandar</span>}
                     </div>
                     <div className="text-[13.5px] text-mute mt-1.5">{resumenBorrador(b)} · {fechaHora(b.creado)}</div>
                     {b.estado === 'rechazado' && b.rechazo_motivo && (
                       <div className="text-[13px] text-red-500 mt-1">Motivo: {b.rechazo_motivo}</div>
+                    )}
+                    {/* El aviso se retira solo en cuanto el cliente edita el borrador. */}
+                    {b.cambios_pedidos && (
+                      <div className="text-[13px] text-gold-ink mt-1">Te pidieron: {b.cambios_pedidos}</div>
                     )}
                   </div>
                 </div>

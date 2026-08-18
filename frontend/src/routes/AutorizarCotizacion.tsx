@@ -59,10 +59,12 @@ export default function AutorizarCotizacion() {
   const [nombre, setNombre] = useState('')
   const [enviando, setEnviando] = useState(false)
   const [motivo, setMotivo] = useState('')
-  const [rechazando, setRechazando] = useState(false)
+  /* Qué está contestando. 'cambios' es la respuesta que más se da en la vida
+     real —"sí, pero quítale el compresor"— y antes había que forzarla a un no. */
+  const [respondiendo, setRespondiendo] = useState<'' | 'rechazar' | 'cambios'>('')
   /** Qué decidió marcar. En modo 'opciones' nunca tiene más de uno. */
   const [elegidos, setElegidos] = useState<Set<number>>(new Set())
-  const [resultado, setResultado] = useState<{ autorizadas: number; folios: string[] } | null>(null)
+  const [resultado, setResultado] = useState<{ autorizadas: number; cambios: number; folios: string[] } | null>(null)
 
   useEffect(() => {
     let vivo = true
@@ -95,7 +97,7 @@ export default function AutorizarCotizacion() {
     return n
   })
 
-  async function decidir(accion: 'autorizar' | 'rechazar') {
+  async function decidir(accion: 'autorizar' | 'rechazar' | 'cambios') {
     if (!nombre.trim()) { setError('Escribe tu nombre para continuar.'); return }
     if (accion === 'autorizar' && elegidos.size === 0) {
       setError(opciones ? 'Escoge cuál autorizas.' : 'Marca al menos una para autorizar.')
@@ -106,17 +108,20 @@ export default function AutorizarCotizacion() {
     try {
       const decisiones = borradores.map(b => ({
         borrador: b.id,
-        accion: accion === 'autorizar' && elegidos.has(b.id) ? 'autorizar' : 'rechazar',
-        motivo: elegidos.has(b.id) && accion === 'autorizar' ? '' : motivo.trim(),
+        // Pedir cambios aplica a todas: el comentario es uno solo y va para
+        // quien la armó, no para una partida en particular.
+        accion: accion === 'cambios' ? 'cambios'
+          : accion === 'autorizar' && elegidos.has(b.id) ? 'autorizar' : 'rechazar',
+        motivo: accion === 'autorizar' && elegidos.has(b.id) ? '' : motivo.trim(),
       }))
-      const r = await api.post<{ autorizadas: number; folios: string[]; ya_resuelto: boolean; detalle: string }>(
+      const r = await api.post<{ autorizadas: number; cambios: number; folios: string[]; ya_resuelto: boolean; detalle: string }>(
         `/autorizacion/${token}/`, { nombre: nombre.trim(), decisiones }, { fondo: true } as never)
       if (r.data.ya_resuelto) {
         setError(r.data.detalle)
         setPaquete(p => p && { ...p, estado: 'resuelto' })
         return
       }
-      setResultado({ autorizadas: r.data.autorizadas || 0, folios: r.data.folios || [] })
+      setResultado({ autorizadas: r.data.autorizadas || 0, cambios: r.data.cambios || 0, folios: r.data.folios || [] })
     } catch (e: unknown) {
       setError((e as { response?: { data?: { detalle?: string } } })?.response?.data?.detalle || 'No se pudo enviar tu decisión.')
     } finally {
@@ -130,22 +135,25 @@ export default function AutorizarCotizacion() {
   // ── Ya se resolvió (ahora, o en otra visita) ──
   if (resultado || (paquete && paquete.estado === 'resuelto' && !cargando)) {
     const autorizadas = resultado?.autorizadas ?? (paquete?.autorizada_por ? -1 : 0)
+    const pidioCambios = (resultado?.cambios || 0) > 0
     const hubo = autorizadas !== 0
     return (
       <div className="min-h-[70vh] flex items-center justify-center px-4 py-16">
         <div className={`${caja} text-center`}>
-          <div className={`w-16 h-16 mx-auto rounded-full flex items-center justify-center mb-5 ${hubo ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400' : 'bg-red-500/10 text-red-500'}`}>
-            {hubo
+          <div className={`w-16 h-16 mx-auto rounded-full flex items-center justify-center mb-5 ${hubo ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400' : pidioCambios ? 'bg-gold-soft text-gold-ink' : 'bg-red-500/10 text-red-500'}`}>
+            {hubo || pidioCambios
               ? <svg className="w-8 h-8" fill="none" stroke="currentColor" strokeWidth="2.4" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
               : <svg className="w-8 h-8" fill="none" stroke="currentColor" strokeWidth="2.4" viewBox="0 0 24 24" strokeLinecap="round"><path d="M6 6l12 12M18 6L6 18" /></svg>}
           </div>
           <h1 className="text-[22px] font-black text-ink">
-            {resultado ? (hubo ? 'Autorizada' : 'Rechazada') : 'Esto ya se resolvió'}
+            {resultado ? (hubo ? 'Autorizada' : pidioCambios ? 'Cambios pedidos' : 'Rechazada') : 'Esto ya se resolvió'}
           </h1>
           <p className="text-mute text-sm mt-2 max-w-[40ch] mx-auto">
             {resultado
               ? (hubo
                 ? <>Ya {resultado.autorizadas === 1 ? 'está' : 'están'} en manos de REMALI{resultado.folios.length ? <> (<b className="text-ink">{resultado.folios.join(', ')}</b>)</> : null}. El equipo contacta a {primerNombre} para coordinar.</>
+                : pidioCambios
+                ? <>Le avisamos a {primerNombre} con tu comentario. Cuando lo corrija te mandará la versión nueva. REMALI no recibió nada.</>
                 : <>Le avisamos a {primerNombre} para que prepare otra versión. REMALI no recibió nada.</>)
               : <>{paquete?.autorizada_por ? `${paquete.autorizada_por} ya lo resolvió` : 'Ya se resolvió'}{paquete?.resuelto_en ? ` el ${new Date(paquete.resuelto_en).toLocaleDateString('es-MX', { day: 'numeric', month: 'long' })}` : ''}. No hace falta que hagas nada.</>}
           </p>
@@ -269,24 +277,34 @@ export default function AutorizarCotizacion() {
                 className="w-full bg-surface-2 border border-edge rounded-xl px-4 py-3 text-sm text-ink placeholder-mute focus:outline-none focus:border-gold/60 transition-colors" />
             </div>
 
-            {rechazando && (
+            {respondiendo && (
               <div className="mt-3">
-                <label className="block text-[12.5px] font-semibold text-mute mb-1.5">Motivo (opcional, lo ve {primerNombre})</label>
-                <textarea value={motivo} onChange={e => setMotivo(e.target.value)} rows={2} placeholder="Ej. Excede el presupuesto de la obra"
-                  className="w-full bg-surface-2 border border-edge rounded-xl px-4 py-3 text-sm text-ink placeholder-mute focus:outline-none focus:border-red-400/60 transition-colors resize-none" />
+                <label className="block text-[12.5px] font-semibold text-mute mb-1.5">
+                  {respondiendo === 'cambios' ? `¿Qué hay que cambiar? Lo ve ${primerNombre}` : `Motivo (opcional, lo ve ${primerNombre})`}
+                </label>
+                <textarea value={motivo} onChange={e => setMotivo(e.target.value)} rows={2}
+                  placeholder={respondiendo === 'cambios' ? 'Ej. Quítale el compresor y bájale a 2 semanas' : 'Ej. Excede el presupuesto de la obra'}
+                  className={`w-full bg-surface-2 border border-edge rounded-xl px-4 py-3 text-sm text-ink placeholder-mute focus:outline-none transition-colors resize-none ${respondiendo === 'cambios' ? 'focus:border-gold/60' : 'focus:border-red-400/60'}`} />
               </div>
             )}
 
             {error && <p className="text-red-500 text-[12.5px] mt-2">{error}</p>}
 
-            {rechazando ? (
+            {respondiendo ? (
               <div className="mt-4 grid grid-cols-2 gap-2.5">
-                <button onClick={() => { setRechazando(false); setMotivo('') }}
+                <button onClick={() => { setRespondiendo(''); setMotivo('') }}
                   className="py-3.5 rounded-full border border-edge text-ink font-semibold text-sm hover:bg-surface-2 transition-colors">Mejor no</button>
-                <button onClick={() => decidir('rechazar')} disabled={enviando || !nombre.trim()}
-                  className="py-3.5 rounded-full bg-red-600 text-white font-bold text-sm hover:bg-red-700 transition-colors disabled:opacity-50">
-                  {enviando ? 'Enviando…' : varias ? 'Rechazar todas' : 'Rechazar cotización'}
-                </button>
+                {respondiendo === 'cambios' ? (
+                  <button onClick={() => decidir('cambios')} disabled={enviando || !nombre.trim() || !motivo.trim()}
+                    className="py-3.5 rounded-full bg-gold text-black font-bold text-sm hover:opacity-90 transition-opacity disabled:opacity-50">
+                    {enviando ? 'Enviando…' : 'Pedir los cambios'}
+                  </button>
+                ) : (
+                  <button onClick={() => decidir('rechazar')} disabled={enviando || !nombre.trim()}
+                    className="py-3.5 rounded-full bg-red-600 text-white font-bold text-sm hover:bg-red-700 transition-colors disabled:opacity-50">
+                    {enviando ? 'Enviando…' : varias ? 'Rechazar todas' : 'Rechazar cotización'}
+                  </button>
+                )}
               </div>
             ) : (
               <>
@@ -296,7 +314,12 @@ export default function AutorizarCotizacion() {
                     : varias ? `Autorizar ${elegidos.size === 1 ? 'la marcada' : `las ${elegidos.size} marcadas`} y enviar a REMALI`
                     : 'Autorizar y enviar a REMALI'}
                 </button>
-                <button onClick={() => setRechazando(true)} disabled={enviando}
+                {/* La respuesta de en medio: ni sí ni no. Es la más común. */}
+                <button onClick={() => setRespondiendo('cambios')} disabled={enviando || paquete.vencido}
+                  className="mt-2.5 w-full py-3 rounded-full border border-edge text-ink font-semibold text-sm hover:bg-surface-2 transition-colors disabled:opacity-50">
+                  Pedir cambios antes de autorizar
+                </button>
+                <button onClick={() => setRespondiendo('rechazar')} disabled={enviando}
                   className="mt-2.5 w-full py-3 rounded-full text-red-600 dark:text-red-400 font-semibold text-sm hover:bg-red-500/10 transition-colors disabled:opacity-50">
                   {varias ? 'Rechazar todas' : 'Rechazar'}
                 </button>

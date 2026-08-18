@@ -51,8 +51,10 @@ export type Borrador = {
   tipo: 'venta' | 'renta' | 'mixta'
   total: string
   items: ItemServidor[]
-  decision: '' | 'autorizado' | 'rechazado'
+  decision: '' | 'autorizado' | 'rechazado' | 'cambios'
   rechazo_motivo: string
+  /** Lo que quien autoriza pidió cambiar. Se limpia en cuanto el cliente lo edita. */
+  cambios_pedidos: string
   paquete: number | null
   cotizacion: number | null
   folio: string | null

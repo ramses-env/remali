@@ -6,6 +6,7 @@ cliente rechazó una versión, son exactamente los defectos que este módulo
 existe para impedir.
 """
 from decimal import Decimal
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
@@ -334,3 +335,142 @@ class PurgaTests(TestCase):
         self.assertFalse(BorradorCliente.objects.filter(pk=viejo_invitado.pk).exists())
         # El de cuenta nunca se purga: el cliente tiene dónde volver por él.
         self.assertTrue(BorradorCliente.objects.filter(pk=viejo_de_cuenta.pk).exists())
+
+
+class PedirCambiosTests(TestCase):
+    """El jefe casi nunca dice solo sí o no: dice 'sí, pero quítale el compresor'."""
+
+    def setUp(self):
+        from django.core.cache import cache
+        from rest_framework.test import APIClient
+        cache.clear()
+        self.eq = Equipo.objects.create(modelo='Compresor', precio_venta=Decimal('23200'))
+        self.user = get_user_model().objects.create_user('cliente', password='x')
+        self.c = APIClient()
+        self.c.force_authenticate(self.user)
+
+    def _borrador(self):
+        b = BorradorCliente.objects.create(usuario=self.user, datos_contacto={'nombre': 'Ana'})
+        BorradorItem.objects.create(borrador=b, equipo=self.eq, cantidad=1, modalidad='venta')
+        return b
+
+    def _mandar(self, bs, modo='lista'):
+        r = self.c.post('/api/autorizaciones/', {'borradores': [b.id for b in bs], 'modo': modo}, format='json')
+        return r.data['token']
+
+    def test_pedir_cambios_devuelve_el_borrador_editable(self):
+        from cotizaciones.models import Cotizacion
+        from rest_framework.test import APIClient
+        b = self._borrador()
+        t = self._mandar([b])
+        r = APIClient().post(f'/api/autorizacion/{t}/', {'nombre': 'Ing. Pérez', 'decisiones': [
+            {'borrador': b.id, 'accion': 'cambios', 'motivo': 'Quítale el compresor'}]}, format='json')
+        self.assertEqual(r.status_code, 200)
+
+        b = BorradorCliente.objects.get(pk=b.pk)
+        # Vuelve a sus manos: editable y con el precio siguiendo al catálogo otra vez.
+        self.assertEqual(b.estado, 'armando')
+        self.assertFalse(b.congelado)
+        self.assertIsNone(b.paquete_id)
+        self.assertEqual(b.cambios_pedidos, 'Quítale el compresor')
+        # Y REMALI sigue sin enterarse de nada.
+        self.assertEqual(Cotizacion.objects.count(), 0)
+
+    def test_pedir_cambios_cierra_el_paquete(self):
+        """El jefe ya contestó: esa liga no debe seguir viva esperando."""
+        from cotizaciones.models_borrador import PaqueteAutorizacion
+        from rest_framework.test import APIClient
+        b = self._borrador()
+        t = self._mandar([b])
+        APIClient().post(f'/api/autorizacion/{t}/', {'nombre': 'P', 'decisiones': [
+            {'borrador': b.id, 'accion': 'cambios', 'motivo': 'muy caro'}]}, format='json')
+        self.assertEqual(PaqueteAutorizacion.objects.get(token=t).estado, 'resuelto')
+
+    def test_al_reeditar_se_limpia_lo_que_pidieron(self):
+        """Si ya lo corrigió, el aviso deja de tener sentido en su pantalla."""
+        b = self._borrador()
+        b.cambios_pedidos = 'Quítale el compresor'
+        b.save(update_fields=['cambios_pedidos'])
+        r = self.c.patch(f'/api/borradores/{b.id}/', {'nombre': 'v2'}, format='json')
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(BorradorCliente.objects.get(pk=b.pk).cambios_pedidos, '')
+
+    def test_mezclar_las_tres_decisiones(self):
+        from cotizaciones.models import Cotizacion
+        from rest_framework.test import APIClient
+        a, b, c = self._borrador(), self._borrador(), self._borrador()
+        t = self._mandar([a, b, c], modo='lista')
+        APIClient().post(f'/api/autorizacion/{t}/', {'nombre': 'P', 'decisiones': [
+            {'borrador': a.id, 'accion': 'autorizar'},
+            {'borrador': b.id, 'accion': 'cambios', 'motivo': 'baja la cantidad'},
+            {'borrador': c.id, 'accion': 'rechazar', 'motivo': 'no'}]}, format='json')
+        self.assertEqual(Cotizacion.objects.count(), 1)          # solo la autorizada cruzó
+        self.assertEqual(BorradorCliente.objects.get(pk=b.pk).estado, 'armando')
+        self.assertEqual(BorradorCliente.objects.get(pk=c.pk).estado, 'rechazado')
+
+
+@patch('maquinaria.correo.enviar_async', return_value=True)
+class RecordatorioTests(TestCase):
+    """Una liga que nadie contesta es una venta enfriándose.
+
+    El aviso va al CLIENTE, nunca a REMALI: el negocio no tiene por qué saber
+    que el jefe de alguien no ha contestado.
+    """
+
+    def setUp(self):
+        from django.core.cache import cache
+        from rest_framework.test import APIClient
+        cache.clear()
+        self.eq = Equipo.objects.create(modelo='Planta', precio_venta=Decimal('11600'))
+        self.user = get_user_model().objects.create_user('cliente', password='x', email='ana@obra.mx')
+        self.c = APIClient()
+        self.c.force_authenticate(self.user)
+
+    def _paquete_de(self, dias):
+        from datetime import timedelta
+        from django.utils import timezone
+        from cotizaciones.models_borrador import PaqueteAutorizacion
+        b = BorradorCliente.objects.create(usuario=self.user, datos_contacto={'nombre': 'Ana', 'email': 'ana@obra.mx'})
+        BorradorItem.objects.create(borrador=b, equipo=self.eq, cantidad=1, modalidad='venta')
+        t = self.c.post('/api/autorizaciones/', {'borradores': [b.id]}, format='json').data['token']
+        p = PaqueteAutorizacion.objects.get(token=t)
+        PaqueteAutorizacion.objects.filter(pk=p.pk).update(congelado_en=timezone.now() - timedelta(days=dias))
+        return PaqueteAutorizacion.objects.get(pk=p.pk)
+
+    def test_avisa_al_cliente_y_no_a_remali(self, _correo):
+        from django.core.management import call_command
+        from maquinaria.models import Notificacion
+        p = self._paquete_de(6)
+        call_command('recordar_autorizaciones')
+
+        mias = Notificacion.objects.filter(usuario=self.user)
+        self.assertEqual(mias.count(), 1)
+        self.assertIn('no ha', mias.first().titulo.lower())
+        # Nada para el panel: una notificación sin usuario es de REMALI.
+        self.assertEqual(Notificacion.objects.filter(usuario__isnull=True).count(), 0)
+        from cotizaciones.models_borrador import PaqueteAutorizacion
+        self.assertIsNotNone(PaqueteAutorizacion.objects.get(pk=p.pk).recordatorio_en)
+
+    def test_no_avisa_antes_de_tiempo(self, _correo):
+        from django.core.management import call_command
+        from maquinaria.models import Notificacion
+        self._paquete_de(2)
+        call_command('recordar_autorizaciones')
+        self.assertEqual(Notificacion.objects.count(), 0)
+
+    def test_no_repite_el_aviso(self, _correo):
+        from django.core.management import call_command
+        from maquinaria.models import Notificacion
+        self._paquete_de(9)
+        call_command('recordar_autorizaciones')
+        call_command('recordar_autorizaciones')
+        self.assertEqual(Notificacion.objects.filter(usuario=self.user).count(), 1)
+
+    def test_no_avisa_de_lo_ya_resuelto(self, _correo):
+        from django.core.management import call_command
+        from maquinaria.models import Notificacion
+        from cotizaciones.models_borrador import PaqueteAutorizacion
+        p = self._paquete_de(8)
+        PaqueteAutorizacion.objects.filter(pk=p.pk).update(estado='resuelto')
+        call_command('recordar_autorizaciones')
+        self.assertEqual(Notificacion.objects.count(), 0)
