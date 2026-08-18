@@ -21,6 +21,7 @@ class CotizacionPagination(PageNumberPagination):
 from maquinaria.permissions import IsAdminGroupOrStaff, EsOperador, PuedeCotizar, puede_de
 from maquinaria.throttling import SolicitudPublicaThrottle, SubidaEvidenciaThrottle
 from maquinaria.ws_events import push_user_event
+from . import precios
 from .models import Cotizacion, CotizacionItem, CotizacionFoto
 from .serializers import CotizacionSerializer, CotizacionFotoSerializer
 
@@ -33,26 +34,6 @@ MAX_FOTOS = 10
 _UNIDADES_RENTA = {'dia': 'día', 'semana': 'semana', 'mes': 'mes'}
 _MODALIDADES = {'venta'} | set(_UNIDADES_RENTA)
 
-
-def _resolver_partida(eq, unit):
-    """Traduce lo que pidió la tienda a (etiqueta, precio, modalidad).
-
-    Si el equipo no tiene precio para esa modalidad se cae a la otra: un equipo
-    que solo se vende no debe quedar cotizado en $0 por pedir "renta por día".
-    """
-    if unit in _UNIDADES_RENTA:
-        precio = eq.get_precio_por_unidad(unit)
-        if precio:
-            return f'{eq.modelo} · renta por {_UNIDADES_RENTA[unit]}', precio, unit
-        return f'{eq.modelo} · venta', eq.precio_venta, 'venta'
-
-    if eq.precio_venta:
-        return f'{eq.modelo} · venta', eq.precio_venta, 'venta'
-    for u in ('dia', 'semana', 'mes'):          # solo se renta: cotiza la renta
-        precio = eq.get_precio_por_unidad(u)
-        if precio:
-            return f'{eq.modelo} · renta por {_UNIDADES_RENTA[u]}', precio, u
-    return f'{eq.modelo} · venta', eq.precio_venta, 'venta'
 
 
 def _enviar_acuse_cliente(cot):
@@ -89,113 +70,16 @@ def _enviar_acuse_cliente(cot):
     return enviar_async(f'Tu cotización {cot.folio} · {negocio}', cuerpo, [cot.cliente_email], adjuntos)
 
 
-def _construir_cotizacion(d, usuario, *, por_autorizar, token_lote=None):
-    """Valida el payload de UNA cotización de tienda y la crea (con sus items),
-    calculando los precios DEL SERVIDOR (no se confía en los del navegador).
-
-    Devuelve la Cotizacion creada. Lanza ValueError(mensaje) si el payload no
-    sirve. NO abre transacción ni dispara notificaciones: eso lo decide quien
-    llama —un envío suelto (crear_cotizacion_publica) o un lote—. Así el precio
-    se calcula en un SOLO lugar para ambos caminos."""
-    from maquinaria.models import Equipo, nombre_propio
-
-    items = d.get('items') or []
-    if not isinstance(items, list) or not items:
-        raise ValueError('Agrega al menos un equipo a tu solicitud.')
-    if len(items) > 50:
-        raise ValueError('Demasiados equipos en una sola solicitud.')
-
-    cliente = d.get('cliente') or {}
-    nombre = (cliente.get('nombre') or '').strip()
-    if not nombre:
-        raise ValueError('Tu nombre es obligatorio.')
-
-    partidas = []
-    carrito = []   # snapshot {id,title,price,qty,unit} para "volver a cotizar"
-    for it in items:
-        try:
-            eq = Equipo.objects.get(pk=it.get('equipo_id') or it.get('id'))
-        except (Equipo.DoesNotExist, ValueError, TypeError):
-            continue
-        try:
-            cant = max(1, min(int(it.get('cantidad') or 1), 999))
-        except (ValueError, TypeError):
-            cant = 1
-        unit = (it.get('unit') or '').lower()
-        try:
-            dur = max(1, min(int(it.get('duracion') or 1), 999)) if unit in ('dia', 'semana', 'mes') else 1
-        except (ValueError, TypeError):
-            dur = 1
-        etiqueta, precio, modalidad = _resolver_partida(eq, unit)
-        promo = min(90, max(0, getattr(eq, 'promo_pct', 0) or 0))
-        precio_lista = Decimal('0')
-        if precio and promo:
-            precio_lista = Decimal(str(precio))
-            precio = (Decimal(precio) * (Decimal('100') - promo) / Decimal('100')).quantize(Decimal('0.01'))
-            etiqueta = f'{etiqueta} (promo −{promo}%)'
-        partidas.append((etiqueta, cant, dur, Decimal(str(precio or 0)), modalidad, precio_lista or Decimal(str(precio or 0)), eq))
-        carrito.append({'id': eq.id, 'title': etiqueta, 'price': float(precio or 0),
-                        'qty': cant, 'duracion': dur, 'unit': unit or 'venta'})
-
-    if not partidas:
-        raise ValueError('No pudimos identificar los equipos de tu solicitud.')
-
-    # Cupón que el cliente trae aplicado (p.ej. su 5% de bienvenida). Se ATA a la
-    # cotización pero NO se gasta aquí: se marca usado recién al concretarse la
-    # venta/renta. Si el código no sirve, no es suyo o ya lo usó, simplemente no
-    # se amarra (el precio del servidor no depende de esto).
-    cupon_obj = None
-    codigo_cupon = (d.get('cupon') or '').strip()
-    if codigo_cupon:
-        from maquinaria.models import Cupon
-        c = Cupon.objects.filter(codigo=codigo_cupon, activo=True).first()
-        if c and not c.usado and (not c.personal or (usuario is not None and c.usuario_id == getattr(usuario, 'id', None))):
-            cupon_obj = c
-
-    obra = d.get('obra') or {}
-    cot = Cotizacion.objects.create(
-        tipo='venta',          # provisional: lo define recalcular_tipo() con las partidas
-        origen='cliente',
-        estado='por_autorizar' if por_autorizar else 'enviada',
-        usuario=usuario,
-        cupon=cupon_obj,
-        cliente_nombre=nombre_propio(nombre),
-        cliente_telefono=(cliente.get('telefono') or '').strip(),
-        cliente_email=(cliente.get('email') or '').strip().lower(),
-        aplica_iva=bool(d.get('requiere_factura')),
-        token_lote=token_lote or None,
-        datos_solicitud={
-            'empresa': (cliente.get('empresa') or '').strip(),
-            'obra': {
-                'responsable': (obra.get('responsable') or '').strip(),
-                'direccion': (obra.get('direccion') or '').strip(),
-                'telefono': (obra.get('telefono') or '').strip(),
-                'email': (obra.get('email') or '').strip().lower(),
-            },
-            'carrito': carrito,
-        },
-    )
-    for etiqueta, cant, dur, precio, modalidad, precio_lista, eq_ref in partidas:
-        CotizacionItem.objects.create(cotizacion=cot, descripcion=etiqueta, cantidad=cant,
-                                      duracion=dur, precio_unitario=precio, precio_lista=precio_lista,
-                                      equipo=eq_ref, modalidad=modalidad)
-    cot.recalcular_tipo()   # venta, renta o mixta según lo que armó el cliente
-    if por_autorizar:
-        import secrets
-        cot.token_autorizacion = secrets.token_hex(16)
-        cot.save(update_fields=['token_autorizacion'])
-    return cot
-
 
 @api_view(['POST'])
 @permission_classes([AllowAny])  # público: la tienda envía la solicitud del cliente
 @throttle_classes([SolicitudPublicaThrottle])  # cada solicitud manda correos: sin techo es spam
 def crear_cotizacion_publica(request):
-    """Recibe la solicitud de cotización que arma el cliente en la tienda.
+    """Recibe la solicitud que el cliente manda DIRECTO a REMALI, sin su jefe.
 
-    Endpoint angosto y validado: se calculan los precios DEL SERVIDOR (no se
-    confía en los que manda el navegador). Crea una Cotizacion origen=cliente
-    en estado 'enviada' y avisa al admin por notificación.
+    Los precios se calculan en el SERVIDOR (no se confía en los del navegador).
+    El camino con autorización interna ya no pasa por aquí: vive en los
+    borradores (`views_borrador.py`), que REMALI no ve hasta que se autorizan.
     """
     from maquinaria.models import Equipo, crear_notificacion, nombre_propio
 
@@ -211,49 +95,30 @@ def crear_cotizacion_publica(request):
     if not nombre:
         return Response({'detalle': 'Tu nombre es obligatorio.'}, status=400)
 
-    # Resolver equipos y precios en el servidor.
+    # Precios del servidor, resueltos en un solo lugar (cotizaciones/precios.py).
     partidas = []
     carrito = []   # snapshot {id,title,price,qty,unit} para "volver a cotizar"
     for it in items:
+        equipo_id, cant, dur, unit = precios.normalizar_item(it)
         try:
-            eq = Equipo.objects.get(pk=it.get('equipo_id') or it.get('id'))
+            eq = Equipo.objects.get(pk=equipo_id)
         except (Equipo.DoesNotExist, ValueError, TypeError):
             continue
-        try:
-            cant = max(1, min(int(it.get('cantidad') or 1), 999))
-        except (ValueError, TypeError):
-            cant = 1
-        unit = (it.get('unit') or '').lower()
-        # Duración = periodos de renta (días/semanas/meses). En venta es 1.
-        try:
-            dur = max(1, min(int(it.get('duracion') or 1), 999)) if unit in ('dia', 'semana', 'mes') else 1
-        except (ValueError, TypeError):
-            dur = 1
-        etiqueta, precio, modalidad = _resolver_partida(eq, unit)
-        # Promo del equipo (la controla el admin en el panel): el precio oficial
-        # de la cotización sale ya con el descuento aplicado. Guardamos el precio
-        # de LISTA (antes de promo) para el descuento de contado sin doble dip.
-        promo = min(90, max(0, getattr(eq, 'promo_pct', 0) or 0))
-        precio_lista = Decimal('0')
-        if precio and promo:
-            precio_lista = Decimal(str(precio))
-            precio = (Decimal(precio) * (Decimal('100') - promo) / Decimal('100')).quantize(Decimal('0.01'))
-            etiqueta = f'{etiqueta} (promo −{promo}%)'
-        partidas.append((etiqueta, cant, dur, Decimal(str(precio or 0)), modalidad, precio_lista or Decimal(str(precio or 0)), eq))
-        carrito.append({'id': eq.id, 'title': etiqueta, 'price': float(precio or 0),
-                        'qty': cant, 'duracion': dur, 'unit': unit or 'venta'})
+        partida = precios.partida_de_equipo(eq, unit)
+        partidas.append((partida, cant, dur, eq))
+        carrito.append({'id': eq.id, 'title': partida['descripcion'],
+                        'price': float(partida['precio_unitario']),
+                        'qty': cant, 'duracion': dur, 'unit': unit})
 
     if not partidas:
         return Response({'detalle': 'No pudimos identificar los equipos de tu solicitud.'}, status=400)
 
     obra = d.get('obra') or {}
-    # ¿La manda a autorización interna (su jefe) o directo a REMALI?
-    por_autorizar = bool(d.get('por_autorizar'))
     with transaction.atomic():
         cot = Cotizacion.objects.create(
             tipo='venta',          # provisional: lo define recalcular_tipo() con las partidas
             origen='cliente',
-            estado='por_autorizar' if por_autorizar else 'enviada',
+            estado='enviada',
             # Si la mandó con sesión, queda ligada a su cuenta para "Mis cotizaciones".
             usuario=request.user if request.user.is_authenticated else None,
             cliente_nombre=nombre_propio(nombre),
@@ -271,25 +136,15 @@ def crear_cotizacion_publica(request):
                 'carrito': carrito,
             },
         )
-        for etiqueta, cant, dur, precio, modalidad, precio_lista, eq_ref in partidas:
-            CotizacionItem.objects.create(cotizacion=cot, descripcion=etiqueta, cantidad=cant,
-                                          duracion=dur, precio_unitario=precio, precio_lista=precio_lista,
-                                          equipo=eq_ref, modalidad=modalidad)
+        for partida, cant, dur, eq_ref in partidas:
+            CotizacionItem.objects.create(cotizacion=cot, descripcion=partida['descripcion'],
+                                          cantidad=cant, duracion=dur,
+                                          precio_unitario=partida['precio_unitario'],
+                                          precio_lista=partida['precio_lista'],
+                                          equipo=eq_ref, modalidad=partida['modalidad'])
         cot.recalcular_tipo()   # venta, renta o mixta según lo que armó el cliente
-        if por_autorizar:
-            import secrets
-            cot.token_autorizacion = secrets.token_hex(16)
-            cot.save(update_fields=['token_autorizacion'])
 
     tel = cot.cliente_telefono or '—'
-    if por_autorizar:
-        # Aún NO llega a REMALI: sin notificación, sin correos de aviso y sin
-        # acuse. Todo eso se dispara cuando el jefe la autorice.
-        return Response({
-            'detalle': 'Cotización lista para autorización',
-            'folio': cot.folio, 'id': cot.id,
-            'liga_autorizacion': f'/autorizar/{cot.token_autorizacion}',
-        }, status=201)
     # 1) Notificación en el panel.
     try:
         crear_notificacion(
@@ -435,289 +290,7 @@ def vincular_cuenta_cotizacion(request, pk):
     return Response({'cuenta': f'{u.first_name} {u.last_name}'.strip() or u.username})
 
 
-@api_view(['GET', 'POST'])
-@permission_classes([AllowAny])
-@throttle_classes([SolicitudPublicaThrottle])
-def autorizacion_cotizacion(request, token):
-    """La liga de QUIEN AUTORIZA (el jefe del cliente), sin cuenta.
 
-    GET muestra la propuesta; POST con su nombre la autoriza: pasa a
-    'enviada', se registra quién/cuándo, y REMALI se entera solo
-    (notificación + correos + acuse) — el admin no mueve nada."""
-    from django.utils import timezone
-    cot = Cotizacion.objects.prefetch_related('items').filter(token_autorizacion=token).first()
-    if not cot:
-        return Response({'detalle': 'Enlace no válido.'}, status=404)
-
-    if request.method == 'GET':
-        return Response({
-            'folio': cot.folio,
-            'cliente': cot.cliente_nombre or '',
-            'empresa': (cot.datos_solicitud or {}).get('empresa') or '',
-            'obra': ((cot.datos_solicitud or {}).get('obra') or {}).get('direccion') or '',
-            'tipo': cot.tipo,
-            'items': [{'descripcion': i.descripcion, 'cantidad': i.cantidad, 'duracion': i.duracion,
-                       'precio': str(i.precio_unitario), 'subtotal': str(i.subtotal), 'modalidad': i.modalidad} for i in cot.items.all()],
-            'subtotal': str(cot.subtotal), 'descuento': str(getattr(cot, 'descuento_total', 0) or 0), 'total': str(cot.total),
-            'vence_el': cot.vence_el,
-            'autorizada': bool(cot.autorizada_en) and not cot.autorizacion_rechazo,
-            'rechazada': bool(cot.autorizacion_rechazo),
-            'autorizada_por': cot.autorizada_por,
-        })
-
-    if cot.autorizada_en:
-        return Response({
-            'detalle': 'Esta cotización ya fue resuelta.', 'folio': cot.folio, 'ya': True,
-            'rechazada': bool(cot.autorizacion_rechazo),
-        })
-    nombre_aut = (request.data.get('nombre') or '').strip()
-    if not nombre_aut:
-        return Response({'detalle': 'Escribe tu nombre para continuar.'}, status=400)
-
-    from maquinaria.models import crear_notificacion, nombre_propio as _np, Notificacion
-
-    if (request.data.get('accion') or 'autorizar') == 'rechazar':
-        # Rechazo INTERNO: nunca llegó a REMALI, así que a REMALI no se le
-        # avisa nada. Al cliente sí — su campanita y su lista se enteran.
-        motivo = (request.data.get('motivo') or '').strip()
-        cot.estado = 'rechazada'
-        cot.autorizada_por = _np(nombre_aut)[:120]
-        cot.autorizada_en = timezone.now()
-        cot.autorizacion_rechazo = motivo or 'Sin motivo indicado'
-        cot.save(update_fields=['estado', 'autorizada_por', 'autorizada_en', 'autorizacion_rechazo'])
-        if cot.usuario_id:
-            try:
-                Notificacion.objects.create(
-                    usuario=cot.usuario, tipo='sistema',
-                    titulo=f'Tu cotización {cot.folio} fue rechazada',
-                    mensaje=f'{cot.autorizada_por} la rechazó{f": {motivo}" if motivo else ""}. Puedes armar otra versión y volver a mandarla.',
-                    seccion='cotizaciones', ref=f'aut-rechazo-{cot.id}',
-                )
-            except Exception:
-                pass
-        return Response({'detalle': 'Rechazada. Le avisamos a quien la armó.', 'folio': cot.folio, 'rechazada': True})
-
-    # El jefe ya aprobó el dinero: entra ACEPTADA — a REMALI solo le queda
-    # concretar la venta o renta (convertir), sin pasos intermedios.
-    if cot.vence_el and cot.vence_el < timezone.now().date():
-        return Response({'detalle': f'Esta cotización venció el {cot.vence_el.strftime("%d/%m/%Y")}. Pide una versión nueva a quien la armó.'}, status=400)
-    cot.estado = 'aceptada'
-    cot.autorizada_por = _np(nombre_aut)[:120]
-    cot.autorizada_en = timezone.now()
-    cot.save(update_fields=['estado', 'autorizada_por', 'autorizada_en'])
-    if cot.usuario_id:
-        try:
-            Notificacion.objects.create(
-                usuario=cot.usuario, tipo='sistema',
-                titulo=f'Tu cotización {cot.folio} fue autorizada',
-                mensaje=f'{cot.autorizada_por} la autorizó; ya está con REMALI y te contactan pronto.',
-                seccion='cotizaciones', ref=f'aut-ok-{cot.id}',
-            )
-        except Exception:
-            pass
-
-    # AHORA sí llega a REMALI: panel + correos + acuse, igual que un envío directo.
-    tel = cot.cliente_telefono or '—'
-    try:
-        crear_notificacion(
-            'sistema',
-            f'Cotización {cot.folio} AUTORIZADA · lista para concretar',
-            f'{cot.autorizada_por} la autorizó: entra ACEPTADA. Solo falta concretar la venta o renta de {cot.cliente_nombre or "cliente"} por ${cot.total}.',
-            seccion='cotizaciones',
-            ref=f'cotizacion-autorizada-{cot.id}',
-            data={'cotizacion_id': cot.id, 'folio': cot.folio},
-        )
-    except Exception:
-        pass
-    try:
-        from maquinaria.correo import enviar_async
-        from maquinaria.models import CorreoAviso
-        destinatarios = list(CorreoAviso.objects.filter(verificado=True).values_list('email', flat=True))
-        if destinatarios:
-            enviar_async(
-                f'[REMALI] Cotización {cot.folio} autorizada',
-                f'{cot.autorizada_por} autorizó la cotización {cot.folio} de {cot.cliente_nombre or "—"} '
-                f'({tel}) por ${cot.total}. Ya aparece en el panel para atenderse.',
-                destinatarios,
-            )
-        _enviar_acuse_cliente(cot)
-    except Exception:
-        pass
-    return Response({'detalle': 'Autorizada: REMALI la recibió.', 'folio': cot.folio})
-
-
-@api_view(['POST'])
-@permission_classes([IsAuthenticated])   # el lote lo arma el comprador con sesión
-@throttle_classes([SolicitudPublicaThrottle])
-def crear_lote_autorizacion(request):
-    """Crea VARIAS cotizaciones (todas 'por_autorizar') bajo UN mismo token_lote,
-    para que el jefe las apruebe con UNA sola liga. Comparten el mismo contacto
-    y la misma obra (mismo comprador). Todo-o-nada: si un borrador no sirve, no
-    se crea ninguno."""
-    import secrets
-    d = request.data or {}
-    cotizaciones = d.get('cotizaciones') or []
-    if not isinstance(cotizaciones, list) or not cotizaciones:
-        return Response({'detalle': 'Selecciona al menos un borrador para el lote.'}, status=400)
-    if len(cotizaciones) > 20:
-        return Response({'detalle': 'Máximo 20 cotizaciones por lote.'}, status=400)
-
-    cliente = d.get('cliente') or {}
-    if not (cliente.get('nombre') or '').strip():
-        return Response({'detalle': 'Faltan tus datos de contacto.'}, status=400)
-    obra = d.get('obra') or {}
-    if not (obra.get('direccion') or '').strip():
-        return Response({'detalle': 'Falta la obra a la que va el lote.'}, status=400)
-
-    token_lote = secrets.token_hex(16)
-    folios = []
-    try:
-        with transaction.atomic():
-            for c in cotizaciones:
-                cot = _construir_cotizacion(
-                    {
-                        'items': c.get('items') or [],
-                        'cliente': cliente,
-                        'obra': obra,
-                        'requiere_factura': d.get('requiere_factura'),
-                        'cupon': c.get('cupon'),
-                    },
-                    request.user,
-                    por_autorizar=True,
-                    token_lote=token_lote,
-                )
-                folios.append(cot.folio)
-    except ValueError as e:
-        return Response({'detalle': str(e)}, status=400)
-
-    return Response({
-        'detalle': 'Lote listo para autorización',
-        'liga_autorizacion': f'/autorizar-lote/{token_lote}',
-        'token': token_lote,
-        'folios': folios,
-        'count': len(folios),
-    }, status=201)
-
-
-@api_view(['GET', 'POST'])
-@permission_classes([AllowAny])
-@throttle_classes([SolicitudPublicaThrottle])
-def autorizacion_lote(request, token):
-    """Liga pública del jefe para un LOTE: ve TODAS las cotizaciones con su total
-    combinado y las autoriza/rechaza JUNTAS (todo-o-nada). Espejo de
-    autorizacion_cotizacion, en bucle."""
-    from django.utils import timezone
-    cots = list(Cotizacion.objects.prefetch_related('items').filter(token_lote=token).order_by('id'))
-    if not cots:
-        return Response({'detalle': 'Enlace no válido.'}, status=404)
-
-    primero = cots[0]
-    resuelto = any(c.autorizada_en for c in cots)
-    rechazado = any(c.autorizacion_rechazo for c in cots)
-    total_lote = sum((c.total for c in cots), Decimal('0'))
-
-    def _ser(c):
-        return {
-            'folio': c.folio, 'tipo': c.tipo,
-            'items': [{'descripcion': i.descripcion, 'cantidad': i.cantidad, 'duracion': i.duracion,
-                       'precio': str(i.precio_unitario), 'subtotal': str(i.subtotal), 'modalidad': i.modalidad}
-                      for i in c.items.all()],
-            'subtotal': str(c.subtotal), 'total': str(c.total),
-        }
-
-    if request.method == 'GET':
-        return Response({
-            'cliente': primero.cliente_nombre or '',
-            'empresa': (primero.datos_solicitud or {}).get('empresa') or '',
-            'obra': ((primero.datos_solicitud or {}).get('obra') or {}).get('direccion') or '',
-            'count': len(cots),
-            'cotizaciones': [_ser(c) for c in cots],
-            'total': str(total_lote),
-            'vence_el': primero.vence_el,
-            'autorizada': resuelto and not rechazado,
-            'rechazada': rechazado,
-            'autorizada_por': primero.autorizada_por,
-        })
-
-    if resuelto:
-        return Response({'detalle': 'Este lote ya fue resuelto.', 'ya': True, 'rechazada': rechazado})
-    nombre_aut = (request.data.get('nombre') or '').strip()
-    if not nombre_aut:
-        return Response({'detalle': 'Escribe tu nombre para continuar.'}, status=400)
-
-    from maquinaria.models import crear_notificacion, nombre_propio as _np, Notificacion, CorreoAviso
-    from maquinaria.correo import enviar_async
-    quien = _np(nombre_aut)[:120]
-    ahora = timezone.now()
-    folios = [c.folio for c in cots]
-
-    if (request.data.get('accion') or 'autorizar') == 'rechazar':
-        # Rechazo INTERNO: nunca llegó a REMALI, así que a REMALI no se le avisa.
-        motivo = (request.data.get('motivo') or '').strip()
-        with transaction.atomic():
-            for c in cots:
-                c.estado = 'rechazada'
-                c.autorizada_por = quien
-                c.autorizada_en = ahora
-                c.autorizacion_rechazo = motivo or 'Sin motivo indicado'
-                c.save(update_fields=['estado', 'autorizada_por', 'autorizada_en', 'autorizacion_rechazo'])
-        if primero.usuario_id:
-            try:
-                Notificacion.objects.create(
-                    usuario=primero.usuario, tipo='sistema',
-                    titulo=f'Tu lote de {len(cots)} cotizaciones fue rechazado',
-                    mensaje=f'{quien} lo rechazó{f": {motivo}" if motivo else ""}. Puedes armar otra versión y volver a mandarlo.',
-                    seccion='cotizaciones', ref=f'aut-lote-rechazo-{token[:12]}',
-                )
-            except Exception:
-                pass
-        return Response({'detalle': 'Rechazado. Le avisamos a quien lo armó.', 'rechazada': True})
-
-    # Autorizar TODAS. Si alguna venció, no se autoriza el lote (todo-o-nada).
-    if any(c.vence_el and c.vence_el < ahora.date() for c in cots):
-        return Response({'detalle': 'Una o más cotizaciones del lote ya vencieron. Pide una versión nueva a quien lo armó.'}, status=400)
-    with transaction.atomic():
-        for c in cots:
-            c.estado = 'aceptada'
-            c.autorizada_por = quien
-            c.autorizada_en = ahora
-            c.save(update_fields=['estado', 'autorizada_por', 'autorizada_en'])
-
-    if primero.usuario_id:
-        try:
-            Notificacion.objects.create(
-                usuario=primero.usuario, tipo='sistema',
-                titulo=f'Tu lote de {len(cots)} cotizaciones fue autorizado',
-                mensaje=f'{quien} lo autorizó; ya están con REMALI y te contactan pronto.',
-                seccion='cotizaciones', ref=f'aut-lote-ok-{token[:12]}',
-            )
-        except Exception:
-            pass
-    try:
-        crear_notificacion(
-            'sistema',
-            f'Lote de {len(cots)} cotizaciones AUTORIZADO',
-            f'{quien} autorizó {len(cots)} cotizaciones de {primero.cliente_nombre or "cliente"} por ${total_lote}. Solo falta concretarlas.',
-            seccion='cotizaciones',
-            ref=f'lote-autorizado-{token[:12]}',
-            data={'folios': folios},
-        )
-    except Exception:
-        pass
-    try:
-        destinatarios = list(CorreoAviso.objects.filter(verificado=True).values_list('email', flat=True))
-        if destinatarios:
-            enviar_async(
-                f'[REMALI] Lote autorizado · {len(cots)} cotizaciones',
-                f'{quien} autorizó un lote de {len(cots)} cotizaciones ({", ".join(folios)}) de '
-                f'{primero.cliente_nombre or "—"} por ${total_lote}. Ya aparecen en el panel.',
-                destinatarios,
-            )
-        for c in cots:
-            _enviar_acuse_cliente(c)
-    except Exception:
-        pass
-    return Response({'detalle': 'Autorizado: REMALI recibió el lote.'})
 
 
 @api_view(['POST'])
@@ -830,7 +403,7 @@ def cotizaciones_mias(request):
     """
     # Etiquetas de cara al cliente: 'enviada' significa "ya la recibimos y la
     # estamos revisando", no un estado interno del panel.
-    LABEL = {'borrador': 'En revisión', 'enviada': 'En revisión', 'por_autorizar': 'Esperando autorización',
+    LABEL = {'borrador': 'En revisión', 'enviada': 'En revisión',
              'aceptada': 'Aceptada', 'rechazada': 'No disponible', 'cancelada': 'Cancelada'}
     hoy = timezone.now().date()
     qs = (Cotizacion.objects
@@ -839,18 +412,15 @@ def cotizaciones_mias(request):
           .order_by('-creada')[:100])
     data = []
     for c in qs:
-        vencida = c.estado in ('borrador', 'enviada', 'por_autorizar') and c.vence_el and c.vence_el < hoy
+        vencida = c.estado in ('borrador', 'enviada') and c.vence_el and c.vence_el < hoy
         data.append({
             'id': c.id,
             'folio': c.folio,
             'estado': 'vencida' if vencida else c.estado,
-            'estado_label': 'Vencida' if vencida else ('Rechazada por tu autorizador' if (c.estado == 'rechazada' and c.autorizacion_rechazo) else LABEL.get(c.estado, c.estado)),
+            'estado_label': 'Vencida' if vencida else LABEL.get(c.estado, c.estado),
             'cancelacion_solicitada': c.cancelacion_solicitada.isoformat() if c.cancelacion_solicitada else None,
-            # Para reenviar la liga al jefe desde "Mis cotizaciones".
-            'liga_autorizacion': (f'/autorizar/{c.token_autorizacion}' if c.estado == 'por_autorizar' and c.token_autorizacion else None),
-            # Si es parte de un LOTE: se agrupan en la lista y comparten UNA liga
-            # (/autorizar-lote/<token>) en vez de la individual de cada una.
-            'token_lote': c.token_lote or None,
+            # Vino firmada por el autorizador del cliente (si fue el caso).
+            'autorizada_por': c.autorizada_por or None,
             'tipo': c.tipo,
             'total': str(c.total),
             'aplica_iva': c.aplica_iva,
@@ -965,8 +535,7 @@ class CotizacionDetail(generics.RetrieveUpdateDestroyAPIView):
                 return Response({'detalle': 'Está cancelada: es un estado final.'}, status=400)
             if nuevo_estado == 'cancelada' and not cot.cancelacion_solicitada:
                 return Response({'detalle': 'Cancelada solo aplica cuando el cliente la solicitó (usa Aprobar cancelación).'}, status=400)
-            autorizada = bool(cot.autorizada_por) and not cot.autorizacion_rechazo
-            if autorizada and nuevo_estado in ('borrador', 'enviada', 'por_autorizar'):
+            if cot.autorizada_por and nuevo_estado in ('borrador', 'enviada'):
                 return Response({'detalle': f'Vino autorizada por {cot.autorizada_por}: solo puede estar Aceptada, Rechazada o Cancelada.'}, status=400)
             if cot.estado != 'borrador' and nuevo_estado == 'borrador':
                 return Response({'detalle': 'Ya tiene folio y el cliente la conoce: no puede regresar a borrador.'}, status=400)
@@ -993,7 +562,7 @@ class CotizacionDetail(generics.RetrieveUpdateDestroyAPIView):
         venta = cot.conversiones.first()
         if venta:
             return Response(
-                {'detail': f'No se puede eliminar "{cot.folio}": ya se convirtió en la venta #{venta.id}. '
+                {'detalle': f'No se puede eliminar "{cot.folio}": ya se convirtió en la venta #{venta.id}. '
                            'Borrarla dejaría esa venta sin el detalle de sus partidas.'},
                 status=status.HTTP_409_CONFLICT,
             )
@@ -1088,7 +657,7 @@ def cotizacion_agregar_item(request, pk: int):
             eq = Equipo.objects.get(pk=equipo_id)
         except (Equipo.DoesNotExist, ValueError, TypeError):
             return Response({'detalle': 'Equipo no encontrado'}, status=404)
-        etiqueta, precio, modalidad = _resolver_partida(eq, modalidad if modalidad in _UNIDADES_RENTA else '')
+        etiqueta, precio, modalidad = precios.resolver_partida(eq, modalidad if modalidad in _UNIDADES_RENTA else '')
         precio = Decimal(str(precio or 0))
         lista = precio
         promo = min(90, max(0, getattr(eq, 'promo_pct', 0) or 0))
@@ -1304,39 +873,6 @@ def atender_cotizacion(request, pk: int):
         })
     return Response({'detalle': 'La estás atendiendo', 'cotizacion': CotizacionSerializer(cot).data})
 
-
-@api_view(['POST'])
-@permission_classes([PuedeCotizar])
-def mandar_a_autorizar(request, pk: int):
-    """La deja lista y la MANDA A AUTORIZAR: pasa a 'por_autorizar' y devuelve la
-    liga del jefe (/autorizar/<token>) que ya existe. El asesor propone; quien
-    autoriza es el jefe desde su liga (o administración desde el panel). No
-    convierte ni acepta: eso viene después y es de otro."""
-    import secrets
-    try:
-        cot = Cotizacion.objects.prefetch_related('items').get(pk=pk)
-    except Cotizacion.DoesNotExist:
-        return Response({'detalle': 'Cotización no encontrada'}, status=404)
-    bloqueo = _bloqueada_si_convertida(cot)
-    if bloqueo:
-        return bloqueo
-    if cot.estado in ('aceptada', 'rechazada', 'cancelada'):
-        return Response({'detalle': f'Ya está {cot.get_estado_display().lower()}: no se puede mandar a autorizar.'}, status=400)
-    if not cot.items.exists():
-        return Response({'detalle': 'Agrega al menos una partida antes de mandarla a autorizar.'}, status=400)
-    cot.estado = 'por_autorizar'
-    if not cot.token_autorizacion:
-        cot.token_autorizacion = secrets.token_hex(16)
-    # Deja registrado quién la trabajó, si nadie la había tomado.
-    if not cot.atendida_por_id and request.user.is_authenticated:
-        cot.atendida_por = request.user
-        cot.atendida_en = timezone.now()
-    cot.save()   # completo: al salir de 'borrador' el modelo asigna folio
-    return Response({
-        'detalle': 'Lista para autorizar. Comparte la liga con quien autoriza.',
-        'liga_autorizacion': f'/autorizar/{cot.token_autorizacion}',
-        'cotizacion': CotizacionSerializer(cot).data,
-    })
 
 
 @api_view(['PATCH', 'DELETE'])

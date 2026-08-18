@@ -56,3 +56,46 @@ class BorradorPrecioTests(TestCase):
         # 2 máquinas × 4 días × $300, sin factura: la renta no suma IVA.
         self.assertEqual(b.total, Decimal('2400.00'))
         self.assertEqual(b.tipo, 'renta')
+
+
+class DuenoUnicoTests(TestCase):
+    """El invariante que sostiene la privacidad: un dueño, nunca dos."""
+
+    def test_no_se_puede_tener_cuenta_y_espacio_a_la_vez(self):
+        from django.db.utils import IntegrityError
+        user = get_user_model().objects.create_user('c2', password='x')
+        with self.assertRaises(IntegrityError):
+            BorradorCliente.objects.create(usuario=user, espacio_token='a' * 32)
+
+    def test_no_se_puede_quedar_sin_dueno(self):
+        from django.db.utils import IntegrityError
+        with self.assertRaises(IntegrityError):
+            BorradorCliente.objects.create()
+
+
+class CotizacionLimpiaTests(TestCase):
+    """La cotización de REMALI ya no carga la etapa privada del cliente."""
+
+    def test_ya_no_existe_el_estado_por_autorizar(self):
+        from cotizaciones.models import Cotizacion
+        self.assertNotIn('por_autorizar', dict(Cotizacion.ESTADOS))
+
+    def test_ya_no_tiene_los_campos_de_autorizacion_interna(self):
+        from cotizaciones.models import Cotizacion
+        campos = {f.name for f in Cotizacion._meta.get_fields()}
+        self.assertNotIn('token_autorizacion', campos)
+        self.assertNotIn('token_lote', campos)
+        self.assertNotIn('autorizacion_rechazo', campos)
+        # Estos SÍ se quedan: a REMALI le sirve saber que llegó firmada.
+        self.assertIn('autorizada_por', campos)
+        self.assertIn('autorizada_en', campos)
+
+    def test_el_desglose_del_modelo_sale_de_precios(self):
+        from cotizaciones import precios
+        from cotizaciones.models import Cotizacion, CotizacionItem
+        cot = Cotizacion.objects.create(estado='enviada', aplica_iva=False)
+        CotizacionItem.objects.create(cotizacion=cot, descripcion='x', cantidad=1,
+                                      precio_unitario=Decimal('11600'), modalidad='venta')
+        base, iva = precios.desglose(Decimal('11600'), Decimal('0'), False)
+        self.assertEqual(cot.base, base)
+        self.assertEqual(cot.iva, iva)

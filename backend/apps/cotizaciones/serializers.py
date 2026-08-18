@@ -74,7 +74,7 @@ class CotizacionSerializer(serializers.ModelSerializer):
             'items', 'fotos', 'subtotal', 'subtotal_venta', 'subtotal_renta', 'base', 'iva', 'total', 'descuento_cupon', 'cupon',
             'cliente_display', 'vigencia_hasta', 'vencida', 'token_publico',
             'convertida', 'venta_id', 'renta_id', 'atendida_en', 'atendida_por_nombre', 'usuario_nombre', 'usuario_email', 'entrega_prometida', 'escalada_en',
-            'autorizada_por', 'autorizada_en', 'autorizacion_rechazo', 'cancelacion_solicitada', 'cancelacion_motivo',
+            'autorizada_por', 'autorizada_en', 'cancelacion_solicitada', 'cancelacion_motivo',
             'usuario',
             'creada', 'actualizada',
         ]

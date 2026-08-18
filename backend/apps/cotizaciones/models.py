@@ -12,7 +12,9 @@ from django.db import models
 from django.db.models import Max
 from django.utils import timezone
 
-IVA_RATE = Decimal('0.16')
+from . import precios
+
+from .precios import IVA_RATE  # noqa: E402  (re-export: la tasa vive en precios.py)
 
 
 class Cotizacion(models.Model):
@@ -20,9 +22,6 @@ class Cotizacion(models.Model):
     TIPOS = [('venta', 'Venta'), ('renta', 'Renta'), ('mixta', 'Venta y renta')]
     ESTADOS = [
         ('borrador', 'Borrador'),
-        # El cliente la mandó a SU jefe: aún no llega a REMALI; al autorizarse
-        # pasa sola a 'enviada' (el admin no mueve nada).
-        ('por_autorizar', 'Por autorizar'),
         ('enviada', 'Enviada'),
         ('aceptada', 'Aceptada'),
         ('rechazada', 'Rechazada'),
@@ -104,19 +103,14 @@ class Cotizacion(models.Model):
     # cientos de clientes, buscar en un selector no escala).
     token_vinculo = models.CharField(max_length=64, null=True, blank=True, unique=True)
     token_vinculo_expira = models.DateTimeField(null=True, blank=True)
-    # Autorización interna del cliente: liga pública para que quien autoriza
-    # (su jefe) apruebe SIN cuenta. Quién y cuándo quedan registrados.
-    token_autorizacion = models.CharField(max_length=64, null=True, blank=True, unique=True)
+    # Si vino firmada por el autorizador del cliente: quién y cuándo. La liga,
+    # el rechazo y el lote viven en el borrador (models_borrador.py) — a REMALI
+    # solo le llega el resultado, no el forcejeo interno del cliente.
     autorizada_por = models.CharField(max_length=120, blank=True, default='')
     autorizada_en = models.DateTimeField(null=True, blank=True)
     # El cliente pidió cancelarla (REMALI decide): cuándo y por qué.
     cancelacion_solicitada = models.DateTimeField(null=True, blank=True)
     cancelacion_motivo = models.TextField(blank=True, default='')
-    # Si quien autoriza la RECHAZA: el motivo queda aquí (vacío = autorizada).
-    autorizacion_rechazo = models.TextField(blank=True, default='')
-    # Autorización EN LOTE: varias cotizaciones comparten este token para que el
-    # jefe las apruebe TODAS con una sola liga. Vacío = no es parte de un lote.
-    token_lote = models.CharField(max_length=64, null=True, blank=True, db_index=True)
     escalada_en = models.DateTimeField(null=True, blank=True, help_text='Cuándo se avisó a los respaldos por falta de atención')
 
     creada = models.DateTimeField(auto_now_add=True)
@@ -198,9 +192,7 @@ class Cotizacion(models.Model):
         modalidades = {i.modalidad for i in self.items.all()}
         if not modalidades:
             return self.tipo
-        hay_venta = 'venta' in modalidades
-        hay_renta = bool(modalidades - {'venta'})
-        nuevo = 'mixta' if (hay_venta and hay_renta) else ('venta' if hay_venta else 'renta')
+        nuevo = precios.tipo_desde_modalidades(modalidades)
         if nuevo != self.tipo:
             self.tipo = nuevo
             self.save(update_fields=['tipo', 'actualizada'])
@@ -224,16 +216,13 @@ class Cotizacion(models.Model):
     def base(self):
         """Base gravable (sin IVA). En VENTA el precio YA incluye IVA, así que se
         desglosa (precio / 1.16); en RENTA el subtotal ya viene sin IVA."""
-        base_venta = self.subtotal_venta / (Decimal('1') + IVA_RATE)
-        return (base_venta + self.subtotal_renta).quantize(Decimal('0.01'))
+        return precios.desglose(self.subtotal_venta, self.subtotal_renta, self.aplica_iva)[0]
 
     @property
     def iva(self):
         """VENTA: IVA incluido en el precio, se desglosa (siempre). RENTA: se suma
         solo si el cliente pidió factura (aplica_iva)."""
-        iva_venta = self.subtotal_venta - self.subtotal_venta / (Decimal('1') + IVA_RATE)
-        iva_renta = (self.subtotal_renta * IVA_RATE) if self.aplica_iva else Decimal('0.00')
-        return (iva_venta + iva_renta).quantize(Decimal('0.01'))
+        return precios.desglose(self.subtotal_venta, self.subtotal_renta, self.aplica_iva)[1]
 
     @property
     def descuento_cupon(self):
@@ -265,10 +254,8 @@ class Cotizacion(models.Model):
     @property
     def total_lista(self):
         """Total a precio de LISTA (antes de promo). Base del descuento de contado."""
-        base = self._sub_venta_lista / (Decimal('1') + IVA_RATE) + self._sub_renta_lista
-        iva_v = self._sub_venta_lista - self._sub_venta_lista / (Decimal('1') + IVA_RATE)
-        iva_r = (self._sub_renta_lista * IVA_RATE) if self.aplica_iva else Decimal('0.00')
-        return (base + iva_v + iva_r).quantize(Decimal('0.01'))
+        base, iva = precios.desglose(self._sub_venta_lista, self._sub_renta_lista, self.aplica_iva)
+        return (base + iva).quantize(Decimal('0.01'))
 
     @property
     def total_contado(self):
