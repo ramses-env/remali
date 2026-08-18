@@ -20,6 +20,32 @@ class SolicitudPublicaThrottle(AnonRateThrottle):
     scope = 'solicitud_publica'
 
 
+class BorradorThrottle(AnonRateThrottle):
+    """Guardar y editar borradores del cliente.
+
+    Esto NO manda correos ni crea nada en REMALI: es un carrito que se guarda.
+    Con el techo de las solicitudes (10/hora) un invitado que compara cinco
+    versiones se quedaría trabado a media tarde, que es justo el trabajo que
+    esta función existe para permitirle.
+    """
+    scope = 'borrador'
+
+
+class AutorizacionThrottle(AnonRateThrottle):
+    """La liga de quien autoriza.
+
+    Solo cuenta las decisiones (POST). Abrir la liga para leerla es gratis: el
+    jefe puede entrar, pensarlo, cerrarla y volver mañana sin que un contador
+    invisible le cierre la puerta.
+    """
+    scope = 'solicitud_publica'
+
+    def allow_request(self, request, view):
+        if request.method in ('GET', 'HEAD', 'OPTIONS'):
+            return True
+        return super().allow_request(request, view)
+
+
 class SubidaEvidenciaThrottle(AnonRateThrottle):
     """Tope a la subida de fotos.
 

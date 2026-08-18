@@ -1,8 +1,20 @@
 from django.urls import path
 
-from . import views
+from . import views, views_borrador
 
 urlpatterns = [
+    # ── El taller privado del cliente. REMALI no ve nada de aquí. ──
+    # El invitado se identifica con el encabezado X-Espacio, no con la URL.
+    path('borradores/', views_borrador.borradores),
+    path('borradores/<int:pk>/', views_borrador.borrador_detalle),
+    path('borradores/<int:pk>/duplicar/', views_borrador.borrador_duplicar),
+    path('borradores/<int:pk>/enviar/', views_borrador.borrador_enviar),
+    path('autorizaciones/', views_borrador.autorizaciones),
+    path('autorizaciones/<int:pk>/', views_borrador.autorizacion_retirar),
+    path('espacio/reclamar/', views_borrador.reclamar_espacio),
+    # Público (sin cuenta): la liga de quien autoriza. Sirve para 1 y para N.
+    path('autorizacion/<str:token>/', views_borrador.autorizacion),
+
     # Público: la tienda envía la solicitud del cliente (secure-by-default lo cubre con AllowAny explícito).
     path('tienda/cotizacion/', views.crear_cotizacion_publica),
     path('cotizaciones/', views.CotizacionListCreate.as_view()),

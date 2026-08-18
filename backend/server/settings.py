@@ -443,6 +443,7 @@ REST_FRAMEWORK = {
     'DEFAULT_THROTTLE_RATES': {
         'solicitud_publica': '10/hour',   # cotizaciones que manda un mismo visitante
         'anon_publico': '120/hour',       # navegación anónima del catálogo
+        'borrador': '120/hour',           # guardar/editar borradores del cliente (no manda correos)
         'subida_evidencia': '200/hour',   # fotos de entrega/devolución por técnico
         'login': '10/min',                # intentos de login por IP (anti fuerza bruta)
         'registro': '5/hour',             # altas de cuenta de cliente por IP
