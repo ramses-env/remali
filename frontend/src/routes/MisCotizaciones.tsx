@@ -10,12 +10,13 @@ import { useAuth } from '../store/auth'
 import { useCart, type Modalidad } from '../store/cart'
 import { useToast } from '../store/toast'
 import {
-  leerBorradores, eliminarBorrador, totalBorrador, resumenBorrador, MAX_BORRADORES,
-  borradorVencido, VIGENCIA_BORRADOR_DIAS, type Borrador,
+  listarBorradores, eliminarBorrador, duplicarBorrador, enviarBorrador, actualizarBorrador,
+  mandarAAutorizar, retirarPaquete, migrarBorradoresLocales, reclamarEspacio,
+  totalBorrador, resumenBorrador, aLineasDeCarrito, tieneEquiposCaidos,
+  MAX_BORRADORES, type Borrador, type Paquete,
 } from '../lib/borradores'
 
 type CotMia = {
-  liga_autorizacion?: string | null
   folio: string
   estado: string
   estado_label: string
@@ -28,12 +29,9 @@ type CotMia = {
   carrito: { id: number; title: string; price: number; qty: number; duracion?: number; unit: Modalidad }[]
   pdf: string | null
   atendida_por?: string | null
-  token_lote?: string | null
+  /** Nombre de quien la autorizó del lado del cliente, si vino firmada. */
+  autorizada_por?: string | null
 }
-
-/** Una fila de la lista de enviadas: una cotización suelta, o un LOTE pendiente
- *  (varias que se autorizan juntas con una sola liga). */
-type RenderItem = { kind: 'cot'; cot: CotMia } | { kind: 'lote'; token: string; cots: CotMia[] }
 
 const monoLabel = 'text-[10.5px] font-mono tracking-[0.14em] text-mute uppercase'
 const UNIT_TXT: Record<string, string> = { venta: 'compra', dia: 'renta por día', semana: 'renta por semana', mes: 'renta por mes' }
@@ -43,7 +41,6 @@ const PILL: Record<string, string> = {
   rechazada: 'text-red-500 border-red-500/40 bg-red-500/10',
   vencida: 'text-mute border-edge bg-surface-2',
   borrador: 'text-mute border-edge bg-surface-2',
-  por_autorizar: 'text-amber-600 dark:text-amber-400 border-amber-500/40 bg-amber-500/10',
   cancelada: 'text-red-500 border-red-500/40 bg-red-500/10',
 }
 const LINEA_ESTADO: Record<string, string> = {
@@ -51,14 +48,12 @@ const LINEA_ESTADO: Record<string, string> = {
   aceptada: 'ACEPTADA · COORDINANDO ENTREGA',
   rechazada: 'NO PROCEDIÓ',
   vencida: 'PRECIOS EXPIRADOS · VUELVE A COTIZAR',
-  por_autorizar: 'ESPERANDO AUTORIZACIÓN · COMPARTE LA LIGA',
   cancelada: 'CANCELADA A TU SOLICITUD',
 }
 // Color de la línea "qué sigue" según el estado (igual criterio que los badges).
 const LINEA_TONO: Record<string, string> = {
   enviada: 'text-gold-ink',
   aceptada: 'text-emerald-500',
-  por_autorizar: 'text-amber-600 dark:text-amber-400',
   rechazada: 'text-mute',
   vencida: 'text-mute',
   cancelada: 'text-mute',
@@ -76,19 +71,22 @@ function resumenCot(c: CotMia): string {
 type ObraCli = { id: number; nombre: string; empresa: string; responsable: string; direccion: string; telefono: string; email: string; predeterminada?: boolean }
 type PerfilLote = { first_name?: string; last_name?: string; empresa?: string; email?: string; telefono?: string }
 
-/** Modal: manda VARIOS borradores como UN lote a autorizar. Toma el contacto del
- *  perfil y UNA obra (la misma para todas), crea las N cotizaciones bajo un
- *  token_lote y devuelve la liga única del jefe para compartir. */
-function LoteAutorizarModal({ seleccion, onClose, onEnviado, notify }: {
+/** Modal: manda uno o varios borradores a autorizar bajo UNA sola liga.
+ *  Toma el contacto del perfil y UNA obra (la misma para todas), se las fija a
+ *  los borradores y crea el paquete. Mandar uno y mandar tres es el mismo
+ *  camino: el paquete de uno no es un caso especial. */
+function AutorizarModal({ seleccion, onClose, onEnviado, notify }: {
   seleccion: Borrador[]
   onClose: () => void
-  onEnviado: (ids: number[]) => void
+  onEnviado: () => void
   notify: (m: string, kind?: 'x') => void
 }) {
   const [perfil, setPerfil] = useState<PerfilLote | null>(null)
   const [obras, setObras] = useState<ObraCli[]>([])
   const [obraId, setObraId] = useState<number | null>(null)
   const [factura, setFactura] = useState(false)
+  const [modo, setModo] = useState<'opciones' | 'lista'>(seleccion.length > 1 ? 'opciones' : 'lista')
+  const [mensaje, setMensaje] = useState('')
   const [creando, setCreando] = useState(false)
   const [liga, setLiga] = useState<string | null>(null)
   const [copiada, setCopiada] = useState(false)
@@ -107,26 +105,35 @@ function LoteAutorizarModal({ seleccion, onClose, onEnviado, notify }: {
   const nombre = `${perfil?.first_name || ''} ${perfil?.last_name || ''}`.trim()
   const obra = obras.find(o => o.id === obraId) || null
   const listo = !!nombre && !!obra && !!(obra.direccion || '').trim()
+  const varias = seleccion.length > 1
 
   async function crear() {
     if (!listo || !obra) return
     setCreando(true)
     try {
-      const r = await api.post<{ liga_autorizacion: string }>('/tienda/cotizacion/lote/', {
-        // El backend espera equipo_id + cantidad (no id/qty del carrito), igual
-        // que el envío individual. Sin este mapeo, cantidad cae a 1 y el total
-        // sale mal.
-        cotizaciones: seleccion.map(b => ({
-          items: b.items.map(i => ({ equipo_id: i.id, cantidad: i.qty, duracion: i.duracion, unit: i.unit || 'venta' })),
-          cupon: b.coupon?.code,
-        })),
-        cliente: { nombre, empresa: perfil?.empresa || obra.empresa || '', email: perfil?.email || '', telefono: perfil?.telefono || '' },
-        obra: { responsable: obra.responsable, direccion: obra.direccion, telefono: obra.telefono, email: obra.email },
-        requiere_factura: factura,
-      })
-      setLiga(`${window.location.origin}${r.data.liga_autorizacion}`)
+      // Los datos de contacto y obra se guardan EN cada borrador antes de
+      // congelarlo: es lo que la cotización va a llevar si el jefe la autoriza.
+      for (const b of seleccion) {
+        await actualizarBorrador(b.id, {
+          requiere_factura: factura,
+          datos_contacto: {
+            nombre,
+            empresa: perfil?.empresa || obra.empresa || '',
+            email: perfil?.email || '',
+            telefono: perfil?.telefono || '',
+          },
+          obra: {
+            responsable: obra.responsable,
+            direccion: obra.direccion,
+            telefono: obra.telefono,
+            email: obra.email,
+          },
+        })
+      }
+      const paquete = await mandarAAutorizar(seleccion.map(b => b.id), modo, mensaje.trim())
+      setLiga(`${window.location.origin}${paquete.liga}`)
     } catch (e) {
-      notify((e as { response?: { data?: { detalle?: string } } })?.response?.data?.detalle || 'No se pudo crear el lote', 'x')
+      notify((e as { response?: { data?: { detalle?: string } } })?.response?.data?.detalle || 'No se pudo crear la liga', 'x')
     } finally {
       setCreando(false)
     }
@@ -137,15 +144,15 @@ function LoteAutorizarModal({ seleccion, onClose, onEnviado, notify }: {
     try { await navigator.clipboard.writeText(liga); setCopiada(true); setTimeout(() => setCopiada(false), 2000) } catch { notify('No se pudo copiar', 'x') }
   }
 
-  const wa = liga ? `https://wa.me/?text=${encodeURIComponent(`Hola, te comparto ${seleccion.length} cotizaciones de maquinaria para autorizar. Ábrelas, revisa el total y autorízalas aquí:\n${liga}`)}` : ''
+  const wa = liga ? `https://wa.me/?text=${encodeURIComponent(`Hola, te comparto ${seleccion.length === 1 ? 'una cotización' : `${seleccion.length} cotizaciones`} de maquinaria para autorizar. Ábrela, revisa el total y autorízala aquí:\n${liga}`)}` : ''
 
   return (
     <div className="modal-in fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-6" onClick={onClose}>
       <div onClick={e => e.stopPropagation()} className="bg-surface w-full sm:max-w-lg sm:rounded-3xl rounded-t-3xl border border-edge sm:my-auto max-h-[92vh] flex flex-col overflow-hidden shadow-[0_20px_50px_rgba(33,29,22,0.18)]">
         <div className="px-6 py-5 border-b border-edge flex items-start justify-between gap-4">
           <div className="min-w-0">
-            <h2 className="text-lg font-black text-ink tracking-tight">Mandar lote a autorizar</h2>
-            <p className="text-[13px] text-mute mt-0.5">{seleccion.length} cotizaciones · total {formatMoney(totalLote)}</p>
+            <h2 className="text-lg font-black text-ink tracking-tight">Mandar a autorizar</h2>
+            <p className="text-[13px] text-mute mt-0.5">{seleccion.length} {seleccion.length === 1 ? 'cotización' : 'cotizaciones'} · total {formatMoney(totalLote)}</p>
           </div>
           <button onClick={onClose} className="w-9 h-9 shrink-0 rounded-xl bg-surface-2 text-mute hover:text-ink hover:bg-edge/60 transition-colors flex items-center justify-center" aria-label="Cerrar">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" d="M6 6l12 12M18 6L6 18" /></svg>
@@ -156,15 +163,17 @@ function LoteAutorizarModal({ seleccion, onClose, onEnviado, notify }: {
           {liga ? (
             <div className="flex flex-col gap-4">
               <div className="rounded-2xl bg-emerald-500/10 p-4">
-                <p className="text-sm font-bold text-emerald-600 dark:text-emerald-400">Liga lista para tu jefe</p>
-                <p className="text-[13px] text-mute mt-1">Cuando la autorice, las {seleccion.length} cotizaciones llegan a REMALI juntas.</p>
+                <p className="text-sm font-bold text-emerald-600 dark:text-emerald-400">Liga lista para quien autoriza</p>
+                <p className="text-[13px] text-mute mt-1">
+                  Los precios quedaron congelados 15 días. REMALI solo se entera de lo que se autorice.
+                </p>
               </div>
               <div className="flex items-center gap-2 rounded-xl border border-edge bg-surface-2 px-3 py-2.5">
                 <span className="flex-1 text-[13px] text-mute truncate font-mono">{liga}</span>
                 <button onClick={copiar} className="shrink-0 h-9 px-3 rounded-lg bg-gold text-black text-[13px] font-bold hover:opacity-90 transition-opacity">{copiada ? '✓ Copiada' : 'Copiar'}</button>
               </div>
               <a href={wa} target="_blank" rel="noopener noreferrer" className="h-11 rounded-xl bg-[#25D366] text-white text-sm font-bold grid place-items-center hover:opacity-90 transition-opacity">Compartir por WhatsApp</a>
-              <button onClick={() => onEnviado(seleccion.map(b => b.id))} className="h-11 rounded-xl border border-edge text-ink text-sm font-semibold hover:bg-surface-2 transition-colors">Listo</button>
+              <button onClick={onEnviado} className="h-11 rounded-xl border border-edge text-ink text-sm font-semibold hover:bg-surface-2 transition-colors">Listo</button>
             </div>
           ) : (
             <>
@@ -177,15 +186,40 @@ function LoteAutorizarModal({ seleccion, onClose, onEnviado, notify }: {
                 ))}
               </div>
 
+              {varias && (
+                <div>
+                  <p className="text-[11px] font-bold uppercase tracking-wide text-mute mb-2">¿Qué son estas {seleccion.length}?</p>
+                  <div className="flex flex-col gap-2">
+                    {([['opciones', 'Opciones de lo mismo', 'Quien autoriza escoge UNA; las demás se descartan.'],
+                       ['lista', 'Cosas distintas', 'Puede autorizar las que quiera, cada una por separado.']] as const).map(([k, t, d]) => (
+                      <label key={k} className={`flex items-start gap-3 rounded-xl border p-3 cursor-pointer transition-colors ${modo === k ? 'border-gold/60 bg-gold-soft/25' : 'border-edge hover:bg-surface-2'}`}>
+                        <input type="radio" name="modo" checked={modo === k} onChange={() => setModo(k)} className="mt-0.5 w-4 h-4 accent-gold" />
+                        <span className="min-w-0">
+                          <span className="block text-[14px] font-bold text-ink">{t}</span>
+                          <span className="block text-[12.5px] text-mute mt-0.5">{d}</span>
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div>
+                <p className="text-[11px] font-bold uppercase tracking-wide text-mute mb-1.5">Recado para quien autoriza <span className="normal-case font-normal">(opcional)</span></p>
+                <textarea value={mensaje} onChange={e => setMensaje(e.target.value)} rows={2}
+                  placeholder="Ej. Es para la obra Norte, la necesitamos el martes."
+                  className="w-full bg-surface-2 border border-edge rounded-xl px-4 py-2.5 text-sm text-ink placeholder-mute focus:outline-none focus:border-gold/60 transition-colors resize-none" />
+              </div>
+
               <div>
                 <p className="text-[11px] font-bold uppercase tracking-wide text-mute mb-1.5">A nombre de</p>
                 {nombre
                   ? <p className="text-sm text-ink">{nombre}{perfil?.empresa ? ` · ${perfil.empresa}` : ''}</p>
-                  : <p className="text-[13px] text-red-500">Completa tu nombre en tu perfil para mandar el lote.</p>}
+                  : <p className="text-[13px] text-red-500">Completa tu nombre en tu perfil para mandarla.</p>}
               </div>
 
               <div>
-                <p className="text-[11px] font-bold uppercase tracking-wide text-mute mb-1.5">Obra · la misma para todas</p>
+                <p className="text-[11px] font-bold uppercase tracking-wide text-mute mb-1.5">Obra{varias ? ' · la misma para todas' : ''}</p>
                 {obras.length
                   ? <select value={obraId ?? ''} onChange={e => setObraId(Number(e.target.value))} className="w-full bg-surface-2 border border-edge rounded-xl px-4 py-2.5 text-sm text-ink focus:outline-none focus:border-gold/60 transition-colors">
                       {obras.map(o => <option key={o.id} value={o.id} className="bg-surface">{o.direccion || o.nombre}{o.responsable ? ` · ${o.responsable}` : ''}</option>)}
@@ -227,9 +261,10 @@ export default function MisCotizaciones() {
   const [filtro, setFiltro] = useState<'todas' | 'borradores' | 'enviada' | 'aceptada' | 'vencida'>('todas')
   const [q, setQ] = useState('')
 
-  // Borradores: viven en el navegador (localStorage). Se releen al montar; el
-  // envío/borrado desde aquí actualiza el estado local.
-  const [borradores, setBorradores] = useState<Borrador[]>(() => leerBorradores())
+  /* Borradores: viven en el SERVIDOR, en su propia tabla. REMALI no los ve —
+     un borrador no existe para el negocio hasta que el cliente lo manda. */
+  const [borradores, setBorradores] = useState<Borrador[]>([])
+  const [paquetes, setPaquetes] = useState<Paquete[]>([])
   const [confirmando, setConfirmando] = useState<number | null>(null)
   // Modo lote: marcar varios borradores para mandarlos JUNTOS a autorizar.
   const [seleccionando, setSeleccionando] = useState(false)
@@ -240,14 +275,19 @@ export default function MisCotizaciones() {
     const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n
   })
   const salirSeleccion = () => { setSeleccionando(false); setSeleccion(new Set()) }
-  // Tras crear el lote: los borradores enviados ya son cotizaciones, se borran.
-  const loteEnviado = (ids: number[]) => {
-    let quedan = borradores
-    ids.forEach(id => { quedan = eliminarBorrador(id) })
-    setBorradores(quedan)
+  const recargarBorradores = async () => {
+    try {
+      const { borradores: bs, paquetes: ps } = await listarBorradores()
+      setBorradores(bs)
+      setPaquetes(ps)
+    } catch { /* la lista de enviadas sigue sirviendo aunque esto falle */ }
+  }
+
+  const loteEnviado = () => {
     setLoteAbierto(false)
     salirSeleccion()
-    notify('Lote mandado a autorizar')
+    recargarBorradores()
+    notify('Mandada a autorizar. Comparte la liga con quien autoriza.')
   }
 
   // Push real por WebSocket; el latido queda solo como red de seguridad.
@@ -267,6 +307,13 @@ export default function MisCotizaciones() {
         .finally(() => vivo && setCargando(false))
     cargar()
     recargar.current = () => cargar(true)
+    /* Primero se adoptan los borradores que armó como invitado y se suben los
+       que quedaron en localStorage de la versión anterior; recién entonces se
+       lee la lista, o el cliente vería su taller vacío por un instante. */
+    reclamarEspacio()
+      .then(() => migrarBorradoresLocales())
+      .then(n => { if (n) notify(`Subimos ${n} borrador(es) que tenías guardados en este navegador`) })
+      .finally(() => { if (vivo) recargarBorradores() })
     return () => { vivo = false }
   }, [token, nav])
 
@@ -278,27 +325,17 @@ export default function MisCotizaciones() {
       return c.folio.toLowerCase().includes(t) || c.items.some(i => i.descripcion.toLowerCase().includes(t))
     }), [cots, filtro, q])
 
-  // Agrupa los lotes PENDIENTES (por_autorizar con token_lote): se muestran como
-  // una sola tarjeta con una sola liga. Las ya resueltas siguen su camino suelto.
-  const listaRender = useMemo<RenderItem[]>(() => {
-    const out: RenderItem[] = []
-    const idx = new Map<string, number>()
-    for (const c of lista) {
-      if (c.token_lote && c.estado === 'por_autorizar') {
-        const at = idx.get(c.token_lote)
-        if (at != null) (out[at] as { kind: 'lote'; cots: CotMia[] }).cots.push(c)
-        else { idx.set(c.token_lote, out.length); out.push({ kind: 'lote', token: c.token_lote, cots: [c] }) }
-      } else {
-        out.push({ kind: 'cot', cot: c })
-      }
-    }
-    return out
-  }, [lista])
-
+  /* En el taller solo se ven los que el cliente todavía tiene en sus manos.
+     Los ya entregados viven abajo, como cotizaciones con folio. */
   const borradoresVisibles = useMemo(() => {
     const t = q.trim().toLowerCase()
-    return borradores.filter(b => !t || b.nombre.toLowerCase().includes(t) || b.items.some(i => i.title.toLowerCase().includes(t)))
+    return borradores
+      .filter(b => b.estado === 'armando' || b.estado === 'rechazado')
+      .filter(b => !t || b.nombre.toLowerCase().includes(t) || b.items.some(i => i.descripcion.toLowerCase().includes(t)))
   }, [borradores, q])
+
+  const paquetesPendientes = useMemo(
+    () => paquetes.filter(p => p.estado === 'pendiente'), [paquetes])
 
   // Qué se muestra: en "Borradores" solo borradores; en "Todas" ambos; en los
   // demás filtros, solo enviadas.
@@ -306,26 +343,67 @@ export default function MisCotizaciones() {
   const mostrarSeccionBorradores = filtro === 'borradores' || (filtro === 'todas' && borradoresVisibles.length > 0)
 
   function seguirEditando(b: Borrador) {
-    dispatch({ type: 'reemplazar', items: b.items })
-    notify('Borrador cargado — sigue editándolo')
+    dispatch({ type: 'reemplazar', items: aLineasDeCarrito(b) })
+    if (tieneEquiposCaidos(b)) notify('Alguno de sus equipos ya no está en el catálogo; lo quitamos', 'x')
+    else notify('Borrador cargado — sigue editándolo')
     nav('/cotizacion')
   }
 
-  // El envío REAL necesita tus datos de contacto/obra: se dispara en el armador
-  // (enviarBorrador valida y, si faltan, carga el borrador y te pide completarlos).
-  // Se lo pasamos por el estado de navegación para no duplicar esa lógica aquí.
-  function enviarABorradorRemali(b: Borrador) {
-    nav('/cotizacion', { state: { enviarBorradorId: b.id } })
-  }
-  // Mismo camino, pero a autorización del jefe (crea la liga por_autorizar).
-  function autorizarBorradorRemali(b: Borrador) {
-    nav('/cotizacion', { state: { autorizarBorradorId: b.id } })
+  async function duplicar(b: Borrador) {
+    try {
+      await duplicarBorrador(b.id)
+      await recargarBorradores()
+      notify('Copia lista — ajústala y vuelve a mandarla')
+    } catch (e) {
+      notify((e as { response?: { data?: { detalle?: string } } })?.response?.data?.detalle || 'No se pudo duplicar', 'x')
+    }
   }
 
-  function borrar(id: number) {
-    setBorradores(eliminarBorrador(id))
-    setConfirmando(null)
-    notify('Borrador borrado')
+  async function retirar(p: Paquete) {
+    try {
+      await retirarPaquete(p.id)
+      await recargarBorradores()
+      notify('Liga retirada: tus borradores volvieron a estar editables')
+    } catch {
+      notify('No se pudo retirar', 'x')
+    }
+  }
+
+  /* Envío DIRECTO a REMALI (sin jefe). El servidor ya tiene los datos del
+     borrador; si le faltan los de contacto avisa con `faltan_datos` y lo
+     mandamos al armador, que es donde se capturan. */
+  async function enviarABorradorRemali(b: Borrador) {
+    try {
+      const { folio } = await enviarBorrador(b.id)
+      await recargarBorradores()
+      recargar.current()
+      notify(`Solicitud enviada · ${folio}`)
+    } catch (e) {
+      const err = e as { response?: { data?: { detalle?: string; codigo?: string } } }
+      if (err?.response?.data?.codigo === 'faltan_datos') {
+        nav('/cotizacion', { state: { enviarBorradorId: b.id } })
+        return
+      }
+      notify(err?.response?.data?.detalle || 'No se pudo enviar', 'x')
+    }
+  }
+
+  // A autorización: abre el modal con este borrador como única selección.
+  function autorizarBorradorRemali(b: Borrador) {
+    setSeleccion(new Set([b.id]))
+    setLoteAbierto(true)
+  }
+
+  async function borrar(id: number) {
+    try {
+      await eliminarBorrador(id)
+      await recargarBorradores()
+      notify('Borrador borrado')
+    } catch {
+      notify('No se pudo borrar', 'x')
+    } finally {
+      setConfirmando(null)
+    }
   }
 
   function volverACotizar(c: CotMia) {
@@ -344,7 +422,7 @@ export default function MisCotizaciones() {
 
   const tabs = [
     ['todas', 'Todas', null],
-    ['borradores', 'Borradores', borradores.length],
+    ['borradores', 'Borradores', borradores.filter(b => b.estado === 'armando' || b.estado === 'rechazado').length],
     ['enviada', 'En revisión', null],
     ['aceptada', 'Aceptadas', null],
     ['vencida', 'Vencidas', null],
@@ -382,7 +460,52 @@ export default function MisCotizaciones() {
             className="flex-1 min-w-[200px] h-[44px] px-4 rounded-xl border border-edge bg-surface text-sm text-ink placeholder-mute focus:outline-none focus:border-gold/60 transition-colors" />
         </div>
 
-        {/* ── Borradores (locales del cliente) ── */}
+        {/* ── Esperando a quien autoriza (aún NO llegan a REMALI) ── */}
+        {paquetesPendientes.length > 0 && filtro !== 'enviada' && filtro !== 'aceptada' && (
+          <section className="rounded-[20px] border border-amber-500/30 bg-surface overflow-hidden">
+            <div className="px-6 py-5 border-b border-edge">
+              <div className="text-[17px] font-bold tracking-tight">Esperando autorización</div>
+              <div className="text-[13.5px] text-mute mt-1">
+                Ya se las mandaste a quien autoriza. REMALI todavía no las ve: solo se entera de lo que se autorice.
+              </div>
+            </div>
+            {paquetesPendientes.map(pq => {
+              const liga = `${window.location.origin}${pq.liga}`
+              const n = pq.borradores?.length || 0
+              const wa = `https://wa.me/?text=${encodeURIComponent(`Hola, te comparto una cotización de maquinaria para autorizar. Ábrela, revisa el total y autorízala aquí:\n${liga}`)}`
+              return (
+                <div key={pq.id} className="px-6 py-4 border-t border-edge flex flex-wrap items-center justify-between gap-4">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2.5 flex-wrap">
+                      <span className="text-[16.5px] font-bold tracking-tight">{formatMoney(Number(pq.total))}</span>
+                      <span className={`text-[11px] font-bold tracking-wide px-2.5 py-1 rounded-full whitespace-nowrap border ${pq.vencido ? 'bg-red-500/10 text-red-500 border-red-500/30' : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30'}`}>
+                        {pq.vencido ? 'Liga vencida' : 'Esperando'}
+                      </span>
+                      {pq.modo === 'opciones' && n > 1 && (
+                        <span className="text-[11px] font-bold tracking-wide px-2.5 py-1 rounded-full bg-surface-2 text-mute border border-edge whitespace-nowrap">Escoge una de {n}</span>
+                      )}
+                    </div>
+                    <div className="text-[13.5px] text-mute mt-1.5">
+                      {pq.vencido
+                        ? 'Los precios que congelamos ya caducaron. Retírala y vuelve a mandarla.'
+                        : `Precios congelados${pq.vence_el ? ` hasta el ${fechaCorta(pq.vence_el)}` : ''}.`}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {!pq.vencido && <>
+                      <button onClick={async () => { try { await navigator.clipboard.writeText(liga); notify('Liga copiada: mándasela a quien autoriza') } catch { notify('No se pudo copiar', 'x') } }}
+                        className="h-[40px] px-4 rounded-xl bg-gold-soft text-gold-ink text-[13.5px] font-bold grid place-items-center hover:opacity-85 transition-opacity">Copiar liga</button>
+                      <a href={wa} target="_blank" rel="noopener noreferrer" className="h-[40px] px-4 rounded-xl border border-[#25D366]/40 text-[#1c9d4d] dark:text-[#25D366] text-[13.5px] font-bold grid place-items-center hover:bg-[#25D366]/10 transition-colors">WhatsApp</a>
+                    </>}
+                    <button onClick={() => retirar(pq)} className="h-[40px] px-4 rounded-xl border border-edge text-[13.5px] font-semibold hover:bg-surface-2 transition-colors whitespace-nowrap">Retirar</button>
+                  </div>
+                </div>
+              )
+            })}
+          </section>
+        )}
+
+        {/* ── Borradores: el taller privado del cliente ── */}
         {mostrarSeccionBorradores && (
           <section className="rounded-[20px] border border-edge bg-surface overflow-hidden">
             <div className="flex items-center justify-between gap-5 px-6 py-5 border-b border-edge flex-wrap">
@@ -399,7 +522,7 @@ export default function MisCotizaciones() {
                     {seleccionando ? 'Cancelar' : 'Seleccionar para lote'}
                   </button>
                 )}
-                {!seleccionando && <span className="text-[13px] text-mute whitespace-nowrap hidden sm:inline">Vigencia {VIGENCIA_BORRADOR_DIAS} días · máx. {MAX_BORRADORES}</span>}
+                {!seleccionando && <span className="text-[13px] text-mute whitespace-nowrap hidden sm:inline">Precio del día · máx. {MAX_BORRADORES}</span>}
               </div>
             </div>
 
@@ -424,18 +547,25 @@ export default function MisCotizaciones() {
                   <div className="min-w-0">
                     <div className="flex items-center gap-2.5 flex-wrap">
                       <span className="text-[16.5px] font-bold tracking-tight">{formatMoney(totalBorrador(b))}</span>
-                      {borradorVencido(b)
-                        ? <span title={`Los precios tienen más de ${VIGENCIA_BORRADOR_DIAS} días; al enviarlo se recalculan.`} className="text-[11px] font-bold tracking-wide px-2.5 py-1 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/30 whitespace-nowrap">Vencido</span>
-                        : <span className="text-[11px] font-bold tracking-wide px-2.5 py-1 rounded-full bg-surface-2 text-mute border border-edge whitespace-nowrap">Sin enviar</span>}
+                      {b.estado === 'rechazado'
+                        ? <span title={b.rechazo_motivo} className="text-[11px] font-bold tracking-wide px-2.5 py-1 rounded-full bg-red-500/10 text-red-500 border border-red-500/30 whitespace-nowrap">No autorizada</span>
+                        : <span className="text-[11px] font-bold tracking-wide px-2.5 py-1 rounded-full bg-surface-2 text-mute border border-edge whitespace-nowrap">Sin mandar</span>}
                     </div>
                     <div className="text-[13.5px] text-mute mt-1.5">{resumenBorrador(b)} · {fechaHora(b.creado)}</div>
+                    {b.estado === 'rechazado' && b.rechazo_motivo && (
+                      <div className="text-[13px] text-red-500 mt-1">Motivo: {b.rechazo_motivo}</div>
+                    )}
                   </div>
                 </div>
                 {!seleccionando && (
                   <div className="flex items-center gap-2 flex-wrap">
+                    {b.estado === 'rechazado' ? (
+                      <button onClick={() => duplicar(b)} title="Lo que ya juzgaron se queda como registro; trabajas sobre una copia" className="h-[40px] px-4 rounded-xl bg-gold text-black text-[13.5px] font-bold hover:opacity-90 transition-opacity whitespace-nowrap btn-acento">Duplicar y corregir</button>
+                    ) : (<>
                     <button onClick={() => seguirEditando(b)} className="h-[40px] px-4 rounded-xl border border-edge text-[13.5px] font-semibold hover:bg-surface-2 transition-colors whitespace-nowrap">Seguir editando</button>
-                    <button onClick={() => autorizarBorradorRemali(b)} title="Tu jefe recibe una liga; al autorizar llega sola a REMALI" className="h-[40px] px-4 rounded-xl border border-gold/40 text-gold-ink text-[13.5px] font-bold hover:bg-gold-soft transition-colors whitespace-nowrap">Mandar a autorizar</button>
+                    <button onClick={() => autorizarBorradorRemali(b)} title="Quien autoriza recibe una liga; al autorizarla llega sola a REMALI" className="h-[40px] px-4 rounded-xl border border-gold/40 text-gold-ink text-[13.5px] font-bold hover:bg-gold-soft transition-colors whitespace-nowrap">Mandar a autorizar</button>
                     <button onClick={() => enviarABorradorRemali(b)} className="h-[40px] px-4 rounded-xl bg-gold text-black text-[13.5px] font-bold hover:opacity-90 transition-opacity whitespace-nowrap btn-acento">Enviar a REMALI</button>
+                    </>)}
                     <button onClick={() => setConfirmando(confirmando === b.id ? null : b.id)} aria-label="Borrar borrador"
                       className="w-[38px] h-[38px] rounded-lg text-mute hover:text-red-500 hover:bg-red-500/10 transition-colors grid place-items-center">
                       <svg className="w-[18px] h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" d="M6 6l12 12M18 6L6 18" /></svg>
@@ -476,48 +606,7 @@ export default function MisCotizaciones() {
             <p className="text-sm text-mute mt-1.5">{cots.length === 0 ? 'Cuando mandes un borrador a REMALI, aparecerá aquí.' : 'Prueba otro estado o borra la búsqueda.'}</p>
             {cots.length === 0 && borradores.length === 0 && <Link to="/equipos" className="inline-block mt-5 px-6 py-3 rounded-xl bg-gold text-black text-sm font-bold btn-acento">Ver equipos</Link>}
           </div>
-        ) : listaRender.map(item => item.kind === 'lote' ? (() => {
-          const cots = item.cots
-          const totalLote = cots.reduce((s, c) => s + Number(c.total || 0), 0)
-          const ligaLote = `${window.location.origin}/autorizar-lote/${item.token}`
-          const waLote = `https://wa.me/?text=${encodeURIComponent(`Hola, te comparto ${cots.length} cotizaciones de maquinaria para autorizar. Ábrelas, revisa el total y autorízalas aquí:\n${ligaLote}`)}`
-          return (
-            <div key={`lote-${item.token}`} className="rounded-[20px] border border-amber-500/30 bg-surface px-6 sm:px-7 py-6">
-              <div className="flex flex-wrap items-center justify-between gap-4">
-                <div className="flex items-center gap-3 flex-wrap">
-                  <span className="text-[16px] font-extrabold tracking-tight">Lote · {cots.length} cotizaciones</span>
-                  <span className={`${monoLabel} !text-inherit px-2.5 py-1 rounded-md border font-bold text-amber-600 dark:text-amber-400 border-amber-500/40 bg-amber-500/10`}>Esperando autorización</span>
-                </div>
-                <div className="text-right shrink-0">
-                  <p className="text-[24px] font-extrabold tracking-tight text-price leading-none">{formatMoney(totalLote)}</p>
-                  <p className="text-[12.5px] text-mute mt-1.5">total del lote</p>
-                </div>
-              </div>
-              <div className="mt-4 rounded-2xl border border-edge overflow-hidden">
-                {cots.map((c, i) => (
-                  <div key={c.folio} className={`flex items-center justify-between gap-4 px-4 py-3 ${i > 0 ? 'border-t border-edge' : ''}`}>
-                    <div className="min-w-0">
-                      <span className="font-mono text-[13.5px] font-bold">{c.folio}</span>
-                      <p className="text-[12.5px] text-mute truncate mt-0.5">{resumenCot(c)}</p>
-                    </div>
-                    <div className="flex items-center gap-3 shrink-0">
-                      <span className="text-[14px] font-bold text-ink">{formatMoney(c.total)}</span>
-                      <Link to={`/mis-cotizaciones/${c.folio}`} className="text-[12.5px] text-gold-ink font-semibold hover:opacity-80 transition-opacity">Ver</Link>
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <div className="mt-4 pt-4 border-t border-edge flex flex-wrap items-center gap-2.5">
-                <button onClick={async () => { try { await navigator.clipboard.writeText(ligaLote); notify('Liga del lote copiada: mándasela a quien autoriza') } catch { notify('No se pudo copiar', 'x') } }}
-                  className="h-[40px] px-4 rounded-xl bg-gold-soft text-gold-ink text-[13.5px] font-bold grid place-items-center hover:opacity-85 transition-opacity">Copiar liga del jefe</button>
-                <a href={waLote} target="_blank" rel="noopener noreferrer" className="h-[40px] px-4 rounded-xl border border-[#25D366]/40 text-[#1c9d4d] dark:text-[#25D366] text-[13.5px] font-bold grid place-items-center hover:bg-[#25D366]/10 transition-colors">WhatsApp</a>
-                <span className="ml-auto text-[12.5px] text-mute">Una sola liga · tu jefe autoriza las {cots.length} juntas</span>
-              </div>
-            </div>
-          )
-        })() : (() => {
-          const c = item.cot
-          return (
+        ) : lista.map(c => (
           <div key={c.folio} className="rounded-[20px] border border-edge bg-surface px-6 sm:px-7 py-6 transition-colors hover:border-edge/80">
             <div className="flex flex-wrap items-start justify-between gap-x-8 gap-y-3">
               <div className="min-w-0">
@@ -536,12 +625,6 @@ export default function MisCotizaciones() {
             </div>
             <div className="mt-4 pt-4 border-t border-edge flex flex-wrap items-center gap-2.5">
               <Link to={`/mis-cotizaciones/${c.folio}`} className="h-[40px] px-4 rounded-xl bg-gold-soft text-gold-ink text-[13.5px] font-bold grid place-items-center hover:opacity-85 transition-opacity">Ver estado</Link>
-              {c.liga_autorizacion && (
-                <button onClick={async () => { try { await navigator.clipboard.writeText(`${window.location.origin}${c.liga_autorizacion}`); notify('Liga copiada: mándasela a quien autoriza') } catch { notify('No se pudo copiar', 'x') } }}
-                  className="h-[40px] px-4 rounded-xl border border-amber-500/40 text-amber-600 dark:text-amber-400 text-[13.5px] font-bold hover:bg-amber-500/10 transition-colors">
-                  Copiar liga del jefe
-                </button>
-              )}
               {c.pdf && <a href={c.pdf} target="_blank" rel="noopener noreferrer" className="h-[40px] px-4 rounded-xl border border-edge text-[13.5px] font-semibold grid place-items-center hover:bg-surface-2 transition-colors">↓ PDF</a>}
               {c.carrito?.length > 0 && <button onClick={() => volverACotizar(c)} className="h-[40px] px-4 rounded-xl border border-edge text-[13.5px] font-semibold hover:bg-surface-2 transition-colors">⟳ Volver a cotizar</button>}
               <span className="ml-auto text-[12.5px] text-mute">
@@ -549,14 +632,13 @@ export default function MisCotizaciones() {
               </span>
             </div>
           </div>
-          )
-        })()))}
+        )))}
       </div>
 
       {loteAbierto && (
-        <LoteAutorizarModal
+        <AutorizarModal
           seleccion={borradores.filter(b => seleccion.has(b.id))}
-          onClose={() => setLoteAbierto(false)}
+          onClose={() => { setLoteAbierto(false); if (!seleccionando) setSeleccion(new Set()) }}
           onEnviado={loteEnviado}
           notify={notify}
         />

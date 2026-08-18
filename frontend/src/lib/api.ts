@@ -1,6 +1,7 @@
 import axios from 'axios'
 import { notificarMutacion } from './realtime'
 import { borrarToken, leerToken, guardarToken, esRecordado } from './token'
+import { leerEspacio } from './espacio'
 import { empiezaPeticion, terminaPeticion } from './cargando'
 import { avisar } from './avisos'
 
@@ -75,6 +76,13 @@ const esRutaOlvide = (url?: string) => RUTAS_OLVIDE.some(r => (url || '').includ
 api.interceptors.request.use(config => {
   const token = leerToken()
   if (token && !esRutaOlvide(config.url)) config.headers.Authorization = `Bearer ${token}`
+  /* El cliente SIN cuenta se identifica con su espacio de borradores. Va en un
+     encabezado y no en la URL a propósito: un secreto en la barra de
+     direcciones se filtra por historial, logs y Referer. Se manda también con
+     sesión iniciada, porque /espacio/reclamar/ necesita los dos a la vez para
+     adoptar los borradores que armó antes de registrarse. */
+  const espacio = leerEspacio()
+  if (espacio) config.headers['X-Espacio'] = espacio
   // Se marca la propia petición: al llegar la respuesta hay que saber si esta
   // llegó a contarse, o el contador se desbalancea y el loader se queda pegado.
   if (!esDeFondo(config)) {
