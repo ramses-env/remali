@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useClienteEventos } from '../lib/clienteEventos'
 import { useLatido } from '../lib/latido'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { Loader2, PackageOpen } from 'lucide-react'
 import api from '../lib/api'
 import Migas from '../components/Migas'
@@ -258,7 +258,11 @@ export default function MisCotizaciones() {
   const { notify } = useToast()
   const [cots, setCots] = useState<CotMia[]>([])
   const [cargando, setCargando] = useState(true)
-  const [filtro, setFiltro] = useState<'todas' | 'borradores' | 'enviada' | 'aceptada' | 'vencida'>('todas')
+  /* ?tab=borradores lo usa la liga de rescate del invitado: llega buscando SUS
+     borradores, no la lista de lo que ya mandó. */
+  const [params] = useSearchParams()
+  const [filtro, setFiltro] = useState<'todas' | 'borradores' | 'enviada' | 'aceptada' | 'vencida'>(
+    params.get('tab') === 'borradores' ? 'borradores' : 'todas')
   const [q, setQ] = useState('')
 
   /* Borradores: viven en el SERVIDOR, en su propia tabla. REMALI no los ve —
