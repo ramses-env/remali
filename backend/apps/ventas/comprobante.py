@@ -20,13 +20,18 @@ def datos_comprobante_venta(v) -> dict:
                 'importe': f'{ci.subtotal}',
             })
         meta.append({'label': 'Cotizacion', 'value': v.cotizacion.folio})
-    elif v.inventario:
-        eq = v.inventario.equipo.modelo if v.inventario.equipo else 'Maquinaria'
-        items.append({
-            'nombre': f'{eq} ({v.inventario.codigo})',
-            'detalle': '1 pza',
-            'importe': f'{v.precio_maquina}',
-        })
+    else:
+        # Una línea por máquina, con su número de serie: es lo que el cliente
+        # necesita para reclamar garantía y lo que el vendedor necesita probar.
+        for renglon in v.maquinas_vivas():
+            inv = renglon.inventario
+            eq = (inv.equipo.modelo if inv and inv.equipo else None) \
+                or (renglon.equipo.modelo if renglon.equipo_id else 'Maquinaria')
+            items.append({
+                'nombre': f'{eq} ({inv.codigo})' if inv else f'{eq} (por llegar)',
+                'detalle': (f'S/N {inv.numero_serie}' if inv and inv.numero_serie else '1 pza'),
+                'importe': f'{renglon.precio}',
+            })
     for it in v.items.all():
         nombre = it.refaccion.nombre if it.refaccion else 'Producto'
         items.append({

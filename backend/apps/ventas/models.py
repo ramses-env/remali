@@ -510,11 +510,17 @@ class Venta(models.Model):
             L.append(f"Cliente: {self.nombre_cliente}")
         L.append("-" * 32)
 
-        # Línea de la máquina (antes se omitía)
-        if self.inventario:
-            eq = self.inventario.equipo.modelo if self.inventario.equipo else 'Maquinaria'
-            L.append(f"{eq} ({self.inventario.codigo})")
-            L.append(f"1 x ${self.precio_maquina}")
+        # Una línea por máquina: el cliente se lleva tres revolvedoras y el
+        # ticket tiene que decir CUÁLES, con su número de serie.
+        for renglon in self.maquinas_vivas():
+            inv = renglon.inventario
+            eq = (inv.equipo.modelo if inv and inv.equipo else None) \
+                or (renglon.equipo.modelo if renglon.equipo_id else 'Maquinaria')
+            etiqueta = f"{eq} ({inv.codigo})" if inv else f"{eq} (por llegar)"
+            L.append(etiqueta)
+            if inv and inv.numero_serie:
+                L.append(f"  S/N {inv.numero_serie}")
+            L.append(f"1 x ${renglon.precio}")
 
         for item in self.items.all():
             nombre = item.refaccion.nombre if item.refaccion else "Producto"

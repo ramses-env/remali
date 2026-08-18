@@ -229,3 +229,54 @@ class QuitarMaquinaTest(TestCase):
         self.assertEqual(resp.status_code, 200, resp.data)
         self.venta.refresh_from_db()
         self.assertEqual(self.venta.inventario_id, self.u2.id)
+
+
+class RespuestasConMaquinasTest(TestCase):
+    """Lo que el panel y el cliente ven tiene que nombrar cada máquina."""
+
+    def setUp(self):
+        from rest_framework.test import APIClient
+        from ventas.models import VentaMaquina
+        self.equipo = _equipo()
+        self.u1 = Inventario.objects.create(equipo=self.equipo, condicion='nueva', numero_serie='8891')
+        self.u2 = Inventario.objects.create(equipo=self.equipo, condicion='nueva', numero_serie='8892')
+        self.admin = get_user_model().objects.create_superuser('jefe2', 'jefe2@x.com', 'pass12345')
+        self.client = APIClient()
+        self.client.force_authenticate(self.admin)
+        self.venta = Venta.objects.create(nombre_cliente='Constructora X')
+        for u in (self.u1, self.u2):
+            VentaMaquina.objects.create(venta=self.venta, inventario=u, precio=Decimal('50000'))
+        self.venta.refresh_from_db()
+
+    def test_la_lista_de_ventas_trae_las_dos_maquinas(self):
+        resp = self.client.get('/api/ventas/lista/')
+        self.assertEqual(resp.status_code, 200, resp.data)
+        fila = next(v for v in resp.data['ventas'] if v['id'] == self.venta.id)
+        self.assertEqual(len(fila['maquinas']), 2)
+        self.assertEqual({m['codigo'] for m in fila['maquinas']}, {self.u1.codigo, self.u2.codigo})
+        self.assertEqual({m['numero_serie'] for m in fila['maquinas']}, {'8891', '8892'})
+        # El campo viejo sigue ahí para quien todavía lo lee.
+        self.assertEqual(fila['unidad']['codigo'], self.u1.codigo)
+
+    def test_el_ticket_nombra_las_dos_maquinas(self):
+        texto = self.venta.as_ticket_text()
+        self.assertIn(self.u1.codigo, texto)
+        self.assertIn(self.u2.codigo, texto)
+
+    def test_no_se_borra_del_inventario_una_maquina_vendida(self):
+        resp = self.client.delete(f'/api/unidades/{self.u1.id}/')
+        self.assertEqual(resp.status_code, 400, getattr(resp, 'data', resp))
+        self.assertTrue(Inventario.objects.filter(pk=self.u1.id).exists())
+
+    def test_entregar_acepta_varias_unidades_por_api(self):
+        from ventas.models import VentaMaquina
+        u3 = Inventario.objects.create(equipo=self.equipo, condicion='nueva')
+        venta = Venta.objects.create(nombre_cliente='Otra', estado='apartada',
+                                     pagos=[{'monto': '100000', 'metodo': 'efectivo'}])
+        VentaMaquina.objects.create(venta=venta, inventario=u3, precio=Decimal('100000'))
+        resp = self.client.post(f'/api/ventas/{venta.id}/entregar/',
+                                {'unidad_ids': [u3.id]}, format='json')
+        self.assertEqual(resp.status_code, 200, resp.data)
+        venta.refresh_from_db(); u3.refresh_from_db()
+        self.assertEqual(venta.estado, 'activa')
+        self.assertEqual(u3.estado, 'vendido')

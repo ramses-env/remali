@@ -276,7 +276,9 @@ def exportar_ventas_csv(request):
             v.telefono_cliente or '',
             v.cliente.nombre if v.cliente_id else '',
             (inv.equipo.modelo if inv and inv.equipo else '') or (v.equipo.modelo if v.equipo_id else '') or 'Venta mostrador',
-            inv.codigo if inv else '',
+            # Todas las máquinas de la venta, no solo la primera: el reporte tiene
+            # que poder contarse contra el inventario.
+            ' / '.join(r.inventario.codigo for r in v.maquinas.all() if r.viva and r.inventario_id),
             v.get_metodo_pago_display(),
             v.subtotal, v.iva, v.total,
             v.pagado(), v.saldo_pendiente(),
@@ -294,7 +296,9 @@ def listar_ventas(request):
     """Lista de ventas (incluye ventas de maquinaria con su unidad)."""
     qs = Venta.objects.all().select_related(
         'inventario', 'inventario__equipo', 'equipo', 'usuario', 'cliente_usuario', 'cliente', 'cotizacion'
-    ).prefetch_related('solicitudes_factura').order_by('-fecha')
+    ).prefetch_related(
+        'solicitudes_factura', 'maquinas__inventario__equipo', 'maquinas__equipo',
+    ).order_by('-fecha')
 
     solo_maquinaria = (request.query_params.get('maquinaria') or '') in ('1', 'true', 'True')
     if solo_maquinaria:
@@ -349,6 +353,9 @@ def listar_ventas(request):
                  'resumen': ', '.join(i.descripcion for i in v.cotizacion.items.all()[:2])}
                 if (not inv and v.cotizacion_id and v.cotizacion) else None
             ),
+            # Cada máquina de la venta, con su serie y su precio. `unidad` (la
+            # primera) se conserva para lo que todavía la lee.
+            'maquinas': _maquinas_de(v),
             'unidad': None if not inv else {
                 'id': inv.id,
                 'codigo': inv.codigo,
@@ -368,6 +375,7 @@ def ventas_mias(request):
     """Compras del cliente en sesión (ligadas por la liga de vinculación)."""
     qs = (Venta.objects.filter(cliente_usuario=request.user)
           .select_related('inventario', 'inventario__equipo', 'equipo', 'cotizacion')
+          .prefetch_related('maquinas__inventario__equipo', 'maquinas__equipo')
           .order_by('-fecha')[:100])
     data = []
     for v in qs:
@@ -385,6 +393,8 @@ def ventas_mias(request):
             'pedido_fase': v.pedido_fase,
             'fecha_estimada_entrega': v.fecha_estimada_entrega,
             'estado': v.estado, 'metodo_pago': v.metodo_pago, 'concepto': concepto,
+            # Si compró varias máquinas, que las vea todas con su número de serie.
+            'maquinas': _maquinas_de(v),
         })
     return Response({'compras': data})
 
@@ -418,6 +428,8 @@ def _serialize_pedido(v):
         'equipo': ((inv.equipo.modelo if inv and inv.equipo else None)
                    or (v.equipo.modelo if v.equipo_id else None)),
         'equipo_id': (inv.equipo_id if inv else v.equipo_id),
+        # Las máquinas del pedido: cuáles ya llegaron y cuáles se esperan.
+        'maquinas': _maquinas_de(v),
         'unidad': None if not inv else {
             'id': inv.id, 'codigo': inv.codigo,
             'equipo': inv.equipo.modelo if inv.equipo else None,
@@ -494,21 +506,24 @@ def entregar_venta(request, pk: int):
             return Response({'detalle': 'Solo se puede entregar un apartado.'}, status=400)
         if v.saldo_pendiente() > 0:
             return Response({'detalle': f'Falta liquidar el saldo (${v.saldo_pendiente()}). Registra el abono antes de entregar.'}, status=400)
-        unidad = None
-        if v.sobre_pedido or not v.inventario_id:
-            unidad_id = datos.get('unidad_id')
-            if not unidad_id:
-                return Response({'detalle': 'Elige la unidad que llegó para entregar el pedido.'}, status=400)
+        # Un pedido de varias máquinas rara vez llega completo: se entregan las
+        # que estén. `unidad_ids` es la forma nueva; `unidad_id`, la de siempre.
+        ids = [i for i in (datos.get('unidad_ids') or []) if i]
+        if not ids and datos.get('unidad_id'):
+            ids = [datos['unidad_id']]
+        unidades = []
+        if ids:
             try:
-                unidad = Inventario.objects.select_for_update().select_related('equipo').get(pk=int(unidad_id))
-            except (ValueError, Inventario.DoesNotExist):
+                ids = [int(i) for i in ids]
+            except (TypeError, ValueError):
+                return Response({'detalle': 'Unidad no válida.'}, status=400)
+            unidades = list(Inventario.objects.select_for_update().select_related('equipo').filter(pk__in=ids))
+            if len(unidades) != len(set(ids)):
                 return Response({'detalle': 'Unidad no encontrada.'}, status=404)
-            if v.equipo_id and unidad.equipo_id != v.equipo_id:
-                return Response({'detalle': 'La unidad no corresponde al equipo pedido.'}, status=400)
-            if not unidad.puede_venderse():
-                return Response({'detalle': f'La unidad {unidad.codigo} no está disponible.'}, status=400)
+        elif v.sobre_pedido or not v.inventario_id:
+            return Response({'detalle': 'Elige la unidad que llegó para entregar el pedido.'}, status=400)
         try:
-            v.entregar(unidad=unidad, user=request.user)
+            v.entregar(unidades=unidades or None, user=request.user)
         except ValueError as e:
             return Response({'detalle': str(e)}, status=400)
         try:
