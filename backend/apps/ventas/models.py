@@ -214,11 +214,16 @@ class Venta(models.Model):
         precio al público, así que NO se le suma ningún impuesto encima. El total
         es esa suma tal cual; el IVA se DESGLOSA del total (total / 1.16) solo para
         mostrarlo en el comprobante y la factura — igual que hace la cotización."""
-        total = Decimal(self.precio_maquina or 0)
-        # Los items solo existen si la venta ya fue guardada (tiene PK)
+        total = Decimal('0.00')
+        # Los renglones solo existen si la venta ya fue guardada (tiene PK). Antes
+        # de eso, el precio de la máquina viaja en `precio_maquina` (forma vieja).
         if self.pk:
+            for renglon in self.maquinas.filter(cancelada_en__isnull=True):
+                total += Decimal(renglon.precio or 0)
             for item in self.items.all():
                 total += item.subtotal
+        else:
+            total += Decimal(self.precio_maquina or 0)
         total = total.quantize(Decimal('0.01'))
         self.total = total
         # IVA incluido → se desglosa hacia atrás, nunca se suma encima.
@@ -321,17 +326,8 @@ class Venta(models.Model):
             self._sembrar_renglon_inicial()
         self._sellar_espejo()
 
-        # Fuente única: la venta transiciona cada unidad según su estado.
-        #  • activa   → vendida de inmediato (venta normal / liquidada).
-        #  • apartada → reservada (apartado); se marca vendida al entregar.
-        if es_nueva:
-            for renglon in self.maquinas.select_related('inventario').all():
-                if not renglon.inventario_id or not renglon.viva:
-                    continue
-                if self.estado == 'apartada':
-                    renglon.inventario.apartar()
-                else:
-                    renglon.inventario.marcar_vendido()
+        # Quién ocupa la unidad: el renglón, al nacer (`VentaMaquina.save`). Así hay
+        # UNA sola puerta, la use la conversión de cotizaciones, la caja o el admin.
 
     # ─────────────────────────────────────────────
     #  RENGLONES DE MÁQUINA
@@ -559,6 +555,41 @@ class VentaMaquina(models.Model):
         verbose_name = 'Máquina vendida'
         verbose_name_plural = 'Máquinas vendidas'
         ordering = ['creada_en', 'id']
+
+    def save(self, *args, **kwargs):
+        """Al nacer, el renglón ocupa su máquina y recalcula la venta.
+
+        La transición vive aquí y no en `Venta.save()` porque el renglón es quien
+        sabe de qué unidad habla: así da igual si la venta la creó la caja, el
+        admin o la conversión de una cotización — todas pasan por la misma puerta
+        y ninguna puede sacar una máquina del patio sin dejarla registrada.
+        """
+        es_nuevo = self.pk is None
+        if es_nuevo and self.inventario_id:
+            # Del disco: quien llama suele reusar la misma instancia de Python
+            # para varias ventas y su copia trae el estado de antes.
+            self.inventario.refresh_from_db(fields=['estado'])
+            if not self.inventario.puede_venderse():
+                raise ValueError(
+                    f'La unidad {self.inventario.codigo} no está disponible para venta '
+                    f'(está {self.inventario.estado}).'
+                )
+            if not self.equipo_id:
+                self.equipo_id = self.inventario.equipo_id
+
+        super().save(*args, **kwargs)
+
+        if es_nuevo and self.inventario_id and self.viva:
+            #  • venta apartada → la máquina se reserva; se marca vendida al entregar.
+            #  • venta activa   → vendida de inmediato.
+            if self.venta.estado == 'apartada':
+                self.inventario.apartar()
+            else:
+                self.inventario.marcar_vendido()
+
+        if self.venta_id:
+            self.venta.recalcular_total()
+            self.venta.save(update_fields=['subtotal', 'iva', 'total'])
 
     @property
     def viva(self) -> bool:

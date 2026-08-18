@@ -45,3 +45,64 @@ class RenglonDeMaquinaTest(TestCase):
         venta.refresh_from_db()
         self.assertEqual(venta.inventario_id, self.unidad.id)
         self.assertEqual(venta.precio_maquina, Decimal('50000'))
+
+
+class VentaDeVariasMaquinasTest(TestCase):
+    """Tres máquinas en una sola operación: un folio, tres renglones."""
+
+    def setUp(self):
+        self.equipo = _equipo()
+        self.u1 = Inventario.objects.create(equipo=self.equipo, condicion='nueva')
+        self.u2 = Inventario.objects.create(equipo=self.equipo, condicion='nueva')
+        self.u3 = Inventario.objects.create(equipo=self.equipo, condicion='nueva')
+
+    def _venta_de_tres(self, estado='activa'):
+        from ventas.models import VentaMaquina
+        venta = Venta.objects.create(nombre_cliente='Constructora X', estado=estado)
+        for unidad, precio in ((self.u1, '50000'), (self.u2, '50000'), (self.u3, '48000')):
+            VentaMaquina.objects.create(venta=venta, inventario=unidad, precio=Decimal(precio))
+        venta.refresh_from_db()
+        return venta
+
+    def test_cada_maquina_queda_vendida_y_el_total_las_suma(self):
+        venta = self._venta_de_tres()
+        self.assertEqual(venta.maquinas.count(), 3)
+        self.assertEqual(venta.total, Decimal('148000'))
+        for u in (self.u1, self.u2, self.u3):
+            u.refresh_from_db()
+            self.assertEqual(u.estado, 'vendido', f'{u.codigo} no quedó vendida')
+
+    def test_el_iva_se_desglosa_del_total_no_se_suma(self):
+        venta = self._venta_de_tres()
+        self.assertEqual(venta.subtotal + venta.iva, venta.total)
+        self.assertEqual(venta.subtotal, (Decimal('148000') / Decimal('1.16')).quantize(Decimal('0.01')))
+
+    def test_cancelar_devuelve_las_tres_al_patio(self):
+        venta = self._venta_de_tres()
+        venta.cancelar('el cliente se echó para atrás')
+        for u in (self.u1, self.u2, self.u3):
+            u.refresh_from_db()
+            self.assertEqual(u.estado, 'disponible', f'{u.codigo} se quedó fuera del inventario')
+
+    def test_apartado_de_varias_aparta_todas(self):
+        venta = self._venta_de_tres(estado='apartada')
+        for u in (self.u1, self.u2, self.u3):
+            u.refresh_from_db()
+            self.assertEqual(u.estado, 'apartado')
+        self.assertEqual(venta.total, Decimal('148000'))
+
+    def test_no_se_puede_meter_una_maquina_que_no_esta_disponible(self):
+        from ventas.models import VentaMaquina
+        Venta.objects.create(inventario=self.u1, precio_maquina=Decimal('50000'))
+        otra = Venta.objects.create(nombre_cliente='Otro')
+        with self.assertRaises(ValueError):
+            VentaMaquina.objects.create(venta=otra, inventario=self.u1, precio=Decimal('50000'))
+
+    def test_maquinas_y_refacciones_en_la_misma_venta(self):
+        from refacciones.models import Refaccion
+        from ventas.models import ItemVenta
+        venta = self._venta_de_tres()
+        ref = Refaccion.objects.create(nombre='Filtro', precio_venta=Decimal('600'), stock=10)
+        ItemVenta.objects.create(venta=venta, refaccion=ref, cantidad=2, precio_unitario=Decimal('600'))
+        venta.refresh_from_db()
+        self.assertEqual(venta.total, Decimal('149200'))
