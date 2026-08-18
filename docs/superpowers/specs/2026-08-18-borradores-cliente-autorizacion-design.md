@@ -45,8 +45,9 @@ duplicadas entre `crear_cotizacion_publica` y `_construir_cotizacion`.
    respeta ese número.
 5. **Uno y varios son el mismo camino.** Mandar a autorizar siempre crea un
    `PaqueteAutorizacion`, aunque lleve un solo borrador.
-6. **El cliente decide qué puede hacer el jefe:** `opciones` (aprueba una sola)
-   o `lista` (aprueba las que quiera).
+6. **El cliente decide qué puede hacer el jefe:** `opciones` (aprueba una sola;
+   las demás quedan `rechazado` con motivo "No seleccionada", automático) o
+   `lista` (aprueba las que quiera, cada una con su motivo si la rechaza).
 7. **La liga del jefe se sigue compartiendo a mano**, por WhatsApp o correo,
    como hoy. No se construye libreta de autorizadores ni envío automático.
 
@@ -169,6 +170,11 @@ necesita distinguir: `paquete_vencido`, `borrador_congelado`,
 con `ya_resuelto` y el desenlace, no un error: la pantalla le dice qué pasó y
 cuándo. El jefe no es programador.
 
+**Techo de tráfico.** Los dos endpoints públicos del jefe y el alta de
+borradores de invitado reusan `SolicitudPublicaThrottle`, el mismo que ya
+protege `crear_cotizacion_publica`: sin techo, una liga filtrada es un grifo de
+correos.
+
 **Concurrencia.** El congelado toma `select_for_update` sobre los borradores del
 paquete, para que una pestaña abierta editando no se cuele entre el congelado y
 la generación de la liga.
@@ -221,7 +227,8 @@ Backend (`tests_borradores.py`, patrón de `tests_caja_maquinaria.py`):
 - El rechazo del jefe no genera notificación ni correo a REMALI.
 - Autorizar crea la `Cotizacion` con folio, `origen='cliente'`, estado
   `aceptada` y `autorizada_por` sellado.
-- Modo `opciones`: aprobar dos devuelve 400 y no crea nada.
+- Modo `opciones`: aprobar dos devuelve 400 y no crea nada; aprobar una deja
+  las otras en `rechazado` sin tocar a REMALI.
 - Un paquete vencido no se puede autorizar (`paquete_vencido`).
 - El borrador de otro usuario/espacio da 404, nunca 403 (no se confirma que
   exista).
