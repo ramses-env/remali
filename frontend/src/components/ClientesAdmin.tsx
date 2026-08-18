@@ -74,6 +74,17 @@ type Cuenta = {
   documentos: DocumentoCuenta[]
 }
 
+type Suelto = {
+  id: number; nombre: string; telefono: string; email: string; creado: string
+  pista: { id: number; nombre: string; documentos: number } | null
+}
+
+type Comprobante = {
+  id: number; tipo: string; tipo_display: string; nota: string
+  vence: string | null; vigente: boolean; subido_en: string; subido_por: string
+  archivo?: string | null
+}
+
 const POR_PAGINA = 25
 
 const pesos = (v: string | number) =>
@@ -100,6 +111,8 @@ export default function ClientesAdmin({ puede, notify, reloadBadge }: {
   const [cargando, setCargando] = useState(true)
   const [ficha, setFicha] = useState<ClienteFicha | null>(null)
   const [formOpen, setFormOpen] = useState(false)
+  const [sueltos, setSueltos] = useState<Suelto[]>([])
+  const [verBandeja, setVerBandeja] = useState(false)
 
   const puedeEditar = Boolean(puede?.editar_clientes)
   const puedeFiscales = (puede?.nivel ?? 0) >= 2
@@ -133,6 +146,19 @@ export default function ClientesAdmin({ puede, notify, reloadBadge }: {
   // de un resultado que ahora tiene 2 renglones se ve como si no hubiera nada.
   useEffect(() => { setDesde(0) }, [q, tipo, soloRevision])
 
+  const cargarSueltos = useCallback(() => {
+    api.get<{ contactos: Suelto[] }>('/clientes/sin-vincular/')
+      .then(r => setSueltos(r.data?.contactos || []))
+      .catch(() => setSueltos([]))
+  }, [])
+  useEffect(() => { cargarSueltos() }, [cargarSueltos])
+
+  function vincular(contactoId: number, clienteId: number) {
+    api.post(`/clientes/${clienteId}/vincular/`, { contacto_id: contactoId })
+      .then(() => { notify('Cuenta vinculada'); cargarSueltos(); cargar() })
+      .catch(err => notify(err?.response?.data?.detalle || 'No se pudo vincular', 'err'))
+  }
+
   function abrir(id: number) {
     api.get(`/clientes/${id}/`)
       .then(r => setFicha(r.data))
@@ -157,6 +183,44 @@ export default function ClientesAdmin({ puede, notify, reloadBadge }: {
           { label: 'Requieren revisión', value: String(enRevision), tone: enRevision ? 'danger' : 'default', emphasis: enRevision > 0 },
         ]}
       />
+
+      {verBandeja && sueltos.length > 0 && (
+        <Card className="overflow-hidden">
+          <div className="px-5 py-4 border-b border-edge">
+            <h2 className="font-bold text-ink">Cuentas sin vincular <span className="text-mute font-normal">({sueltos.length})</span></h2>
+            <p className="text-[13px] text-mute mt-0.5">
+              Se registraron en la tienda y todavía no sabemos de quién son. El teléfono
+              es una pista, no una decisión: tú vinculas.
+            </p>
+          </div>
+          <ul className="divide-y divide-edge">
+            {sueltos.map(s2 => (
+              <li key={s2.id} className="px-5 py-3.5 flex flex-wrap items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-ink truncate">{s2.nombre}</p>
+                  <p className="text-[12.5px] text-mute truncate">
+                    {[s2.email, s2.telefono].filter(Boolean).join(' · ') || '—'}
+                  </p>
+                  {s2.pista && (
+                    <p className="text-[12.5px] mt-1 text-ink">
+                      Ese teléfono ya es de <b>{s2.pista.nombre}</b>
+                      <span className="text-mute"> · {s2.pista.documentos} documentos</span>
+                    </p>
+                  )}
+                </div>
+                {puedeEditar && s2.pista && (
+                  <button
+                    onClick={() => vincular(s2.id, s2.pista!.id)}
+                    className="shrink-0 btn-acento h-9 px-4 rounded-full text-[13px] font-black"
+                  >
+                    Vincular con {s2.pista.nombre}
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
 
       <Card className="overflow-hidden">
         <div className="px-5 py-4 border-b border-edge flex flex-col sm:flex-row sm:items-center gap-3">
@@ -185,6 +249,16 @@ export default function ClientesAdmin({ puede, notify, reloadBadge }: {
             >
               Revisión{enRevision ? ` · ${enRevision}` : ''}
             </button>
+            {sueltos.length > 0 && (
+              <button
+                onClick={() => setVerBandeja(v => !v)}
+                className={`h-11 px-4 rounded-[10px] border text-[13px] font-bold transition-colors ${
+                  verBandeja ? 'border-gold/50 bg-gold-soft text-ink' : 'border-edge bg-surface-2 text-mute hover:text-ink'
+                }`}
+              >
+                Cuentas nuevas · {sueltos.length}
+              </button>
+            )}
             {puedeEditar && (
               <button onClick={() => setFormOpen(true)} className="btn-acento h-11 px-5 rounded-full text-[13.5px] font-black">
                 Nuevo cliente
@@ -449,11 +523,15 @@ function FichaCliente({ ficha, puedeEditar, puedeFiscales, notify, onClose, onCh
   const [nuevoContacto, setNuevoContacto] = useState(false)
   const [nc, setNc] = useState({ nombre: '', telefono: '', puesto: '' })
   const [cuenta, setCuenta] = useState<Cuenta | null>(null)
+  const [docs, setDocs] = useState<Comprobante[]>([])
 
   useEffect(() => {
     api.get<Cuenta>(`/clientes/${ficha.id}/estado-cuenta/`)
       .then(r => setCuenta(r.data))
       .catch(() => setCuenta(null))
+    api.get<{ documentos: Comprobante[] }>(`/clientes/${ficha.id}/documentos/`)
+      .then(r => setDocs(r.data?.documentos || []))
+      .catch(() => setDocs([]))
   }, [ficha.id])
 
   function agregarContacto() {
@@ -609,6 +687,46 @@ function FichaCliente({ ficha, puedeEditar, puedeFiscales, notify, onClose, onCh
                 <p className="text-[12.5px] text-mute">
                   {[o.responsable, o.ubicacion].filter(Boolean).join(' · ') || '—'}
                 </p>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      {/* Comprobantes: lo que hay que revisar ANTES de entregar una máquina cara */}
+      <section className="mb-6">
+        <h3 className="text-[11px] uppercase tracking-wide text-mute font-medium mb-2">
+          Comprobantes ({docs.length})
+        </h3>
+        {docs.length === 0 ? (
+          <p className="text-[13px] text-mute">
+            Sin comprobantes. {puedeFiscales ? 'Súbelos desde el admin por ahora.' : ''}
+          </p>
+        ) : (
+          <ul className="space-y-2">
+            {docs.map(d => (
+              <li key={d.id} className="flex items-center justify-between gap-3 p-3 rounded-xl bg-surface-2 border border-edge">
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-ink truncate">{d.tipo_display}</p>
+                  <p className="text-[12.5px] text-mute truncate">
+                    {d.vence ? `Vence ${d.vence}` : 'No caduca'}
+                    {d.nota ? ` · ${d.nota}` : ''}
+                  </p>
+                </div>
+                <div className="shrink-0 flex items-center gap-2">
+                  {!d.vigente && (
+                    <span className="px-2 py-0.5 rounded-full bg-[color:var(--c-price)]/10 text-[10.5px] font-bold uppercase tracking-wide text-[color:var(--c-price)]">
+                      Vencido
+                    </span>
+                  )}
+                  {/* La liga solo llega si quien mira es administración: adentro hay INEs. */}
+                  {d.archivo && (
+                    <a href={d.archivo} target="_blank" rel="noreferrer"
+                       className="text-[13px] font-bold text-mute hover:text-ink transition-colors">
+                      Abrir
+                    </a>
+                  )}
+                </div>
               </li>
             ))}
           </ul>

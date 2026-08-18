@@ -9,13 +9,16 @@ por nombre de puesto: es lo que permitirá que la pantalla de permisos
 configurables funcione sin tocar estas vistas.
 """
 from django.db.models import Count, Q
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 
-from maquinaria.permissions import ExigeCapacidad, NIVEL_ADMIN, nivel_de
+from maquinaria.permissions import (
+    ExigeCapacidad, IsAdminGroupOrStaff as EsAdministracion, NIVEL_ADMIN, nivel_de,
+)
 
-from .models import Cliente, Contacto
+from .models import Cliente, Contacto, DocumentoCliente
 from .cuenta import estado_de_cuenta
 from .resolucion import resumen_de
 from .serializers import (
@@ -139,6 +142,164 @@ def _crear(request):
         principal=True,
     )
     return Response(ClienteFichaSerializer(_con_relaciones(cli.pk)).data, status=201)
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  COMPROBANTES
+# ═══════════════════════════════════════════════════════════════════
+def _doc_json(d, *, con_archivo: bool):
+    """Nivel 1 ve QUE existe y si está vigente; el archivo es de nivel 2.
+    Adentro hay INEs, y no todo el que atiende necesita el INE de nadie."""
+    datos = {
+        'id': d.id, 'tipo': d.tipo, 'tipo_display': d.get_tipo_display(),
+        'nota': d.nota, 'vence': d.vence, 'vigente': d.vigente,
+        'subido_en': d.subido_en,
+        'subido_por': (d.subido_por.get_username() if d.subido_por_id else ''),
+    }
+    if con_archivo:
+        try:
+            datos['archivo'] = d.archivo.url
+        except Exception:
+            datos['archivo'] = None
+    return datos
+
+
+@api_view(['GET', 'POST'])
+@permission_classes([PuedeVerClientes])
+def documentos(request, pk: int):
+    cli = Cliente.objects.filter(pk=pk).first()
+    if cli is None:
+        return Response({'detalle': 'Cliente no encontrado.'}, status=404)
+
+    if request.method == 'POST':
+        if not _es_admin(request):
+            return Response({'detalle': 'Los comprobantes los sube administración.'}, status=403)
+        archivo = request.FILES.get('archivo')
+        if not archivo:
+            return Response({'detalle': 'Falta el archivo.'}, status=400)
+        d = DocumentoCliente.objects.create(
+            cliente=cli,
+            tipo=request.data.get('tipo') or 'otro',
+            archivo=archivo,
+            nota=(request.data.get('nota') or '').strip(),
+            vence=request.data.get('vence') or None,
+            subido_por=request.user,
+        )
+        return Response(_doc_json(d, con_archivo=True), status=201)
+
+    con_archivo = _es_admin(request)
+    return Response({'documentos': [
+        _doc_json(d, con_archivo=con_archivo) for d in cli.documentos.all()
+    ]})
+
+
+@api_view(['DELETE'])
+@permission_classes([EsAdministracion])
+def documento_borrar(request, pk: int):
+    d = DocumentoCliente.objects.filter(pk=pk).first()
+    if d is None:
+        return Response({'detalle': 'Documento no encontrado.'}, status=404)
+    d.delete()
+    return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  CUENTAS SIN VINCULAR
+# ═══════════════════════════════════════════════════════════════════
+@api_view(['GET'])
+@permission_classes([PuedeVerClientes])
+def sin_vincular(request):
+    """La bandeja: quién se registró en la tienda y todavía no es de nadie.
+
+    Cada renglón trae la PISTA de teléfono si la hay. Es una sugerencia, no una
+    decisión: el sistema no une nunca por su cuenta.
+    """
+    filas = []
+    for c in Contacto.sin_vincular().select_related('usuario'):
+        pista = Cliente.buscar_por_telefono(c.telefono).first() if c.telefono else None
+        filas.append({
+            'id': c.id,
+            'nombre': c.nombre,
+            'telefono': c.telefono,
+            'email': c.email or (c.usuario.email if c.usuario_id else ''),
+            'creado': c.creado,
+            'pista': ({'id': pista.id, 'nombre': pista.nombre,
+                       'documentos': sum(resumen_de(pista)[k] for k in
+                                         ('compras', 'rentas', 'cotizaciones', 'reparaciones'))}
+                      if pista else None),
+        })
+    return Response({'total': len(filas), 'contactos': filas})
+
+
+@api_view(['POST'])
+@permission_classes([PuedeEditarClientes])
+def vincular_contacto(request, pk: int):
+    """Le pone su cliente a una cuenta registrada. Con rastro de quién y cuándo."""
+    cli = Cliente.objects.filter(pk=pk).first()
+    if cli is None:
+        return Response({'detalle': 'Cliente no encontrado.'}, status=404)
+    contacto = Contacto.objects.filter(pk=request.data.get('contacto_id')).first()
+    if contacto is None:
+        return Response({'detalle': 'Contacto no encontrado.'}, status=404)
+    if contacto.cliente_id:
+        return Response({'detalle': f'Ese contacto ya es de "{contacto.cliente.nombre}".'}, status=400)
+
+    contacto.cliente = cli
+    contacto.save()
+    quien = getattr(request.user, 'username', '') or 's/d'
+    cli.notas = (f'{cli.notas}\n' if cli.notas else '') + (
+        f'[{timezone.now():%d/%m/%Y}] {quien} vinculó la cuenta de {contacto.nombre}.')
+    cli.save(update_fields=['notas'])
+    return Response(ClienteFichaSerializer(_con_relaciones(cli.pk)).data)
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  FUSIONAR
+# ═══════════════════════════════════════════════════════════════════
+@api_view(['POST'])
+@permission_classes([EsAdministracion])
+def fusionar(request, pk: int):
+    """Funde dos fichas: TODO lo del origen pasa a este cliente.
+
+    Nivel 2 a propósito: mueve historial y saldos de una persona a otra, y eso
+    no se deshace solo. Queda el rastro de quién, cuándo y desde dónde.
+
+    El origen NO se borra: se desactiva. Borrarlo perdería la única prueba de
+    que esa ficha existió, y con ella la forma de entender una fusión mal hecha.
+    """
+    destino = Cliente.objects.filter(pk=pk).first()
+    origen = Cliente.objects.filter(pk=request.data.get('origen_id')).first()
+    if destino is None or origen is None:
+        return Response({'detalle': 'Cliente no encontrado.'}, status=404)
+    if origen.pk == destino.pk:
+        return Response({'detalle': 'El origen y el destino son el mismo cliente.'}, status=400)
+
+    movidos = {
+        'ventas': origen.ventas.update(cliente=destino),
+        'rentas': origen.rentas.update(cliente=destino),
+        'cotizaciones': origen.cotizaciones.update(cliente=destino),
+        'reparaciones': origen.reparaciones.update(cliente=destino),
+        'obras': origen.obras.update(cliente=destino),
+        # Los contactos pierden el "principal": el destino ya tiene el suyo y
+        # dos principales en la misma ficha es un estado inválido.
+        'contactos': origen.contactos.update(cliente=destino, principal=False),
+    }
+
+    quien = getattr(request.user, 'username', '') or 's/d'
+    motivo = (request.data.get('motivo') or '').strip()
+    sello = f'[{timezone.now():%d/%m/%Y %H:%M}] {quien} fundió aquí la ficha "{origen.nombre}" (#{origen.pk}).'
+    if motivo:
+        sello += f' Motivo: {motivo}'
+    destino.notas = (f'{destino.notas}\n' if destino.notas else '') + sello
+    destino.save(update_fields=['notas'])
+
+    origen.activo = False
+    origen.requiere_revision = False
+    origen.notas = (f'{origen.notas}\n' if origen.notas else '') + (
+        f'[{timezone.now():%d/%m/%Y %H:%M}] {quien} fundió esta ficha en "{destino.nombre}" (#{destino.pk}).')
+    origen.save(update_fields=['activo', 'requiere_revision', 'notas'])
+
+    return Response({'movidos': movidos, 'cliente': ClienteFichaSerializer(_con_relaciones(destino.pk)).data})
 
 
 # ═══════════════════════════════════════════════════════════════════

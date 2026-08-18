@@ -272,3 +272,55 @@ class Obra(DomicilioMixin):
 
     def __str__(self):
         return f'{self.nombre} ({self.cliente.nombre})'
+
+
+class DocumentoCliente(models.Model):
+    """Los papeles del cliente: acta constitutiva, INE, comprobante de domicilio.
+
+    Regla de negocio (dueño, ago-2026): casi no se le renta a personas sueltas —
+    se le renta a constructoras, con comprobante de por medio. La identidad se
+    establece con papeles en el mostrador, y aquí es donde viven.
+
+    `vence` es lo que le da valor: un comprobante de domicilio de hace tres años
+    no sirve para nada, y la ficha puede avisar antes de que alguien entregue una
+    máquina de $800,000.
+
+    ACCESO PARTIDO: el mostrador (nivel 1) ve QUE existen y si están vigentes —es
+    lo que necesita para decidir si entrega—; abrirlos o descargarlos es nivel 2,
+    porque ahí adentro hay INEs.
+    """
+    TIPOS = [
+        ('acta', 'Acta constitutiva'),
+        ('ine', 'Identificación oficial'),
+        ('domicilio', 'Comprobante de domicilio'),
+        ('orden_compra', 'Orden de compra'),
+        ('otro', 'Otro'),
+    ]
+
+    cliente = models.ForeignKey(Cliente, on_delete=models.CASCADE, related_name='documentos')
+    tipo = models.CharField(max_length=14, choices=TIPOS, default='otro')
+    archivo = models.FileField(upload_to='clientes/documentos/')
+    nota = models.CharField(max_length=200, blank=True, default='')
+    vence = models.DateField(null=True, blank=True, help_text='Vacío = no caduca.')
+
+    subido_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name='documentos_cliente_subidos',
+    )
+    subido_en = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'clientes_documento'
+        verbose_name = 'Documento del cliente'
+        verbose_name_plural = 'Documentos del cliente'
+        ordering = ['-subido_en']
+
+    @property
+    def vigente(self) -> bool:
+        """Se CALCULA, no se guarda: un documento marcado 'vigente' en la base
+        que en realidad venció ayer es peor que no tener el dato."""
+        from django.utils import timezone
+        return self.vence is None or self.vence >= timezone.localdate()
+
+    def __str__(self):
+        return f'{self.get_tipo_display()} · {self.cliente.nombre}'

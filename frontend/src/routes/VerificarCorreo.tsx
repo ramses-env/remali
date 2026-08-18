@@ -10,7 +10,7 @@ import { useIrTrasEntrar } from '../lib/sesion'
 import { AuthCabecera, AuthItem } from '@/components/ui/auth-split-screen'
 import { Input } from '@/components/ui/input'
 
-type Estado = 'verificando' | 'listo' | 'vencido' | 'invalido' | 'inactiva'
+type Estado = 'verificando' | 'listo' | 'vencido' | 'invalido' | 'inactiva' | 'saturado' | 'sin_red'
 
 /** Cuánto dura la pantalla de bienvenida antes de entrar sola. Suficiente para
  *  leer "tu correo quedó confirmado" y no tanto como para parecer que se atoró. */
@@ -65,13 +65,15 @@ export default function VerificarCorreo() {
 
   // El token es de un solo uso: en StrictMode React monta dos veces y el segundo
   // intento vería una liga ya quemada ("esta liga ya no sirve") sobre una sesión
-  // que en realidad sí se abrió.
+  // que en realidad sí se abrió. El ref sobrevive al remonte; una bandera `vivo`
+  // de las de "cancelar al desmontar" NO sirve aquí y de hecho rompía la pantalla:
+  // el desmonte de StrictMode la apagaba, el segundo montaje no volvía a pedir por
+  // el ref, y la respuesta del primero se descartaba → "Un momento…" eterno.
   const pedido = useRef(false)
 
   useEffect(() => {
     if (pedido.current) return
     pedido.current = true
-    let vivo = true
 
     // Si el navegador traía la sesión de OTRA cuenta, manda la liga del correo:
     // se olvida el acento y el nivel del anterior para que el panel no abra un
@@ -82,7 +84,6 @@ export default function VerificarCorreo() {
       '/auth/verificar-correo/', { token }, { fondo: true } as never,
     )
       .then(r => {
-        if (!vivo) return
         const access = r.data?.access
         if (!access) { setEstado('invalido'); return }
         setNombre((r.data?.nombre || '').trim())
@@ -90,12 +91,21 @@ export default function VerificarCorreo() {
         setEstado('listo')
       })
       .catch(err => {
-        if (!vivo) return
+        // El 429 (freno anti-barrido de tokens) va aparte: su liga probablemente
+        // sirve, y decirle "ya no sirve" lo mandaría a pedir una nueva en vano.
+        if (err?.response?.status === 429) { setEstado('saturado'); return }
         const codigo = err?.response?.data?.codigo
-        setEstado(codigo === 'vencido' ? 'vencido' : codigo === 'inactiva' ? 'inactiva' : 'invalido')
+        // Sin `response` no hubo respuesta: red caída, tiempo agotado o CORS. No
+        // es una liga mala, y decir que lo es manda al usuario a pedir otra que
+        // fallará igual.
+        setEstado(
+          !err?.response ? 'sin_red'
+            : codigo === 'vencido' ? 'vencido'
+            : codigo === 'inactiva' ? 'inactiva'
+            : 'invalido',
+        )
       })
 
-    return () => { vivo = false }
     // Solo al montar: el token viene de la URL y no cambia bajo los pies.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -158,6 +168,33 @@ export default function VerificarCorreo() {
           <button type="button" onClick={() => { void irTrasEntrar() }} className="hover:text-ink hover:underline">
             Entrar ahora
           </button>
+        </AuthItem>
+      </>
+    )
+  }
+
+  if (estado === 'saturado' || estado === 'sin_red') {
+    return (
+      <>
+        <AuthCabecera
+          title={estado === 'saturado' ? 'Demasiados intentos' : 'No pudimos conectar'}
+          description={
+            estado === 'saturado'
+              ? 'Espera un minuto y vuelve a abrir la liga de tu correo. Tu liga sigue siendo válida.'
+              : 'No hubo respuesta del servidor. Revisa tu conexión y reintenta: tu liga sigue siendo válida.'
+          }
+        />
+        <AuthItem>
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="h-11 w-full rounded-full bg-gold text-sm font-bold text-gold-on transition-[transform,opacity] duration-150 hover:opacity-90 active:scale-[0.98]"
+          >
+            Reintentar
+          </button>
+        </AuthItem>
+        <AuthItem className="text-center text-sm text-mute">
+          <Link to="/login" className="hover:underline">Volver a iniciar sesión</Link>
         </AuthItem>
       </>
     )

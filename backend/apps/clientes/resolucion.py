@@ -83,3 +83,45 @@ def resumen_de(cliente) -> dict:
         'tiene_adeudo': cuenta['tiene_adeudo'],
         'tiene_credito': cuenta['tiene_credito'],
     }
+
+
+def registrar_cuenta_nueva(user):
+    """Alguien se registró en la tienda: nace su Contacto SIN cliente y REMALI
+    se entera.
+
+    No se crea un `Cliente`: eso ensuciaría el padrón que el dueño cura a mano,
+    y todavía no se sabe de quién es esa cuenta —puede ser gente de una
+    constructora que ya está en el sistema—. Vincularla es una decisión suya, y
+    el aviso es lo que se la pone enfrente.
+
+    Si coincide el teléfono con alguien del padrón, se dice en el aviso como
+    PISTA. Nunca se aplica sola: el teléfono dejó de ser llave.
+    """
+    from maquinaria.models import crear_notificacion
+
+    perfil = getattr(user, 'perfil', None)
+    telefono = _digitos(getattr(perfil, 'telefono', ''))
+    nombre = (user.get_full_name() or '').strip() or user.get_username()
+
+    contacto = Contacto.objects.create(
+        cliente=None, nombre=nombre, telefono=telefono, email=user.email, usuario=user,
+    )
+
+    pista = Cliente.buscar_por_telefono(telefono).first() if telefono else None
+    mensaje = f'{user.email or nombre} se registró en la tienda.'
+    if pista:
+        mensaje += f' Ese teléfono ya es de "{pista.nombre}" — revisa si es la misma persona.'
+    else:
+        mensaje += ' Vincúlala con un cliente del padrón o déjala aparte.'
+
+    try:
+        crear_notificacion(
+            'sistema', f'Cuenta nueva: {nombre}', mensaje,
+            seccion='clientes', ref=f'cuenta-{user.id}',
+            data={'contacto_id': contacto.id, 'usuario_id': user.id,
+                  'cliente_sugerido': pista.id if pista else None},
+        )
+    except Exception:
+        # Un aviso que falla no debe impedir que alguien se registre.
+        pass
+    return contacto

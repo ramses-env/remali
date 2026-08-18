@@ -60,13 +60,28 @@ export default function Registro() {
       const status = err?.response?.status
       // "Altas" es palabra de sistema, no de cliente. Y el mensaje genérico dice
       // qué pasó pero no qué hacer: se le agrega la salida.
-      if (status === 429)
-        setError('Se crearon varias cuentas desde esta red. Espera un rato e intenta de nuevo.')
-      else
+      if (status === 429) {
+        // "Espera un rato" deja al usuario probando a ciegas. El servidor dice
+        // cuántos segundos faltan (Retry-After o el propio detalle): se traduce a
+        // minutos para que sepa si es cosa de esperar o de volver mañana.
+        const seg = Number(err?.response?.headers?.['retry-after']) ||
+          Number(String(err?.response?.data?.detail || '').match(/(\d+) segundos/)?.[1]) || 0
+        const min = Math.ceil(seg / 60)
+        setError(
+          'Se crearon varias cuentas desde esta red.' +
+            (min > 0 ? ` Vuelve a intentar en ${min} minuto${min === 1 ? '' : 's'}.` : ' Espera un rato e intenta de nuevo.'),
+        )
+      } else if (!err?.response) {
+        // Sin respuesta no es un dato mal escrito: es red, servidor caído o
+        // tiempo agotado. Mandarlo a "revisa los datos" lo pone a corregir algo
+        // que está bien.
+        setError('No hubo respuesta del servidor. Revisa tu conexión y vuelve a intentar.')
+      } else {
         setError(
           err?.response?.data?.detail ||
             'No se pudo crear la cuenta. Revisa los datos y vuelve a intentar.',
         )
+      }
       return
     }
 

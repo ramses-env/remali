@@ -4,7 +4,7 @@ Las pruebas de la migración del histórico se fueron con el comando: al elimina
 `Empresa` y arrancar con base limpia dejó de haber histórico que migrar.
 """
 from django.contrib.auth.models import Group, User
-from django.test import TestCase
+from django.test import TestCase, override_settings
 
 from clientes.models import Cliente, Contacto
 
@@ -432,3 +432,213 @@ class EstadoDeCuentaTest(TestCase):
         mostrador = self.api.get('/api/clientes/buscar/?telefono=7441234567')
 
         self.assertEqual(mostrador.data['clientes'][0]['resumen']['saldo'], ficha.data['saldo'])
+
+
+class CuentaNuevaTest(TestCase):
+    """Registrarse en la tienda NO ensucia el padrón: crea un contacto suelto
+    y le avisa a REMALI para que lo vincule a mano."""
+
+    def setUp(self):
+        from rest_framework.test import APIClient
+        self.publico = APIClient()
+        admin = User.objects.create_user(username='admin1', password='pass12345', is_staff=True)
+        self.api = APIClient()
+        self.api.force_authenticate(user=admin)
+
+    def _registrar(self, email='laura@bajio.mx', telefono='4771111111'):
+        return self.publico.post('/api/auth/registro/', {
+            'email': email, 'password': 'Remali-2026-clave', 'nombre': 'Laura Méndez',
+            'telefono': telefono,
+        }, format='json')
+
+    def test_el_registro_no_crea_un_cliente(self):
+        r = self._registrar()
+
+        self.assertEqual(r.status_code, 201, r.data)
+        self.assertEqual(Cliente.objects.count(), 0)      # el padrón sigue limpio
+        self.assertEqual(Contacto.sin_vincular().count(), 1)
+
+    def test_avisa_al_equipo_con_la_pista_del_telefono(self):
+        from maquinaria.models import Notificacion
+        Cliente.objects.create(tipo=Cliente.MORAL, nombre='Constructora del Bajío',
+                               telefono='4771111111')
+
+        self._registrar()
+
+        aviso = Notificacion.objects.filter(titulo__startswith='Cuenta nueva').first()
+        self.assertIsNotNone(aviso)
+        self.assertIn('Constructora del Bajío', aviso.mensaje)   # la pista
+        self.assertEqual(Contacto.sin_vincular().count(), 1)     # NO se unió sola
+
+    def test_la_bandeja_muestra_la_pista_sin_aplicarla(self):
+        cli = Cliente.objects.create(tipo=Cliente.MORAL, nombre='Constructora del Bajío',
+                                     telefono='4771111111')
+        self._registrar()
+
+        r = self.api.get('/api/clientes/sin-vincular/')
+
+        self.assertEqual(r.data['total'], 1)
+        self.assertEqual(r.data['contactos'][0]['pista']['id'], cli.pk)
+
+    def test_vincular_le_pone_su_cliente_y_deja_rastro(self):
+        cli = Cliente.objects.create(tipo=Cliente.MORAL, nombre='Constructora del Bajío')
+        self._registrar()
+        contacto = Contacto.sin_vincular().first()
+
+        r = self.api.post(f'/api/clientes/{cli.pk}/vincular/',
+                          {'contacto_id': contacto.pk}, format='json')
+
+        self.assertEqual(r.status_code, 200, r.data)
+        contacto.refresh_from_db(); cli.refresh_from_db()
+        self.assertEqual(contacto.cliente, cli)
+        self.assertFalse(Contacto.sin_vincular().exists())
+        self.assertIn('admin1', cli.notas)          # quién lo hizo
+        self.assertIn('Laura', cli.notas)
+
+    def test_no_se_vincula_un_contacto_que_ya_tiene_dueno(self):
+        a = Cliente.objects.create(tipo=Cliente.MORAL, nombre='Constructora A')
+        b = Cliente.objects.create(tipo=Cliente.MORAL, nombre='Constructora B')
+        c = Contacto.objects.create(cliente=a, nombre='Laura')
+
+        r = self.api.post(f'/api/clientes/{b.pk}/vincular/', {'contacto_id': c.pk}, format='json')
+
+        self.assertEqual(r.status_code, 400)
+        self.assertIn('Constructora A', r.data['detalle'])
+
+
+class FusionarTest(TestCase):
+    def setUp(self):
+        from decimal import Decimal
+        from rest_framework.test import APIClient
+        from ventas.models import Venta
+
+        self.admin = User.objects.create_user(username='admin1', password='pass12345', is_staff=True)
+        self.api = APIClient()
+        self.api.force_authenticate(user=self.admin)
+
+        self.origen = Cliente.objects.create(tipo=Cliente.FISICA, nombre='Naomi')
+        self.destino = Cliente.objects.create(tipo=Cliente.FISICA, nombre='Naomí Pérez')
+        Venta.objects.create(cliente=self.origen, precio_maquina=Decimal('1000'))
+        Contacto.objects.create(cliente=self.origen, nombre='Naomi', principal=True)
+
+    def test_todo_se_mueve_al_destino_y_el_origen_se_desactiva(self):
+        r = self.api.post(f'/api/clientes/{self.destino.pk}/fusionar/',
+                          {'origen_id': self.origen.pk, 'motivo': 'mismo teléfono'}, format='json')
+
+        self.assertEqual(r.status_code, 200, r.data)
+        self.assertEqual(r.data['movidos']['ventas'], 1)
+        self.origen.refresh_from_db(); self.destino.refresh_from_db()
+        self.assertEqual(self.destino.ventas.count(), 1)
+        # El origen NO se borra: sin él no hay forma de entender una fusión mala.
+        self.assertTrue(Cliente.objects.filter(pk=self.origen.pk).exists())
+        self.assertFalse(self.origen.activo)
+
+    def test_deja_rastro_de_quien_cuando_y_por_que(self):
+        self.api.post(f'/api/clientes/{self.destino.pk}/fusionar/',
+                      {'origen_id': self.origen.pk, 'motivo': 'mismo teléfono'}, format='json')
+
+        self.destino.refresh_from_db()
+        self.assertIn('admin1', self.destino.notas)
+        self.assertIn('Naomi', self.destino.notas)
+        self.assertIn('mismo teléfono', self.destino.notas)
+
+    def test_el_contacto_movido_pierde_el_principal(self):
+        """Dos contactos principales en la misma ficha es un estado inválido."""
+        Contacto.objects.create(cliente=self.destino, nombre='Naomí', principal=True)
+
+        self.api.post(f'/api/clientes/{self.destino.pk}/fusionar/',
+                      {'origen_id': self.origen.pk}, format='json')
+
+        principales = self.destino.contactos.filter(principal=True).count()
+        self.assertEqual(principales, 1)
+
+    def test_no_se_funde_un_cliente_consigo_mismo(self):
+        r = self.api.post(f'/api/clientes/{self.destino.pk}/fusionar/',
+                          {'origen_id': self.destino.pk}, format='json')
+        self.assertEqual(r.status_code, 400)
+
+    def test_el_mostrador_no_puede_fundir(self):
+        from rest_framework.test import APIClient
+        cajero = User.objects.create_user(username='cajero1', password='pass12345')
+        cajero.groups.add(Group.objects.get_or_create(name='Cajero')[0])
+        api = APIClient(); api.force_authenticate(user=cajero)
+
+        r = api.post(f'/api/clientes/{self.destino.pk}/fusionar/',
+                     {'origen_id': self.origen.pk}, format='json')
+
+        self.assertEqual(r.status_code, 403)
+
+
+# Sin esto las pruebas suben archivos a Cloudinary DE VERDAD: lentas, con red
+# de por medio, y ensuciando la cuenta con basura de cada corrida.
+@override_settings(STORAGES={
+    'default': {'BACKEND': 'django.core.files.storage.InMemoryStorage'},
+    'staticfiles': {'BACKEND': 'django.contrib.staticfiles.storage.StaticFilesStorage'},
+})
+class ComprobantesTest(TestCase):
+    def setUp(self):
+        from rest_framework.test import APIClient
+        self.cli = Cliente.objects.create(tipo=Cliente.MORAL, nombre='Constructora del Bajío')
+        self.admin = User.objects.create_user(username='admin1', password='pass12345', is_staff=True)
+        self.cajero = User.objects.create_user(username='cajero1', password='pass12345')
+        self.cajero.groups.add(Group.objects.get_or_create(name='Cajero')[0])
+        self.api = APIClient()
+
+    def _documento(self, vence=None):
+        from clientes.models import DocumentoCliente
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        return DocumentoCliente.objects.create(
+            cliente=self.cli, tipo='domicilio', vence=vence,
+            archivo=SimpleUploadedFile('recibo.pdf', b'%PDF-1.4 x'),
+        )
+
+    def test_la_vigencia_se_calcula_contra_hoy(self):
+        from datetime import timedelta
+        from django.utils import timezone
+        vigente = self._documento(vence=timezone.localdate() + timedelta(days=30))
+        vencido = self._documento(vence=timezone.localdate() - timedelta(days=1))
+        sin_fecha = self._documento()
+
+        self.assertTrue(vigente.vigente)
+        self.assertFalse(vencido.vigente)
+        self.assertTrue(sin_fecha.vigente)      # sin fecha = no caduca
+
+    def test_el_mostrador_ve_que_existen_pero_NO_el_archivo(self):
+        self._documento()
+        self.api.force_authenticate(user=self.cajero)
+
+        r = self.api.get(f'/api/clientes/{self.cli.pk}/documentos/')
+
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(len(r.data['documentos']), 1)
+        self.assertIn('vigente', r.data['documentos'][0])
+        self.assertNotIn('archivo', r.data['documentos'][0])   # adentro hay INEs
+
+    def test_administracion_si_recibe_la_liga_del_archivo(self):
+        self._documento()
+        self.api.force_authenticate(user=self.admin)
+
+        r = self.api.get(f'/api/clientes/{self.cli.pk}/documentos/')
+
+        self.assertIn('archivo', r.data['documentos'][0])
+
+    def test_el_mostrador_no_sube_comprobantes(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        self.api.force_authenticate(user=self.cajero)
+
+        r = self.api.post(f'/api/clientes/{self.cli.pk}/documentos/',
+                          {'tipo': 'ine', 'archivo': SimpleUploadedFile('ine.jpg', b'x')},
+                          format='multipart')
+
+        self.assertEqual(r.status_code, 403)
+
+    def test_la_ficha_avisa_cuantos_estan_vencidos(self):
+        from datetime import timedelta
+        from django.utils import timezone
+        self._documento(vence=timezone.localdate() - timedelta(days=1))
+        self._documento()
+        self.api.force_authenticate(user=self.cajero)
+
+        r = self.api.get(f'/api/clientes/{self.cli.pk}/')
+
+        self.assertEqual(r.data['documentos_vencidos'], 1)

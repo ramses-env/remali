@@ -57,6 +57,7 @@ class ClienteFichaSerializer(serializers.ModelSerializer):
     obras = ObraResumenSerializer(many=True, read_only=True)
     tipo_display = serializers.CharField(source='get_tipo_display', read_only=True)
     tiene_cuenta = serializers.BooleanField(read_only=True)
+    documentos_vencidos = serializers.SerializerMethodField()
 
     class Meta:
         model = Cliente
@@ -68,9 +69,14 @@ class ClienteFichaSerializer(serializers.ModelSerializer):
             'municipio', 'ciudad', 'entidad', 'codigo_postal', 'pais', 'referencias',
             'notas', 'activo', 'creado',
             'requiere_revision', 'revision_motivo',
-            'contactos', 'obras', 'tiene_cuenta',
+            'contactos', 'obras', 'tiene_cuenta', 'documentos_vencidos',
         ]
         read_only_fields = ['creado', 'direccion']
+
+    def get_documentos_vencidos(self, obj) -> int:
+        """Cuántos comprobantes caducaron. Es lo que hay que ver ANTES de
+        entregar una máquina cara, sin tener que abrir los archivos."""
+        return sum(1 for d in obj.documentos.all() if not d.vigente)
 
 
 # Campos que solo administración puede escribir. Tocan la factura: un RFC mal

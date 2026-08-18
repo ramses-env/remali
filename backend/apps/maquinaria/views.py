@@ -659,6 +659,10 @@ def registro(request):
         token = _nuevo_token_verificacion(perfil)
         perfil.save()
         espejar_obra_predeterminada(user)
+        # La cuenta entra al padrón como CONTACTO SIN CLIENTE, y REMALI recibe
+        # el aviso para vincularla a mano. No se une por teléfono sola.
+        from clientes.resolucion import registrar_cuenta_nueva
+        registrar_cuenta_nueva(user)
 
     _enviar_correo_verificacion(user, token)
     # NO devolvemos el email_token: es el token de verificación de correo. Si
@@ -725,6 +729,10 @@ def google_login(request):
             perfil.email_verificado = True
             perfil.email_verificado_en = timezone.now()
             perfil.save()
+            # Entrar con Google también es darse de alta: mismo trato que el
+            # registro normal, o esas cuentas nunca aparecerían en la bandeja.
+            from clientes.resolucion import registrar_cuenta_nueva
+            registrar_cuenta_nueva(user)
     else:
         perfil, _ = PerfilUsuario.objects.get_or_create(usuario=user)
         if not perfil.email_verificado:
