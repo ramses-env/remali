@@ -22,6 +22,8 @@ urlpatterns = [
     path('caja/devolucion/', caja_views.devolucion_caja, name='caja-devolucion'),
     path('ventas/<int:pk>/abono/', views.registrar_abono_venta, name='ventas-abono'),
     path('ventas/<int:pk>/entregar/', views.entregar_venta, name='ventas-entregar'),
+    # Sacar UNA máquina de una venta de varias (acción sensible: pide código).
+    path('ventas/<int:pk>/maquinas/<int:linea_id>/quitar/', views.quitar_maquina_venta, name='ventas-quitar-maquina'),
     path('ventas/<int:pk>/pedido-fase/', views.actualizar_pedido_fase, name='ventas-pedido-fase'),
     path('ventas/<int:pk>/cancelar/', views.cancelar_venta, name='ventas-cancelar'),
     path('ventas/<int:pk>/comprobante/', views.comprobante_venta, name='ventas-comprobante'),

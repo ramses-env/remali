@@ -425,6 +425,50 @@ class Venta(models.Model):
         if campos:
             super().save(update_fields=campos)
 
+    @transaction.atomic
+    def quitar_maquina(self, renglon, motivo, user=None):
+        """Saca UNA máquina de la venta y la devuelve al patio.
+
+        Pasa de verdad: se dañó en el traslado, el cliente se arrepintió de una
+        de tres, salió con falla de fábrica. Cancelar la venta entera sería
+        mentir sobre las otras dos, y dejar la máquina marcada como vendida sería
+        mentir sobre el inventario.
+
+        El renglón NO se borra: se sella con quién y por qué. El dinero ya
+        cobrado no se toca — si el total baja de lo pagado, queda saldo a favor
+        del cliente y el reembolso lo decide una persona.
+
+        Quien autoriza esto se valida ARRIBA (la vista pide el código de
+        seguridad), igual que ajustar el precio al vender.
+        """
+        motivo = (motivo or '').strip()
+        if not motivo:
+            raise ValueError('Escribe el motivo por el que se quita la máquina.')
+        if renglon.venta_id != self.pk:
+            raise ValueError('Ese renglón no pertenece a esta venta.')
+        if not renglon.viva:
+            raise ValueError('Esa máquina ya se había quitado de la venta.')
+        vivas = self.maquinas_vivas().count()
+        if vivas <= 1 and not self.items.exists():
+            raise ValueError(
+                'Es la única máquina de la venta: cancela la venta completa en vez de quitarla.'
+            )
+
+        from django.utils import timezone
+        if renglon.inventario_id:
+            renglon.inventario.liberar_venta('Bodega')
+        renglon.cancelada_en = timezone.now()
+        renglon.cancelada_motivo = motivo[:200]
+        if user is not None and getattr(user, 'is_authenticated', False):
+            renglon.cancelada_por = user
+        renglon.save(update_fields=['cancelada_en', 'cancelada_motivo', 'cancelada_por'])
+
+        self.recalcular_total()
+        # El espejo tiene que seguir apuntando a una máquina que siga en la venta.
+        self._sellar_espejo()
+        self.save(update_fields=['subtotal', 'iva', 'total', 'inventario', 'precio_maquina'])
+        return renglon
+
     # ─────────────────────────────────────────────
     #  CANCELACIÓN (reversa)
     # ─────────────────────────────────────────────

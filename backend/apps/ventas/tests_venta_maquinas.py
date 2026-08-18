@@ -159,3 +159,73 @@ class EntregaParcialTest(TestCase):
         for u in (self.u1, self.u2, self.u3):
             u.refresh_from_db()
             self.assertEqual(u.estado, 'vendido')
+
+
+class QuitarMaquinaTest(TestCase):
+    """Sacar una máquina de una venta ya hecha: se puede, pero deja rastro."""
+
+    def setUp(self):
+        from rest_framework.test import APIClient
+        from maquinaria.seguridad import definir_codigo
+        from ventas.models import VentaMaquina
+        self.equipo = _equipo()
+        self.u1 = Inventario.objects.create(equipo=self.equipo, condicion='nueva')
+        self.u2 = Inventario.objects.create(equipo=self.equipo, condicion='nueva')
+        self.admin = get_user_model().objects.create_superuser('jefa', 'jefa@x.com', 'pass12345')
+        definir_codigo(self.admin, '123456')
+        self.client = APIClient()
+        self.client.force_authenticate(self.admin)
+        self.venta = Venta.objects.create(nombre_cliente='Constructora X')
+        for u in (self.u1, self.u2):
+            VentaMaquina.objects.create(venta=self.venta, inventario=u, precio=Decimal('50000'))
+        self.venta.refresh_from_db()
+        self.renglon2 = self.venta.maquinas.filter(inventario=self.u2).first()
+
+    def _quitar(self, **extra):
+        cuerpo = {'motivo': 'salió con falla de fábrica', 'codigo_seguridad': '123456'}
+        cuerpo.update(extra)
+        return self.client.post(
+            f'/api/ventas/{self.venta.id}/maquinas/{self.renglon2.id}/quitar/', cuerpo, format='json')
+
+    def test_con_codigo_la_maquina_vuelve_al_patio_y_el_total_baja(self):
+        resp = self._quitar()
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.u2.refresh_from_db(); self.venta.refresh_from_db(); self.renglon2.refresh_from_db()
+        self.assertEqual(self.u2.estado, 'disponible')
+        self.assertEqual(self.venta.total, Decimal('50000'))
+        self.assertIsNotNone(self.renglon2.cancelada_en)
+        self.assertEqual(self.renglon2.cancelada_por_id, self.admin.id)
+        self.assertIn('falla de fábrica', self.renglon2.cancelada_motivo)
+
+    def test_sin_codigo_no_pasa_nada(self):
+        resp = self._quitar(codigo_seguridad='')
+        self.assertEqual(resp.status_code, 403, resp.data)
+        self.u2.refresh_from_db(); self.venta.refresh_from_db()
+        self.assertEqual(self.u2.estado, 'vendido')
+        self.assertEqual(self.venta.total, Decimal('100000'))
+
+    def test_sin_motivo_no_pasa(self):
+        resp = self._quitar(motivo='')
+        self.assertEqual(resp.status_code, 400, resp.data)
+        self.u2.refresh_from_db()
+        self.assertEqual(self.u2.estado, 'vendido')
+
+    def test_no_se_quita_la_ultima_maquina(self):
+        self._quitar()
+        renglon1 = self.venta.maquinas.filter(inventario=self.u1).first()
+        resp = self.client.post(
+            f'/api/ventas/{self.venta.id}/maquinas/{renglon1.id}/quitar/',
+            {'motivo': 'ya no la quiso', 'codigo_seguridad': '123456'}, format='json')
+        self.assertEqual(resp.status_code, 400, resp.data)
+        self.u1.refresh_from_db()
+        self.assertEqual(self.u1.estado, 'vendido')
+
+    def test_el_espejo_sigue_apuntando_a_una_maquina_viva(self):
+        """Quitar la PRIMERA no puede dejar `venta.inventario` apuntando a la que ya volvió."""
+        renglon1 = self.venta.maquinas.filter(inventario=self.u1).first()
+        resp = self.client.post(
+            f'/api/ventas/{self.venta.id}/maquinas/{renglon1.id}/quitar/',
+            {'motivo': 'se dañó en el traslado', 'codigo_seguridad': '123456'}, format='json')
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.venta.refresh_from_db()
+        self.assertEqual(self.venta.inventario_id, self.u2.id)

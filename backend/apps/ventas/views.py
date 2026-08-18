@@ -16,6 +16,30 @@ logger = logging.getLogger(__name__)
 
 
 
+def _maquinas_de(venta):
+    """Los renglones de máquina de una venta, como los lee el panel.
+
+    Vive aquí y no repetido en cada listado porque el ticket, el historial, los
+    pedidos y "mis compras" tienen que contar la misma historia.
+    """
+    filas = []
+    for r in venta.maquinas.select_related('inventario', 'inventario__equipo', 'equipo').all():
+        if not r.viva:
+            continue
+        inv = r.inventario
+        filas.append({
+            'id': r.id,
+            'unidad_id': inv.id if inv else None,
+            'codigo': inv.codigo if inv else None,
+            'numero_serie': inv.numero_serie if inv else None,
+            'equipo': ((inv.equipo.modelo if inv and inv.equipo else None)
+                       or (r.equipo.modelo if r.equipo_id else None)),
+            'precio': str(r.precio),
+            'entregada': r.entregada,
+        })
+    return filas
+
+
 def _campos_cliente(datos):
     """Los campos de cliente para construir un documento, resueltos en un solo
     lugar (apps/clientes/resolucion.py). Si viene `cliente_id` se usa; si no, se
@@ -652,6 +676,62 @@ def crear_pedido(request):
     except Exception:
         pass
     return Response({'detalle': 'Pedido registrado', 'pedido': _serialize_pedido(v)}, status=201)
+
+
+@api_view(['POST'])
+@permission_classes([IsAdminGroupOrStaff])
+def quitar_maquina_venta(request, pk: int, linea_id: int):
+    """Saca una máquina de una venta de varias y la devuelve al inventario.
+
+    Se dañó en el traslado, salió con falla, el cliente se arrepintió de una de
+    tres. Cancelar la venta completa mentiría sobre las otras. Es acción
+    sensible: pide el código personal de quien la ejecuta y guarda el motivo.
+    """
+    from ventas.models import VentaMaquina
+    try:
+        v = Venta.objects.select_related('inventario').get(pk=pk)
+    except Venta.DoesNotExist:
+        return Response({'detalle': 'Venta no encontrada'}, status=404)
+    if v.estado == 'cancelada':
+        return Response({'detalle': 'La venta está cancelada.'}, status=400)
+    try:
+        renglon = VentaMaquina.objects.select_related('inventario', 'inventario__equipo').get(pk=linea_id, venta=v)
+    except VentaMaquina.DoesNotExist:
+        return Response({'detalle': 'Esa máquina no es de esta venta.'}, status=404)
+
+    datos = request.data or {}
+    motivo = (datos.get('motivo') or '').strip()
+    if not motivo:
+        return Response({'detalle': 'Escribe el motivo por el que se quita la máquina.'}, status=400)
+
+    from maquinaria.seguridad import verificar_codigo
+    ok, detalle, status_cod, _c = verificar_codigo(request.user, datos.get('codigo_seguridad'))
+    if not ok:
+        return Response({'detalle': detalle}, status=status_cod)
+
+    quien = getattr(request.user, 'username', '') or 's/d'
+    try:
+        with transaction.atomic():
+            v.quitar_maquina(renglon, f'{motivo} — autorizó {quien}', user=request.user)
+    except ValueError as e:
+        return Response({'detalle': str(e)}, status=400)
+
+    try:
+        from maquinaria.models import crear_notificacion
+        codigo = renglon.inventario.codigo if renglon.inventario_id else 'una máquina'
+        crear_notificacion(
+            'venta', f'Máquina retirada de la venta #{v.id}',
+            f'{codigo} volvió al inventario. Motivo: {motivo}. Nuevo total: ${v.total:,.2f}.',
+            seccion='ventas', ref=f'quita-{v.id}-{renglon.id}', data={'venta_id': v.id},
+        )
+    except Exception:
+        pass
+
+    return Response({
+        'detalle': 'Máquina retirada de la venta',
+        'total': str(v.total),
+        'maquinas': _maquinas_de(v),
+    })
 
 
 @api_view(['POST', 'PATCH'])
