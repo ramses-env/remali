@@ -3531,6 +3531,7 @@ function RentasAdmin({ reload, notify }: { reload: () => void; notify: (m: strin
   const [rentas, setRentas] = useState<RentaFull[]>([])
   const [loading, setLoading] = useState(true)
   const [verRenta, setVerRenta] = useState<RentaFull | null>(null)
+  const [entradaAvance, setEntradaAvance] = useState(false)
 
   const load = useCallback(() => {
     setLoading(true)
@@ -3548,8 +3549,10 @@ function RentasAdmin({ reload, notify }: { reload: () => void; notify: (m: strin
       ?? api.get<{ rentas: RentaFull[] }>('/rentas/?estado=todas')
         .then(r => (r.data?.rentas || []).find(x => x.id === id) ?? null)
         .catch(() => null)
+    const avance = llegaDeTraspaso
+    llegaDeTraspaso = false
     enVuelo.then(renta => {
-      if (renta) setVerRenta(renta)
+      if (renta) { setEntradaAvance(avance); setVerRenta(renta) }
       else notify(`No encontramos la renta #${id}`, 'err')
     })
     // Solo al montar: el puente es de un solo uso.
@@ -3571,7 +3574,7 @@ function RentasAdmin({ reload, notify }: { reload: () => void; notify: (m: strin
 
   return (
     <div className="space-y-5">
-      {verRenta && <RentaDetalleModal renta={verRenta} onClose={() => setVerRenta(null)} onOrdenCarta={() => abrirOrdenCartaPDF('rentas', verRenta.id)} notify={notify} onChanged={() => { load(); reload() }} />}
+      {verRenta && <RentaDetalleModal renta={verRenta} avance={entradaAvance} onClose={() => { setVerRenta(null); setEntradaAvance(false) }} onOrdenCarta={() => abrirOrdenCartaPDF('rentas', verRenta.id)} notify={notify} onChanged={() => { load(); reload() }} />}
       {/* KPIs */}
       <KpiGrid
         items={[
@@ -3862,7 +3865,7 @@ function AbonoModal({ saldo, onClose, onRegistrar }: {
   )
 }
 
-function RentaDetalleModal({ renta: r, onClose, onOrdenCarta, notify, onChanged }: { renta: RentaFull; onClose: () => void; onOrdenCarta: () => void; notify?: (m: string, t?: 'ok' | 'err') => void; onChanged?: () => void }) {
+function RentaDetalleModal({ renta: r, onClose, onOrdenCarta, notify, onChanged, avance = false }: { renta: RentaFull; onClose: () => void; onOrdenCarta: () => void; notify?: (m: string, t?: 'ok' | 'err') => void; onChanged?: () => void; avance?: boolean }) {
   const money = formatMoney
   // Sustituir la máquina por avería: la actual entra a mantenimiento y una de
   // repuesto (del mismo equipo, disponible) toma la renta sin cambiar términos.
@@ -3980,7 +3983,7 @@ function RentaDetalleModal({ renta: r, onClose, onOrdenCarta, notify, onChanged 
   )
 
   return createPortal(
-    <Modal className="fixed inset-0 z-[60] bg-[rgba(33,29,22,0.4)] backdrop-blur-[2px] flex items-start justify-center p-0 sm:p-6 overflow-y-auto" onClose={onClose} label="Detalle de la renta">
+    <Modal className={`fixed inset-0 z-[60] bg-[rgba(33,29,22,0.4)] backdrop-blur-[2px] flex items-start justify-center p-0 sm:p-6 overflow-y-auto ${avance ? 'modal-avance' : 'modal-in'}`} onClose={onClose} label="Detalle de la renta">
       <div onClick={(e: React.MouseEvent) => e.stopPropagation()} className="w-full sm:max-w-[720px] bg-surface rounded-none sm:rounded-[16px] shadow-[0_24px_60px_rgba(33,29,22,0.2)] min-h-screen sm:min-h-0 sm:my-auto sm:max-h-[92vh] flex flex-col overflow-hidden border-0 sm:border border-edge">
         {/* Header */}
         <div className="px-6 sm:px-[26px] pt-[22px] pb-[18px] border-b border-edge flex items-start justify-between gap-3 shrink-0">
@@ -6694,8 +6697,14 @@ let cotParaRenta: CotParaRenta | null = null
    meter la navegación en el estado global. */
 const RENTA_ABRIR_KEY = 'remali_renta_abrir'
 export function fijarRentaAAbrir(id: number | null) {
+  llegaDeTraspaso = id !== null
   try { id ? sessionStorage.setItem(RENTA_ABRIR_KEY, String(id)) : sessionStorage.removeItem(RENTA_ABRIR_KEY) } catch { /* privado */ }
 }
+/* Si la renta se abre por un traspaso, su modal entra desde la derecha (el otro
+   extremo del mismo movimiento). Abierta a mano desde la lista, entra centrada
+   como cualquier otro modal: no venías de ningún lado. */
+let llegaDeTraspaso = false
+
 function tomarRentaAAbrir(): number | null {
   try {
     const v = sessionStorage.getItem(RENTA_ABRIR_KEY)
@@ -7416,7 +7425,10 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
     pedirRenta(rentaId)
     setTraspasando(true)
     const reducido = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
-    window.setTimeout(() => { onVerRenta?.(rentaId); onClose() }, reducido ? 0 : 160)
+    // La flecha sale (240ms) y la hoja se retira detrás de ella (160ms); se
+    // solapan a propósito —el panel arranca a los 90ms— para que se lea como un
+    // arrastre y no como dos animaciones en fila.
+    window.setTimeout(() => { onVerRenta?.(rentaId); onClose() }, reducido ? 0 : 250)
   }
 
   const m = cotEstadoMeta(c.estado)
@@ -7984,7 +7996,7 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
                izquierda; esto es navegación. */
             <button onClick={() => traspasarARenta(c.renta_id as number)} className="w-full sm:w-auto py-2.5 px-5 rounded-full text-sm font-bold transition active:scale-[0.98] flex items-center justify-center gap-2 border border-emerald-500/40 text-emerald-600 hover:bg-emerald-500/10">
               Ver la renta #{c.renta_id}
-              <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
+              <svg className={`w-4 h-4 shrink-0 ${traspasando ? 'flecha-vuela' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
             </button>
           ) : c.tipo === 'renta' ? (
             <div className="w-full sm:w-auto py-2.5 px-4 rounded-full border border-edge text-mute text-[12px] font-medium flex items-center justify-center text-center" title="Las cotizaciones de renta se concretan creando la renta">

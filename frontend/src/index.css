@@ -425,12 +425,40 @@
    presentarse otra vez, y una salida lenta se siente como que el sistema no
    responde. */
 @keyframes modal-backdrop-out { from { opacity: 1; } to { opacity: 0; } }
-@keyframes modal-panel-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(-6px) scale(0.985); } }
-.modal-out { animation: modal-backdrop-out 160ms cubic-bezier(0.4, 0, 1, 1) both; pointer-events: none; }
-.modal-out > * { animation: modal-panel-out 160ms cubic-bezier(0.4, 0, 1, 1) both; }
+/* Se va HACIA LA IZQUIERDA porque tú vas hacia la derecha: la hoja que dejas
+   atrás se desplaza en sentido contrario a tu avance, como una página que pasa.
+   Es la gramática de "adelante" de cualquier sistema operativo, y por eso no
+   hay que explicarla. */
+@keyframes modal-panel-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateX(-28px) scale(0.985); } }
+/* El retraso de 90ms es el gesto: la flecha ya salió disparada y el panel
+   arranca detrás de ella. Se solapan —no van en fila— para que se lea como un
+   arrastre, no como dos animaciones esperando turno. */
+.modal-out { animation: modal-backdrop-out 160ms cubic-bezier(0.4, 0, 1, 1) 90ms both; pointer-events: none; }
+.modal-out > * { animation: modal-panel-out 160ms cubic-bezier(0.4, 0, 1, 1) 90ms both; }
+
+/* Entrada del OTRO extremo del mismo viaje: llega desde la derecha, que es
+   hacia donde apuntaba la flecha que tocaste. La curva es la del sistema
+   (llega con calma) y dura más que la salida: lo nuevo sí se presenta. */
+@keyframes modal-panel-avance { from { opacity: 0; transform: translateX(34px) scale(0.99); } to { opacity: 1; transform: none; } }
+.modal-avance { animation: modal-backdrop-in 180ms ease-out both; }
+.modal-avance > * { animation: modal-panel-avance 280ms cubic-bezier(0.23, 1, 0.32, 1) both; }
+
+/* La flecha se va ANTES que la hoja: tocas, sale disparada, y el panel la
+   sigue. Da la sensación de que ella te llevó —causa y efecto, no dos cosas
+   que pasaron juntas— y de paso es el acuse del clic, que el botón necesitaba
+   igual. 140ms: se siente, no se espera. */
+@keyframes flecha-vuela {
+  0%   { opacity: 1; transform: none; }
+  55%  { opacity: 1; transform: translateX(5px); }
+  100% { opacity: 0; transform: translateX(22px); }
+}
+.flecha-vuela { animation: flecha-vuela 240ms cubic-bezier(0.4, 0, 1, 1) both; }
+
 @media (prefers-reduced-motion: reduce) {
-  /* Se conserva el fundido —marca que algo cambió— y se quita el desplazamiento. */
+  /* Se conserva el fundido —marca que algo cambió— y se quita el viaje lateral. */
   .modal-out > * { animation: modal-backdrop-out 160ms ease-in both; }
+  .modal-avance > * { animation: modal-backdrop-in 180ms ease-out both; }
+  .flecha-vuela { animation: none; opacity: 0.5; }
 }
 
 /* Éxito (p. ej. al vincular): UN solo momento de delight. La insignia entra con
