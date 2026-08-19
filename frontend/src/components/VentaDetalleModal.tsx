@@ -3,6 +3,7 @@ import Modal from './Modal'
 import { createPortal } from 'react-dom'
 import api from '../lib/api'
 import { descargarBlob } from '../lib/descargar'
+import TicketModal from './TicketModal'
 
 type VentaLike = {
   id: number
@@ -101,6 +102,18 @@ export default function VentaDetalleModal({ venta, onClose, onChanged, notify, o
       setCancelando(false)
     }
   }
+
+  /* Qué comprobante lleva esta venta.
+
+     Maquinaria (una unidad, o varias) → ORDEN EN CARTA. Es un documento que se
+     archiva, se firma y se manda por correo.
+     Refacciones de mostrador → TICKET térmico, que es lo que sale de la
+     impresora del mostrador y lo que el cliente se lleva en la mano.
+
+     No son dos formatos del mismo papel: son dos documentos distintos, y
+     ofrecer el que no toca solo confunde a quien atiende. */
+  const esRefaccion = !venta.unidad && !(venta.maquinas?.length)
+  const [verTicket, setVerTicket] = useState(false)
 
   // Orden carta en PDF (misma que recibía el cliente): se baja como blob con la
   // sesión del axios, no con un <a href> (que no llevaría el token).
@@ -269,10 +282,17 @@ export default function VentaDetalleModal({ venta, onClose, onChanged, notify, o
         {/* Acciones */}
         <div className="flex items-center justify-between gap-4 px-6 sm:px-[26px] py-5 mt-[22px] border-t border-edge flex-wrap">
           <div className="flex gap-2">
-            <button onClick={ordenCarta} disabled={pdf}
-              className="h-[44px] px-4 rounded-[12px] border border-edge bg-surface text-[14px] font-semibold text-ink hover:bg-surface-2 transition-colors whitespace-nowrap disabled:opacity-50">
-              {pdf ? 'Abriendo…' : '↓ Orden carta (PDF)'}
-            </button>
+            {esRefaccion ? (
+              <button onClick={() => setVerTicket(true)}
+                className="h-[44px] px-4 rounded-[12px] border border-edge bg-surface text-[14px] font-semibold text-ink hover:bg-surface-2 transition-colors whitespace-nowrap">
+                🖨 Reimprimir ticket
+              </button>
+            ) : (
+              <button onClick={ordenCarta} disabled={pdf}
+                className="h-[44px] px-4 rounded-[12px] border border-edge bg-surface text-[14px] font-semibold text-ink hover:bg-surface-2 transition-colors whitespace-nowrap disabled:opacity-50">
+                {pdf ? 'Abriendo…' : '↓ Orden carta (PDF)'}
+              </button>
+            )}
             {!cancelada && !factura && (
               <button onClick={mandarPorFacturar} disabled={mandando}
                 className="h-[44px] px-4 rounded-[12px] border border-amber-500/40 bg-amber-500/10 text-[14px] font-semibold text-amber-700 dark:text-amber-400 hover:bg-amber-500/20 transition-colors whitespace-nowrap disabled:opacity-50">
@@ -311,6 +331,11 @@ export default function VentaDetalleModal({ venta, onClose, onChanged, notify, o
               </button>
             </div>
           </div>
+        )}
+
+        {/* El ticket térmico de mostrador: solo existe para las refacciones. */}
+        {verTicket && (
+          <TicketModal url={`/ventas/${venta.id}/comprobante/`} onClose={() => setVerTicket(false)} />
         )}
       </div>
     </Modal>,

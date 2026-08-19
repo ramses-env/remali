@@ -121,3 +121,20 @@ class CotizacionConcretadaEsSoloLecturaTest(TestCase):
         r = self.client.patch(f'/api/cotizaciones/{self.cot.id}/',
                               {'entrega_prometida': '2026-09-01T10:00:00Z'}, format='json')
         self.assertEqual(r.status_code, 200, r.data)
+
+    def test_una_cotizacion_de_renta_no_se_convierte_en_venta(self):
+        """Red de seguridad del botón que mentía.
+
+        El pie decía "Ver ticket" pero llamaba a convertir: con una cotización
+        de renta el atajo idempotente no aplica (no hay venta_id), así que caía
+        en el diálogo "Convertir en venta". El servidor lo rechaza porque no hay
+        partidas de venta — nunca hubo riesgo de cobrar dos veces— pero conviene
+        que quede fijado, porque es lo único que separaba al usuario de un
+        diálogo sin sentido de una venta duplicada.
+        """
+        from ventas.models import Venta
+        r = self.client.post(f'/api/cotizaciones/{self.cot.id}/convertir/',
+                             {'metodo_pago': 'efectivo'}, format='json')
+        self.assertEqual(r.status_code, 400, r.data)
+        self.assertIn('partidas de venta', r.data['detalle'])
+        self.assertEqual(Venta.objects.filter(cotizacion=self.cot).count(), 0)

@@ -701,7 +701,14 @@ export default function Dashboard() {
     inventario: 'editar_catalogo',
     refacciones: 'editar_catalogo',
     rentas: 'ver_dinero',
-    reparaciones: 'ver_dinero',
+    // Reparaciones se gateaba con `ver_dinero`, que es "ver las cuentas del
+    // negocio": el técnico TENÍA la capacidad de reparar y no veía ni una de sus
+    // órdenes. La sección es su mesa de trabajo, no un reporte de contabilidad.
+    reparaciones: 'reparar',
+    // Pedidos y apartados son VENTAS CON ANTICIPO. No tenía candado, así que la
+    // veía cualquiera que entrara al panel —el técnico y el cajero incluidos—,
+    // aunque el backend luego les negara los datos.
+    pedidos: 'ver_dinero',
     // "Mi jornada": el técnico la trabaja (`jornada_campo`), administración solo
     // la mira (`ver_jornada`). Antes pedía `operar_inventario`, que cascadea
     // hacia arriba desde el nivel 1: por eso el admin la veía completa, con
@@ -3538,7 +3545,7 @@ function RentasAdmin({ reload, notify }: { reload: () => void; notify: (m: strin
 
   return (
     <div className="space-y-5">
-      {verRenta && <RentaDetalleModal renta={verRenta} onClose={() => setVerRenta(null)} onTicket={() => abrirOrdenCartaPDF('rentas', verRenta.id)} notify={notify} onChanged={() => { load(); reload() }} />}
+      {verRenta && <RentaDetalleModal renta={verRenta} onClose={() => setVerRenta(null)} onOrdenCarta={() => abrirOrdenCartaPDF('rentas', verRenta.id)} notify={notify} onChanged={() => { load(); reload() }} />}
       {/* KPIs */}
       <KpiGrid
         items={[
@@ -3829,7 +3836,7 @@ function AbonoModal({ saldo, onClose, onRegistrar }: {
   )
 }
 
-function RentaDetalleModal({ renta: r, onClose, onTicket, notify, onChanged }: { renta: RentaFull; onClose: () => void; onTicket: () => void; notify?: (m: string, t?: 'ok' | 'err') => void; onChanged?: () => void }) {
+function RentaDetalleModal({ renta: r, onClose, onOrdenCarta, notify, onChanged }: { renta: RentaFull; onClose: () => void; onOrdenCarta: () => void; notify?: (m: string, t?: 'ok' | 'err') => void; onChanged?: () => void }) {
   const money = formatMoney
   // Sustituir la máquina por avería: la actual entra a mantenimiento y una de
   // repuesto (del mismo equipo, disponible) toma la renta sin cambiar términos.
@@ -4135,7 +4142,7 @@ function RentaDetalleModal({ renta: r, onClose, onTicket, notify, onChanged }: {
         {/* Footer */}
         <div className="px-6 sm:px-[26px] py-5 border-t border-edge flex items-center gap-2.5 shrink-0">
           <button onClick={onClose} className="flex-1 h-11 rounded-[9px] border border-edge text-ink text-[13.5px] font-bold hover:bg-surface-2 transition-colors">Cerrar</button>
-          <button onClick={onTicket} className="flex-1 h-11 rounded-[9px] bg-gold text-black text-[13.5px] font-bold hover:brightness-95 transition-all">Orden carta (PDF)</button>
+          <button onClick={onOrdenCarta} className="flex-1 h-11 rounded-[9px] bg-gold text-black text-[13.5px] font-bold hover:brightness-95 transition-all">Orden carta (PDF)</button>
         </div>
       </div>
     </Modal>,
@@ -6362,7 +6369,7 @@ function AdeudosAdmin({ datos, pedidos, reload, reloadApartados, notify }: {
         <AbonoModal saldo={Number(abonandoApartado.saldo || 0)} onClose={() => setAbonandoApartado(null)} onRegistrar={registrarAbonoApartado} />
       )}
       {ver && (
-        <RentaDetalleModal renta={ver} onClose={() => { setVer(null); reload() }} onTicket={() => abrirOrdenCartaPDF('rentas', ver.id)} notify={notify} onChanged={reload} />
+        <RentaDetalleModal renta={ver} onClose={() => { setVer(null); reload() }} onOrdenCarta={() => abrirOrdenCartaPDF('rentas', ver.id)} notify={notify} onChanged={reload} />
       )}
     </div>
   )
@@ -7193,7 +7200,7 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
     }
     const aviso = c.tipo === 'mixta'
       ? `¿Crear la venta con las partidas de venta (${orMoney(c.subtotal_venta)})?\n\nLas partidas de renta NO se incluyen: esas se concretan desde Rentas eligiendo unidad y fechas.`
-      : '¿Convertir esta cotización en venta? Se creará la venta con estas partidas y su ticket.'
+      : '¿Convertir esta cotización en venta? Se creará la venta con estas partidas y su orden en carta.'
     if (!(await confirmar({ titulo: 'Convertir en venta', mensaje: aviso, aceptar: 'Convertir' }))) return
     setBusy(true)
     const rMet = await elegir({
@@ -7843,10 +7850,21 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
           )}
 
           {/* Acción de negocio: no aplica en estados finales (cancelada/rechazada). */}
-          {!cotCerrada && (c.convertida ? (
-            <button onClick={convertir} disabled={busy} className="w-full sm:w-auto py-2.5 px-5 rounded-full text-sm font-bold transition active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-2 border border-emerald-500/40 text-emerald-600 hover:bg-emerald-500/10">
+          {/* Ya concretada: el botón lleva al comprobante de lo que se hizo.
+              Antes decía "Ver ticket" y llamaba a `convertir` para TODAS: con
+              una renta el atajo idempotente no aplica (no hay venta_id) y el
+              admin caía en el diálogo "Convertir en venta", que no viene a
+              cuento. La excepción real es la MIXTA con la renta ya concretada:
+              ahí sí falta convertir su parte de venta. */}
+          {!cotCerrada && (c.venta_id ? (
+            <button onClick={() => onConvertida(c.venta_id as number)} className="w-full sm:w-auto py-2.5 px-5 rounded-full text-sm font-bold transition active:scale-[0.98] flex items-center justify-center gap-2 border border-emerald-500/40 text-emerald-600 hover:bg-emerald-500/10">
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.9"><path strokeLinecap="round" strokeLinejoin="round" d="M4 12l5 5L20 6" /></svg>
-              Ver ticket
+              Ver la orden en carta
+            </button>
+          ) : c.renta_id && c.tipo !== 'mixta' ? (
+            <button onClick={() => abrirOrdenCartaPDF('rentas', c.renta_id as number)} className="w-full sm:w-auto py-2.5 px-5 rounded-full text-sm font-bold transition active:scale-[0.98] flex items-center justify-center gap-2 border border-emerald-500/40 text-emerald-600 hover:bg-emerald-500/10">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.9"><path strokeLinecap="round" strokeLinejoin="round" d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" /></svg>
+              Ver la renta #{c.renta_id}
             </button>
           ) : c.tipo === 'renta' ? (
             <div className="w-full sm:w-auto py-2.5 px-4 rounded-full border border-edge text-mute text-[12px] font-medium flex items-center justify-center text-center" title="Las cotizaciones de renta se concretan creando la renta">
@@ -8159,6 +8177,24 @@ function EntregaHoja({ tarea, onClose, onHecho, notify }: {
   const [ocupado, setOcupado] = useState(false)
   const inputRef = useRef<HTMLInputElement | null>(null)
 
+  /* ── Cobrar al recoger ──
+     Al técnico se le pedía cobrar y no se le daba dónde anotarlo: su tarjeta
+     decía "Adeudo: cobrar $2,000" y esta hoja no tenía campo de pago. El
+     AbonoModal vivía en Rentas y en Adeudos, dos secciones que su rol no ve.
+     Aquí queda a la mano, en el momento en que el dinero cambia de manos.
+     `saldo` es lo que queda por cobrar; baja con cada abono sin recargar. */
+  const [saldo, setSaldo] = useState(Number(tarea.adeudo || 0))
+  const [cobrando, setCobrando] = useState(false)
+  const puedeCobrar = usePuede()('ver_montos_operacion')
+  const hayQueCobrar = esRecoger && saldo > 0 && !!tarea.renta_id && puedeCobrar
+
+  async function registrarAbono(monto: number, metodo: string, fecha: string) {
+    await api.post(`/rentas/${tarea.renta_id}/abonos/`, { monto, metodo, fecha: fecha || undefined })
+    setSaldo(s => Math.max(0, Number((s - monto).toFixed(2))))
+    setCobrando(false)
+    notify(monto >= saldo ? 'Adeudo liquidado' : 'Abono registrado')
+  }
+
   const previews = useMemo(() => fotos.map(f => URL.createObjectURL(f)), [fotos])
   useEffect(() => () => previews.forEach(URL.revokeObjectURL), [previews])
 
@@ -8229,6 +8265,23 @@ function EntregaHoja({ tarea, onClose, onHecho, notify }: {
             </div>
           </div>
 
+          {hayQueCobrar && (
+            <div className="rounded-xl border border-amber-500/40 bg-amber-500/[0.07] px-4 py-3.5">
+              <p className="text-[11px] font-extrabold tracking-[0.5px] text-amber-700 dark:text-amber-400 mb-1">POR COBRAR</p>
+              <p className="text-[13px] text-ink">
+                El cliente debe <b>${saldo.toLocaleString('en-US', { minimumFractionDigits: 2 })}</b> de esta renta.
+              </p>
+              <p className="text-[12px] text-mute mt-0.5">Si te entrega dinero, regístralo ahora: después no vas a acordarte de cuánto fue.</p>
+              <button onClick={() => setCobrando(true)}
+                className="mt-3 h-10 px-5 rounded-full btn-acento text-[13px] font-black">
+                Registrar cobro
+              </button>
+            </div>
+          )}
+          {esRecoger && saldo === 0 && Number(tarea.adeudo || 0) > 0 && (
+            <p className="text-[13px] font-semibold text-libre">✓ Adeudo liquidado. Puedes recoger.</p>
+          )}
+
           <div>
             <label className="text-[11px] font-extrabold tracking-[0.5px] text-gold-ink mb-2 block">NOTA (OPCIONAL)</label>
             <input aria-label="NOTA (OPCIONAL)" value={nota} onChange={e => setNota(e.target.value)} placeholder="Ej. Rayón en la tapa, tanque lleno…"
@@ -8255,6 +8308,14 @@ function EntregaHoja({ tarea, onClose, onHecho, notify }: {
           )}
         </div>
       </div>
+
+      {cobrando && (
+        <AbonoModal
+          saldo={saldo}
+          onClose={() => setCobrando(false)}
+          onRegistrar={registrarAbono}
+        />
+      )}
     </Modal>,
     document.body
   )
@@ -9094,9 +9155,9 @@ function UsuarioModal({ usuario, roles, soyYo, onClose, onSaved, notify }: {
   })
   const [guardando, setGuardando] = useState(false)
   const set = (k: keyof typeof f, v: string) => setF(s => ({ ...s, [k]: v }))
-  // Solo Administrador y Gerente pueden autorizar acciones sensibles: su PIN es su
+  // Solo el Administrador (y el Dueño) autoriza acciones sensibles: su PIN es su
   // firma. A los demás roles ni se les pide (el backend también lo impone).
-  const esAutoridad = ['Administrador', 'Gerente'].includes(f.rol)
+  const esAutoridad = f.rol === 'Administrador'
 
   function guardar() {
     setGuardando(true)
@@ -9206,7 +9267,7 @@ function UsuarioModal({ usuario, roles, soyYo, onClose, onSaved, notify }: {
               <input aria-label="Código de seguridad (PIN de 6 dígitos)" className={`${campo} font-mono tracking-[0.3em]`} type="password" inputMode="numeric" maxLength={6} autoComplete="one-time-code"
                 value={f.codigo_seguridad} onChange={e => set('codigo_seguridad', e.target.value.replace(/\D/g, '').slice(0, 6))}
                 placeholder={nuevo ? '6 dígitos' : 'Dejar vacío para no cambiarlo'} />
-              <p className="text-[12px] text-mute mt-1.5">Solo Administrador y Gerente pueden autorizar acciones sensibles (ajustes de precio, anticipos bajos, devoluciones). Este PIN es su firma.</p>
+              <p className="text-[12px] text-mute mt-1.5">Solo el Administrador puede autorizar acciones sensibles (ajustes de precio, anticipos bajos, devoluciones). Este PIN es su firma.</p>
             </div>
           )}
 
@@ -9827,7 +9888,7 @@ function PerfilAdmin({ notify }: { notify: (m: string, t?: 'ok' | 'err') => void
           </div>
           <div>
             <label className={labelG}>Puesto</label>
-            <input aria-label="Puesto" className={inputG} value={form.puesto || ''} onChange={e => setForm({ ...form, puesto: e.target.value })} placeholder="Ej. Gerente" />
+            <input aria-label="Puesto" className={inputG} value={form.puesto || ''} onChange={e => setForm({ ...form, puesto: e.target.value })} placeholder="Ej. Encargado de piso" />
           </div>
           <div className="sm:col-span-2">
             <label className={labelG}>Bio</label>
