@@ -334,6 +334,9 @@ def listar_ventas(request):
             'total': str(v.total),
             'pagado': str(v.pagado()),
             'saldo': str(v.saldo_pendiente()),
+            # Los abonos con su fecha: el Resumen los necesita para contar el
+            # ingreso el día que entró el dinero, no el día que se levantó la venta.
+            'pagos': v.pagos or [],
             'sobre_pedido': v.sobre_pedido,
             'fecha_estimada_entrega': v.fecha_estimada_entrega,
             'entregada_en': v.entregada_en,
@@ -424,6 +427,7 @@ def _serialize_pedido(v):
         'fecha_estimada_entrega': v.fecha_estimada_entrega,
         'pedido_fase': v.pedido_fase,
         'entregada_en': v.entregada_en,
+        'entregada_por': getattr(v.entregada_por, 'username', None),
         'vendedor': getattr(v.usuario, 'username', None),
         'equipo': ((inv.equipo.modelo if inv and inv.equipo else None)
                    or (v.equipo.modelo if v.equipo_id else None)),
@@ -440,18 +444,77 @@ def _serialize_pedido(v):
 @api_view(['GET'])
 @permission_classes([EsOperador])
 def pedidos_adeudos(request):
-    """Ventas 'apartada' (con anticipo): lo que falta por cobrar y entregar.
-    Es la sección 'Pedidos y apartados'."""
+    """La sección 'Pedidos y apartados', por sus dos lados.
+
+    Sin parámetros: los ABIERTOS (`apartada`), lo que falta por cobrar y entregar.
+    Con `?estado=entregados`: el HISTORIAL de los que ya se cumplieron, acotado
+    por periodo. Sin ese lado, un pedido desaparecía de la pantalla en el momento
+    de entregarlo —pasa a 'activa' y el filtro dejaba de verlo—, y el módulo solo
+    sabía contar lo que faltaba, nunca lo que se cumplió.
+    """
     from decimal import Decimal
-    qs = (Venta.objects.filter(estado='apartada')
-          .select_related('inventario', 'inventario__equipo', 'equipo', 'cliente', 'usuario', 'cliente_usuario')
-          .order_by('fecha_estimada_entrega', '-fecha'))
+    from server.periodos import rango_periodo, anio_actual
+
+    base = (Venta.objects
+            .select_related('inventario', 'inventario__equipo', 'equipo', 'cliente',
+                            'usuario', 'cliente_usuario', 'entregada_por')
+            .prefetch_related('maquinas__inventario__equipo', 'maquinas__equipo'))
+
+    if (request.query_params.get('estado') or '').strip().lower() == 'entregados':
+        qs = base.filter(estado='activa', entregada_en__isnull=False)
+        # Por periodo de ENTREGA, no de registro: un pedido se aparta un mes y se
+        # entrega otro, y lo que este historial cuenta es cuándo se cumplió.
+        ini, fin = rango_periodo(request.query_params)
+        if ini is None and fin is None:
+            ini, fin = rango_periodo({'anio': str(anio_actual())})
+        if ini:
+            qs = qs.filter(entregada_en__gte=ini)
+        if fin:
+            qs = qs.filter(entregada_en__lt=fin)
+        entregados = list(qs.order_by('-entregada_en'))
+        filas = [_serialize_pedido(v) for v in entregados]
+        cobrado = sum((v.total or Decimal('0')) for v in entregados)
+        clientes = len({(f.get('cuenta') or f.get('cliente') or f.get('nombre_cliente') or str(f['id'])) for f in filas})
+        return Response({'pedidos': filas, 'total': str(cobrado), 'clientes': clientes})
+
+    qs = base.filter(estado='apartada').order_by('fecha_estimada_entrega', '-fecha')
     filas, total = [], Decimal('0')
     for v in qs:
         filas.append(_serialize_pedido(v))
         total += v.saldo_pendiente()
     clientes = len({(f.get('cuenta') or f.get('cliente') or f.get('nombre_cliente') or str(f['id'])) for f in filas})
     return Response({'pedidos': filas, 'total': str(total), 'clientes': clientes})
+
+
+def _abono_a_caja(user, *, monto, metodo, venta=None, renta=None, concepto=''):
+    """Cuelga el abono del turno de caja de quien lo registra, si es que tiene uno.
+
+    La regla la puso el negocio: el dinero que se le entrega al mostrador tiene
+    que estar en el corte —está en el cajón, y un arqueo que no lo espera no
+    cuadra—, pero el que recibe directo el dueño o un administrador solo hay que
+    dejarlo registrado. "¿Tiene turno abierto?" es exactamente esa pregunta.
+
+    Deliberadamente NO abre turno al vuelo, a diferencia de la venta de mostrador:
+    ahí el cobro es del mostrador por definición, aquí abrirlo metería al dueño en
+    un corte que no es suyo y ensuciaría el arqueo de quien sí está en ventanilla.
+
+    Devuelve un aviso para la interfaz, o None si el abono no tocó la caja.
+    """
+    from ventas.caja_views import sesion_abierta_de
+    from .models import MovimientoCaja
+    sesion = sesion_abierta_de(user)
+    if not sesion:
+        return None
+    MovimientoCaja.objects.create(
+        sesion=sesion, caja=sesion.caja, usuario=user,
+        tipo=MovimientoCaja.VENTA, metodo_pago=metodo,
+        # Solo el billete mueve el arqueo. Tarjeta y transferencia entran al corte
+        # del turno para que cuadre por método, pero no como efectivo en el cajón.
+        afecta_efectivo=(metodo == 'efectivo'),
+        monto=monto, venta=venta, renta=renta, concepto=concepto,
+    )
+    return {'sesion_id': sesion.id, 'en_corte': True,
+            'afecta_efectivo': metodo == 'efectivo'}
 
 
 @api_view(['POST'])
@@ -480,21 +543,59 @@ def registrar_abono_venta(request, pk: int):
     saldo = v.saldo_pendiente()
     if monto > saldo:
         return Response({'detalle': f'El abono (${monto}) es mayor al saldo (${saldo}).'}, status=400)
-    sello = timezone.now().isoformat()
-    pagos = list(v.pagos or [])
-    pagos.append({'fecha': sello, 'monto': str(monto), 'metodo': metodo,
-                  'por': request.user.get_username() if request.user.is_authenticated else ''})
-    v.pagos = pagos
-    v.metodo_pago = metodo
-    v.save(update_fields=['pagos', 'metodo_pago'])
-    return Response({'detalle': 'Abono registrado', 'pedido': _serialize_pedido(v)})
+    # La fecha que capturó el operador manda. Antes se ignoraba y se sellaba el
+    # momento del registro: un anticipo recibido el viernes y capturado el lunes
+    # contaba el lunes, y ahora que el ingreso sigue a los pagos eso sería mentir
+    # sobre qué día entró el dinero.
+    from server.cobranza import sellar_abono
+    sello, err = sellar_abono(datos.get('fecha'))
+    if err:
+        return Response({'detalle': err}, status=400)
+    with transaction.atomic():
+        pagos = list(v.pagos or [])
+        pagos.append({'fecha': sello, 'monto': str(monto), 'metodo': metodo,
+                      'por': request.user.get_username() if request.user.is_authenticated else ''})
+        v.pagos = pagos
+        v.metodo_pago = metodo
+        v.save(update_fields=['pagos', 'metodo_pago'])
+        aviso = _abono_a_caja(request.user, monto=monto, metodo=metodo, venta=v,
+                              concepto=f'Abono {v.folio or v.id}')
+    salida = {'detalle': 'Abono registrado', 'pedido': _serialize_pedido(v)}
+    if aviso:
+        salida['caja'] = aviso
+    return Response(salida)
+
+
+def _equipo_pendiente(venta):
+    """El equipo del renglón que todavía espera máquina, o None si no hay ninguno.
+
+    Un sobre pedido nace sin unidad: el renglón solo guarda QUÉ se pidió, y es de
+    ahí de donde sale el equipo al que pertenece la máquina que acaba de llegar.
+
+    Devolver None cuando ya no queda hueco es lo que evita registrar una máquina
+    que ningún renglón está esperando: nacería, no se entregaría a nadie y se
+    quedaría suelta en el patio como stock disponible que nadie compró.
+    """
+    renglones = list(venta.maquinas_vivas().filter(entregada_en__isnull=True))
+    for renglon in renglones:
+        if not renglon.inventario_id:
+            return renglon.equipo or venta.equipo
+    return None if renglones else venta.equipo
 
 
 @api_view(['POST'])
 @permission_classes([EsOperador])
 def entregar_venta(request, pk: int):
     """Cierra un apartado: exige saldo 0; si es sobre pedido, asigna la unidad que
-    ya llegó (`unidad_id`). Marca la unidad vendida y la venta 'activa'."""
+    ya llegó (`unidad_id`). Marca la unidad vendida y la venta 'activa'.
+
+    Un SOBRE PEDIDO se pide de un producto que sí está en el catálogo, pero la
+    máquina física no existe todavía: estaba en la bodega del proveedor cuando el
+    cliente la apartó. Por eso se puede registrar aquí mismo (`nueva_unidad`), en
+    el acto de entregarla, en vez de mandar a nadie a Inventario a media entrega.
+    Nace y sale VENDIDA dentro de esta misma transacción: nunca se asoma al stock
+    ni al catálogo público, así que nadie te la puede vender dos veces.
+    """
     from inventario.models import Inventario
     datos = request.data or {}
     with transaction.atomic():
@@ -520,7 +621,33 @@ def entregar_venta(request, pk: int):
             unidades = list(Inventario.objects.select_for_update().select_related('equipo').filter(pk__in=ids))
             if len(unidades) != len(set(ids)):
                 return Response({'detalle': 'Unidad no encontrada.'}, status=404)
-        elif v.sobre_pedido or not v.inventario_id:
+
+        # La máquina que acaba de llegar del proveedor: se da de alta aquí.
+        nueva = datos.get('nueva_unidad')
+        if isinstance(nueva, dict):
+            if not puede_de(request.user).get('alta_inventario'):
+                return Response({'detalle': 'Para entregar hay que registrar la máquina que llegó. '
+                                            'Pídeselo a administración.'}, status=403)
+            equipo = _equipo_pendiente(v)
+            if equipo is None:
+                return Response({'detalle': 'Este pedido no dice de qué equipo es; no se puede registrar la máquina.'}, status=400)
+            serie = (str(nueva.get('numero_serie') or '')).strip()
+            if serie:
+                ya = Inventario.objects.filter(numero_serie__iexact=serie).first()
+                if ya:
+                    return Response({'detalle': f'La unidad {ya.codigo} ya tiene el número de serie '
+                                                f'{ya.numero_serie}. Revisa si esta máquina ya se había '
+                                                'registrado.'}, status=400)
+            condicion = (str(nueva.get('condicion') or 'nueva')).strip().lower()
+            if condicion not in {c[0] for c in Inventario.CONDICIONES}:
+                condicion = 'nueva'
+            unidades.append(Inventario.objects.create(
+                equipo=equipo, condicion=condicion, numero_serie=serie or None,
+            ))
+            logger.info('Unidad %s dada de alta al entregar el pedido %s por %s',
+                        unidades[-1].codigo, v.id, request.user.get_username())
+
+        if not unidades and (v.sobre_pedido or not v.inventario_id):
             return Response({'detalle': 'Elige la unidad que llegó para entregar el pedido.'}, status=400)
         try:
             v.entregar(unidades=unidades or None, user=request.user)
@@ -767,7 +894,10 @@ def cancelar_venta(request, pk: int):
         return Response({'detalle': detalle}, status=status_cod)
 
     motivo = (request.data or {}).get('motivo', '').strip()
-    quien = getattr(request.user, 'username', '') or 's/d'
+    # Para el Gestor queda "carol-2025 (autorizó el dueño)": sin eso el registro
+    # diría solo su nombre y parecería que se lo aprobó a sí mismo.
+    from maquinaria.seguridad import etiqueta_autorizacion
+    quien = etiqueta_autorizacion(request.user)
     v.cancelar(motivo=(f'{motivo} — autorizó {quien}' if motivo else f'Autorizó {quien}'))
 
     # Reverso de caja (auditoría): si la venta entró a un turno, se crea un

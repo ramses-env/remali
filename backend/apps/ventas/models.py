@@ -34,7 +34,8 @@ def evaluar_anticipo(precio, anticipo, codigo='', user=None):
         if not ok:
             return '', {'detalle': f'Anticipo menor al mínimo ({int(pct_min)}%). {detalle}', 'status': status}
         pct_dado = (anticipo / precio * Decimal('100')).quantize(Decimal('0.1'))
-        quien = getattr(user, 'username', '') or 's/d'
+        from maquinaria.seguridad import etiqueta_autorizacion
+        quien = etiqueta_autorizacion(user)
         return f'Anticipo {pct_dado}% (mínimo {int(pct_min)}%), autorizado por {quien}.', None
     return '', None
 
@@ -394,13 +395,22 @@ class Venta(models.Model):
         Sin esto, todo lo que hoy hace `Venta(inventario=u)` —la caja, el admin,
         `vender_unidad`— quedaría fuera del modelo nuevo y tendríamos dos
         verdades sobre la misma venta.
+
+        Un SOBRE PEDIDO también lleva renglón, aunque todavía no tenga máquina:
+        el renglón guarda QUÉ se pidió y espera la unidad, que es justo para lo
+        que existe `VentaMaquina.equipo`. Sin él, el pedido nacía sin renglones y
+        al entregarlo el modelo respondía "esta venta ya no tiene máquinas por
+        entregar" — o sea, un sobre pedido no se podía entregar nunca.
         """
-        if not self.inventario_id or self.maquinas.exists():
+        if self.maquinas.exists():
             return
+        if not self.inventario_id and not self.equipo_id:
+            return   # venta de puras refacciones: no lleva renglón de máquina
         VentaMaquina.objects.create(
             venta=self,
             inventario_id=self.inventario_id,
-            equipo_id=(self.inventario.equipo_id if self.inventario else None),
+            equipo_id=((self.inventario.equipo_id if self.inventario else None)
+                       or self.equipo_id),
             precio=self.precio_maquina or Decimal('0.00'),
             entregada_en=self.entregada_en,
         )

@@ -6,6 +6,8 @@
  * las térmicas de 58/80 mm y sus clones).
  */
 
+import { rasterCacheado } from './ticketLogo'
+
 type Linea = { nombre: string; detalle?: string; importe?: string }
 type Total = { label: string; value: string; fuerte?: boolean }
 export type Comprobante = {
@@ -67,7 +69,27 @@ function code128B(s: string): number[] {
   return out
 }
 
-type NegocioTicket = { nombre?: string; direccion?: string; telefono?: string; rfc?: string; footer?: string }
+type NegocioTicket = { nombre?: string; direccion?: string; telefono?: string; rfc?: string; web?: string; footer?: string }
+
+/** Lo que el admin arma en Configuración › Ticket. Viaja en la config pública. */
+export type TicketCfg = {
+  logo: string            // data URI PNG ya monocromo (lo que la térmica imprime)
+  logoEscala: number      // % del ancho del papel
+  mostrarLogo: boolean
+  lema: string
+  mostrarDireccion: boolean
+  mostrarTelefono: boolean
+  mostrarRfc: boolean
+  mostrarWeb: boolean
+  codigoBarras: boolean
+  leyenda: string         // aviso al pie (devoluciones, garantía)
+}
+
+export const TICKET_DEFAULT: TicketCfg = {
+  logo: '', logoEscala: 70, mostrarLogo: true, lema: 'Renta · Venta · Servicio',
+  mostrarDireccion: true, mostrarTelefono: true, mostrarRfc: true, mostrarWeb: false,
+  codigoBarras: true, leyenda: '',
+}
 
 // Texto de "fila" (etiqueta izq / valor der) de exactamente `width` caracteres.
 function padStr(left: string, right: string, width: number): string {
@@ -79,36 +101,66 @@ function padStr(left: string, right: string, width: number): string {
   return l + ' '.repeat(espacios) + r
 }
 
+/** Parte un texto en líneas de `width` caracteres sin cortar palabras.
+ *  Sin esto, una dirección larga se sale del papel: la rejilla es fija. */
+function envolver(texto: string, width: number): string[] {
+  const out: string[] = []
+  for (const parrafo of String(texto || '').split(/\r?\n/)) {
+    let linea = ''
+    for (const palabra of parrafo.trim().split(/\s+/).filter(Boolean)) {
+      if (!linea) { linea = palabra.slice(0, width); continue }
+      if (linea.length + 1 + palabra.length <= width) { linea += ' ' + palabra; continue }
+      out.push(linea)
+      linea = palabra.length > width ? palabra.slice(0, width) : palabra
+    }
+    out.push(linea)   // un párrafo vacío deja su renglón en blanco, a propósito
+  }
+  return out
+}
+
 /**
  * Modelo de línea del ticket — FUENTE ÚNICA que alimenta tanto la vista previa
  * (HTML) como la impresión (ESC/POS), para que se vean IGUAL.
  */
 export type TLine =
-  | { k: 'text'; t: string; a: 'l' | 'c' | 'r'; b?: boolean; big?: boolean }
-  | { k: 'hr'; heavy?: boolean }
-  | { k: 'sp' }
-  | { k: 'bc'; v: string }
+  | { k: 'text'; t: string; a: 'l' | 'c' | 'r'; b?: boolean; big?: boolean; z?: Zona }
+  | { k: 'hr'; heavy?: boolean; z?: Zona }
+  | { k: 'sp'; z?: Zona }
+  | { k: 'bc'; v: string; z?: Zona }
+  | { k: 'logo'; src: string; escala: number; z?: Zona }
+
+/** Zona del ticket a la que pertenece cada línea. La impresión la ignora; sirve
+ *  para que el configurador pueda señalar en el papel qué acabas de tocar. */
+export type Zona = 'logo' | 'cabeza' | 'cuerpo' | 'pie'
 
 /** Arma el ticket como una lista de líneas sobre una rejilla de `width` caracteres. */
-export function layoutTicket(data: Comprobante, opts: { width: number; negocio?: NegocioTicket }): TLine[] {
+export function layoutTicket(data: Comprobante, opts: { width: number; negocio?: NegocioTicket; ticket?: Partial<TicketCfg> }): TLine[] {
   const W = opts.width
   const n = opts.negocio || {}
+  const c: TicketCfg = { ...TICKET_DEFAULT, ...(opts.ticket || {}) }
   const L: TLine[] = []
-  const txt = (t: string, a: 'l' | 'c' | 'r' = 'l', o: { b?: boolean; big?: boolean } = {}) => L.push({ k: 'text', t, a, ...o })
+  let zona: Zona = 'cabeza'
+  const add = (l: TLine) => L.push({ ...l, z: zona } as TLine)
+  const txt = (t: string, a: 'l' | 'c' | 'r' = 'l', o: { b?: boolean; big?: boolean } = {}) => add({ k: 'text', t, a, ...o })
+  // Los textos libres se envuelven a la rejilla: nada puede salirse del papel.
+  const parrafo = (t: string, a: 'l' | 'c' | 'r' = 'c', o: { b?: boolean } = {}) => envolver(t, W).forEach(l => txt(l, a, o))
   // Doble tamaño SOLO si el texto cabe a 2x (≤ W/2 caracteres); si no, se pone
   // en negrita a tamaño normal para que NUNCA se desborde del papel.
   const cabe2x = (s: string) => s.length <= Math.floor(W / 2)
 
   // Encabezado del negocio
+  if (c.mostrarLogo && c.logo) { zona = 'logo'; add({ k: 'logo', src: c.logo, escala: c.logoEscala }); zona = 'cabeza' }
   const nombre = n.nombre || 'REMALI MAQUINARIA'
   txt(nombre, 'c', { b: true, big: cabe2x(nombre) })
-  txt('Renta · Venta · Servicio', 'c')
-  if (n.direccion) txt(n.direccion, 'c')
-  if (n.telefono) txt('Tel: ' + n.telefono, 'c')
-  if (n.rfc) txt('RFC: ' + n.rfc, 'c')
+  if (c.lema) parrafo(c.lema)
+  if (c.mostrarDireccion && n.direccion) parrafo(n.direccion)
+  if (c.mostrarTelefono && n.telefono) txt('Tel: ' + n.telefono, 'c')
+  if (c.mostrarWeb && n.web) txt(n.web, 'c')
+  if (c.mostrarRfc && n.rfc) txt('RFC: ' + n.rfc, 'c')
 
   // Título
-  L.push({ k: 'hr', heavy: true })
+  zona = 'cuerpo'
+  add({ k: 'hr', heavy: true })
   const titulo = (data.titulo || '').toUpperCase()
   txt(titulo, 'c', { b: true, big: cabe2x(titulo) })
   txt(padStr('Folio:', data.folio, W))
@@ -116,21 +168,21 @@ export function layoutTicket(data: Comprobante, opts: { width: number; negocio?:
 
   // Cliente / meta
   if (data.meta.length) {
-    L.push({ k: 'hr' })
+    add({ k: 'hr' })
     data.meta.forEach(m => txt(padStr(m.label, m.value, W)))
   }
 
   // Conceptos
-  L.push({ k: 'hr', heavy: true })
+  add({ k: 'hr', heavy: true })
   txt(padStr('CONCEPTO', 'IMPORTE', W), 'l', { b: true })
-  L.push({ k: 'hr' })
+  add({ k: 'hr' })
   data.items.forEach(it => {
     txt(it.nombre, 'l', { b: true })
     if (it.detalle || it.importe) txt(padStr('  ' + (it.detalle || ''), it.importe ? `$${it.importe}` : '', W))
   })
 
   // Totales
-  L.push({ k: 'hr' })
+  add({ k: 'hr' })
   data.totales.forEach(t => {
     const val = `$${t.value}`
     // TOTAL a doble tamaño solo si cabe a 2x; si no, negrita a ancho completo.
@@ -142,23 +194,61 @@ export function layoutTicket(data: Comprobante, opts: { width: number; negocio?:
   })
 
   // Pie
-  L.push({ k: 'hr', heavy: true })
-  L.push({ k: 'sp' })
-  data.pie.forEach(p => txt(p, 'c'))
-  if (n.footer) { L.push({ k: 'sp' }); txt(n.footer, 'c', { b: true }) }
-  if (data.folio) L.push({ k: 'bc', v: data.folio })
+  add({ k: 'hr', heavy: true })
+  zona = 'pie'
+  add({ k: 'sp' })
+  data.pie.forEach(p => parrafo(p))
+  if (c.leyenda) { add({ k: 'sp' }); parrafo(c.leyenda) }
+  if (n.footer) { add({ k: 'sp' }); parrafo(n.footer, 'c', { b: true }) }
+  if (c.codigoBarras && data.folio) add({ k: 'bc', v: data.folio })
 
   return L
 }
 
-/** Arma el ticket en bytes ESC/POS a partir del modelo de líneas (misma fuente que el preview). */
-export function buildTicket(data: Comprobante, opts: { width: number; negocio?: NegocioTicket }): Uint8Array {
+/**
+ * Largo del ticket en MILÍMETROS de papel.
+ *
+ * A 203 dpi la impresora avanza 8 puntos por milímetro; un renglón normal gasta
+ * 30 puntos (3.8 mm) y uno a doble alto el doble. Sirve para dos cosas: decirle
+ * al admin cuánto papel gasta cada opción que enciende, y para que la animación
+ * de la vista previa dure lo que tarda la impresora de verdad.
+ */
+export function altoTicketMm(lineas: TLine[], logoMm = 12): number {
+  const LH = 3.8
+  let mm = 0
+  for (const l of lineas) {
+    if (l.k === 'bc') mm += 10            // barras (50 pt) + folio legible debajo
+    else if (l.k === 'logo') mm += logoMm
+    else if (l.k === 'sp') mm += LH * 0.6
+    else if (l.k === 'text' && l.big) mm += LH * 2
+    else mm += LH
+  }
+  return mm + LH * 3.5                    // avance final y corte
+}
+
+/** Arma el ticket en bytes ESC/POS a partir del modelo de líneas (misma fuente que el preview).
+ *  Es asíncrona porque el logo se decodifica del PNG a un mapa de bits. */
+export async function buildTicket(
+  data: Comprobante,
+  opts: { width: number; negocio?: NegocioTicket; ticket?: Partial<TicketCfg>; puntos?: number },
+): Promise<Uint8Array> {
   const W = opts.width
+  const anchoDots = opts.puntos || (W >= 48 ? 576 : 384)
   const bytes: number[] = []
   const push = (...arr: number[][]) => arr.forEach(a => bytes.push(...a))
 
   push(INIT, CODEPAGE_CP850)
   for (const ln of layoutTicket(data, opts)) {
+    if (ln.k === 'logo') {
+      const r = await rasterCacheado(ln.src, Math.round(anchoDots * Math.max(30, Math.min(100, ln.escala)) / 100))
+      if (!r) continue   // logo ilegible: el ticket sale igual, solo sin él
+      const porFila = r.w / 8
+      // GS v 0: modo normal, ancho en BYTES y alto en puntos, ambos little-endian.
+      push(ALIGN(1), [GS, 0x76, 0x30, 0, porFila & 0xff, (porFila >> 8) & 0xff, r.h & 0xff, (r.h >> 8) & 0xff])
+      bytes.push(...r.bytes)
+      push(ALIGN(0))
+      continue
+    }
     if (ln.k === 'hr') { push(ln.heavy ? separadorFuerte(W) : separador(W)); continue }
     if (ln.k === 'sp') { push(FEED(1)); continue }
     if (ln.k === 'bc') {

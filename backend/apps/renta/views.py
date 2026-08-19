@@ -435,25 +435,27 @@ def registrar_abono(request, pk):
     if monto > saldo:
         return Response({'detalle': f'El abono (${monto}) es mayor al saldo (${saldo}).'}, status=400)
     # Fecha del abono: hoy por defecto; editable hacia atrás (se les olvida
-    # registrarlo el mismo día) pero nunca futura.
-    fecha_txt = (request.data.get('fecha') or '').strip()
-    if fecha_txt:
-        from datetime import date as _date
-        try:
-            f = _date.fromisoformat(fecha_txt)
-        except ValueError:
-            return Response({'detalle': 'Fecha no válida (usa AAAA-MM-DD).'}, status=400)
-        if f > timezone.localdate():
-            return Response({'detalle': 'La fecha del abono no puede ser futura.'}, status=400)
-        sello = f.isoformat()
-    else:
-        sello = timezone.now().isoformat()
-    pagos = list(r.pagos or [])
-    pagos.append({'fecha': sello, 'monto': str(monto), 'metodo': metodo,
-                  'por': request.user.get_username() if request.user.is_authenticated else ''})
-    r.pagos = pagos
-    r.save(update_fields=['pagos', 'actualizado_en'])
-    return Response({'detalle': 'Abono registrado', 'renta': _serialize_renta(r)})
+    # registrarlo el mismo día) pero nunca futura. La regla vive en un solo lugar
+    # para que la renta y la venta sellen igual: si cada una lo hiciera a su
+    # manera, el mismo dinero contaría en días distintos según de dónde viniera.
+    from django.db import transaction
+    from server.cobranza import sellar_abono
+    from ventas.views import _abono_a_caja
+    sello, err = sellar_abono(request.data.get('fecha'))
+    if err:
+        return Response({'detalle': err}, status=400)
+    with transaction.atomic():
+        pagos = list(r.pagos or [])
+        pagos.append({'fecha': sello, 'monto': str(monto), 'metodo': metodo,
+                      'por': request.user.get_username() if request.user.is_authenticated else ''})
+        r.pagos = pagos
+        r.save(update_fields=['pagos', 'actualizado_en'])
+        aviso = _abono_a_caja(request.user, monto=monto, metodo=metodo, renta=r,
+                              concepto=f'Abono renta #{r.id}')
+    salida = {'detalle': 'Abono registrado', 'renta': _serialize_renta(r)}
+    if aviso:
+        salida['caja'] = aviso
+    return Response(salida)
 
 
 @api_view(['POST'])

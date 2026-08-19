@@ -18,6 +18,17 @@ export type ConfigPublica = {
   descuento_contado_pct: number
   anticipo_minimo_pct: number
   ajuste_requiere_codigo: boolean
+  /* Personalización del ticket (Configuración › Ticket). */
+  ticket_logo: string
+  ticket_logo_escala: number
+  ticket_mostrar_logo: boolean
+  ticket_lema: string
+  ticket_mostrar_direccion: boolean
+  ticket_mostrar_telefono: boolean
+  ticket_mostrar_rfc: boolean
+  ticket_mostrar_web: boolean
+  ticket_codigo_barras: boolean
+  ticket_leyenda: string
 }
 
 const VACIA: ConfigPublica = {
@@ -26,6 +37,9 @@ const VACIA: ConfigPublica = {
   negocio_representante: '', negocio_footer: '',
   cotizacion_condiciones: '', cotizacion_condiciones_renta: '', datos_bancarios: '', cotizacion_cierre: '',
   descuento_contado_pct: 5, anticipo_minimo_pct: 60, ajuste_requiere_codigo: false,
+  ticket_logo: '', ticket_logo_escala: 70, ticket_mostrar_logo: true, ticket_lema: 'Renta · Venta · Servicio',
+  ticket_mostrar_direccion: true, ticket_mostrar_telefono: true, ticket_mostrar_rfc: true, ticket_mostrar_web: false,
+  ticket_codigo_barras: true, ticket_leyenda: '',
 }
 
 // Cache a nivel módulo: la config pública se pide UNA vez por sesión de página.

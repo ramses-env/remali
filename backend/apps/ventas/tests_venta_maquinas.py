@@ -280,3 +280,217 @@ class RespuestasConMaquinasTest(TestCase):
         venta.refresh_from_db(); u3.refresh_from_db()
         self.assertEqual(venta.estado, 'activa')
         self.assertEqual(u3.estado, 'vendido')
+
+
+class EntregarSobrePedidoTest(TestCase):
+    """Un sobre pedido se entrega registrando la máquina que acaba de llegar.
+
+    El PRODUCTO siempre está en el catálogo —por eso el cliente pudo pedirlo—,
+    pero la pieza física no existía cuando lo apartó: estaba en la bodega del
+    proveedor. Antes eso mandaba a quien entregaba hasta Inventario a media
+    entrega, y la unidad pasaba unos minutos como stock disponible aunque ya
+    estuviera vendida. Ahora nace y sale vendida en el mismo acto.
+    """
+
+    def setUp(self):
+        from django.contrib.auth.models import Group
+        from rest_framework.test import APIClient
+        self.equipo = _equipo('VIB-500', permite_sobre_pedido=True)
+        self.admin = get_user_model().objects.create_superuser('duena', 'duena@x.com', 'pass12345')
+        self.client = APIClient()
+        self.client.force_authenticate(self.admin)
+        self.venta = Venta.objects.create(
+            nombre_cliente='Carol Sofía', equipo=self.equipo, sobre_pedido=True,
+            estado='apartada', inventario=None, precio_maquina=Decimal('12350'),
+        )
+        self.venta.pagos = [{'fecha': '2026-08-19T10:00:00', 'monto': '12350', 'metodo': 'efectivo'}]
+        self.venta.save(update_fields=['pagos'])
+        self.grupo = lambda nombre: Group.objects.get_or_create(name=nombre)[0]
+
+    def _entregar(self, **cuerpo):
+        return self.client.post(f'/api/ventas/{self.venta.id}/entregar/', cuerpo, format='json')
+
+    def test_la_maquina_que_llego_nace_vendida_y_ligada_al_pedido(self):
+        resp = self._entregar(nueva_unidad={'numero_serie': 'SN-77421'})
+        self.assertEqual(resp.status_code, 200, resp.data)
+        unidad = Inventario.objects.get(numero_serie='SN-77421')
+        self.assertEqual(unidad.equipo_id, self.equipo.id)
+        self.assertEqual(unidad.condicion, 'nueva')
+        self.assertEqual(unidad.estado, 'vendido')     # nunca queda 'disponible'
+        self.venta.refresh_from_db()
+        self.assertEqual(self.venta.estado, 'activa')
+        self.assertEqual(self.venta.inventario_id, unidad.id)
+        self.assertIsNotNone(self.venta.maquinas.first().entregada_en)
+
+    def test_sin_numero_de_serie_tambien_se_entrega(self):
+        """No toda máquina trae serie a la vista; eso no puede frenar una entrega."""
+        resp = self._entregar(nueva_unidad={})
+        self.assertEqual(resp.status_code, 200, resp.data)
+        unidad = Inventario.objects.get(equipo=self.equipo)
+        self.assertIsNone(unidad.numero_serie)
+        self.assertEqual(unidad.estado, 'vendido')
+
+    def test_una_serie_repetida_se_rechaza(self):
+        """Si ya se había registrado, registrarla otra vez duplicaría el activo."""
+        ya = Inventario.objects.create(equipo=self.equipo, condicion='nueva', numero_serie='SN-77421')
+        resp = self._entregar(nueva_unidad={'numero_serie': 'sn-77421'})
+        self.assertEqual(resp.status_code, 400, resp.data)
+        self.assertIn(ya.codigo, resp.data['detalle'])      # dice CUÁL es, para poder ir a verla
+        self.assertIn('SN-77421', resp.data['detalle'])
+        self.assertEqual(Inventario.objects.filter(numero_serie__iexact='SN-77421').count(), 1)
+        self.venta.refresh_from_db()
+        self.assertEqual(self.venta.estado, 'apartada')
+
+    def test_el_gestor_puede_registrarla(self):
+        """Administración delegada: es quien está en el piso cuando llega el camión."""
+        gestor = get_user_model().objects.create_user('gestora', password='pass12345')
+        gestor.groups.add(self.grupo('Gestor'))
+        self.client.force_authenticate(gestor)
+        resp = self._entregar(nueva_unidad={'numero_serie': 'SN-99001'})
+        self.assertEqual(resp.status_code, 200, resp.data)
+
+    def test_el_tecnico_no_da_de_alta_maquinas(self):
+        """Puede entregar, pero meter un activo al inventario no le toca."""
+        tecnico = get_user_model().objects.create_user('tecnico', password='pass12345')
+        tecnico.groups.add(self.grupo('Técnico'))
+        self.client.force_authenticate(tecnico)
+        resp = self._entregar(nueva_unidad={'numero_serie': 'SN-99002'})
+        self.assertEqual(resp.status_code, 403, resp.data)
+        self.assertFalse(Inventario.objects.filter(numero_serie='SN-99002').exists())
+        self.venta.refresh_from_db()
+        self.assertEqual(self.venta.estado, 'apartada')
+
+    def test_con_saldo_pendiente_no_se_registra_nada(self):
+        """Primero el dinero: una máquina no entra al inventario para nada."""
+        self.venta.pagos = [{'fecha': '2026-08-19T10:00:00', 'monto': '5000', 'metodo': 'efectivo'}]
+        self.venta.save(update_fields=['pagos'])
+        resp = self._entregar(nueva_unidad={'numero_serie': 'SN-99003'})
+        self.assertEqual(resp.status_code, 400, resp.data)
+        self.assertFalse(Inventario.objects.filter(numero_serie='SN-99003').exists())
+
+    def test_sin_unidad_ni_alta_sigue_pidiendo_la_maquina(self):
+        resp = self._entregar()
+        self.assertEqual(resp.status_code, 400, resp.data)
+        self.assertIn('unidad', resp.data['detalle'].lower())
+
+    def test_el_pedido_creado_por_el_panel_nace_con_su_renglon(self):
+        """El camino real, de punta a punta: se pide, se liquida y se entrega.
+
+        El renglón es lo que espera la máquina. Sin él, el pedido se guardaba sin
+        nada adentro y al entregarlo el modelo contestaba "esta venta ya no tiene
+        máquinas por entregar": un sobre pedido no se podía entregar nunca.
+        """
+        from maquinaria.models import ConfiguracionSitio
+        cfg = ConfiguracionSitio.get_solo()
+        cfg.anticipo_minimo_pct = 60
+        cfg.save(update_fields=['anticipo_minimo_pct'])
+
+        resp = self.client.post('/api/ventas/pedidos/crear/', {
+            'equipo_id': self.equipo.id, 'nombre_cliente': 'Carol Sofía',
+            'precio': '12350', 'anticipo': '10000', 'metodo_pago': 'efectivo',
+        }, format='json')
+        self.assertEqual(resp.status_code, 201, resp.data)
+        pedido = Venta.objects.get(pk=resp.data['pedido']['id'])
+        self.assertEqual(pedido.maquinas.count(), 1)
+        self.assertEqual(pedido.maquinas.first().equipo_id, self.equipo.id)
+        self.assertIsNone(pedido.maquinas.first().inventario_id)
+        self.assertEqual(pedido.total, Decimal('12350.00'))
+
+        self.client.post(f'/api/ventas/{pedido.id}/abono/',
+                         {'monto': '2350', 'metodo': 'efectivo'}, format='json')
+        entrega = self.client.post(f'/api/ventas/{pedido.id}/entregar/',
+                                   {'nueva_unidad': {'numero_serie': 'SN-30500'}}, format='json')
+        self.assertEqual(entrega.status_code, 200, entrega.data)
+        pedido.refresh_from_db()
+        self.assertEqual(pedido.estado, 'activa')
+        self.assertEqual(pedido.inventario.numero_serie, 'SN-30500')
+        self.assertEqual(pedido.inventario.estado, 'vendido')
+        self.assertEqual(pedido.total, Decimal('12350.00'))
+
+    def test_no_se_registra_una_maquina_que_nadie_espera(self):
+        """Si el pedido ya tiene su unidad, registrar otra la dejaría suelta."""
+        unidad = Inventario.objects.create(equipo=self.equipo, condicion='nueva')
+        self.venta.maquinas.update(inventario=unidad)
+        antes = Inventario.objects.count()
+        resp = self._entregar(nueva_unidad={'numero_serie': 'SN-40000'})
+        self.assertEqual(resp.status_code, 400, resp.data)
+        self.assertEqual(Inventario.objects.count(), antes)
+
+
+class HistorialDePedidosTest(TestCase):
+    """El módulo de pedidos tiene que saber contar lo que ya se cumplió.
+
+    Al entregar, un pedido pasa de 'apartada' a 'activa' y el filtro de la
+    sección dejaba de verlo: desaparecía de la pantalla sin dejar rastro, aunque
+    el dato siguiera completo en la venta. Estas pruebas cuidan el otro lado.
+    """
+
+    def setUp(self):
+        from rest_framework.test import APIClient
+        self.equipo = _equipo('APS-90')
+        self.admin = get_user_model().objects.create_superuser('jefa3', 'jefa3@x.com', 'pass12345')
+        self.client = APIClient()
+        self.client.force_authenticate(self.admin)
+
+    def _pedido(self, nombre, precio='10000'):
+        v = Venta.objects.create(
+            nombre_cliente=nombre, equipo=self.equipo, sobre_pedido=True,
+            estado='apartada', inventario=None, precio_maquina=Decimal(precio),
+        )
+        v.pagos = [{'fecha': '2026-08-19T10:00:00', 'monto': precio, 'metodo': 'efectivo'}]
+        v.save(update_fields=['pagos'])
+        return v
+
+    def _entregar(self, venta, serie):
+        return self.client.post(f'/api/ventas/{venta.id}/entregar/',
+                                {'nueva_unidad': {'numero_serie': serie}}, format='json')
+
+    def test_los_abiertos_y_los_entregados_no_se_revuelven(self):
+        abierto = self._pedido('Moises Caleb')
+        entregado = self._pedido('Poli')
+        self.assertEqual(self._entregar(entregado, 'SN-11100').status_code, 200)
+
+        abiertos = self.client.get('/api/ventas/pedidos/')
+        self.assertEqual([p['id'] for p in abiertos.data['pedidos']], [abierto.id])
+
+        historial = self.client.get('/api/ventas/pedidos/?estado=entregados')
+        self.assertEqual([p['id'] for p in historial.data['pedidos']], [entregado.id])
+
+    def test_el_historial_nombra_la_maquina_y_a_quien_la_entrego(self):
+        pedido = self._pedido('Carol Sofía', '12350')
+        self.assertEqual(self._entregar(pedido, 'SN-30500').status_code, 200)
+
+        fila = self.client.get('/api/ventas/pedidos/?estado=entregados').data['pedidos'][0]
+        self.assertEqual(fila['entregada_por'], 'jefa3')
+        self.assertIsNotNone(fila['entregada_en'])
+        self.assertEqual(fila['maquinas'][0]['numero_serie'], 'SN-30500')
+        self.assertTrue(fila['maquinas'][0]['codigo'])
+        self.assertTrue(fila['maquinas'][0]['entregada'])
+
+    def test_el_total_del_historial_es_lo_cobrado_no_lo_que_falta(self):
+        """En los abiertos el total es el saldo; aquí, lo que ya entró."""
+        for nombre, precio in (('Poli', '15000'), ('Carol Sofía', '12350')):
+            self.assertEqual(self._entregar(self._pedido(nombre, precio), f'SN-{precio}').status_code, 200)
+        historial = self.client.get('/api/ventas/pedidos/?estado=entregados')
+        self.assertEqual(Decimal(historial.data['total']), Decimal('27350'))
+        self.assertEqual(historial.data['clientes'], 2)
+
+    def test_el_periodo_acota_por_fecha_de_ENTREGA(self):
+        """Un pedido se aparta un mes y se entrega otro: cuenta cuándo se cumplió."""
+        pedido = self._pedido('Poli', '15000')
+        self.assertEqual(self._entregar(pedido, 'SN-22200').status_code, 200)
+        pedido.refresh_from_db()
+        anio, mes = pedido.entregada_en.year, pedido.entregada_en.month
+
+        dentro = self.client.get(f'/api/ventas/pedidos/?estado=entregados&anio={anio}&mes={mes}')
+        self.assertEqual(len(dentro.data['pedidos']), 1)
+        otro_mes = 1 if mes != 1 else 2
+        fuera = self.client.get(f'/api/ventas/pedidos/?estado=entregados&anio={anio}&mes={otro_mes}')
+        self.assertEqual(fuera.data['pedidos'], [])
+
+    def test_una_venta_de_mostrador_no_se_cuela_al_historial(self):
+        """El historial es del módulo de pedidos: solo lo que pasó por un apartado."""
+        unidad = Inventario.objects.create(equipo=self.equipo, condicion='nueva')
+        Venta.objects.create(inventario=unidad, precio_maquina=Decimal('9000'))   # venta directa
+        historial = self.client.get('/api/ventas/pedidos/?estado=entregados')
+        self.assertEqual(historial.data['pedidos'], [])

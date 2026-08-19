@@ -1,7 +1,7 @@
 # El ingreso sigue al dinero, no a la venta
 
 **Fecha:** 2026-08-19
-**Estado:** diseño aprobado — listo para implementar
+**Estado:** implementado — 2026-08-19
 
 ## Problema
 

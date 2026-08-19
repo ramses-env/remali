@@ -8,20 +8,23 @@
  */
 import { useEffect, useState } from 'react'
 import { cargarConfigPublica, configPublicaEnCache, EVT_CONFIG } from './configPublica'
+import { TICKET_DEFAULT, type TicketCfg } from './escpos'
 
 export type PrintMethod = 'usb' | 'serial' | 'navegador'
 export type Negocio = { nombre: string; direccion: string; telefono: string; email: string; web: string; rfc: string; representante: string; footer: string; condiciones: string; condicionesRenta: string; datosBancarios: string; cierre: string }
+export type { TicketCfg }
 export type PrintSettings = {
   method: PrintMethod           // cómo se conecta la impresora térmica
   thermalWidth: 58 | 80         // ancho del papel térmico en mm
   baud: number                  // velocidad del puerto serial (solo método 'serial')
   docSize: 'carta' | 'a4'       // tamaño de documentos grandes (órdenes)
   negocio: Negocio              // encabezado/pie del ticket — SOLO LECTURA, viene del servidor
+  ticket: TicketCfg             // diseño del ticket (logo, lema, qué se muestra) — también del servidor
   printSpeed: number            // velocidad de impresión mm/s (para que la animación coincida)
 }
 
 /** Lo que sí se guarda por equipo. `negocio` queda fuera a propósito. */
-type PrintSettingsLocales = Omit<PrintSettings, 'negocio'>
+type PrintSettingsLocales = Omit<PrintSettings, 'negocio' | 'ticket'>
 
 const KEY = 'print_settings'
 const EVT = 'print-settings-change'
@@ -52,24 +55,41 @@ export function getNegocio(): Negocio {
   }
 }
 
+/** Diseño del ticket publicado por el panel. Igual en todas las computadoras. */
+export function getTicketCfg(): TicketCfg {
+  const c = configPublicaEnCache()
+  return {
+    logo: c.ticket_logo || '',
+    logoEscala: c.ticket_logo_escala || TICKET_DEFAULT.logoEscala,
+    mostrarLogo: c.ticket_mostrar_logo !== false,
+    lema: c.ticket_lema ?? TICKET_DEFAULT.lema,
+    mostrarDireccion: c.ticket_mostrar_direccion !== false,
+    mostrarTelefono: c.ticket_mostrar_telefono !== false,
+    mostrarRfc: c.ticket_mostrar_rfc !== false,
+    mostrarWeb: !!c.ticket_mostrar_web,
+    codigoBarras: c.ticket_codigo_barras !== false,
+    leyenda: c.ticket_leyenda || '',
+  }
+}
+
 export function getPrintSettings(): PrintSettings {
   let locales = LOCALES_DEFAULT
   try {
     const raw = localStorage.getItem(KEY)
     if (raw) {
-      const { negocio: _viejo, ...resto } = JSON.parse(raw)   // ignora el negocio local heredado
+      const { negocio: _viejo, ticket: _viejoT, ...resto } = JSON.parse(raw)   // ignora lo heredado que ahora vive en el servidor
       locales = { ...LOCALES_DEFAULT, ...resto }
     }
   } catch { /* json corrupto: nos quedamos con los de fábrica */ }
-  return { ...locales, negocio: getNegocio() }
+  return { ...locales, negocio: getNegocio(), ticket: getTicketCfg() }
 }
 
 export function setPrintSettings(patch: Partial<PrintSettings>) {
-  const { negocio: _ignorado, ...resto } = patch              // el negocio se edita en Configuración
-  const { negocio, ...actuales } = getPrintSettings()
+  const { negocio: _ignorado, ticket: _ignorado2, ...resto } = patch   // negocio y ticket se editan en Configuración
+  const { negocio, ticket, ...actuales } = getPrintSettings()
   const locales = { ...actuales, ...resto }
   try { localStorage.setItem(KEY, JSON.stringify(locales)) } catch { /* ignore */ }
-  const next: PrintSettings = { ...locales, negocio }
+  const next: PrintSettings = { ...locales, negocio, ticket }
   window.dispatchEvent(new CustomEvent(EVT, { detail: next }))
   return next
 }
