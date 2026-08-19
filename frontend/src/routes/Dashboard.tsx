@@ -18,14 +18,16 @@ import ClientesAdmin from '../components/ClientesAdmin'
 import BuscadorCliente, { SELECCION_VACIA, type SeleccionCliente } from '../components/BuscadorCliente'
 import Dock, { type DockItem } from '../components/ui/dock'
 import { REGIMEN_FISCAL, USO_CFDI } from '../lib/sat'
-import { usePrintSettings, charsPerLine } from '../lib/printSettings'
+import { usePrintSettings, charsPerLine, getNegocio } from '../lib/printSettings'
 import { invalidarConfigPublica, useConfigPublica } from '../lib/configPublica'
 import { AnimatePresence, motion } from 'framer-motion'
 import { useRecurso, invalidar, type Tema } from '../lib/realtime'
 import { useLatidoPanel } from '../lib/latido'
 import { conectarAvisos } from '../lib/avisos'
 import { CLAVE_JORNADA, recordarAcceso, ProveedorPermisos, usePuede, type Capacidades } from '../lib/acceso'
-import { buildTestTicket } from '../lib/escpos'
+import { buildTestTicket, layoutTicket, type Comprobante } from '../lib/escpos'
+import TicketPaper, { paperCss } from '../components/TicketPaper'
+import { procesarLogo, reducirOriginal, anchoPuntos } from '../lib/ticketLogo'
 import { METODOS, metodoSoportado, imprimirTermico, vincularMetodo, metodoVinculado, infoMetodo } from '../lib/printer'
 import { useAuth } from '../store/auth'
 import ThemeToggle from '../components/ThemeToggle'
@@ -681,12 +683,16 @@ export default function Dashboard() {
   // segundo existe por "Mi jornada": el técnico entra a trabajar y
   // administración entra a mirar, con capacidades distintas y la misma puerta.
   const REQUIERE: Partial<Record<Section, Cap | Cap[]>> = {
+    // El Resumen son las MÉTRICAS del negocio (ingresos del mes, gráficas): es lo
+    // único que sigue pidiendo `ver_dinero`. Las listas de abajo pasaron a
+    // `ver_operacion` para que el Gestor pueda trabajarlas —no se puede cancelar
+    // una venta sin poder abrirla— sin ver cuánto gana el negocio.
     resumen: 'ver_dinero',
     caja: 'usar_caja',
-    ventas: 'ver_dinero',   // la LISTA de ventas es historial del negocio
+    ventas: 'ver_operacion',
     cotizaciones: 'cotizar',
     facturacion: 'facturar',
-    adeudos: 'ver_dinero',   // cobranza: dinero, no operación de campo
+    adeudos: 'ver_operacion',   // cobranza: se trabaja, no es una métrica
     // El mostrador es quien MÁS necesita el padrón, así que va con una
     // capacidad de nivel 1. Empresas (abajo) sigue siendo de administración.
     clientes: 'ver_clientes',
@@ -699,7 +705,7 @@ export default function Dashboard() {
     equipos: 'editar_catalogo',
     inventario: 'editar_catalogo',
     refacciones: 'editar_catalogo',
-    rentas: 'ver_dinero',
+    rentas: 'ver_operacion',
     // La sección Reparaciones es para LLEVAR el taller: historial completo, las
     // cuatro etapas, costos y entrega al cliente. Hacer el trabajo es otra cosa
     // y el técnico ya lo hace desde "Mi jornada", que le trae sus órdenes
@@ -710,7 +716,7 @@ export default function Dashboard() {
     // Pedidos y apartados son VENTAS CON ANTICIPO. No tenía candado, así que la
     // veía cualquiera que entrara al panel —el técnico y el cajero incluidos—,
     // aunque el backend luego les negara los datos.
-    pedidos: 'ver_dinero',
+    pedidos: 'ver_operacion',
     // "Mi jornada": el técnico la trabaja (`jornada_campo`), administración solo
     // la mira (`ver_jornada`). Antes pedía `operar_inventario`, que cascadea
     // hacia arriba desde el nivel 1: por eso el admin la veía completa, con
@@ -7497,11 +7503,20 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
               </p>
             </div>
           )}
-          {c.origen === 'cliente' && (
+          {(c.origen === 'cliente' || c.autorizada_por) && (
             <div className="rounded-xl border border-blue-500/20 bg-blue-500/5 p-4">
               <div className="flex items-center justify-between gap-3 mb-2 flex-wrap">
                 <p className="text-[11px] font-bold uppercase tracking-wide text-blue-600">Solicitud del cliente</p>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
+                  {/* Procedencia: quién la firmó del lado del cliente. Vive aquí
+                      —no bajo la barra de Estado— porque no habla del estado,
+                      habla de dónde vino; y su par natural es "Atendida por". */}
+                  {c.autorizada_por && (
+                    <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-emerald-600" title={c.autorizada_en ? new Date(c.autorizada_en).toLocaleString('es-MX') : undefined}>
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5"><path strokeLinecap="round" d="M5 13l4 4L19 7" /></svg>
+                      Autorizada por {c.autorizada_por}{c.autorizada_en ? ` · ${new Date(c.autorizada_en).toLocaleDateString('es-MX', { day: 'numeric', month: 'short' })}` : ''}
+                    </span>
+                  )}
                   {c.atendida_por_nombre
                     ? <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-emerald-600"><svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5"><path strokeLinecap="round" d="M5 13l4 4L19 7" /></svg>Atendida por {c.atendida_por_nombre}</span>
                     : <button onClick={atender} className="px-3 h-8 rounded-lg border border-blue-500/40 text-blue-600 text-xs font-bold hover:bg-blue-500/10 transition-colors">La estoy atendiendo</button>}
@@ -7586,23 +7601,6 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
                   </button>
                 </div>
               ))}
-              {!bloqueada && c.estado === 'aceptada' && (c.tipo === 'renta' || c.tipo === 'mixta') && (
-                <button onClick={concretarRenta}
-                  className="mt-2.5 h-10 px-4 rounded-full btn-renta text-[13px] font-bold transition active:scale-[0.98]">
-                  Concretar renta →
-                </button>
-              )}
-              {/* Vino firmada por quien autoriza del lado del cliente. Es un
-                  hecho, no una tarea: en cuanto se concreta deja de invitar a
-                  concretarla —lo contrario mandaba a hacer algo ya hecho, que
-                  además el servidor rechaza. */}
-              {c.autorizada_por && (
-                <div className="mt-2 inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 text-[12.5px] font-bold">
-                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round"><path d="M5 13l4 4L19 7" /></svg>
-                  Autorizada por {c.autorizada_por}{c.autorizada_en ? ` · ${new Date(c.autorizada_en).toLocaleDateString('es-MX', { day: 'numeric', month: 'short' })}` : ''}
-                  {!bloqueada && c.estado === 'aceptada' ? ' — lista para concretar' : ''}
-                </div>
-              )}
             </div>
             {verEntrega && <div className="min-w-0">
               <p className={labelCot}>Entrega prometida</p>
@@ -7997,9 +7995,18 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
               Ver la renta #{c.renta_id}
               <svg className={`w-4 h-4 shrink-0 ${traspasando ? 'flecha-vuela' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
             </button>
+          ) : !bloqueada && c.estado === 'aceptada' && (c.tipo === 'renta' || c.tipo === 'mixta') ? (
+            /* Lo que sigue. Estaba arriba, colgando de la barra de Estado, que
+               solo informa; las acciones viven en el pie. Y así ocupa el mismo
+               lugar que "Ver la renta #N": la acción se convierte en su
+               resultado sin que la vista se reacomode. */
+            <button onClick={concretarRenta} className="w-full sm:w-auto py-2.5 px-5 rounded-full btn-renta text-sm font-bold transition active:scale-[0.98] flex items-center justify-center gap-2">
+              Concretar renta
+              <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
+            </button>
           ) : c.tipo === 'renta' ? (
-            <div className="w-full sm:w-auto py-2.5 px-4 rounded-full border border-edge text-mute text-[12px] font-medium flex items-center justify-center text-center" title="Las cotizaciones de renta se concretan creando la renta">
-              Concreta esta renta desde Rentas
+            <div className="w-full sm:w-auto py-2.5 px-4 rounded-full border border-edge text-mute text-[12px] font-medium flex items-center justify-center text-center" title="Acéptala para poder concretar la renta">
+              Acéptala primero
             </div>
           ) : c.estado !== 'aceptada' ? (
             <div className="w-full sm:w-auto py-2.5 px-4 rounded-full border border-edge text-mute text-[12px] font-medium flex items-center justify-center text-center" title="Marca la cotización como “Aceptada” para poder convertirla en venta o pedirla sobre pedido">
@@ -9636,9 +9643,6 @@ function NegocioAdmin({ notify }: { notify: (m: string, t?: 'ok' | 'err') => voi
         <Ajuste titulo="Representante (firma)" desc="Nombre que firma la cotización al pie. Si lo dejas vacío, no se muestra la firma.">
           <input aria-label="Representante que firma" className={`${campoCfg} sm:w-72`} value={cfg.negocio_representante} onChange={e => set('negocio_representante', e.target.value)} placeholder="C.P. Nombre Apellido" />
         </Ajuste>
-        <Ajuste titulo="Pie del ticket" desc="La última línea del comprobante.">
-          <input aria-label="Frase de pie de página" className={`${campoCfg} sm:w-72`} value={cfg.negocio_footer} onChange={e => set('negocio_footer', e.target.value)} placeholder="¡Gracias por su preferencia!" />
-        </Ajuste>
       </Panel>
 
       <Panel titulo="Caja del mostrador" desc="Qué se puede cobrar desde la caja, además de refacciones. Lo que apagues aquí desaparece de la caja y el servidor también lo rechaza.">
@@ -9675,11 +9679,18 @@ function NegocioAdmin({ notify }: { notify: (m: string, t?: 'ok' | 'err') => voi
             onChange={e => set('cotizacion_condiciones_renta', e.target.value)}
             placeholder={'El equipo se entrega limpio; de lo contrario, cargo de $300 + IVA.\nVerificar aceite a diario. Cambio de aceite cada 25 h…'} />
         </Ajuste>
+        {/* Los datos bancarios se imprimen en CADA cotización: cambiarlos desvía
+            los pagos de los clientes a otra cuenta, y no se nota hasta que
+            alguien diga "ya te pagué". Por eso son del dueño y no de quien
+            administra. El servidor rechaza el cambio igual: esconderlo aquí es
+            para no ofrecer un campo que va a fallar, no la defensa. */}
+        {puede('editar_datos_bancarios') && (
         <Ajuste titulo="Datos bancarios" desc="Banco, titular, cuenta y CLABE. Si lo dejas vacío, no se muestra." apilado>
           <textarea aria-label="Datos bancarios" className={`${campoCfg} resize-y min-h-[84px]`} rows={4} value={cfg.datos_bancarios}
             onChange={e => set('datos_bancarios', e.target.value)}
             placeholder={'Titular: Nombre o razón social\nBanco: XYZ\nCuenta: 0000000000\nCLABE: 000000000000000000'} />
         </Ajuste>
+        )}
         <Ajuste titulo="Despedida" desc="Frase de cortesía al final de la cotización. Si la dejas vacía, no se muestra." apilado>
           <textarea aria-label="Frase de despedida" className={`${campoCfg} resize-y min-h-[72px]`} rows={2} value={cfg.cotizacion_cierre}
             onChange={e => set('cotizacion_cierre', e.target.value)}
@@ -9742,21 +9753,354 @@ function NegocioAdmin({ notify }: { notify: (m: string, t?: 'ok' | 'err') => voi
   )
 }
 
+/* ── Configuración › Ticket ──
+   El admin arma el ticket a la izquierda y lo ve salir a la derecha. La vista
+   previa NO es una ilustración: usa el mismo `layoutTicket` que se manda a la
+   impresora, así que lo que aquí se lee es lo que el papel va a decir. */
+
+type TicketForm = {
+  ticket_logo: string; ticket_logo_origen: string; ticket_logo_escala: number
+  ticket_mostrar_logo: boolean; ticket_lema: string
+  ticket_mostrar_direccion: boolean; ticket_mostrar_telefono: boolean
+  ticket_mostrar_rfc: boolean; ticket_mostrar_web: boolean
+  ticket_codigo_barras: boolean; ticket_leyenda: string
+  negocio_footer: string
+}
+
+const TICKET_VACIO: TicketForm = {
+  ticket_logo: '', ticket_logo_origen: '', ticket_logo_escala: 70,
+  ticket_mostrar_logo: true, ticket_lema: 'Renta · Venta · Servicio',
+  ticket_mostrar_direccion: true, ticket_mostrar_telefono: true,
+  ticket_mostrar_rfc: true, ticket_mostrar_web: false,
+  ticket_codigo_barras: true, ticket_leyenda: '', negocio_footer: '',
+}
+
+/* Venta de mostrador de verdad: tres refacciones, IVA desglosado y cambio. Un
+   ejemplo corto haría creer que el ticket siempre cabe en la mano. */
+const TICKET_EJEMPLO: Comprobante = {
+  tipo: 'venta', titulo: 'Ticket de Venta', folio: 'V-1842',
+  fecha: '19/08/2026 13:42',
+  meta: [{ label: 'Cliente', value: 'Mostrador' }, { label: 'Tel', value: '7441234567' }],
+  items: [
+    { nombre: 'Filtro de aceite HF-153', detalle: '2 x $185.00', importe: '370.00' },
+    { nombre: 'Bujía NGK BPR6ES', detalle: '1 x $95.00', importe: '95.00' },
+    { nombre: 'Aceite 15W-40 · 1 L', detalle: '3 x $148.00', importe: '444.00' },
+  ],
+  totales: [
+    { label: 'Subtotal', value: '783.62' },
+    { label: 'IVA (16%)', value: '125.38' },
+    { label: 'TOTAL', value: '909.00', fuerte: true },
+  ],
+  pie: ['Pago: Efectivo', '¡Gracias por su compra!'],
+}
+
+function TicketAdmin({ notify }: { notify: (m: string, t?: 'ok' | 'err') => void }) {
+  const [f, setF] = useState<TicketForm>(TICKET_VACIO)
+  const [guardado, setGuardado] = useState<TicketForm>(TICKET_VACIO)
+  const [saving, setSaving] = useState(false)
+  const [procesando, setProcesando] = useState(false)
+  const [umbral, setUmbral] = useState(170)
+  const [tramado, setTramado] = useState(false)
+  const [afinar, setAfinar] = useState(false)
+  const [arrastrando, setArrastrando] = useState(false)
+  const [mm, setMm] = useState<58 | 80>(58)
+  const [zoom, setZoom] = useState(1)
+  const negocio = getNegocio()
+
+  useEffect(() => {
+    api.get<TicketForm>('/config/')
+      .then(r => { const c = { ...TICKET_VACIO, ...r.data }; setF(c); setGuardado(c) })
+      .catch(() => {})
+  }, [])
+
+  const set = <K extends keyof TicketForm>(k: K, v: TicketForm[K]) => setF(c => ({ ...c, [k]: v }))
+  const hayCambios = JSON.stringify(f) !== JSON.stringify(guardado)
+
+  const W = charsPerLine(mm)
+  const lineas = layoutTicket(TICKET_EJEMPLO, {
+    width: W,
+    negocio: { ...negocio, footer: f.negocio_footer },
+    ticket: {
+      logo: f.ticket_logo, logoEscala: f.ticket_logo_escala, mostrarLogo: f.ticket_mostrar_logo,
+      lema: f.ticket_lema, mostrarDireccion: f.ticket_mostrar_direccion,
+      mostrarTelefono: f.ticket_mostrar_telefono, mostrarRfc: f.ticket_mostrar_rfc,
+      mostrarWeb: f.ticket_mostrar_web, codigoBarras: f.ticket_codigo_barras, leyenda: f.ticket_leyenda,
+    },
+  })
+
+  /* El logo se convierte SIEMPRE al ancho máximo del cabezal (576 puntos, 80 mm).
+     Al imprimir en 58 mm se reduce desde ahí: guardar la mejor versión y bajar
+     conserva más detalle que guardar la chica y estirarla. */
+  async function convertir(origen: File | string, u: number, tr: boolean) {
+    setProcesando(true)
+    try {
+      const [mono, original] = await Promise.all([
+        procesarLogo(origen, { anchoPx: anchoPuntos(80), umbral: u, tramado: tr }),
+        typeof origen === 'string' ? Promise.resolve(f.ticket_logo_origen) : reducirOriginal(origen),
+      ])
+      setF(c => ({ ...c, ticket_logo: mono, ticket_logo_origen: original || c.ticket_logo_origen }))
+    } catch (e: any) {
+      notify(e?.message || 'No se pudo leer esa imagen', 'err')
+    } finally {
+      setProcesando(false)
+    }
+  }
+
+  function elegirArchivo(file: File | null | undefined) {
+    if (!file) return
+    if (!file.type.startsWith('image/')) { notify('Elige una imagen (PNG o JPG)', 'err'); return }
+    if (file.size > 8 * 1024 * 1024) { notify('La imagen pesa más de 8 MB', 'err'); return }
+    setAfinar(true)
+    convertir(file, umbral, tramado)
+  }
+
+  /* Reajustar rehace el logo desde el original guardado: sin él no habría de
+     dónde recuperar los grises que el umbral necesita comparar. */
+  function reajustar(u: number, tr: boolean) {
+    setUmbral(u); setTramado(tr)
+    if (f.ticket_logo_origen) convertir(f.ticket_logo_origen, u, tr)
+  }
+
+  function guardar() {
+    setSaving(true)
+    api.patch<TicketForm>('/config/', f)
+      .then(r => {
+        const c = { ...TICKET_VACIO, ...r.data }
+        setF(c); setGuardado(c)
+        invalidarConfigPublica()   // las cajas toman el ticket nuevo al instante
+        notify('Ticket actualizado')
+      })
+      .catch(err => notify(errorMsg(err, 'No se pudo guardar'), 'err'))
+      .finally(() => setSaving(false))
+  }
+
+  /* Un dato del negocio vacío no se puede "mostrar": el interruptor se apaga y
+     dice dónde se llena, en vez de mentir con un renglón que nunca sale. */
+  const dato = (valor: string, campo: string) =>
+    valor ? valor : <span className="text-mute">Sin capturar · se llena en <b className="text-ink">Negocio y contacto</b> ({campo})</span>
+
+  const chip = (activo: boolean) =>
+    `px-2.5 py-1 rounded-md text-[11px] font-bold transition-colors ${activo ? 'bg-gold text-black' : 'bg-surface-2 text-mute hover:text-ink'}`
+
+  return (
+    <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_324px] gap-2.5 items-start pb-24">
+      <div className="space-y-2.5 min-w-0">
+        <Panel titulo="Logo" desc="La térmica no imprime grises: quema puntos negros. Tu logo se convierte a blanco y negro puro y aquí ves exactamente los puntos que van a salir.">
+          <Ajuste titulo={f.ticket_logo ? 'Tu logo, ya convertido' : 'Sube tu logo'}
+            desc={f.ticket_logo ? 'Así se verá impreso. Si se ve manchado o desaparecido, ajústalo abajo.' : 'PNG o JPG. Lo mejor es un logo plano y con buen contraste; los degradados se pierden.'}
+            apilado>
+            <div className="w-full space-y-3">
+              {f.ticket_logo ? (
+                <div className="flex flex-wrap items-center gap-4">
+                  <div className="rounded-xl border border-edge p-4 grid place-items-center min-w-[180px]" style={{ background: '#fffdf7' }}>
+                    <img src={f.ticket_logo} alt="Logo convertido a blanco y negro" className="max-h-24 max-w-[220px]" style={{ imageRendering: 'pixelated' }} />
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <label className={`${btnSecundario} inline-flex items-center cursor-pointer`}>
+                      Cambiar imagen
+                      <input type="file" accept="image/*" className="sr-only" onChange={e => elegirArchivo(e.target.files?.[0])} />
+                    </label>
+                    <button onClick={() => setF(c => ({ ...c, ticket_logo: '', ticket_logo_origen: '' }))}
+                      className="h-11 px-5 rounded-[10px] text-[13.5px] font-bold text-mute hover:text-red-500 hover:bg-red-500/10 transition-colors">Quitar logo</button>
+                  </div>
+                </div>
+              ) : (
+                <label
+                  onDragOver={e => { e.preventDefault(); setArrastrando(true) }}
+                  onDragLeave={() => setArrastrando(false)}
+                  onDrop={e => { e.preventDefault(); setArrastrando(false); elegirArchivo(e.dataTransfer.files?.[0]) }}
+                  className={`block rounded-xl border-2 border-dashed px-6 py-9 text-center cursor-pointer transition-colors ${arrastrando ? 'border-gold bg-gold-soft' : 'border-edge bg-surface-2 hover:border-gold/50'}`}>
+                  <svg className="w-7 h-7 mx-auto text-mute" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 16V4m0 0L8 8m4-4 4 4" /><path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />
+                  </svg>
+                  <p className="text-[13.5px] font-black text-ink mt-2">{procesando ? 'Convirtiendo…' : 'Arrastra tu logo o elige un archivo'}</p>
+                  <p className="text-[12.5px] text-mute mt-1">Se convierte aquí mismo. Nada sale de tu computadora sin que guardes.</p>
+                  <input type="file" accept="image/*" className="sr-only" onChange={e => elegirArchivo(e.target.files?.[0])} />
+                </label>
+              )}
+
+              {f.ticket_logo && (
+                <>
+                  <div className="flex items-center gap-3">
+                    <label htmlFor="tk-escala" className="text-[13px] font-bold text-ink w-16">Tamaño</label>
+                    <input id="tk-escala" type="range" min={30} max={100} step={5} value={f.ticket_logo_escala}
+                      onChange={e => set('ticket_logo_escala', Number(e.target.value))}
+                      className="flex-1 accent-[var(--c-gold)]" />
+                    <span className="text-[13px] font-mono text-ink w-20 text-right tabular-nums">{f.ticket_logo_escala}% ancho</span>
+                  </div>
+
+                  <button onClick={() => setAfinar(a => !a)} aria-expanded={afinar}
+                    className="inline-flex items-center gap-1.5 text-[13px] font-black text-gold-ink hover:opacity-80 transition-opacity">
+                    <svg className={`w-4 h-4 transition-transform ${afinar ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.4" strokeLinecap="round"><path d="m9 6 6 6-6 6" /></svg>
+                    Ajuste fino
+                  </button>
+
+                  {afinar && (
+                    <div className="rounded-xl bg-surface-2 border border-edge p-4 space-y-4">
+                      <div>
+                        <div className="flex items-center gap-3">
+                          <label htmlFor="tk-umbral" className="text-[13px] font-bold text-ink w-16">Fuerza</label>
+                          <input id="tk-umbral" type="range" min={60} max={230} step={5} value={umbral} disabled={!f.ticket_logo_origen}
+                            onChange={e => reajustar(Number(e.target.value), tramado)}
+                            className="flex-1 accent-[var(--c-gold)] disabled:opacity-40" />
+                          <span className="text-[13px] font-mono text-ink w-20 text-right tabular-nums">{umbral}</span>
+                        </div>
+                        <p className="text-[12.5px] text-mute mt-1.5">Menos = solo lo más oscuro se imprime. Más = entra más tinta y el logo se engorda.</p>
+                      </div>
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="max-w-[42ch]">
+                          <p className="text-[13px] font-bold text-ink">Tramado</p>
+                          <p className="text-[12.5px] text-mute mt-0.5">Simula grises con puntitos. Enciéndelo si tu logo es una foto o tiene degradados; apágalo si es plano.</p>
+                        </div>
+                        <Switch checked={tramado} onChange={v => reajustar(umbral, v)} disabled={!f.ticket_logo_origen} label="Tramado del logo" />
+                      </div>
+                      {!f.ticket_logo_origen && (
+                        <p className="text-[12.5px] text-amber-700 dark:text-amber-500">Este logo se subió antes de que existiera el ajuste fino. Vuelve a subir la imagen para poder reajustarlo.</p>
+                      )}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          </Ajuste>
+
+          <Ajuste titulo="Imprimir el logo" desc="Apágalo para ahorrar papel sin perder la imagen que ya cargaste.">
+            <Switch checked={f.ticket_mostrar_logo} onChange={v => set('ticket_mostrar_logo', v)} disabled={!f.ticket_logo} label="Imprimir el logo en el ticket" />
+          </Ajuste>
+        </Panel>
+
+        <Panel titulo="Encabezado" desc="Lo primero que lee el cliente. Cada renglón que enciendas alarga el ticket.">
+          <Ajuste titulo="Lema" desc="Va debajo del nombre. Déjalo vacío si no quieres ninguno." apilado>
+            <input aria-label="Lema del negocio" className={`${campoCfg} sm:max-w-md`} maxLength={80}
+              value={f.ticket_lema} onChange={e => set('ticket_lema', e.target.value)} placeholder="Renta · Venta · Servicio" />
+          </Ajuste>
+          <Ajuste titulo="Dirección" desc={dato(negocio.direccion, 'Dirección')}>
+            <Switch checked={f.ticket_mostrar_direccion} onChange={v => set('ticket_mostrar_direccion', v)} disabled={!negocio.direccion} label="Imprimir la dirección" />
+          </Ajuste>
+          <Ajuste titulo="Teléfono" desc={dato(negocio.telefono, 'Teléfono')}>
+            <Switch checked={f.ticket_mostrar_telefono} onChange={v => set('ticket_mostrar_telefono', v)} disabled={!negocio.telefono} label="Imprimir el teléfono" />
+          </Ajuste>
+          <Ajuste titulo="Página web" desc={dato(negocio.web, 'Página web')}>
+            <Switch checked={f.ticket_mostrar_web} onChange={v => set('ticket_mostrar_web', v)} disabled={!negocio.web} label="Imprimir la página web" />
+          </Ajuste>
+          <Ajuste titulo="RFC" desc={dato(negocio.rfc, 'RFC')}>
+            <Switch checked={f.ticket_mostrar_rfc} onChange={v => set('ticket_mostrar_rfc', v)} disabled={!negocio.rfc} label="Imprimir el RFC" />
+          </Ajuste>
+        </Panel>
+
+        <Panel titulo="Pie" desc="Lo último que se lleva el cliente. Es donde se reclama una garantía o una devolución.">
+          <Ajuste titulo="Aviso" desc="Devoluciones, garantía, horario. Una línea por renglón; se acomoda solo al ancho del papel." apilado>
+            <textarea aria-label="Aviso al pie del ticket" className={`${campoCfg} resize-y min-h-[84px] sm:max-w-md`} rows={3} maxLength={400}
+              value={f.ticket_leyenda} onChange={e => set('ticket_leyenda', e.target.value)}
+              placeholder={'Cambios y devoluciones dentro de los 30 días\ncon este ticket y el producto sin uso.'} />
+          </Ajuste>
+          <Ajuste titulo="Despedida" desc="La última línea, en negritas." apilado>
+            <input aria-label="Frase de despedida" className={`${campoCfg} sm:max-w-md`} maxLength={200}
+              value={f.negocio_footer} onChange={e => set('negocio_footer', e.target.value)} placeholder="¡Gracias por su preferencia!" />
+          </Ajuste>
+          <Ajuste titulo="Código de barras del folio" desc="Deja escanear el ticket para encontrar la venta en el panel. Ocupa un centímetro de papel.">
+            <Switch checked={f.ticket_codigo_barras} onChange={v => set('ticket_codigo_barras', v)} label="Imprimir el código de barras" />
+          </Ajuste>
+        </Panel>
+      </div>
+
+      {/* ── Vista previa ── el papel, no un dibujo del papel */}
+      <aside className="xl:sticky xl:top-3">
+        <div className="bg-surface border border-edge rounded-2xl overflow-hidden">
+          <header className="flex items-center justify-between gap-2 px-4 py-3 border-b border-edge">
+            <div className="min-w-0">
+              <h3 className="text-[13.5px] font-black text-ink">Así queda</h3>
+              <p className="text-[12px] text-mute">Venta de ejemplo</p>
+            </div>
+            <div className="flex gap-1 shrink-0" role="group" aria-label="Ancho del papel">
+              {([58, 80] as const).map(w => (
+                <button key={w} onClick={() => setMm(w)} aria-pressed={mm === w} className={chip(mm === w)}>{w}mm</button>
+              ))}
+            </div>
+          </header>
+
+          <div className="p-4 max-h-[62vh] overflow-auto" style={{ background: '#d7d4ce' }}>
+            <div className="flex flex-col items-center gap-2">
+              {/* Cota: el papel mide lo que mide, no lo que parece en pantalla. */}
+              <div className="flex items-center gap-2 text-[10px] font-black tracking-wide text-neutral-600 tabular-nums">
+                <span className="h-px w-8 bg-neutral-500" />{mm} mm<span className="h-px w-8 bg-neutral-500" />
+              </div>
+              <TicketPaper lineas={lineas} width={W} zoom={zoom}
+                className="shadow-[0_6px_16px_rgba(0,0,0,.2)]" />
+            </div>
+          </div>
+
+          <footer className="flex items-center justify-between gap-2 px-4 py-2.5 border-t border-edge">
+            <span className="text-[11.5px] text-mute">Tamaño en pantalla</span>
+            <div className="flex gap-1" role="group" aria-label="Acercar la vista previa">
+              {([0.85, 1, 1.35] as const).map(z => (
+                <button key={z} onClick={() => setZoom(z)} aria-pressed={zoom === z} className={chip(zoom === z)}>{Math.round(z * 100)}%</button>
+              ))}
+            </div>
+          </footer>
+        </div>
+        <p className="text-[12px] text-mute mt-2 px-1 leading-relaxed">
+          El ticket se arma con las mismas líneas que se mandan a la impresora, así que lo que ves aquí es lo que sale en el papel.
+        </p>
+      </aside>
+
+      {hayCambios && (
+        <div className="fixed bottom-0 inset-x-0 sm:left-auto sm:right-6 sm:bottom-6 z-40 px-4 pb-4 sm:p-0 pointer-events-none">
+          <div className="pointer-events-auto mx-auto sm:mx-0 max-w-md sm:max-w-none flex items-center gap-3 bg-surface border border-edge rounded-2xl shadow-[0_12px_32px_rgba(33,29,22,0.16)] px-4 py-3">
+            <p className="text-[13px] text-ink font-semibold flex-1 sm:flex-none sm:mr-2">Tienes cambios sin guardar</p>
+            <button onClick={() => setF(guardado)} className="h-9 px-3.5 rounded-lg text-[13px] font-bold text-mute hover:text-ink hover:bg-surface-2 transition-colors">Descartar</button>
+            <button onClick={guardar} disabled={saving} className={`${btnPrimario} h-9 px-4 text-[13px]`}>{saving ? 'Guardando…' : 'Guardar'}</button>
+          </div>
+        </div>
+      )}
+
+      <style>{paperCss(W)}</style>
+    </div>
+  )
+}
+
 function ConfiguracionAdmin({ notify, lang, onLang }: {
   notify: (m: string, t?: 'ok' | 'err') => void; lang: 'ES' | 'EN'; onLang: (l: 'ES' | 'EN') => void
 }) {
   const { t } = useLang()
   const puede = usePuede()
-  const [tab, setTab] = useState<'perfil' | 'negocio' | 'seguridad' | 'preferencias'>('perfil')
+  const [tab, setTab] = useState<'perfil' | 'negocio' | 'ticket' | 'seguridad' | 'preferencias'>('perfil')
   const [pw, setPw] = useState({ actual: '', nueva: '', confirma: '' })
+  /* ── Código de autorización (NIP) ──
+     Hasta ahora el panel NO tenía dónde ponerlo: el endpoint existía y nadie lo
+     llamaba, así que ni el dueño tenía uno. Sin NIP del dueño, el Gestor no
+     puede autorizar nada. Es INDIVIDUAL: uno por persona, hasheado, y nunca se
+     puede leer de vuelta —solo reemplazar. */
+  const [nip, setNip] = useState({ password: '', codigo: '', confirma: '' })
+  const [savingNip, setSavingNip] = useState(false)
+  const [tieneNip, setTieneNip] = useState<boolean | null>(null)
+  useEffect(() => {
+    api.get<{ tiene_codigo_seguridad?: boolean }>('/auth/me/')
+      .then(r => setTieneNip(!!r.data?.tiene_codigo_seguridad))
+      .catch(() => setTieneNip(null))
+  }, [])
+  function guardarNip() {
+    if (nip.codigo.length !== 6) { notify('El código debe ser de 6 dígitos', 'err'); return }
+    if (nip.codigo !== nip.confirma) { notify('Los códigos no coinciden', 'err'); return }
+    setSavingNip(true)
+    api.post('/auth/codigo-seguridad/', { password: nip.password, codigo: nip.codigo })
+      .then(() => {
+        notify(tieneNip ? 'Código de autorización actualizado' : 'Código de autorización configurado')
+        setNip({ password: '', codigo: '', confirma: '' })
+        setTieneNip(true)
+      })
+      .catch(e => notify(e?.response?.data?.detalle || 'No se pudo guardar el código', 'err'))
+      .finally(() => setSavingNip(false))
+  }
   const [savingPw, setSavingPw] = useState(false)
 
   // "Negocio y contacto" edita datos del negocio: solo el dueño. Mostrarla a
   // quien no puede editarla solo produce un 403 al abrirla.
-  type TabKey = 'perfil' | 'negocio' | 'seguridad' | 'preferencias'
+  type TabKey = 'perfil' | 'negocio' | 'ticket' | 'seguridad' | 'preferencias'
   const tabs: { key: TabKey; label: string; icon: React.ReactNode }[] = [
     { key: 'perfil', label: t('cfg.perfil'), icon: <><circle cx="12" cy="8" r="4" /><path d="M4.5 21a7.5 7.5 0 0 1 15 0" /></> },
     ...(puede('configurar_negocio') ? [{ key: 'negocio' as TabKey, label: 'Negocio y contacto', icon: <><path d="M4 20V9l8-5 8 5v11" /><path d="M9 20v-6h6v6" /></> }] : []),
+    ...(puede('configurar_negocio') ? [{ key: 'ticket' as TabKey, label: 'Ticket', icon: <><path d="M5 4h14v16l-2.3-1.6L14.4 20 12 18.4 9.6 20l-2.3-1.6L5 20z" /><path d="M8.5 9h7M8.5 13h4" /></> }] : []),
     { key: 'seguridad', label: t('cfg.seguridad'), icon: <><rect x="5" y="11" width="14" height="9" rx="2" /><path d="M8 11V8a4 4 0 0 1 8 0v3" /></> },
     { key: 'preferencias', label: t('cfg.preferencias'), icon: <><path d="M4 7h11M18 7h2M4 12h2M9 12h11M4 17h11M18 17h2" /><circle cx="16" cy="7" r="2" /><circle cx="7" cy="12" r="2" /><circle cx="16" cy="17" r="2" /></> },
   ]
@@ -9772,7 +10116,7 @@ function ConfiguracionAdmin({ notify, lang, onLang }: {
   }
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-[228px_1fr] gap-2.5 items-start max-w-5xl">
+    <div className={`grid grid-cols-1 lg:grid-cols-[228px_1fr] gap-2.5 items-start ${tab === 'ticket' ? 'max-w-6xl' : 'max-w-5xl'}`}>
       {/* Navegación de pestañas */}
       <nav className="bg-surface border border-edge rounded-2xl p-2 flex lg:flex-col gap-0.5 overflow-x-auto">
         {tabs.map(tb => {
@@ -9792,6 +10136,8 @@ function ConfiguracionAdmin({ notify, lang, onLang }: {
 
         {tab === 'negocio' && <NegocioAdmin notify={notify} />}
 
+        {tab === 'ticket' && <TicketAdmin notify={notify} />}
+
         {tab === 'seguridad' && (
           <Panel titulo="Cambiar contraseña" desc="Al cambiarla seguirás con la sesión iniciada aquí, pero tendrás que entrar de nuevo en tus otros dispositivos.">
             <Ajuste titulo="Contraseña actual" apilado>
@@ -9807,6 +10153,68 @@ function ConfiguracionAdmin({ notify, lang, onLang }: {
             <div className="px-6 sm:px-7 py-5 flex justify-end">
               <button onClick={cambiarPassword} disabled={savingPw || !pw.actual || pw.nueva.length < 8 || pw.nueva !== pw.confirma} className={btnPrimario}>
                 {savingPw ? 'Cambiando…' : 'Cambiar contraseña'}
+              </button>
+            </div>
+          </Panel>
+        )}
+
+        {/* ── Código de autorización ──
+            Solo lo ve quien PUEDE tener uno. El GESTOR no: para él la
+            autorización es el NIP del dueño, no el suyo —dárselo sería la llave
+            que su rol le quita a propósito—. El servidor también lo rechaza, así
+            que esconderlo aquí es comodidad, no la defensa. */}
+        {tab === 'seguridad' && puede('tener_codigo_propio') && (
+          <Panel
+            titulo="Código de autorización"
+            desc="Seis dígitos que autorizan lo delicado: cancelar una venta o una renta, ajustar un precio, resolver un depósito o aceptar un anticipo bajo el mínimo. Es tuyo y solo tuyo: cada persona tiene el suyo."
+          >
+            <Ajuste
+              titulo={tieneNip === null ? 'Tu código' : tieneNip ? 'Cambiar tu código' : 'Todavía no tienes código'}
+              desc={tieneNip
+                ? 'Por seguridad no se puede ver el que tienes, solo reemplazarlo.'
+                : 'Sin código no podrás autorizar las acciones delicadas del panel.'}
+              apilado
+            >
+              <div className="grid sm:grid-cols-3 gap-3 w-full">
+                <div>
+                  <label className="block text-[12px] font-semibold text-mute mb-1.5" htmlFor="nip-pass">Tu contraseña</label>
+                  <input
+                    id="nip-pass" type="password" autoComplete="current-password"
+                    className={campoCfg} value={nip.password}
+                    onChange={e => setNip(n => ({ ...n, password: e.target.value }))}
+                    placeholder="Para confirmar que eres tú"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[12px] font-semibold text-mute mb-1.5" htmlFor="nip-codigo">Código nuevo</label>
+                  <input
+                    id="nip-codigo" type="password" inputMode="numeric" autoComplete="one-time-code"
+                    className={`${campoCfg} tracking-[0.4em]`} value={nip.codigo}
+                    onChange={e => setNip(n => ({ ...n, codigo: e.target.value.replace(/\D/g, '').slice(0, 6) }))}
+                    placeholder="6 dígitos"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[12px] font-semibold text-mute mb-1.5" htmlFor="nip-confirma">Repítelo</label>
+                  <input
+                    id="nip-confirma" type="password" inputMode="numeric" autoComplete="one-time-code"
+                    className={`${campoCfg} tracking-[0.4em]`} value={nip.confirma}
+                    onChange={e => setNip(n => ({ ...n, confirma: e.target.value.replace(/\D/g, '').slice(0, 6) }))}
+                    placeholder="6 dígitos"
+                  />
+                </div>
+              </div>
+              {nip.confirma && nip.codigo !== nip.confirma && (
+                <p className="text-[13px] text-red-500 mt-2">No coinciden.</p>
+              )}
+            </Ajuste>
+            <div className="px-6 sm:px-7 py-5 flex justify-end">
+              <button
+                onClick={guardarNip}
+                disabled={savingNip || !nip.password || nip.codigo.length !== 6 || nip.codigo !== nip.confirma}
+                className={btnPrimario}
+              >
+                {savingNip ? 'Guardando…' : tieneNip ? 'Cambiar código' : 'Configurar código'}
               </button>
             </div>
           </Panel>
