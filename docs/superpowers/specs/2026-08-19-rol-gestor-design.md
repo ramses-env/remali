@@ -134,6 +134,12 @@ el campo no se pinta. Se valida en el servidor, no solo escondiendo el campo.
 `pedidos` pasan de `ver_dinero` a `ver_operacion`. `resumen` se queda en
 `ver_dinero`.
 
+**Consecuencia declarada del corte de caja.** `corte_caja` usa `ver_dinero` para
+decidir si se ve la caja de todos o solo la propia. Como el Gestor no lo tiene,
+al hacer un corte verá únicamente su turno, no el de los demás cajeros. Es el
+comportamiento deseado —el corte de todos es información agregada del negocio—
+pero conviene tenerlo escrito para que nadie lo lea después como un bug.
+
 ## Rastro de precios de lista
 
 Al cambiar `precio_dia`, `precio_semana`, `precio_mes` o `precio_venta` de un
