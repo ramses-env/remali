@@ -317,6 +317,9 @@ export default function MisCotizaciones() {
     reclamarEspacio()
       .then(() => migrarBorradoresLocales())
       .then(n => { if (n) notify(`Subimos ${n} borrador(es) que tenías guardados en este navegador`) })
+      // El taller es una parte de la pantalla, no la pantalla: si el servidor
+      // falla aquí, la lista de lo que ya mandó tiene que seguir cargando.
+      .catch(() => {})
       .finally(() => { if (vivo) recargarBorradores() })
     return () => { vivo = false }
   }, [token, nav])

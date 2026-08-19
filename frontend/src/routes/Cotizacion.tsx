@@ -6,6 +6,12 @@ import type { downloadCotizacionPdf } from '../lib/pdf'
 import { Link } from 'react-router-dom'
 import { useToast } from '../store/toast'
 import api from '../lib/api'
+import {
+  listarBorradores, crearBorrador, actualizarBorrador, eliminarBorrador as borrarEnServidor,
+  enviarBorrador as enviarAlServidor, mandarAAutorizar, migrarBorradoresLocales,
+  reclamarEspacio, aLineasDeCarrito, tieneEquiposCaidos, totalBorrador,
+  MAX_BORRADORES, type Borrador,
+} from '../lib/borradores'
 import Migas from '../components/Migas'
 import { waLink } from '../lib/whatsapp'
 import { useConfigPublica } from '../lib/configPublica'
@@ -42,7 +48,7 @@ function Field({ label, ok, showErrors, children }: { label: string; ok: boolean
   )
 }
 
-type ObraCli = { id: number; nombre: string; responsable: string; direccion: string; telefono: string; email: string }
+type ObraCli = { id: number; nombre: string; responsable: string; direccion: string; telefono: string }
 
 export default function Cotizacion() {
   const { state, dispatch } = useCart()
@@ -58,7 +64,6 @@ export default function Cotizacion() {
   const [direccion, setDireccion] = useState('')
   const [responsable, setResponsable] = useState('')
   const [obraTelefono, setObraTelefono] = useState('')
-  const [obraEmail, setObraEmail] = useState('')
   const [factura, setFactura] = useState(false)
   const [showErrors, setShowErrors] = useState(false)
   const [sending, setSending] = useState(false)
@@ -99,7 +104,6 @@ export default function Cotizacion() {
     setResponsable(o.responsable || '')
     setDireccion(o.direccion || '')
     setObraTelefono((o.telefono || '').replace(/\D+/g, '').slice(0, 10))
-    setObraEmail(o.email || '')
   }
 
   // Guardar la obra actual en la cuenta, para reusarla después.
@@ -112,7 +116,7 @@ export default function Cotizacion() {
       notify('Esa obra ya está guardada en tu cuenta', 'x'); return
     }
     try {
-      const r = await api.post<ObraCli>('/obras-cliente/', { nombre, responsable, direccion, telefono: obraTelefono, email: obraEmail })
+      const r = await api.post<ObraCli>('/obras-cliente/', { nombre, responsable, direccion, telefono: obraTelefono })
       setObras(prev => [...prev.filter(o => o.id !== r.data.id), r.data])
       notify('Obra guardada en tu cuenta')
     } catch { notify('No se pudo guardar la obra', 'x') }
@@ -127,17 +131,16 @@ export default function Cotizacion() {
   const validDireccion = direccion.trim().length > 0
   const validResponsable = responsable.trim().length > 0
   const validObraTelefono = isPhone10(obraTelefono)
-  const validObraEmail = isEmail(obraEmail)
   const formValid = useMemo(() => (
     state.items.length > 0 && validNombre && validEmpresa && validClientEmail &&
-    validTelefono && validDireccion && validResponsable && validObraTelefono && validObraEmail
-  ), [state.items, validNombre, validEmpresa, validClientEmail, validTelefono, validDireccion, validResponsable, validObraTelefono, validObraEmail])
+    validTelefono && validDireccion && validResponsable && validObraTelefono
+  ), [state.items, validNombre, validEmpresa, validClientEmail, validTelefono, validDireccion, validResponsable, validObraTelefono])
 
   // Argumentos del PDF, compartidos por "descargar" y por el snapshot de éxito.
   function pdfArgs() {
     return {
       items: state.items,
-      client: { nombre, empresa, email, telefono, direccion, responsable, obra_telefono: obraTelefono, obra_email: obraEmail },
+      client: { nombre, empresa, email, telefono, direccion, responsable, obra_telefono: obraTelefono },
       coupon: state.coupon,
       iva: factura,
     }
@@ -154,20 +157,25 @@ export default function Cotizacion() {
   // Envía la solicitud al backend. El navegador manda equipo_id + cantidad + unit;
   // el servidor recalcula los precios (no confía en los del cliente).
   // Éxito del camino "a autorizar": guarda folio y liga del jefe.
-  const [sentAut, setSentAut] = useState<{ folio: string; liga: string } | null>(null)
+  const [sentAut, setSentAut] = useState<{ liga: string } | null>(null)
   const [ligaAutCopiada, setLigaAutCopiada] = useState(false)
 
-  async function crearPorAutorizar(items: typeof state.items): Promise<boolean> {
+  /* Crea el borrador (si no venía de uno) y su liga de autorización. Aquí NO
+     nace ninguna cotización ni ningún folio: REMALI no se entera de esto hasta
+     que quien autoriza diga que sí. */
+  async function crearPorAutorizar(items: typeof state.items, borradorId?: number): Promise<boolean> {
     setSending(true)
     try {
-      const r = await api.post<{ folio: string; liga_autorizacion: string }>('/tienda/cotizacion/', {
-        items: items.map(i => ({ equipo_id: i.id, cantidad: i.qty, duracion: periodosDe(i), unit: i.unit || 'venta' })),
-        cliente: { nombre, empresa, email, telefono },
-        obra: { responsable, direccion, telefono: obraTelefono, email: obraEmail },
-        requiere_factura: factura,
-        por_autorizar: true,
-      })
-      setSentAut({ folio: r.data.folio, liga: `${window.location.origin}${r.data.liga_autorizacion}` })
+      let id = borradorId
+      if (!id) {
+        const b = await crearBorrador({ items, ...datosDelFormulario() })
+        id = b.id
+      } else {
+        await actualizarBorrador(id, datosDelFormulario())
+      }
+      const paquete = await mandarAAutorizar([id], 'lista', '')
+      setSentAut({ liga: `${window.location.origin}${paquete.liga}` })
+      await recargarBorradores()
       return true
     } catch (err: any) {
       notify(err?.response?.data?.detalle || 'No se pudo preparar la autorización', 'x')
@@ -187,14 +195,14 @@ export default function Cotizacion() {
   }
   async function autorizarBorrador(b: Borrador) {
     const datosValidos = validNombre && validEmpresa && validClientEmail &&
-      validTelefono && validDireccion && validResponsable && validObraTelefono && validObraEmail
+      validTelefono && validDireccion && validResponsable && validObraTelefono
     if (!datosValidos) {
       cargarBorrador(b)
       setShowErrors(true)
       notify('Cargué el borrador; completa tus datos para mandarlo a autorizar', 'x')
       return
     }
-    if (await crearPorAutorizar(b.items)) borrarBorrador(b.id)
+    await crearPorAutorizar(aLineasDeCarrito(b), b.id)
   }
 
   async function handleSend() {
@@ -208,7 +216,7 @@ export default function Cotizacion() {
       const r = await api.post<{ folio: string; liga?: string }>('/tienda/cotizacion/', {
         items: state.items.map(i => ({ equipo_id: i.id, cantidad: i.qty, duracion: periodosDe(i), unit: i.unit || 'venta' })),
         cliente: { nombre, empresa, email, telefono },
-        obra: { responsable, direccion, telefono: obraTelefono, email: obraEmail },
+        obra: { responsable, direccion, telefono: obraTelefono },
         requiere_factura: factura,
       })
       // Mensaje de WhatsApp pre-llenado (se arma ANTES de limpiar el carrito).
@@ -256,51 +264,71 @@ export default function Cotizacion() {
 
   const monoLabel = 'text-[10.5px] font-mono tracking-[0.14em] text-mute uppercase'
 
-  /* ── Borradores del cliente (en SU navegador) ─────────────────────────────
-     Puede armar varias versiones, bajar el PDF de cada una para su jefe, y
-     cuando decidan, cargar UNA y enviarla a REMALI. El folio nace al enviar,
-     nunca antes — los borradores no existen para el sistema. */
-  type Borrador = { id: number; nombre: string; items: typeof state.items; coupon?: typeof state.coupon; creado: string }
-  const [borradores, setBorradores] = useState<Borrador[]>(() => {
-    try { return JSON.parse(localStorage.getItem('remali_borradores') || '[]') } catch { return [] }
+  /* ── El taller del cliente ────────────────────────────────────────────────
+     Sus versiones viven en el SERVIDOR, no en este navegador: así no se pierden
+     al cambiar de dispositivo y las puede mandar a autorizar. REMALI no las ve.
+     El folio nace cuando la manda —directo o autorizada—, nunca antes. */
+  const [borradores, setBorradores] = useState<Borrador[]>([])
+
+  const recargarBorradores = async () => {
+    try { setBorradores((await listarBorradores()).borradores.filter(b => b.estado === 'armando')) }
+    catch { /* el armador sigue sirviendo aunque el taller no cargue */ }
+  }
+
+  useEffect(() => {
+    reclamarEspacio()
+      .then(() => migrarBorradoresLocales())
+      .then(n => { if (n) notify(`Subimos ${n} borrador(es) que tenías guardados en este navegador`) })
+      // Si el taller no carga, el armador sigue sirviendo para cotizar: es lo
+      // que el cliente vino a hacer.
+      .catch(() => {})
+      .finally(recargarBorradores)
+    // Solo al montar: el rescate de lo viejo se hace una vez.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  /** Los datos que el cliente ya capturó en el formulario. Se guardan CON el
+   *  borrador para que, si lo manda después desde "Mis cotizaciones", no tenga
+   *  que volver a escribirlos. */
+  const datosDelFormulario = () => ({
+    datos_contacto: { nombre, empresa, email, telefono },
+    obra: { responsable, direccion, telefono: obraTelefono },
+    requiere_factura: factura,
   })
-  const persistir = (bs: Borrador[]) => {
-    setBorradores(bs)
-    try { localStorage.setItem('remali_borradores', JSON.stringify(bs)) } catch { /* cuota llena */ }
-  }
-  function guardarBorrador() {
+
+  async function guardarBorrador() {
     if (!state.items.length) { notify('Agrega equipos antes de guardar el borrador', 'x'); return }
-    if (borradores.length >= 8) { notify('Máximo 8 borradores; borra alguno primero', 'x'); return }
+    if (borradores.length >= MAX_BORRADORES) { notify(`Máximo ${MAX_BORRADORES} borradores; borra alguno primero`, 'x'); return }
     const tipo = state.items[0].unit === 'venta' ? 'Venta' : 'Renta'
-    const nombre = `${tipo} · ${state.items.length} equipo${state.items.length === 1 ? '' : 's'} · ${money(totalConIVA)}`
-    persistir([...borradores, { id: Date.now(), nombre, items: state.items, coupon: state.coupon, creado: new Date().toISOString() }])
-    notify('Borrador guardado')
+    const nom = `${tipo} · ${state.items.length} equipo${state.items.length === 1 ? '' : 's'} · ${money(totalConIVA)}`
+    try {
+      await crearBorrador({ nombre: nom, items: state.items, ...datosDelFormulario() })
+      await recargarBorradores()
+      notify('Borrador guardado')
+    } catch (e) {
+      notify((e as { response?: { data?: { detalle?: string } } })?.response?.data?.detalle || 'No se pudo guardar', 'x')
+    }
   }
+
   function cargarBorrador(b: Borrador) {
-    dispatch({ type: 'reemplazar', items: b.items })
-    notify('Borrador cargado — revisa y envía cuando quieras')
-  }
-  const borrarBorrador = (id: number) => persistir(borradores.filter(b => b.id !== id))
-
-  // Total de una lista de items con el MISMO espejo del backend (venta con IVA
-  // incluido, renta +16% solo con factura); para el resumen al enviar borradores.
-  function totalDe(items: Borrador['items'], coupon?: Borrador['coupon']) {
-    const sv = items.reduce((s, i) => s + (i.unit === 'venta' ? importeLinea(i) : 0), 0)
-    const sr = items.reduce((s, i) => s + (i.unit !== 'venta' ? importeLinea(i) : 0), 0)
-    const sub = sv + sr
-    const desc = coupon ? sub * coupon.discount : 0
-    const f = sub > 0 ? Math.max(0, sub - desc) / sub : 1
-    const vn = sv * f, rn = sr * f
-    return vn + rn + (factura ? rn * 0.16 : 0)
+    dispatch({ type: 'reemplazar', items: aLineasDeCarrito(b) })
+    if (tieneEquiposCaidos(b)) notify('Alguno de sus equipos ya no está en el catálogo; lo quitamos', 'x')
+    else notify('Borrador cargado — revisa y envía cuando quieras')
   }
 
-  /* Enviar UN borrador a REMALI tal cual, sin tocar el carrito: hizo 4
-     versiones y manda solo la elegida. Usa los datos de contacto/obra del
-     formulario; si faltan, carga el borrador y señala qué completar. Al
-     enviarse, el borrador se borra — ya vive en el sistema con folio. */
+  async function borrarBorrador(id: number) {
+    try { await borrarEnServidor(id); await recargarBorradores() }
+    catch { notify('No se pudo borrar el borrador', 'x') }
+  }
+
+  /* Mandar UN borrador guardado directo a REMALI, sin tocar el carrito: hizo
+     cuatro versiones y manda solo la elegida. El servidor ya tiene sus
+     partidas y su precio del día; aquí solo se completan los datos de contacto
+     si el formulario los tiene. Al mandarse, el borrador pasa a "entregado" y
+     sale del taller — ya vive en el sistema, con folio. */
   async function enviarBorrador(b: Borrador) {
     const datosValidos = validNombre && validEmpresa && validClientEmail &&
-      validTelefono && validDireccion && validResponsable && validObraTelefono && validObraEmail
+      validTelefono && validDireccion && validResponsable && validObraTelefono
     if (!datosValidos) {
       cargarBorrador(b)
       setShowErrors(true)
@@ -310,24 +338,20 @@ export default function Cotizacion() {
     if (sending) return
     setSending(true)
     try {
-      const r = await api.post<{ folio: string; liga?: string }>('/tienda/cotizacion/', {
-        items: b.items.map(i => ({ equipo_id: i.id, cantidad: i.qty, duracion: periodosDe(i), unit: i.unit || 'venta' })),
-        cliente: { nombre, empresa, email, telefono },
-        obra: { responsable, direccion, telefono: obraTelefono, email: obraEmail },
-        requiere_factura: factura,
-      })
-      const resumen = b.items.map(i => `${i.qty}x ${i.title}`).join(', ')
-      setSentWaMsg(`Hola, soy ${nombre}. Envié la solicitud de cotización ${r.data.folio}${resumen ? ` (${resumen})` : ''}. Quisiera continuar por aquí.`)
+      await actualizarBorrador(b.id, datosDelFormulario())
+      const { folio } = await enviarAlServidor(b.id)
+      const lineas = aLineasDeCarrito(b)
+      const resumen = lineas.map(i => `${i.qty}x ${i.title}`).join(', ')
+      setSentWaMsg(`Hola, soy ${nombre}. Envié la solicitud de cotización ${folio}${resumen ? ` (${resumen})` : ''}. Quisiera continuar por aquí.`)
       setSentPdfArgs({
-        items: b.items,
-        client: { nombre, empresa, email, telefono, direccion, responsable, obra_telefono: obraTelefono, obra_email: obraEmail },
-        coupon: b.coupon,
+        items: lineas,
+        client: { nombre, empresa, email, telefono, direccion, responsable, obra_telefono: obraTelefono },
         iva: factura,
       })
-      setSentResumen({ items: b.items, total: totalDe(b.items, b.coupon), obra: direccion.trim() || empresa.trim() })
-      setSentLiga(r.data.liga || null)
-      setSentFolio(r.data.folio)
-      borrarBorrador(b.id)
+      setSentResumen({ items: lineas, total: totalBorrador(b), obra: direccion.trim() || empresa.trim() })
+      setSentLiga(null)
+      setSentFolio(folio)
+      await recargarBorradores()
     } catch (err: any) {
       notify(err?.response?.data?.detalle || 'No se pudo enviar la solicitud', 'x')
     } finally {
@@ -351,7 +375,7 @@ export default function Cotizacion() {
             </p>
 
             <div className="mt-6 text-left rounded-2xl bg-surface-2 border border-edge p-4 space-y-2.5 text-[13px]">
-              <div className="flex items-center gap-2.5"><span className="w-5 h-5 rounded-full bg-emerald-500 text-white grid place-items-center text-[10px] font-black shrink-0">✓</span><span><b>Creada</b> — folio {sentAut.folio}</span></div>
+              <div className="flex items-center gap-2.5"><span className="w-5 h-5 rounded-full bg-emerald-500 text-white grid place-items-center text-[10px] font-black shrink-0">✓</span><span><b>Lista</b> — todavía sin folio: REMALI la recibe cuando la autoricen</span></div>
               <div className="flex items-center gap-2.5"><span className="w-5 h-5 rounded-full bg-gold text-black grid place-items-center text-[10px] font-black shrink-0">2</span><span><b>Tu jefe la autoriza</b> desde la liga</span></div>
               <div className="flex items-center gap-2.5"><span className="w-5 h-5 rounded-full bg-surface border border-edge text-mute grid place-items-center text-[10px] font-black shrink-0">3</span><span><b>REMALI la recibe al instante</b> y te contacta</span></div>
             </div>
@@ -663,9 +687,6 @@ export default function Cotizacion() {
                 <Field label="TELÉFONO EN OBRA" ok={validObraTelefono} showErrors={showErrors}><input type="tel" inputMode="numeric" maxLength={10} className={inp(validObraTelefono)} value={obraTelefono} onChange={e => setObraTelefono(e.target.value.replace(/\D+/g, '').slice(0, 10))} placeholder="10 dígitos" /></Field>
                 <div className="sm:col-span-2">
                   <Field label="DIRECCIÓN DE ENTREGA" ok={validDireccion} showErrors={showErrors}><input className={inp(validDireccion)} value={direccion} onChange={e => setDireccion(e.target.value)} placeholder="Calle, número, colonia" /></Field>
-                </div>
-                <div className="sm:col-span-2">
-                  <Field label="CORREO DE LA OBRA" ok={validObraEmail} showErrors={showErrors}><input type="email" className={inp(validObraEmail)} value={obraEmail} onChange={e => setObraEmail(e.target.value.toLowerCase())} placeholder="Le llega la cotización" /></Field>
                 </div>
               </div>
             </div>

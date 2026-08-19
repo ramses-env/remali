@@ -2,28 +2,7 @@ import { lazy, Suspense, useEffect } from 'react'
 import { Route, Routes, useLocation } from 'react-router-dom'
 import Navbar from './components/Navbar'
 import Home from './routes/Home'
-import EquiposList from './routes/EquiposList'
-import Favoritos from './routes/Favoritos'
-import EquipoDetail from './routes/EquipoDetail'
-import Cotizacion from './routes/Cotizacion'
-import Login from './routes/Login'
-import Registro from './routes/Registro'
-import Recuperar from './routes/Recuperar'
-import Restablecer from './routes/Restablecer'
-import VerificarCorreo from './routes/VerificarCorreo'
-import Perfil from './routes/Perfil'
-import MisCotizaciones from './routes/MisCotizaciones'
-import MisCotizacionEstado from './routes/MisCotizacionEstado'
-import MisRentas from './routes/MisRentas'
-import MisAdeudos from './routes/MisAdeudos'
 import RecordatorioAdeudo from './components/RecordatorioAdeudo'
-import MisCompras from './routes/MisCompras'
-import MisReparaciones from './routes/MisReparaciones'
-import SeguirReparacion from './routes/SeguirReparacion'
-import VincularCuenta from './routes/VincularCuenta'
-import AutorizarCotizacion from './routes/AutorizarCotizacion'
-import AutorizarLote from './routes/AutorizarLote'
-import UnidadQR from './routes/UnidadQR'
 import RecordatorioPerfil from './components/RecordatorioPerfil'
 import CambioTipoCotizacion from './components/CambioTipoCotizacion'
 import DockTienda from './components/DockTienda'
@@ -38,9 +17,44 @@ import CargaGlobal from './components/CargaGlobal'
 import { PriceUnitProvider } from './store/priceUnit'
 import { I18nProvider } from './lib/i18n'
 
+// Cada ruta viaja en su propio archivo. Antes se importaban las 23 de forma
+// estática y el chunk de entrada pesaba 1.11 MB: quien abría la tienda para ver
+// una máquina descargaba también el perfil, las cotizaciones, las reparaciones y
+// el generador de PDF. Con lazy() cada quien baja lo que abre.
+const EquiposList = lazy(() => import('./routes/EquiposList'))
+const Favoritos = lazy(() => import('./routes/Favoritos'))
+const EquipoDetail = lazy(() => import('./routes/EquipoDetail'))
+const Cotizacion = lazy(() => import('./routes/Cotizacion'))
+const Login = lazy(() => import('./routes/Login'))
+const Registro = lazy(() => import('./routes/Registro'))
+const Recuperar = lazy(() => import('./routes/Recuperar'))
+const Restablecer = lazy(() => import('./routes/Restablecer'))
+const VerificarCorreo = lazy(() => import('./routes/VerificarCorreo'))
+const Perfil = lazy(() => import('./routes/Perfil'))
+const MisCotizaciones = lazy(() => import('./routes/MisCotizaciones'))
+const MisCotizacionEstado = lazy(() => import('./routes/MisCotizacionEstado'))
+const MisRentas = lazy(() => import('./routes/MisRentas'))
+const MisAdeudos = lazy(() => import('./routes/MisAdeudos'))
+const MisCompras = lazy(() => import('./routes/MisCompras'))
+const MisReparaciones = lazy(() => import('./routes/MisReparaciones'))
+const SeguirReparacion = lazy(() => import('./routes/SeguirReparacion'))
+const VincularCuenta = lazy(() => import('./routes/VincularCuenta'))
+const AutorizarCotizacion = lazy(() => import('./routes/AutorizarCotizacion'))
+const RescatarEspacio = lazy(() => import('./routes/RescatarEspacio'))
+const UnidadQR = lazy(() => import('./routes/UnidadQR'))
 // El panel admin pesa más que toda la tienda junta; se descarga solo cuando
 // alguien entra a /dashboard, no en la primera visita de cada cliente.
 const Dashboard = lazy(() => import('./routes/Dashboard'))
+
+/* Lo que se ve el instante que tarda en bajar el archivo de una ruta. Es el mismo
+   spinner del panel: si parpadea algo distinto en cada sección, se siente rota. */
+function CargandoRuta() {
+  return (
+    <div className="min-h-[60vh] grid place-items-center">
+      <div className="w-8 h-8 rounded-full border-2 border-gold border-t-transparent animate-spin" role="status" aria-label="Cargando" />
+    </div>
+  )
+}
 
 function App() {
   const location = useLocation()
@@ -61,6 +75,7 @@ function App() {
       <CargaGlobal />
       {bare ? (
         <ErrorBoundary>
+          <Suspense fallback={<CargandoRuta />}>
           <Routes>
             {/* Ruta de layout: el marco (foto, logo, botones) se monta una sola
                 vez y solo cambia el contenido, que es lo que permite animar el
@@ -85,6 +100,7 @@ function App() {
               }
             />
           </Routes>
+          </Suspense>
         </ErrorBoundary>
       ) : (
         <PriceUnitProvider>
@@ -99,6 +115,7 @@ function App() {
             <Navbar />
             <div className="flex-1 w-full">
               <ErrorBoundary>
+                <Suspense fallback={<CargandoRuta />}>
                 <Routes>
                   <Route path="/" element={<Home />} />
                   <Route path="/equipos" element={<EquiposList />} />
@@ -120,21 +137,30 @@ function App() {
                   <Route path="/vincular/cotizacion/:token" element={<VincularCuenta tipo="cotizacion" />} />
                   <Route path="/vincular/reparacion/:token" element={<VincularCuenta tipo="reparacion" />} />
                   <Route path="/seguir/reparacion/:token" element={<SeguirReparacion modo="publico" />} />
-                  {/* Liga del JEFE: pública, sin cuenta; autorizar la manda a REMALI */}
+                  {/* Liga de QUIEN AUTORIZA: pública, sin cuenta. Sirve igual
+                      para una cotización que para varias. */}
                   <Route path="/autorizar/:token" element={<AutorizarCotizacion />} />
+                  {/* Recuperar el taller de un cliente SIN cuenta en otro equipo */}
+                  <Route path="/mis-borradores/:token" element={<RescatarEspacio />} />
                   {/* Liga del JEFE para un LOTE: autoriza/rechaza varias juntas */}
-                  <Route path="/autorizar-lote/:token" element={<AutorizarLote />} />
                   {/* La página del QR pegado en cada máquina */}
                   <Route path="/u/:codigo" element={<UnidadQR />} />
                   <Route path="*" element={<ErrorPage type="404" />} />
                 </Routes>
+                </Suspense>
               </ErrorBoundary>
             </div>
             <Footer />
             {/* Recordatorios flotantes del cliente (perfil a medias, adeudo):
                 apilados en un contenedor para que NO se enciman si salen juntos.
                 El contenedor no bloquea clics; cada alerta sí es interactiva. */}
-            <div className="fixed top-[76px] left-4 right-4 z-40 md:left-auto md:right-5 md:max-w-[360px] flex flex-col gap-3 pointer-events-none">
+            {/* El tope sale de --nav-h (lo publica el Navbar, que encoge al hacer
+                scroll): así el aviso siempre queda DEBAJO de la barra y no
+                tapado por ella, que va con z-50. */}
+            <div
+              style={{ top: 'calc(var(--nav-h, 80px) + 12px)' }}
+              className="fixed left-4 right-4 z-40 md:left-auto md:right-5 md:max-w-[360px] flex flex-col gap-3 pointer-events-none transition-[top] duration-300"
+            >
               <RecordatorioPerfil />
               <RecordatorioAdeudo />
             </div>

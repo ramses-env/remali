@@ -3,6 +3,24 @@
 from django.db import migrations, models
 
 
+def aterrizar_por_autorizar(apps, schema_editor):
+    """Las que quedaron esperando al jefe bajo el modelo viejo.
+
+    Ese estado deja de existir aquí, así que hay que decidir dónde caen. Van a
+    'enviada': bajo el flujo anterior ya tenían folio y REMALI ya las veía en su
+    lista, o sea que ya eran suyas. Dejarlas en el estado borrado las volvería
+    invisibles para la máquina de estados —sin etiqueta y sin poder avanzar—,
+    que es peor que verlas.
+    """
+    Cotizacion = apps.get_model('cotizaciones', 'Cotizacion')
+    Cotizacion.objects.filter(estado='por_autorizar').update(estado='enviada')
+
+
+def revertir(apps, schema_editor):
+    # No se puede saber cuáles eran: la ida es irreversible a propósito.
+    pass
+
+
 class Migration(migrations.Migration):
 
     dependencies = [
@@ -10,6 +28,9 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
+        # Primero se aterrizan los datos, luego se quita el estado: al revés
+        # dejaría filas apuntando a algo que ya no existe.
+        migrations.RunPython(aterrizar_por_autorizar, revertir),
         migrations.RemoveField(
             model_name='cotizacion',
             name='autorizacion_rechazo',
