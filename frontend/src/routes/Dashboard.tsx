@@ -7297,10 +7297,50 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
       })
       .catch(err => notify(errorMsg(err, 'No se pudo quitar la foto'), 'err'))
   }
-  /* La descarga del PDF ya no vive aquí: está dentro de la vista previa
-     (CotizacionCartaModal), que es donde tiene sentido —se ve la orden y desde
-     ahí se decide si se imprime o se guarda—. Tenerla también en este pie era
-     el tercer camino para la misma acción. */
+  /* Imprimir y descargar trabajan sobre el PDF del SERVIDOR (reportlab), no
+     sobre una recreación del HTML: lo que sale de la impresora es idéntico a lo
+     que el cliente recibió por correo. Si el papel y el correo no coinciden, la
+     discusión con el cliente la pierde REMALI. */
+  const [documento, setDocumento] = useState<'' | 'descarga' | 'impresion'>('')
+
+  function pedirPDF() {
+    if (!(clienteNombre.trim() || empresaSel) || c.items.length === 0) {
+      notify('Agrega el cliente y al menos un concepto para generar el PDF', 'err')
+      return null
+    }
+    return api.get(`/cotizaciones/${c.id}/pdf/`, { responseType: 'blob' }).then(r => r.data as Blob)
+  }
+
+  function descargarPDF() {
+    const p = pedirPDF()
+    if (!p) return
+    setDocumento('descarga')
+    p.then(b => descargarBlob(b, `${c.folio || 'cotizacion'}.pdf`))
+      .catch(() => notify('No se pudo descargar el PDF', 'err'))
+      .finally(() => setDocumento(''))
+  }
+
+  /* El PDF se carga en un iframe oculto y se imprime desde ahí. `window.print()`
+     a secas mandaría a la impresora el panel entero, que es lo que hacía el
+     botón viejo cuando no había una hoja montada. */
+  function imprimirPDF() {
+    const p = pedirPDF()
+    if (!p) return
+    setDocumento('impresion')
+    p.then(b => {
+      const url = URL.createObjectURL(b)
+      const marco = document.createElement('iframe')
+      marco.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0'
+      marco.src = url
+      marco.onload = () => { marco.contentWindow?.focus(); marco.contentWindow?.print() }
+      document.body.appendChild(marco)
+      // El diálogo del sistema es modal: el iframe tiene que seguir vivo mientras
+      // esté abierto, así que la limpieza va con holgura.
+      window.setTimeout(() => { URL.revokeObjectURL(url); marco.remove() }, 60_000)
+    })
+      .catch(() => notify('No se pudo abrir la impresión', 'err'))
+      .finally(() => setDocumento(''))
+  }
   // Enviar por correo: guarda primero (para que el servidor tenga el correo
   // actual) y luego manda el PDF adjunto. El envío la marca como "Enviada".
   function enviarCorreo() {
@@ -7831,12 +7871,24 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
               el primero ya trae dentro esos mismos dos botones — tres caminos
               para dos acciones. Ahora se abre la orden y se decide viéndola:
               nadie imprime a ciegas un documento que va a firmar un cliente. */}
-          <div className="sm:mr-auto">
-            <button onClick={() => onPrint({ ...c, notas, vigencia_dias: Number(vigencia) || 15, aplica_iva: aplicaIva, base: String(baseMonto), iva: String(ivaMonto), total: String(totalMonto) })} disabled={!completa} title={!completa ? 'Agrega cliente y al menos un concepto' : 'Ver la orden en carta: desde ahí se imprime o se descarga'} className="w-full sm:w-auto py-2.5 px-5 rounded-full border border-edge text-ink text-sm font-semibold hover:bg-surface-2 transition active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100 flex items-center justify-center gap-2">
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+          <div className="grid grid-cols-3 sm:flex gap-2 sm:mr-auto">
+            <button onClick={() => onPrint({ ...c, notas, vigencia_dias: Number(vigencia) || 15, aplica_iva: aplicaIva, base: String(baseMonto), iva: String(ivaMonto), total: String(totalMonto) })} disabled={!completa} title={!completa ? 'Agrega cliente y al menos un concepto' : 'Ver la orden en carta antes de imprimirla'} className="py-2.5 sm:px-4 rounded-full border border-edge text-ink text-sm font-semibold hover:bg-surface-2 transition active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100 flex items-center justify-center gap-2">
+              <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /><path d="M8 13h8M8 17h5" />
               </svg>
               Ver la orden
+            </button>
+            <button onClick={imprimirPDF} disabled={documento === 'impresion' || !completa} title={!completa ? 'Agrega cliente y al menos un concepto' : undefined} className="py-2.5 sm:px-4 rounded-full border border-edge text-ink text-sm font-semibold hover:bg-surface-2 transition active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100 flex items-center justify-center gap-2">
+              {documento === 'impresion'
+                ? <span className="w-4 h-4 border-2 border-ink/30 border-t-ink rounded-full animate-spin shrink-0" />
+                : <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9V3h12v6" /><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" /><path d="M6 14h12v7H6z" /></svg>}
+              Imprimir
+            </button>
+            <button onClick={descargarPDF} disabled={documento === 'descarga' || !completa} title={!completa ? 'Agrega cliente y al menos un concepto' : undefined} className="py-2.5 sm:px-4 rounded-full border border-edge text-ink text-sm font-semibold hover:bg-surface-2 transition active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100 flex items-center justify-center gap-2">
+              {documento === 'descarga'
+                ? <span className="w-4 h-4 border-2 border-ink/30 border-t-ink rounded-full animate-spin shrink-0" />
+                : <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" /></svg>}
+              Descargar PDF
             </button>
           </div>
 

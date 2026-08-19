@@ -1,12 +1,10 @@
-import { useCallback, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import Modal from './Modal'
 import { createPortal } from 'react-dom'
-import { Printer, X, FileText, Download } from 'lucide-react'
+import { X, FileText, Minus, Plus, Maximize2 } from 'lucide-react'
 import { usePrintSettings } from '../lib/printSettings'
 import { formatMoney } from '../lib/utils'
 import resolveMediaUrl from '../lib/resolveMediaUrl'
-import api from '../lib/api'
-import { descargarBlob } from '../lib/descargar'
 import LogoRemali from './ui/logo-remali'
 
 type Item = { id: number; descripcion: string; cantidad: number; precio_unitario: string; subtotal: string; modalidad_label?: string; equipo?: number | null; equipo_imagen?: string | null }
@@ -65,8 +63,6 @@ const ACENTO_TIPO: Record<string, string> = { venta: '#2B5FAD', renta: '#EA580C'
 
 export default function CotizacionCartaModal({ cotizacion, onClose }: { cotizacion: Cotizacion; onClose: () => void }) {
   const [ps] = usePrintSettings()
-  const [descargando, setDescargando] = useState(false)
-  const [errPdf, setErrPdf] = useState('')
   const neg = ps.negocio
   const acento = ACENTO_TIPO[cotizacion.tipo] || '#B8872E'
 
@@ -75,7 +71,13 @@ export default function CotizacionCartaModal({ cotizacion, onClose }: { cotizaci
   // el layout se calcula SIEMPRE a ancho Carta (sin cortes) y solo se ve más chico.
   const scrollRef = useRef<HTMLDivElement>(null)
   const cartaRef = useRef<HTMLDivElement>(null)
-  const [box, setBox] = useState({ scale: 1, w: DOC_PX, h: PH * 96 / 25.4 })
+  const [doc, setDoc] = useState({ w: DOC_PX, h: PH * 96 / 25.4 })
+  // Escala que hace caber la hoja completa en el modal.
+  const [ajuste, setAjuste] = useState(1)
+  /* Zoom del usuario. null = "ajustar", que es como abre. Una vista previa que
+     solo encoge la hoja para que quepa no sirve para lo único que se revisa de
+     verdad: la letra chica —condiciones, precios unitarios, vigencia—. */
+  const [zoom, setZoom] = useState<number | null>(null)
 
   const medir = useCallback(() => {
     const scroll = scrollRef.current, carta = cartaRef.current
@@ -83,10 +85,28 @@ export default function CotizacionCartaModal({ cotizacion, onClose }: { cotizaci
     const PAD = 20
     const disponible = scroll.clientWidth - PAD * 2
     const w = carta.offsetWidth || DOC_PX
-    const h = carta.offsetHeight
-    const scale = Math.min(1, disponible / w)
-    setBox({ scale, w: w * scale, h: h * scale })
+    setDoc({ w, h: carta.offsetHeight })
+    setAjuste(Math.min(1, disponible / w))
   }, [])
+
+  const escala = zoom ?? ajuste
+  const box = { scale: escala, w: doc.w * escala, h: doc.h * escala }
+  const ZOOM_MIN = 0.5, ZOOM_MAX = 2.5
+  const acercar = (paso: number) =>
+    setZoom(z => Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Number(((z ?? ajuste) + paso).toFixed(2)))))
+
+  // Los atajos de cualquier visor: + acerca, − aleja, 0 vuelve a ajustar.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return
+      if (e.key === '+' || e.key === '=') { e.preventDefault(); acercar(0.25) }
+      else if (e.key === '-' || e.key === '_') { e.preventDefault(); acercar(-0.25) }
+      else if (e.key === '0') { e.preventDefault(); setZoom(null) }
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ajuste])
 
   useLayoutEffect(() => {
     medir()
@@ -113,14 +133,6 @@ export default function CotizacionCartaModal({ cotizacion, onClose }: { cotizaci
             })
         ).values()]
 
-  // Baja el PDF de reportlab (idéntico al del correo), no una captura del HTML.
-  function descargarPDF() {
-    setErrPdf(''); setDescargando(true)
-    api.get(`/cotizaciones/${cotizacion.id}/pdf/`, { responseType: 'blob' })
-      .then(r => descargarBlob(r.data as Blob, `${cotizacion.folio || 'cotizacion'}.pdf`))
-      .catch(() => setErrPdf('No se pudo descargar el PDF.'))
-      .finally(() => setDescargando(false))
-  }
   const money = formatMoney
   const fecha = (v?: string | null) => (v ? new Date(v).toLocaleDateString('es-MX', { day: '2-digit', month: 'long', year: 'numeric' }) : '—')
 
@@ -139,9 +151,29 @@ export default function CotizacionCartaModal({ cotizacion, onClose }: { cotizaci
               <p className="text-[11px] text-mute leading-tight truncate">{TIPO_LABEL[cotizacion.tipo] || 'Venta'} · {ESTADO_LABEL[cotizacion.estado] || cotizacion.estado} · Carta</p>
             </div>
           </div>
-          <button onClick={onClose} aria-label="Cerrar" className="w-9 h-9 rounded-full flex items-center justify-center text-mute hover:bg-surface-2 hover:text-ink transition-colors shrink-0">
-            <X className="h-[18px] w-[18px]" />
-          </button>
+          <div className="flex items-center gap-1.5 shrink-0">
+            {/* Zoom: lo que hace útil una vista previa. Atajos + − 0. */}
+            <div className="hidden sm:flex items-center gap-0.5 rounded-full border border-edge bg-surface-2 p-0.5">
+              <button onClick={() => acercar(-0.25)} disabled={escala <= ZOOM_MIN} aria-label="Alejar"
+                className="w-8 h-8 rounded-full grid place-items-center text-mute hover:text-ink hover:bg-surface disabled:opacity-40 disabled:hover:bg-transparent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/60">
+                <Minus className="h-4 w-4" />
+              </button>
+              <span className="min-w-[3.5rem] text-center text-[12px] font-bold text-ink tabular-nums" aria-live="polite">
+                {Math.round(escala * 100)}%
+              </span>
+              <button onClick={() => acercar(0.25)} disabled={escala >= ZOOM_MAX} aria-label="Acercar"
+                className="w-8 h-8 rounded-full grid place-items-center text-mute hover:text-ink hover:bg-surface disabled:opacity-40 disabled:hover:bg-transparent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/60">
+                <Plus className="h-4 w-4" />
+              </button>
+              <button onClick={() => setZoom(null)} disabled={zoom === null} title="Ajustar a la ventana (0)" aria-label="Ajustar a la ventana"
+                className="w-8 h-8 rounded-full grid place-items-center text-mute hover:text-ink hover:bg-surface disabled:opacity-40 disabled:hover:bg-transparent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/60">
+                <Maximize2 className="h-[15px] w-[15px]" />
+              </button>
+            </div>
+            <button onClick={onClose} aria-label="Cerrar" className="w-9 h-9 rounded-full flex items-center justify-center text-mute hover:bg-surface-2 hover:text-ink transition-colors shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/60">
+              <X className="h-[18px] w-[18px]" />
+            </button>
+          </div>
         </div>
 
         {/* Área de vista previa: "escritorio" con la hoja escalada al centro */}
@@ -252,22 +284,9 @@ export default function CotizacionCartaModal({ cotizacion, onClose }: { cotizaci
           </div>
         </div>
 
-        {errPdf && <div className="oc-actions px-4 pt-2 text-[12px] text-red-500 text-right shrink-0">{errPdf}</div>}
-
-        {/* Acciones: tamaño fijo Carta, sin selector A4 (este negocio imprime en Carta) */}
-        <div className="oc-actions flex items-center gap-2 p-3 sm:p-4 border-t border-edge bg-surface shrink-0">
-          <button onClick={onClose} className="flex-1 py-2.5 rounded-full border border-edge text-mute text-sm font-semibold hover:text-ink hover:bg-surface-2 transition-colors">Cerrar</button>
-          <button onClick={descargarPDF} disabled={descargando} className="flex-1 py-2.5 rounded-full border border-edge text-ink text-sm font-semibold hover:bg-surface-2 transition-colors disabled:opacity-50 flex items-center justify-center gap-2">
-            {descargando
-              ? <span className="w-4 h-4 border-2 border-ink/30 border-t-ink rounded-full animate-spin" />
-              : <Download className="h-[18px] w-[18px]" />}
-            <span>{descargando ? 'Generando…' : 'Descargar PDF'}</span>
-          </button>
-          <button onClick={() => window.print()} className="flex-1 py-2.5 rounded-full bg-gold text-black text-sm font-bold hover:opacity-90 transition-opacity flex items-center justify-center gap-2">
-            <Printer className="h-[18px] w-[18px]" />
-            <span>Imprimir</span>
-          </button>
-        </div>
+        {/* Sin pie de acciones: esto es una vista previa y nada más.
+            Imprimir y descargar viven en la cotización, que es donde se trabaja;
+            tenerlos aquí Y allá era el mismo botón dos veces. */}
       </div>
       <style>{CSS(acento)}</style>
     </Modal>,
