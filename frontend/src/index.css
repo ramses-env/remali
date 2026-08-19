@@ -413,6 +413,26 @@
   .modal-in > * { animation: modal-backdrop-in 180ms ease-out both; }
 }
 
+/* SALIDA de un modal que TRASPASA a otra pantalla (no el cierre normal, que no
+   necesita ceremonia: ahí no vas a ningún lado).
+
+   Se usa cuando una acción te lleva a otro sitio —de la cotización a su renta—
+   y sirve para que el cambio se lea como causado por ti y no como un corte. La
+   hoja se retira hacia atrás mientras el fondo se apaga; al llegar, la pantalla
+   destino entra con `modal-in`, la misma curva, así el viaje es UNO.
+
+   Sale más rápido de lo que entró (160 vs 260ms): lo que ya viste no necesita
+   presentarse otra vez, y una salida lenta se siente como que el sistema no
+   responde. */
+@keyframes modal-backdrop-out { from { opacity: 1; } to { opacity: 0; } }
+@keyframes modal-panel-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(-6px) scale(0.985); } }
+.modal-out { animation: modal-backdrop-out 160ms cubic-bezier(0.4, 0, 1, 1) both; pointer-events: none; }
+.modal-out > * { animation: modal-panel-out 160ms cubic-bezier(0.4, 0, 1, 1) both; }
+@media (prefers-reduced-motion: reduce) {
+  /* Se conserva el fundido —marca que algo cambió— y se quita el desplazamiento. */
+  .modal-out > * { animation: modal-backdrop-out 160ms ease-in both; }
+}
+
 /* Éxito (p. ej. al vincular): UN solo momento de delight. La insignia entra con
    un pop suave (nada nace de la nada), un anillo de confirmación se expande una
    vez, la palomita se dibuja sola y el texto sube en cascada. Momento raro, así

@@ -3544,13 +3544,14 @@ function RentasAdmin({ reload, notify }: { reload: () => void; notify: (m: strin
   useEffect(() => {
     const id = tomarRentaAAbrir()
     if (!id) return
-    api.get<{ rentas: RentaFull[] }>('/rentas/?estado=todas')
-      .then(r => {
-        const encontrada = (r.data?.rentas || []).find(x => x.id === id)
-        if (encontrada) setVerRenta(encontrada)
-        else notify(`No encontramos la renta #${id}`, 'err')
-      })
-      .catch(() => notify('No se pudo abrir la renta', 'err'))
+    const enVuelo = tomarRentaEnVuelo(id)
+      ?? api.get<{ rentas: RentaFull[] }>('/rentas/?estado=todas')
+        .then(r => (r.data?.rentas || []).find(x => x.id === id) ?? null)
+        .catch(() => null)
+    enVuelo.then(renta => {
+      if (renta) setVerRenta(renta)
+      else notify(`No encontramos la renta #${id}`, 'err')
+    })
     // Solo al montar: el puente es de un solo uso.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -6703,6 +6704,25 @@ function tomarRentaAAbrir(): number | null {
   } catch { return null }
 }
 
+/* La renta pedida desde otra pantalla, ya en vuelo. Se dispara al hacer clic —no
+   al montar la sección—, así la red corre DEBAJO de la animación de salida en vez
+   de después: al aterrizar, la renta suele estar lista y el viaje se lee como un
+   solo gesto en vez de tres cortes. */
+let rentaEnVuelo: { id: number; promesa: Promise<RentaFull | null> } | null = null
+function pedirRenta(id: number) {
+  rentaEnVuelo = {
+    id,
+    promesa: api.get<{ rentas: RentaFull[] }>('/rentas/?estado=todas')
+      .then(r => (r.data?.rentas || []).find(x => x.id === id) ?? null)
+      .catch(() => null),
+  }
+}
+function tomarRentaEnVuelo(id: number) {
+  const v = rentaEnVuelo && rentaEnVuelo.id === id ? rentaEnVuelo.promesa : null
+  rentaEnVuelo = null
+  return v
+}
+
 const COT_RENTA_KEY = 'remali_cot_para_renta'
 function leerCotParaRenta(): CotParaRenta | null {
   if (cotParaRenta) return cotParaRenta
@@ -7387,6 +7407,18 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
       .finally(() => setEnviando(false))
   }
 
+  /* Traspaso a la renta. La petición sale primero (viaja mientras la hoja se
+     retira), luego corre la salida, y al terminar se navega: un solo gesto en
+     lugar de "desaparece / cambia / aparece". 160ms es la salida del sistema. */
+  const [traspasando, setTraspasando] = useState(false)
+  function traspasarARenta(rentaId: number) {
+    if (traspasando) return
+    pedirRenta(rentaId)
+    setTraspasando(true)
+    const reducido = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    window.setTimeout(() => { onVerRenta?.(rentaId); onClose() }, reducido ? 0 : 160)
+  }
+
   const m = cotEstadoMeta(c.estado)
   // Estado final (cancelada/rechazada): es un registro cerrado — no se edita,
   // ni se envía, ni se convierte; solo se consulta o se imprime.
@@ -7419,7 +7451,7 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
   // que cae directo en aceptada). Antes de eso no hay nada que prometer.
   const verEntrega = c.estado === 'aceptada' || Boolean(c.entrega_prometida)
   return (
-    <Modal className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm flex items-start justify-center p-0 sm:p-6 overflow-y-auto modal-in" onClose={cerrar} label="Detalle de la cotización">
+    <Modal className={`fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm flex items-start justify-center p-0 sm:p-6 overflow-y-auto ${traspasando ? 'modal-out' : 'modal-in'}`} onClose={cerrar} label="Detalle de la cotización">
       <div onClick={(e: React.MouseEvent) => e.stopPropagation()} className="w-full sm:max-w-5xl my-0 sm:my-auto bg-surface border border-edge rounded-none sm:rounded-2xl shadow-[0_20px_50px_rgba(33,29,22,0.18)] min-h-screen sm:min-h-0 sm:max-h-[92vh] flex flex-col sm:overflow-hidden">
         <div className="px-5 sm:px-7 py-4 sm:py-5 border-b border-edge flex items-start justify-between gap-4 bg-surface shrink-0">
           <div className="min-w-0">
@@ -7950,7 +7982,7 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
                mismo ícono de descarga, uno al lado del otro, y el que decía
                "Ver" no llevaba a ningún lado. Los documentos están a la
                izquierda; esto es navegación. */
-            <button onClick={() => { onVerRenta?.(c.renta_id as number); onClose() }} className="w-full sm:w-auto py-2.5 px-5 rounded-full text-sm font-bold transition active:scale-[0.98] flex items-center justify-center gap-2 border border-emerald-500/40 text-emerald-600 hover:bg-emerald-500/10">
+            <button onClick={() => traspasarARenta(c.renta_id as number)} className="w-full sm:w-auto py-2.5 px-5 rounded-full text-sm font-bold transition active:scale-[0.98] flex items-center justify-center gap-2 border border-emerald-500/40 text-emerald-600 hover:bg-emerald-500/10">
               Ver la renta #{c.renta_id}
               <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
             </button>
