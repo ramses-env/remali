@@ -38,6 +38,8 @@ const ES: Dict = {
   'sec.catalogos.sub': 'Organiza categorías, tipos y marcas.',
   'sec.rentas.title': 'Rentas',
   'sec.rentas.sub': 'Gestiona rentas activas, reservas y devoluciones.',
+  'sec.clientes.title': 'Clientes',
+  'sec.clientes.sub': 'El padrón del negocio: quién compra, quién renta y quién debe.',
   'sec.ubicaciones.title': 'Mi jornada',
   'sec.ubicaciones.sub': 'Tus entregas, recolecciones y reparaciones del día.',
   // La MISMA sección vista por administración: es la jornada de otro, así que
@@ -108,6 +110,8 @@ const EN: Dict = {
   'sec.catalogos.sub': 'Organize categories, types and brands.',
   'sec.rentas.title': 'Rentals',
   'sec.rentas.sub': 'Manage active rentals, reservations and returns.',
+  'sec.clientes.title': 'Customers',
+  'sec.clientes.sub': 'The business directory: who buys, who rents and who owes.',
   'sec.ubicaciones.title': 'My shift',
   'sec.ubicaciones.sub': 'Your deliveries, pickups and repairs for the day.',
   'sec.jornada_sup.title': "Technician's shift",

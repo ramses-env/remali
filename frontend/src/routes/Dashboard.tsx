@@ -25,9 +25,9 @@ import { useRecurso, invalidar, type Tema } from '../lib/realtime'
 import { useLatidoPanel } from '../lib/latido'
 import { conectarAvisos } from '../lib/avisos'
 import { CLAVE_JORNADA, recordarAcceso, ProveedorPermisos, usePuede, type Capacidades } from '../lib/acceso'
-import { buildTestTicket, layoutTicket, type Comprobante } from '../lib/escpos'
+import { buildTestTicket, buildTicket, layoutTicket, altoTicketMm, type Comprobante, type Zona } from '../lib/escpos'
 import TicketPaper, { paperCss } from '../components/TicketPaper'
-import { procesarLogo, reducirOriginal, anchoPuntos } from '../lib/ticketLogo'
+import { procesarLogo, reducirOriginal, anchoPuntos, medirLogo, analizarTinta } from '../lib/ticketLogo'
 import { METODOS, metodoSoportado, imprimirTermico, vincularMetodo, metodoVinculado, infoMetodo } from '../lib/printer'
 import { useAuth } from '../store/auth'
 import ThemeToggle from '../components/ThemeToggle'
@@ -100,6 +100,8 @@ type Venta = {
   total: string
   metodo_pago: string
   fecha: string
+  /** Los abonos con su fecha: el ingreso se cuenta el día que entró el dinero. */
+  pagos?: { fecha: string; monto: string; metodo: string; por?: string }[]
   vendedor?: string | null
   telefono_cliente?: string | null
   cuenta?: string | null
@@ -1441,9 +1443,17 @@ function Resumen({ equipos, rentas, unidades, ventas, me, go, metrics, adeudos, 
   const y = now.getFullYear(), mo = now.getMonth()
   const pad = (n: number) => String(n).padStart(2, '0')
   const hoyStr = `${y}-${pad(mo + 1)}-${pad(now.getDate())}`
+  /* Un ingreso es un PAGO recibido, en la fecha en que se recibió: no el total de
+     la venta el día que se registró. Un apartado de $12,350 con anticipo de
+     $10,000 no fueron $12,350 ese día — fueron $10,000 ese día y el resto cuando
+     el cliente liquidó. La cifra buena la da el backend (ventas + rentas); esto
+     es solo el respaldo mientras carga, y cuenta con la MISMA regla para no
+     contradecirla durante un parpadeo. */
+  const cobradoEn = (v: Venta, prefijo: string) =>
+    (v.pagos || []).reduce((a, p) => a + ((p.fecha || '').slice(0, prefijo.length) === prefijo ? num(p.monto) : 0), 0)
   // Ingreso de HOY: cifra autoritativa del backend (ventas + rentas); si aún no
   // llega, respaldo con el cálculo cliente (solo ventas) para no mostrar vacío.
-  const ingresosHoy = metrics?.ingresos_hoy ?? ventasActivas.filter(v => (v.fecha || '').slice(0, 10) === hoyStr).reduce((a, v) => a + num(v.total), 0)
+  const ingresosHoy = metrics?.ingresos_hoy ?? ventasActivas.reduce((a, v) => a + cobradoEn(v, hoyStr), 0)
 
   // Ingresos por mes (últimos 6): del backend (ventas + rentas, sin tope). Respaldo cliente.
   const MESES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
@@ -1452,7 +1462,7 @@ function Resumen({ equipos, rentas, unidades, ventas, me, go, metrics, adeudos, 
     : Array.from({ length: 6 }, (_, i) => {
       const d = new Date(y, mo - (5 - i), 1)
       const key = `${d.getFullYear()}-${pad(d.getMonth() + 1)}`
-      const t = ventasActivas.filter(v => (v.fecha || '').slice(0, 7) === key).reduce((a, v) => a + num(v.total), 0)
+      const t = ventasActivas.reduce((a, v) => a + cobradoEn(v, key), 0)
       return { label: MESES[d.getMonth()], total: t }
     })
   const maxRev = Math.max(1, ...revByMonth.map(r => r.total))
@@ -2040,9 +2050,14 @@ function EquiposAdmin({ equipos, categorias, tipos, marcas, reload, notify }: {
                         <button onClick={() => openEdit(e)} title="Editar" className="w-8 h-8 rounded-lg border border-edge text-mute hover:text-ink hover:border-gold/40 transition-colors flex items-center justify-center">
                           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.8"><path strokeLinecap="round" strokeLinejoin="round" d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
                         </button>
+                        {/* Borrar es del DUEÑO: quitar una máquina del sistema es como se encubre
+                            una que falta. El backend lo rechaza igual; esconderlo aquí evita
+                            ofrecer un botón que va a fallar. */}
+                        {puede('borrar_catalogo') && (
                         <button onClick={() => del(e.id)} title="Eliminar" className="w-8 h-8 rounded-lg border border-red-500/20 text-red-400 hover:bg-red-500/10 transition-colors flex items-center justify-center">
                           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.8"><path strokeLinecap="round" strokeLinejoin="round" d="M3 6h18M8 6V4a1 1 0 011-1h6a1 1 0 011 1v2m2 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6" /></svg>
                         </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -2394,6 +2409,7 @@ function BannerConcretando({ inset = true }: { inset?: boolean }) {
 function InventoryModal({ equipo, onClose, notify }: {
   equipo: Equipo; onClose: () => void; notify: (m: string, t?: 'ok' | 'err') => void
 }) {
+  const puede = usePuede()
   const [unidades, setUnidades] = useState<Unidad[]>([])
   const [loading, setLoading] = useState(true)
   const [adding, setAdding] = useState(false)
@@ -2612,7 +2628,11 @@ function InventoryModal({ equipo, onClose, notify }: {
                           <svg className="w-4 h-4 text-mute shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.8"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h2v2h-2zM18 14h2v2h-2zM14 18h2v2h-2zM18 18h2v2h-2z" /></svg>
                           Ver / imprimir QR
                         </button>
-                        {u.estado === 'disponible' && (
+                        {/* Solo si está libre Y quien mira puede borrar del catálogo.
+                            Quitar una máquina del sistema es como se encubre una que
+                            falta, así que es del DUEÑO. El backend lo rechaza igual;
+                            esconderlo evita ofrecer un botón que va a fallar. */}
+                        {u.estado === 'disponible' && puede('borrar_catalogo') && (
                           <button onClick={() => { setMenu(null); delUnit(u) }}
                             className="w-full text-left px-3.5 py-2 text-[13px] text-red-500 hover:bg-red-500/10 transition-colors flex items-center gap-2.5">
                             <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.8"><path strokeLinecap="round" strokeLinejoin="round" d="M6 7h12M9 7V5a1 1 0 011-1h4a1 1 0 011 1v2m1 0v12a1 1 0 01-1 1H8a1 1 0 01-1-1V7" /></svg>
@@ -5033,6 +5053,7 @@ function VenderRefaccionModal({ refaccion, notify, onClose, onSold }: {
 function RefaccionesAdmin({ refacciones, reload, notify }: {
   refacciones: Refaccion[]; reload: () => void; notify: (m: string, t?: 'ok' | 'err') => void
 }) {
+  const puede = usePuede()
   const empty = { nombre: '', descripcion: '', precio_venta: '', stock: '0', stock_minimo: '0', para_venta: true, ubicacion: '', codigo_barras: '' }
   const [q, setQ] = useState('')
   const [formOpen, setFormOpen] = useState(false)
@@ -5145,9 +5166,14 @@ function RefaccionesAdmin({ refacciones, reload, notify }: {
                       <button onClick={() => openEdit(r)} title="Editar" className="w-8 h-8 rounded-lg border border-edge text-mute hover:text-ink hover:border-gold/40 transition-colors flex items-center justify-center">
                         <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.8"><path strokeLinecap="round" strokeLinejoin="round" d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
                       </button>
+                      {/* Borrar es del DUEÑO: quitar una máquina del sistema es como se encubre
+                          una que falta. El backend lo rechaza igual; esconderlo aquí evita
+                          ofrecer un botón que va a fallar. */}
+                      {puede('borrar_catalogo') && (
                       <button onClick={() => del(r)} title="Eliminar" className="w-8 h-8 rounded-lg border border-red-500/20 text-red-400 hover:bg-red-500/10 transition-colors flex items-center justify-center">
                         <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M3 6h18M8 6V4a1 1 0 011-1h6a1 1 0 011 1v2m2 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6" /></svg>
                       </button>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -5694,6 +5720,7 @@ type Pedido = {
   pagos: { fecha: string; monto: string; metodo: string; por?: string }[]
   metodo_pago: string; anticipo_nota: string | null; fecha: string
   fecha_estimada_entrega: string | null; pedido_fase: string; entregada_en: string | null
+  entregada_por: string | null
   vendedor: string | null; equipo: string | null; equipo_id: number | null
   unidad: { id: number; codigo: string; equipo: string | null } | null
   /** Las máquinas del pedido: cuáles llegaron y cuáles se esperan. */
@@ -5950,17 +5977,39 @@ function PedidosAdmin({ datos, reload, equipos, empresas, notify }: {
   notify: (m: string, t?: 'ok' | 'err') => void
 }) {
   const money = formatMoney
+  const puedeAlta = usePuede()('alta_inventario')
   const [busca, setBusca] = useState('')
   const [nuevo, setNuevo] = useState(false)
   const [abonando, setAbonando] = useState<Pedido | null>(null)
   const [abierto, setAbierto] = useState<Set<number>>(new Set())
+  // El módulo tiene dos lados: lo que falta ("abiertos") y lo que ya se cumplió
+  // ("entregados"). Los abiertos viven en el estado del panel —los comparte el
+  // Resumen—; el historial se pide aquí, acotado por periodo, para no arrastrar
+  // todos los años cada vez que alguien abre la sección.
+  const [pestana, setPestana] = useState<'abiertos' | 'entregados'>('abiertos')
+  const [anio, setAnio] = useState<number>(new Date().getFullYear())
+  const [mes, setMes] = useState<number>(0)
+  const [historial, setHistorial] = useState<PedidosDatos>({ pedidos: [], total: '0', clientes: 0 })
+  const [cargandoHist, setCargandoHist] = useState(false)
+
+  const cargarHistorial = useCallback(() => {
+    setCargandoHist(true)
+    const params = new URLSearchParams({ estado: 'entregados', anio: String(anio) })
+    if (mes) params.set('mes', String(mes))
+    api.get<PedidosDatos>(`/ventas/pedidos/?${params.toString()}`)
+      .then(r => setHistorial(r.data || { pedidos: [], total: '0', clientes: 0 }))
+      .catch(() => {}).finally(() => setCargandoHist(false))
+  }, [anio, mes])
+  useEffect(() => { if (pestana === 'entregados') cargarHistorial() }, [pestana, cargarHistorial])
   const toggle = (id: number) => setAbierto(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
   const fechaAbono = (iso: string) => { try { return new Date(iso).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }) } catch { return iso } }
 
   const conSaldo = datos.pedidos.filter(p => Number(p.saldo || 0) > 0).length
   const sobre = datos.pedidos.filter(p => p.sobre_pedido).length
+  const entregados = pestana === 'entregados'
+  const fuente = entregados ? historial : datos
   const q = busca.trim().toLowerCase()
-  const lista = !q ? datos.pedidos : datos.pedidos.filter(p =>
+  const lista = !q ? fuente.pedidos : fuente.pedidos.filter(p =>
     [p.nombre_cliente, p.empresa, p.cuenta, p.equipo, p.folio].some(x => (x || '').toLowerCase().includes(q)))
 
   async function abonar(monto: number, metodo: string, fecha: string) {
@@ -6000,10 +6049,31 @@ function PedidosAdmin({ datos, reload, equipos, empresas, notify }: {
     } catch (e) { notify((e as { response?: { data?: { detalle?: string } } })?.response?.data?.detalle || 'No se pudo actualizar', 'err') }
   }
 
+  // La máquina que llegó del proveedor. El PRODUCTO ya está en el catálogo —por
+  // eso el cliente pudo pedirlo—; lo que no existe todavía es la pieza física,
+  // que estaba en la bodega del proveedor cuando se apartó. Aquí se le pone su
+  // código y su número de serie, sin salir de Pedidos.
+  async function registrarLaQueLlego(p: Pedido): Promise<{ numero_serie: string } | null> {
+    let codigo = ''
+    try {
+      const r = await api.get<{ codigo: string }>(`/equipos/${p.equipo_id}/unidades/proximo-codigo/`, { fondo: true } as never)
+      codigo = r.data?.codigo || ''
+    } catch { /* el código es cortesía: si no carga, igual se registra */ }
+    const serie = await pedir({
+      titulo: `Máquina que llegó · ${p.equipo || 'este equipo'}`,
+      mensaje: `Se registra como nueva${codigo ? ` con el código ${codigo}` : ''} y sale vendida a nombre del cliente.\n`
+        + 'Anota su número de serie; déjalo vacío si la máquina no lo trae.',
+      placeholder: 'Número de serie',
+    })
+    if (serie === null) return null   // canceló: no se registra nada
+    return { numero_serie: serie.trim() }
+  }
+
   async function entregar(p: Pedido) {
     if (Number(p.saldo || 0) > 0) { notify('Falta liquidar el saldo antes de entregar.', 'err'); return }
     let unidad_id: number | undefined
     let unidad_ids: number[] | undefined
+    let nueva_unidad: { numero_serie: string } | undefined
 
     // Pedido de VARIAS máquinas: rara vez llegan todas el mismo día, así que se
     // elige cuáles se entregan hoy. Las que falten dejan el pedido abierto.
@@ -6021,25 +6091,47 @@ function PedidosAdmin({ datos, reload, equipos, empresas, notify }: {
       if (!sel || !sel.length) return
       unidad_ids = sel.map(Number)
     } else if (p.sobre_pedido || !p.unidad) {
+      let libres: Unidad[] = []
       try {
         const resp = await api.get<Unidad[]>(`/equipos/${p.equipo_id}/unidades/`, { fondo: true } as never)
-        const libres = (resp.data || []).filter(u => u.estado === 'disponible')
-        if (!libres.length) { notify('No hay una unidad disponible de ese equipo. Da de alta la que llegó.', 'err'); return }
+        libres = (resp.data || []).filter(u => u.estado === 'disponible')
+      } catch { notify('No se pudieron cargar las unidades', 'err'); return }
+
+      // Sin ninguna libre es el caso normal de un sobre pedido: esta máquina
+      // nunca se tiene en stock, llega solo cuando alguien la pide. No es un
+      // error: es el momento de registrarla.
+      if (!libres.length) {
+        if (!puedeAlta) {
+          notify('Para entregar hay que registrar la máquina que llegó. Pídeselo a administración.', 'err'); return
+        }
+        const reg = await registrarLaQueLlego(p)
+        if (!reg) return
+        nueva_unidad = reg
+      } else {
+        const NUEVA = 'nueva'
         const sel = await elegir({
-          titulo: 'Unidad que llegó',
-          mensaje: `Elige la unidad de ${p.equipo || 'este equipo'} que entregarás al cliente.`,
-          opciones: libres.map(u => ({ valor: String(u.id), label: u.codigo, detalle: u.numero_serie ? `S/N ${u.numero_serie}` : 'Disponible' })),
+          titulo: 'Máquina que entregas',
+          mensaje: `Elige la unidad de ${p.equipo || 'este equipo'} que se lleva el cliente.`,
+          opciones: [
+            ...libres.map(u => ({ valor: String(u.id), label: u.codigo, detalle: u.numero_serie ? `S/N ${u.numero_serie}` : 'Disponible' })),
+            ...(puedeAlta ? [{ valor: NUEVA, label: 'Llegó una nueva del proveedor', detalle: 'Registrarla ahora y entregarla' }] : []),
+          ],
         })
         if (!sel || !sel[0]) return
-        unidad_id = Number(sel[0])
-      } catch { notify('No se pudieron cargar las unidades', 'err'); return }
+        if (sel[0] === NUEVA) {
+          const reg = await registrarLaQueLlego(p)
+          if (!reg) return
+          nueva_unidad = reg
+        } else unidad_id = Number(sel[0])
+      }
     }
     try {
-      const r = await api.post<{ pedido?: { estado?: string } }>(`/ventas/${p.id}/entregar/`, { unidad_id, unidad_ids })
+      const r = await api.post<{ pedido?: { estado?: string } }>(`/ventas/${p.id}/entregar/`, { unidad_id, unidad_ids, nueva_unidad })
       notify(r.data?.pedido?.estado === 'apartada'
         ? 'Máquinas entregadas · el pedido sigue abierto por las que faltan'
         : 'Pedido entregado')
       reload()
+      if (pestana === 'entregados') cargarHistorial()
     } catch (e) { notify((e as { response?: { data?: { detalle?: string } } })?.response?.data?.detalle || 'No se pudo entregar', 'err') }
   }
 
@@ -6047,26 +6139,54 @@ function PedidosAdmin({ datos, reload, equipos, empresas, notify }: {
     <div className="space-y-5">
       <KpiGrid
         gridClassName="grid-cols-2 lg:grid-cols-3"
-        items={[
+        items={entregados ? [
+          { label: 'Cobrado en el periodo', value: money(Number(historial.total)), tone: 'gold' },
+          { label: 'Pedidos entregados', value: String(historial.pedidos.length), tone: 'muted' },
+          { label: 'Clientes', value: String(historial.clientes), tone: 'muted' },
+        ] : [
           { label: 'Por cobrar', value: money(Number(datos.total)), tone: 'gold' },
           { label: 'Apartados con saldo', value: String(conSaldo), tone: 'muted' },
           { label: 'Sobre pedido', value: String(sobre), tone: 'muted' },
         ]}
       />
 
+      <div className="flex items-center gap-1 p-1 rounded-full border border-edge bg-surface w-fit">
+        {([['abiertos', 'Abiertos'], ['entregados', 'Entregados']] as const).map(([k, etiqueta]) => (
+          <button key={k} onClick={() => setPestana(k)}
+            className={`h-8 px-4 rounded-full text-[12.5px] font-bold transition-colors ${pestana === k ? 'bg-gold text-black' : 'text-mute hover:text-ink'}`}>
+            {etiqueta}
+          </button>
+        ))}
+      </div>
+
       <div className="flex flex-wrap items-center gap-2">
         <input aria-label="Buscar cliente, equipo o folio" value={busca} onChange={e => setBusca(e.target.value)} placeholder="Buscar cliente, equipo o folio…"
           className={`${input} flex-1 min-w-[200px]`} />
-        <button onClick={() => setNuevo(true)}
-          className="h-10 px-4 rounded-full bg-gold text-black text-sm font-bold hover:brightness-95 transition whitespace-nowrap active:scale-[0.97]">
-          + Nuevo pedido
-        </button>
+        {entregados
+          ? <SelectorPeriodo anio={anio} mes={mes} onAnio={setAnio} onMes={setMes} />
+          : (
+            <button onClick={() => setNuevo(true)}
+              className="h-10 px-4 rounded-full bg-gold text-black text-sm font-bold hover:brightness-95 transition whitespace-nowrap active:scale-[0.97]">
+              + Nuevo pedido
+            </button>
+          )}
       </div>
 
-      {lista.length === 0 ? (
+      {cargandoHist && entregados ? (
         <div className="rounded-2xl border border-edge bg-surface px-6 py-14 text-center">
-          <p className="text-[16px] font-bold text-ink">{datos.pedidos.length ? 'Sin coincidencias' : 'No hay pedidos ni apartados'}</p>
-          <p className="text-[13px] text-mute mt-1">{datos.pedidos.length ? 'Prueba con otro nombre o folio.' : 'Registra un sobre pedido con "Nuevo pedido", o convierte una cotización sin stock.'}</p>
+          <p className="text-[13px] text-mute">Cargando el historial…</p>
+        </div>
+      ) : lista.length === 0 ? (
+        <div className="rounded-2xl border border-edge bg-surface px-6 py-14 text-center">
+          <p className="text-[16px] font-bold text-ink">
+            {fuente.pedidos.length ? 'Sin coincidencias'
+              : entregados ? 'Nada entregado en este periodo' : 'No hay pedidos ni apartados'}
+          </p>
+          <p className="text-[13px] text-mute mt-1">
+            {fuente.pedidos.length ? 'Prueba con otro nombre o folio.'
+              : entregados ? 'Prueba con otro mes o año. Aquí queda cada pedido que se entregó, con su máquina.'
+                : 'Registra un sobre pedido con "Nuevo pedido", o convierte una cotización sin stock.'}
+          </p>
         </div>
       ) : (
         <div className="space-y-3">
@@ -6091,15 +6211,47 @@ function PedidosAdmin({ datos, reload, equipos, empresas, notify }: {
                     </div>
                     <p className="text-[12px] text-mute mt-0.5 truncate">
                       {p.equipo || 'Equipo'}{p.folio ? ` · ${p.folio}` : ''}
-                      {p.fecha_estimada_entrega ? ` · llega ${fechaAbono(p.fecha_estimada_entrega)}` : ''}
+                      {entregados
+                        ? (p.entregada_en ? ` · entregado ${fechaAbono(p.entregada_en)}` : '')
+                        : (p.fecha_estimada_entrega ? ` · llega ${fechaAbono(p.fecha_estimada_entrega)}` : '')}
                     </p>
+                    {/* Qué máquina se llevó el cliente: su código y su serie. Es
+                        la pregunta que trae a alguien al historial. */}
+                    {entregados && (
+                      <p className="text-[11.5px] text-mute mt-0.5 truncate">
+                        {(p.maquinas || []).filter(m => m.codigo).map(m =>
+                          m.codigo + (m.numero_serie ? ` · S/N ${m.numero_serie}` : '')).join('  ·  ')
+                          || (p.unidad?.codigo ?? 'Sin unidad registrada')}
+                        {p.entregada_por ? ` · entregó ${p.entregada_por}` : ''}
+                      </p>
+                    )}
                   </div>
                   <div className="text-right">
-                    <p className="text-[10px] text-mute">Pagó {money(Number(p.pagado || 0))} de {money(Number(p.total || 0))}</p>
-                    <p className={`text-[17px] font-black tabular-nums leading-tight ${saldo > 0 ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400'}`}>{saldo > 0 ? money(saldo) : 'Liquidado'}</p>
+                    {entregados ? (
+                      <>
+                        <p className="text-[10px] text-mute">Cobrado</p>
+                        <p className="text-[17px] font-black tabular-nums leading-tight text-ink">{money(Number(p.total || 0))}</p>
+                      </>
+                    ) : (
+                      <>
+                        <p className="text-[10px] text-mute">Pagó {money(Number(p.pagado || 0))} de {money(Number(p.total || 0))}</p>
+                        <p className={`text-[17px] font-black tabular-nums leading-tight ${saldo > 0 ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400'}`}>{saldo > 0 ? money(saldo) : 'Liquidado'}</p>
+                      </>
+                    )}
                   </div>
                 </div>
                 <div className="flex flex-wrap gap-1.5 px-4 sm:px-5 pb-3">
+                  {/* Historial: ya no hay nada que cobrar ni que entregar. Lo que
+                      sí se pide después es volver a sacarle el papel al cliente. */}
+                  {entregados ? (
+                    <>
+                      <button onClick={() => toggle(p.id)} className="h-8 px-3 rounded-lg border border-edge text-[12px] font-bold text-ink hover:bg-surface-2 transition-colors">{abiertoP ? 'Ocultar' : 'Ver abonos'}</button>
+                      <button onClick={() => abrirOrdenCartaPDF('ventas', p.id)} title="Descargar de nuevo la orden en PDF"
+                        className="h-8 px-3 rounded-lg border border-edge text-[12px] font-bold text-ink hover:bg-surface-2 transition-colors">
+                        Reimprimir orden
+                      </button>
+                    </>
+                  ) : (<>
                   {saldo > 0 && (
                     <button onClick={() => setAbonando(p)} className="h-8 px-3 rounded-lg bg-gold text-black text-[12px] font-bold hover:brightness-95 transition-all">+ Abono</button>
                   )}
@@ -6118,6 +6270,7 @@ function PedidosAdmin({ datos, reload, equipos, empresas, notify }: {
                     className="h-8 px-3 rounded-lg border border-emerald-500/40 text-[12px] font-bold text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
                     Entregar
                   </button>
+                  </>)}
                 </div>
                 {abiertoP && (
                   <div className="border-t border-edge px-4 sm:px-5 py-3 bg-surface-2/30">
@@ -9483,7 +9636,7 @@ type ConfigSitio = {
   negocio_rfc: string; negocio_representante: string; negocio_footer: string
   cotizacion_condiciones: string; cotizacion_condiciones_renta: string; datos_bancarios: string; cotizacion_cierre: string
   /* Qué puede cobrarse desde la caja del mostrador. Nacen apagados. */
-  caja_vende_maquinaria: boolean; caja_renta_maquinaria: boolean
+  caja_vende_maquinaria: boolean; caja_renta_maquinaria: boolean; caja_cobra_abonos: boolean
 }
 type CorreoAviso = { id: number; email: string; etiqueta: string; verificado: boolean; creado: string }
 
@@ -9529,7 +9682,8 @@ const btnSecundario = 'h-11 px-5 rounded-[10px] border border-edge bg-surface-2 
 
 /** Configuración editable del sitio: WhatsApp, datos del negocio y correos de aviso. */
 function NegocioAdmin({ notify }: { notify: (m: string, t?: 'ok' | 'err') => void }) {
-  const vacia: ConfigSitio = { whatsapp_principal: '', whatsapp_respaldos: [], negocio_nombre: '', negocio_telefono: '', negocio_direccion: '', negocio_email: '', negocio_web: '', negocio_rfc: '', negocio_representante: '', negocio_footer: '', cotizacion_condiciones: '', cotizacion_condiciones_renta: '', datos_bancarios: '', cotizacion_cierre: '', caja_vende_maquinaria: false, caja_renta_maquinaria: false }
+  const puede = usePuede()
+  const vacia: ConfigSitio = { whatsapp_principal: '', whatsapp_respaldos: [], negocio_nombre: '', negocio_telefono: '', negocio_direccion: '', negocio_email: '', negocio_web: '', negocio_rfc: '', negocio_representante: '', negocio_footer: '', cotizacion_condiciones: '', cotizacion_condiciones_renta: '', datos_bancarios: '', cotizacion_cierre: '', caja_vende_maquinaria: false, caja_renta_maquinaria: false, caja_cobra_abonos: false }
   const [cfg, setCfg] = useState<ConfigSitio>(vacia)
   const [guardado, setGuardado] = useState<ConfigSitio>(vacia)   // lo último confirmado por el servidor
   const [correos, setCorreos] = useState<CorreoAviso[]>([])
@@ -9666,6 +9820,16 @@ function NegocioAdmin({ notify }: { notify: (m: string, t?: 'ok' | 'err') => voi
             label="Levantar rentas desde la caja"
           />
         </Ajuste>
+        <Ajuste
+          titulo="Recibir abonos desde la caja"
+          desc="El mostrador podrá cobrar abonos de pedidos y de rentas. Sin esto, esos anticipos solo los recibe administración. Un abono cobrado con turno abierto siempre entra al corte, lo prendas o no."
+        >
+          <Switch
+            checked={!!cfg.caja_cobra_abonos}
+            onChange={v => set('caja_cobra_abonos', v)}
+            label="Recibir abonos desde la caja"
+          />
+        </Ajuste>
       </Panel>
 
       <Panel titulo="Cotizaciones · condiciones y pago" desc="Aparecen en la carta y en el PDF que recibe el cliente. Puedes usar varias líneas.">
@@ -9775,6 +9939,18 @@ const TICKET_VACIO: TicketForm = {
   ticket_codigo_barras: true, ticket_leyenda: '', negocio_footer: '',
 }
 
+/* Solo los campos del ticket. `/config/` devuelve TODA la configuración y
+   reenviarla completa haría dos daños: pisaría lo que otro admin acabe de
+   cambiar, y mandaría los datos bancarios —que el servidor solo acepta del
+   dueño— tumbando el guardado entero con un 403. */
+function soloTicket(o: any): TicketForm {
+  const out = { ...TICKET_VACIO }
+  for (const k of Object.keys(TICKET_VACIO) as (keyof TicketForm)[]) {
+    if (o?.[k] !== undefined && o[k] !== null) (out as any)[k] = o[k]
+  }
+  return out
+}
+
 /* Venta de mostrador de verdad: tres refacciones, IVA desglosado y cambio. Un
    ejemplo corto haría creer que el ticket siempre cabe en la mano. */
 const TICKET_EJEMPLO: Comprobante = {
@@ -9794,39 +9970,130 @@ const TICKET_EJEMPLO: Comprobante = {
   pie: ['Pago: Efectivo', '¡Gracias por su compra!'],
 }
 
+/* Puntos de partida. No son "temas": son decisiones de negocio ya tomadas —
+   qué tanto quieres decirle al cliente y cuánto papel estás dispuesto a gastar.
+   No tocan el logo: esa es tu marca, no un preset. */
+const PLANTILLAS: { id: string; nombre: string; desc: string; campos: Partial<TicketForm> }[] = [
+  {
+    id: 'completo', nombre: 'Completo', desc: 'Todos tus datos y el aviso de garantía.',
+    campos: {
+      ticket_mostrar_logo: true, ticket_lema: 'Renta · Venta · Servicio',
+      ticket_mostrar_direccion: true, ticket_mostrar_telefono: true, ticket_mostrar_rfc: true, ticket_mostrar_web: true,
+      ticket_codigo_barras: true,
+      ticket_leyenda: 'Cambios y devoluciones dentro de los 30 días, con este ticket y el producto sin uso.',
+      negocio_footer: '¡Gracias por su preferencia!',
+    },
+  },
+  {
+    id: 'compacto', nombre: 'Compacto', desc: 'Lo necesario para localizarte y reclamar.',
+    campos: {
+      ticket_mostrar_logo: true, ticket_lema: '',
+      ticket_mostrar_direccion: false, ticket_mostrar_telefono: true, ticket_mostrar_rfc: false, ticket_mostrar_web: false,
+      ticket_codigo_barras: true, ticket_leyenda: '', negocio_footer: '¡Gracias por su preferencia!',
+    },
+  },
+  {
+    id: 'minimo', nombre: 'Mínimo', desc: 'El menor papel posible. Solo el comprobante.',
+    campos: {
+      ticket_mostrar_logo: false, ticket_lema: '',
+      ticket_mostrar_direccion: false, ticket_mostrar_telefono: false, ticket_mostrar_rfc: false, ticket_mostrar_web: false,
+      ticket_codigo_barras: false, ticket_leyenda: '', negocio_footer: '',
+    },
+  },
+]
+
 function TicketAdmin({ notify }: { notify: (m: string, t?: 'ok' | 'err') => void }) {
   const [f, setF] = useState<TicketForm>(TICKET_VACIO)
   const [guardado, setGuardado] = useState<TicketForm>(TICKET_VACIO)
+  const [cargando, setCargando] = useState(true)
   const [saving, setSaving] = useState(false)
   const [procesando, setProcesando] = useState(false)
   const [umbral, setUmbral] = useState(170)
   const [tramado, setTramado] = useState(false)
   const [afinar, setAfinar] = useState(false)
   const [arrastrando, setArrastrando] = useState(false)
+  const [tinta, setTinta] = useState<number | null>(null)
+  const [logoMm, setLogoMm] = useState(12)
   const [mm, setMm] = useState<58 | 80>(58)
-  const [zoom, setZoom] = useState(1)
+  const [vista, setVista] = useState<'85' | '100' | '135' | 'real'>('100')
+  const [resaltar, setResaltar] = useState<Zona | null>(null)
+  const [probando, setProbando] = useState(false)
+  const [ps] = usePrintSettings()
   const negocio = getNegocio()
+  const temporizador = useRef<number | undefined>(undefined)
+  const reproceso = useRef<number | undefined>(undefined)
 
   useEffect(() => {
     api.get<TicketForm>('/config/')
-      .then(r => { const c = { ...TICKET_VACIO, ...r.data }; setF(c); setGuardado(c) })
+      .then(r => {
+        const c = soloTicket(r.data); setF(c); setGuardado(c)
+        if (c.ticket_logo) analizarTinta(c.ticket_logo).then(setTinta)
+      })
       .catch(() => {})
+      .finally(() => setCargando(false))
   }, [])
 
-  const set = <K extends keyof TicketForm>(k: K, v: TicketForm[K]) => setF(c => ({ ...c, [k]: v }))
-  const hayCambios = JSON.stringify(f) !== JSON.stringify(guardado)
+  /* Señala en el papel la zona que se está editando y la apaga sola cuando el
+     admin deja de moverle. Sin esto hay que buscar a ojo qué cambió. */
+  const marcar = useCallback((z: Zona) => {
+    setResaltar(z)
+    window.clearTimeout(temporizador.current)
+    temporizador.current = window.setTimeout(() => setResaltar(null), 1100)
+  }, [])
 
+  useEffect(() => () => { window.clearTimeout(temporizador.current); window.clearTimeout(reproceso.current) }, [])
+
+  const set = useCallback(<K extends keyof TicketForm>(k: K, v: TicketForm[K], z: Zona) => {
+    setF(c => ({ ...c, [k]: v })); marcar(z)
+  }, [marcar])
+
+  const hayCambios = JSON.stringify(f) !== JSON.stringify(guardado)
   const W = charsPerLine(mm)
-  const lineas = layoutTicket(TICKET_EJEMPLO, {
-    width: W,
-    negocio: { ...negocio, footer: f.negocio_footer },
-    ticket: {
-      logo: f.ticket_logo, logoEscala: f.ticket_logo_escala, mostrarLogo: f.ticket_mostrar_logo,
-      lema: f.ticket_lema, mostrarDireccion: f.ticket_mostrar_direccion,
-      mostrarTelefono: f.ticket_mostrar_telefono, mostrarRfc: f.ticket_mostrar_rfc,
-      mostrarWeb: f.ticket_mostrar_web, codigoBarras: f.ticket_codigo_barras, leyenda: f.ticket_leyenda,
-    },
-  })
+  const cfgTicket = useMemo(() => ({
+    logo: f.ticket_logo, logoEscala: f.ticket_logo_escala, mostrarLogo: f.ticket_mostrar_logo,
+    lema: f.ticket_lema, mostrarDireccion: f.ticket_mostrar_direccion,
+    mostrarTelefono: f.ticket_mostrar_telefono, mostrarRfc: f.ticket_mostrar_rfc,
+    mostrarWeb: f.ticket_mostrar_web, codigoBarras: f.ticket_codigo_barras, leyenda: f.ticket_leyenda,
+  }), [f])
+
+  const lineas = useMemo(
+    () => layoutTicket(TICKET_EJEMPLO, { width: W, negocio: { ...negocio, footer: f.negocio_footer }, ticket: cfgTicket }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [W, cfgTicket, f.negocio_footer, negocio.nombre, negocio.direccion, negocio.telefono, negocio.rfc, negocio.web],
+  )
+  const largoCm = altoTicketMm(lineas, logoMm) / 10
+
+  /* Lo que cuesta cada plantilla, en el papel de este mostrador. Sin el número
+     "Compacto" es solo una palabra; con él es una decisión de cuánto rollo
+     gastas en cada venta del día. */
+  const costoPlantillas = useMemo(() => PLANTILLAS.map(p => {
+    const c = { ...f, ...p.campos }
+    const l = layoutTicket(TICKET_EJEMPLO, {
+      width: W,
+      negocio: { ...negocio, footer: c.negocio_footer },
+      ticket: {
+        logo: c.ticket_logo, logoEscala: c.ticket_logo_escala, mostrarLogo: c.ticket_mostrar_logo,
+        lema: c.ticket_lema, mostrarDireccion: c.ticket_mostrar_direccion,
+        mostrarTelefono: c.ticket_mostrar_telefono, mostrarRfc: c.ticket_mostrar_rfc,
+        mostrarWeb: c.ticket_mostrar_web, codigoBarras: c.ticket_codigo_barras, leyenda: c.ticket_leyenda,
+      },
+    })
+    return altoTicketMm(l, c.ticket_mostrar_logo && c.ticket_logo ? logoMm : 0) / 10
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [f, W, logoMm, negocio.nombre, negocio.direccion, negocio.telefono, negocio.rfc, negocio.web])
+
+  /* Cuánto papel se lleva el logo: alto real de la imagen a la escala elegida,
+     traducido a milímetros (8 puntos = 1 mm a 203 dpi). */
+  useEffect(() => {
+    let vivo = true
+    if (!f.ticket_logo || !f.ticket_mostrar_logo) { setLogoMm(0); return }
+    medirLogo(f.ticket_logo).then(d => {
+      if (!vivo || !d) return
+      const anchoImpreso = anchoPuntos(mm) * f.ticket_logo_escala / 100
+      setLogoMm((d.alto / d.ancho) * anchoImpreso / 8 + 1)
+    })
+    return () => { vivo = false }
+  }, [f.ticket_logo, f.ticket_mostrar_logo, f.ticket_logo_escala, mm])
 
   /* El logo se convierte SIEMPRE al ancho máximo del cabezal (576 puntos, 80 mm).
      Al imprimir en 58 mm se reduce desde ahí: guardar la mejor versión y bajar
@@ -9834,11 +10101,13 @@ function TicketAdmin({ notify }: { notify: (m: string, t?: 'ok' | 'err') => void
   async function convertir(origen: File | string, u: number, tr: boolean) {
     setProcesando(true)
     try {
-      const [mono, original] = await Promise.all([
+      const [logo, original] = await Promise.all([
         procesarLogo(origen, { anchoPx: anchoPuntos(80), umbral: u, tramado: tr }),
         typeof origen === 'string' ? Promise.resolve(f.ticket_logo_origen) : reducirOriginal(origen),
       ])
-      setF(c => ({ ...c, ticket_logo: mono, ticket_logo_origen: original || c.ticket_logo_origen }))
+      setTinta(logo.tinta)
+      setF(c => ({ ...c, ticket_logo: logo.dataUrl, ticket_logo_origen: original || c.ticket_logo_origen }))
+      marcar('logo')
     } catch (e: any) {
       notify(e?.message || 'No se pudo leer esa imagen', 'err')
     } finally {
@@ -9855,17 +10124,43 @@ function TicketAdmin({ notify }: { notify: (m: string, t?: 'ok' | 'err') => void
   }
 
   /* Reajustar rehace el logo desde el original guardado: sin él no habría de
-     dónde recuperar los grises que el umbral necesita comparar. */
+     dónde recuperar los grises que el umbral necesita comparar. Va con retraso
+     porque arrastrar el control dispararía una conversión por cada píxel. */
   function reajustar(u: number, tr: boolean) {
-    setUmbral(u); setTramado(tr)
-    if (f.ticket_logo_origen) convertir(f.ticket_logo_origen, u, tr)
+    setUmbral(u); setTramado(tr); marcar('logo')
+    if (!f.ticket_logo_origen) return
+    window.clearTimeout(reproceso.current)
+    reproceso.current = window.setTimeout(() => convertir(f.ticket_logo_origen, u, tr), 130)
+  }
+
+  function aplicarPlantilla(p: typeof PLANTILLAS[number]) {
+    setF(c => ({ ...c, ...p.campos })); marcar('cabeza')
+  }
+
+  /* Imprimir de verdad, con el diseño de la pantalla y SIN guardar todavía: en
+     papel se ve si el logo quedó muy claro o muy manchado, y eso la pantalla no
+     lo puede decidir por ti. */
+  async function imprimirPrueba() {
+    setProbando(true)
+    try {
+      const bytes = await buildTicket(TICKET_EJEMPLO, {
+        width: W, puntos: anchoPuntos(mm),
+        negocio: { ...negocio, footer: f.negocio_footer }, ticket: cfgTicket,
+      })
+      await imprimirTermico(bytes, { method: ps.method, baud: ps.baud })
+      notify('Prueba enviada a la impresora')
+    } catch (e: any) {
+      notify(e?.name === 'NotFoundError' ? 'No se seleccionó impresora' : (e?.message || 'No se pudo imprimir'), 'err')
+    } finally {
+      setProbando(false)
+    }
   }
 
   function guardar() {
     setSaving(true)
     api.patch<TicketForm>('/config/', f)
       .then(r => {
-        const c = { ...TICKET_VACIO, ...r.data }
+        const c = soloTicket(r.data)
         setF(c); setGuardado(c)
         invalidarConfigPublica()   // las cajas toman el ticket nuevo al instante
         notify('Ticket actualizado')
@@ -9882,25 +10177,56 @@ function TicketAdmin({ notify }: { notify: (m: string, t?: 'ok' | 'err') => void
   const chip = (activo: boolean) =>
     `px-2.5 py-1 rounded-md text-[11px] font-bold transition-colors ${activo ? 'bg-gold text-black' : 'bg-surface-2 text-mute hover:text-ink'}`
 
+  /* La conversión a un bit puede salir mal de dos formas y ninguna se nota a
+     simple vista en un monitor retroiluminado. */
+  const avisoTinta = tinta == null ? null
+    : tinta < 0.02 ? { tono: 'amber', txt: 'Quedó casi en blanco. Sube la fuerza o usa una imagen con más contraste.' }
+    : tinta > 0.45 ? { tono: 'amber', txt: 'Quedó casi sólido: saldrá como una mancha y gasta cabezal. Baja la fuerza.' }
+    : { tono: 'ok', txt: `Buen contraste · ${Math.round(tinta * 100)}% de puntos negros.` }
+
+  if (cargando) {
+    return (
+      <div className="space-y-2.5" aria-busy="true" aria-label="Cargando la configuración del ticket">
+        {[220, 300, 260].map((h, i) => <div key={i} className="bg-surface border border-edge rounded-2xl animate-pulse" style={{ height: h }} />)}
+      </div>
+    )
+  }
+
   return (
-    <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_324px] gap-2.5 items-start pb-24">
+    <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_336px] gap-2.5 items-start pb-24">
       <div className="space-y-2.5 min-w-0">
+        <Panel titulo="Punto de partida" desc="Tres formas de resolver el mismo ticket. Elige la más cercana y ajusta lo que quieras: nada se guarda hasta que lo digas.">
+          <div className="px-6 sm:px-7 py-5 grid sm:grid-cols-3 gap-2">
+            {PLANTILLAS.map((p, i) => (
+              <button key={p.id} onClick={() => aplicarPlantilla(p)}
+                className="text-left rounded-xl border border-edge bg-surface-2 p-3.5 hover:border-gold/50 active:scale-[0.98] transition-all">
+                <span className="flex items-baseline justify-between gap-2">
+                  <span className="text-[13.5px] font-black text-ink">{p.nombre}</span>
+                  <span className="text-[11.5px] font-bold text-gold-ink tabular-nums shrink-0">{costoPlantillas[i].toFixed(1)} cm</span>
+                </span>
+                <span className="block text-[12px] text-mute mt-1 leading-snug">{p.desc}</span>
+              </button>
+            ))}
+          </div>
+        </Panel>
+
         <Panel titulo="Logo" desc="La térmica no imprime grises: quema puntos negros. Tu logo se convierte a blanco y negro puro y aquí ves exactamente los puntos que van a salir.">
           <Ajuste titulo={f.ticket_logo ? 'Tu logo, ya convertido' : 'Sube tu logo'}
             desc={f.ticket_logo ? 'Así se verá impreso. Si se ve manchado o desaparecido, ajústalo abajo.' : 'PNG o JPG. Lo mejor es un logo plano y con buen contraste; los degradados se pierden.'}
             apilado>
             <div className="w-full space-y-3">
               {f.ticket_logo ? (
-                <div className="flex flex-wrap items-center gap-4">
-                  <div className="rounded-xl border border-edge p-4 grid place-items-center min-w-[180px]" style={{ background: '#fffdf7' }}>
+                <div className="flex flex-wrap items-start gap-4">
+                  <div className="rounded-xl border border-edge p-4 grid place-items-center min-w-[180px] relative" style={{ background: '#fffdf7' }}>
                     <img src={f.ticket_logo} alt="Logo convertido a blanco y negro" className="max-h-24 max-w-[220px]" style={{ imageRendering: 'pixelated' }} />
+                    {procesando && <span className="absolute inset-0 grid place-items-center bg-white/60 rounded-xl text-[12px] font-bold text-neutral-700">Convirtiendo…</span>}
                   </div>
                   <div className="flex flex-col gap-2">
                     <label className={`${btnSecundario} inline-flex items-center cursor-pointer`}>
                       Cambiar imagen
                       <input type="file" accept="image/*" className="sr-only" onChange={e => elegirArchivo(e.target.files?.[0])} />
                     </label>
-                    <button onClick={() => setF(c => ({ ...c, ticket_logo: '', ticket_logo_origen: '' }))}
+                    <button onClick={() => { setF(c => ({ ...c, ticket_logo: '', ticket_logo_origen: '' })); setTinta(null); marcar('cabeza') }}
                       className="h-11 px-5 rounded-[10px] text-[13.5px] font-bold text-mute hover:text-red-500 hover:bg-red-500/10 transition-colors">Quitar logo</button>
                   </div>
                 </div>
@@ -9919,12 +10245,17 @@ function TicketAdmin({ notify }: { notify: (m: string, t?: 'ok' | 'err') => void
                 </label>
               )}
 
+              {f.ticket_logo && avisoTinta && (
+                <p className={`text-[12.5px] ${avisoTinta.tono === 'ok' ? 'text-emerald-600' : 'text-amber-700 dark:text-amber-500'}`} role="status">{avisoTinta.txt}</p>
+              )}
+
               {f.ticket_logo && (
                 <>
                   <div className="flex items-center gap-3">
                     <label htmlFor="tk-escala" className="text-[13px] font-bold text-ink w-16">Tamaño</label>
                     <input id="tk-escala" type="range" min={30} max={100} step={5} value={f.ticket_logo_escala}
-                      onChange={e => set('ticket_logo_escala', Number(e.target.value))}
+                      aria-valuetext={`${f.ticket_logo_escala} por ciento del ancho del papel`}
+                      onChange={e => set('ticket_logo_escala', Number(e.target.value), 'logo')}
                       className="flex-1 accent-[var(--c-gold)]" />
                     <span className="text-[13px] font-mono text-ink w-20 text-right tabular-nums">{f.ticket_logo_escala}% ancho</span>
                   </div>
@@ -9941,6 +10272,7 @@ function TicketAdmin({ notify }: { notify: (m: string, t?: 'ok' | 'err') => void
                         <div className="flex items-center gap-3">
                           <label htmlFor="tk-umbral" className="text-[13px] font-bold text-ink w-16">Fuerza</label>
                           <input id="tk-umbral" type="range" min={60} max={230} step={5} value={umbral} disabled={!f.ticket_logo_origen}
+                            aria-valuetext={`Fuerza ${umbral} de 230`}
                             onChange={e => reajustar(Number(e.target.value), tramado)}
                             className="flex-1 accent-[var(--c-gold)] disabled:opacity-40" />
                           <span className="text-[13px] font-mono text-ink w-20 text-right tabular-nums">{umbral}</span>
@@ -9965,52 +10297,56 @@ function TicketAdmin({ notify }: { notify: (m: string, t?: 'ok' | 'err') => void
           </Ajuste>
 
           <Ajuste titulo="Imprimir el logo" desc="Apágalo para ahorrar papel sin perder la imagen que ya cargaste.">
-            <Switch checked={f.ticket_mostrar_logo} onChange={v => set('ticket_mostrar_logo', v)} disabled={!f.ticket_logo} label="Imprimir el logo en el ticket" />
+            <Switch checked={f.ticket_mostrar_logo} onChange={v => set('ticket_mostrar_logo', v, 'logo')} disabled={!f.ticket_logo} label="Imprimir el logo en el ticket" />
           </Ajuste>
         </Panel>
 
         <Panel titulo="Encabezado" desc="Lo primero que lee el cliente. Cada renglón que enciendas alarga el ticket.">
           <Ajuste titulo="Lema" desc="Va debajo del nombre. Déjalo vacío si no quieres ninguno." apilado>
             <input aria-label="Lema del negocio" className={`${campoCfg} sm:max-w-md`} maxLength={80}
-              value={f.ticket_lema} onChange={e => set('ticket_lema', e.target.value)} placeholder="Renta · Venta · Servicio" />
+              value={f.ticket_lema} onChange={e => set('ticket_lema', e.target.value, 'cabeza')} placeholder="Renta · Venta · Servicio" />
           </Ajuste>
           <Ajuste titulo="Dirección" desc={dato(negocio.direccion, 'Dirección')}>
-            <Switch checked={f.ticket_mostrar_direccion} onChange={v => set('ticket_mostrar_direccion', v)} disabled={!negocio.direccion} label="Imprimir la dirección" />
+            <Switch checked={f.ticket_mostrar_direccion} onChange={v => set('ticket_mostrar_direccion', v, 'cabeza')} disabled={!negocio.direccion} label="Imprimir la dirección" />
           </Ajuste>
           <Ajuste titulo="Teléfono" desc={dato(negocio.telefono, 'Teléfono')}>
-            <Switch checked={f.ticket_mostrar_telefono} onChange={v => set('ticket_mostrar_telefono', v)} disabled={!negocio.telefono} label="Imprimir el teléfono" />
+            <Switch checked={f.ticket_mostrar_telefono} onChange={v => set('ticket_mostrar_telefono', v, 'cabeza')} disabled={!negocio.telefono} label="Imprimir el teléfono" />
           </Ajuste>
           <Ajuste titulo="Página web" desc={dato(negocio.web, 'Página web')}>
-            <Switch checked={f.ticket_mostrar_web} onChange={v => set('ticket_mostrar_web', v)} disabled={!negocio.web} label="Imprimir la página web" />
+            <Switch checked={f.ticket_mostrar_web} onChange={v => set('ticket_mostrar_web', v, 'cabeza')} disabled={!negocio.web} label="Imprimir la página web" />
           </Ajuste>
           <Ajuste titulo="RFC" desc={dato(negocio.rfc, 'RFC')}>
-            <Switch checked={f.ticket_mostrar_rfc} onChange={v => set('ticket_mostrar_rfc', v)} disabled={!negocio.rfc} label="Imprimir el RFC" />
+            <Switch checked={f.ticket_mostrar_rfc} onChange={v => set('ticket_mostrar_rfc', v, 'cabeza')} disabled={!negocio.rfc} label="Imprimir el RFC" />
           </Ajuste>
         </Panel>
 
         <Panel titulo="Pie" desc="Lo último que se lleva el cliente. Es donde se reclama una garantía o una devolución.">
           <Ajuste titulo="Aviso" desc="Devoluciones, garantía, horario. Una línea por renglón; se acomoda solo al ancho del papel." apilado>
             <textarea aria-label="Aviso al pie del ticket" className={`${campoCfg} resize-y min-h-[84px] sm:max-w-md`} rows={3} maxLength={400}
-              value={f.ticket_leyenda} onChange={e => set('ticket_leyenda', e.target.value)}
+              value={f.ticket_leyenda} onChange={e => set('ticket_leyenda', e.target.value, 'pie')}
               placeholder={'Cambios y devoluciones dentro de los 30 días\ncon este ticket y el producto sin uso.'} />
           </Ajuste>
           <Ajuste titulo="Despedida" desc="La última línea, en negritas." apilado>
             <input aria-label="Frase de despedida" className={`${campoCfg} sm:max-w-md`} maxLength={200}
-              value={f.negocio_footer} onChange={e => set('negocio_footer', e.target.value)} placeholder="¡Gracias por su preferencia!" />
+              value={f.negocio_footer} onChange={e => set('negocio_footer', e.target.value, 'pie')} placeholder="¡Gracias por su preferencia!" />
           </Ajuste>
           <Ajuste titulo="Código de barras del folio" desc="Deja escanear el ticket para encontrar la venta en el panel. Ocupa un centímetro de papel.">
-            <Switch checked={f.ticket_codigo_barras} onChange={v => set('ticket_codigo_barras', v)} label="Imprimir el código de barras" />
+            <Switch checked={f.ticket_codigo_barras} onChange={v => set('ticket_codigo_barras', v, 'pie')} label="Imprimir el código de barras" />
           </Ajuste>
         </Panel>
       </div>
 
       {/* ── Vista previa ── el papel, no un dibujo del papel */}
-      <aside className="xl:sticky xl:top-3">
+      <aside className="lg:sticky lg:top-3">
         <div className="bg-surface border border-edge rounded-2xl overflow-hidden">
-          <header className="flex items-center justify-between gap-2 px-4 py-3 border-b border-edge">
+          <header className="flex items-start justify-between gap-2 px-4 py-3 border-b border-edge">
             <div className="min-w-0">
               <h3 className="text-[13.5px] font-black text-ink">Así queda</h3>
-              <p className="text-[12px] text-mute">Venta de ejemplo</p>
+              {/* El largo es el dato que nadie más le da al admin: cada renglón
+                  que enciende se paga en rollo, y aquí se ve al instante. */}
+              <p className="text-[12px] text-mute tabular-nums whitespace-nowrap">
+                <span className="text-ink font-bold">{largoCm.toFixed(1)} cm</span> de papel
+              </p>
             </div>
             <div className="flex gap-1 shrink-0" role="group" aria-label="Ancho del papel">
               {([58, 80] as const).map(w => (
@@ -10019,24 +10355,40 @@ function TicketAdmin({ notify }: { notify: (m: string, t?: 'ok' | 'err') => void
             </div>
           </header>
 
-          <div className="p-4 max-h-[62vh] overflow-auto" style={{ background: '#d7d4ce' }}>
+          <div className="p-4 max-h-[64vh] overflow-auto" style={{ background: '#d7d4ce' }}>
             <div className="flex flex-col items-center gap-2">
               {/* Cota: el papel mide lo que mide, no lo que parece en pantalla. */}
               <div className="flex items-center gap-2 text-[10px] font-black tracking-wide text-neutral-600 tabular-nums">
                 <span className="h-px w-8 bg-neutral-500" />{mm} mm<span className="h-px w-8 bg-neutral-500" />
               </div>
-              <TicketPaper lineas={lineas} width={W} zoom={zoom}
+              <TicketPaper lineas={lineas} width={W} resaltar={resaltar}
+                zoom={vista === 'real' ? 1 : Number(vista) / 100}
+                tamanoReal={vista === 'real' ? mm : undefined}
                 className="shadow-[0_6px_16px_rgba(0,0,0,.2)]" />
             </div>
           </div>
 
-          <footer className="flex items-center justify-between gap-2 px-4 py-2.5 border-t border-edge">
-            <span className="text-[11.5px] text-mute">Tamaño en pantalla</span>
-            <div className="flex gap-1" role="group" aria-label="Acercar la vista previa">
-              {([0.85, 1, 1.35] as const).map(z => (
-                <button key={z} onClick={() => setZoom(z)} aria-pressed={zoom === z} className={chip(zoom === z)}>{Math.round(z * 100)}%</button>
-              ))}
+          <footer className="border-t border-edge divide-y divide-edge">
+            <div className="flex items-center justify-between gap-2 px-4 py-2.5">
+              <span className="text-[11.5px] text-mute">Tamaño en pantalla</span>
+              <div className="flex gap-1" role="group" aria-label="Tamaño de la vista previa">
+                {(['85', '100', '135', 'real'] as const).map(v => (
+                  <button key={v} onClick={() => setVista(v)} aria-pressed={vista === v} className={chip(vista === v)}
+                    title={v === 'real' ? 'Tamaño físico aproximado: depende de los puntos por pulgada de tu monitor' : undefined}>
+                    {v === 'real' ? '1:1' : `${v}%`}
+                  </button>
+                ))}
+              </div>
             </div>
+            {ps.method !== 'navegador' && metodoSoportado(ps.method) && (
+              <div className="p-3">
+                <button onClick={imprimirPrueba} disabled={probando}
+                  className="w-full h-10 rounded-[10px] border border-edge bg-surface-2 text-[13px] font-bold text-ink hover:border-gold/40 active:scale-[0.98] disabled:opacity-40 transition-all">
+                  {probando ? 'Enviando…' : 'Imprimir una prueba'}
+                </button>
+                <p className="text-[11.5px] text-mute mt-2 leading-snug">Sale en papel con este diseño, aunque todavía no lo guardes.</p>
+              </div>
+            )}
           </footer>
         </div>
         <p className="text-[12px] text-mute mt-2 px-1 leading-relaxed">
@@ -10058,6 +10410,7 @@ function TicketAdmin({ notify }: { notify: (m: string, t?: 'ok' | 'err') => void
     </div>
   )
 }
+
 
 function ConfiguracionAdmin({ notify, lang, onLang }: {
   notify: (m: string, t?: 'ok' | 'err') => void; lang: 'ES' | 'EN'; onLang: (l: 'ES' | 'EN') => void

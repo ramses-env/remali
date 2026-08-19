@@ -12,15 +12,31 @@ import api from './api'
 export type Capacidades = {
   nivel: number; rol: string
   gestionar_usuarios: boolean; configurar_negocio: boolean
-  /** Las cuentas del negocio: métricas, ingresos, historial de ventas. */
+  /** El Resumen, los ingresos del día/mes/año, gráficas y reportes exportables. */
   ver_dinero: boolean
+  /** La lista de ventas, rentas, adeudos y pedidos, para poder trabajarlos.
+   *  Separada de `ver_dinero` para que el Gestor pueda operar el negocio sin
+   *  ver cuánto gana el negocio. */
+  ver_operacion: boolean
+  /** Borrar productos, unidades y refacciones. Solo el dueño: borrar es cómo se
+   *  encubre una máquina que falta. */
+  borrar_catalogo: boolean
+  /** El titular, banco, cuenta y CLABE que se imprimen en cada cotización. */
+  editar_datos_bancarios: boolean
+  /** Fijar un NIP propio. El Gestor no lo tiene: sus acciones delicadas las
+   *  autoriza el dueño con el de él. */
+  tener_codigo_propio: boolean
   /** Los montos de lo que uno mismo opera: quien entrega también cobra. */
   ver_montos_operacion: boolean
   vender: boolean; rentar: boolean; cotizar: boolean
   facturar: boolean; editar_catalogo: boolean
   /** Dar de alta equipo nuevo, distinto de mover el que ya existe. */
   alta_inventario: boolean
-  operar_inventario: boolean; reparar: boolean
+  operar_inventario: boolean
+  /** Hacer el trabajo de taller: recibir y trabajar órdenes desde Mi jornada. */
+  reparar: boolean
+  /** Llevar el taller: la sección Reparaciones (historial, costos, entrega). */
+  gestionar_reparaciones: boolean
   /** La caja: punto de venta de refacciones en el mostrador. */
   usar_caja: boolean
   /** Cerrar el turno de caja (arqueo). */
