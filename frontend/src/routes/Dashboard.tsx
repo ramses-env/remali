@@ -701,10 +701,13 @@ export default function Dashboard() {
     inventario: 'editar_catalogo',
     refacciones: 'editar_catalogo',
     rentas: 'ver_dinero',
-    // Reparaciones se gateaba con `ver_dinero`, que es "ver las cuentas del
-    // negocio": el técnico TENÍA la capacidad de reparar y no veía ni una de sus
-    // órdenes. La sección es su mesa de trabajo, no un reporte de contabilidad.
-    reparaciones: 'reparar',
+    // La sección Reparaciones es para LLEVAR el taller: historial completo, las
+    // cuatro etapas, costos y entrega al cliente. Hacer el trabajo es otra cosa
+    // y el técnico ya lo hace desde "Mi jornada", que le trae sus órdenes
+    // abiertas sin importar los días que lleven. Abrirle además esta sección era
+    // duplicarle el día en otra pantalla. (Antes pedía `ver_dinero`, que era peor:
+    // gateaba una pantalla de taller con un permiso de contabilidad.)
+    reparaciones: 'gestionar_reparaciones',
     // Pedidos y apartados son VENTAS CON ANTICIPO. No tenía candado, así que la
     // veía cualquiera que entrara al panel —el técnico y el cajero incluidos—,
     // aunque el backend luego les negara los datos.
@@ -1234,7 +1237,12 @@ export default function Dashboard() {
           {section === 'clientes' && (
             <ClientesAdmin puede={puede} notify={notify} reloadBadge={loadClientesTotal} />
           )}
-          {section === 'ubicaciones' && <UbicacionesAdmin notify={notify} />}
+          {section === 'ubicaciones' && (
+            <UbicacionesAdmin
+              notify={notify} empresas={empresas} unidades={unidades}
+              onOrdenCreada={() => { loadOrdenes(); loadUnidades() }}
+            />
+          )}
           {section === 'usuarios' && <UsuariosAdmin usuarios={usuarios} reload={loadUsuarios} notify={notify} yoId={me?.id} />}
           {section === 'configuracion' && <ConfiguracionAdmin notify={notify} lang={lang} onLang={cambiarIdioma} />}
           </div>
@@ -6966,7 +6974,6 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
   const [fotos, setFotos] = useState<CotizacionFoto[]>(cotizacion.fotos || [])
   const [subiendoFotos, setSubiendoFotos] = useState(false)
   const [zoomFoto, setZoomFoto] = useState<CotizacionFoto | null>(null)
-  const [descargando, setDescargando] = useState(false)
   const [enviando, setEnviando] = useState(false)
   const fotoInput = useRef<HTMLInputElement>(null)
 
@@ -7290,18 +7297,10 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
       })
       .catch(err => notify(errorMsg(err, 'No se pudo quitar la foto'), 'err'))
   }
-  // Descarga el PDF de reportlab (el mismo del correo), no una recreación del
-  // HTML: lo que baja el admin y lo que recibe el cliente son idénticos.
-  function descargarPDF() {
-    if (!(clienteNombre.trim() || empresaSel) || c.items.length === 0) {
-      notify('Agrega el cliente y al menos un concepto para generar el PDF', 'err'); return
-    }
-    setDescargando(true)
-    api.get(`/cotizaciones/${c.id}/pdf/`, { responseType: 'blob' })
-      .then(r => descargarBlob(r.data as Blob, `${c.folio || 'cotizacion'}.pdf`))
-      .catch(() => notify('No se pudo descargar el PDF', 'err'))
-      .finally(() => setDescargando(false))
-  }
+  /* La descarga del PDF ya no vive aquí: está dentro de la vista previa
+     (CotizacionCartaModal), que es donde tiene sentido —se ve la orden y desde
+     ahí se decide si se imprime o se guarda—. Tenerla también en este pie era
+     el tercer camino para la misma acción. */
   // Enviar por correo: guarda primero (para que el servidor tenga el correo
   // actual) y luego manda el PDF adjunto. El envío la marca como "Enviada".
   function enviarCorreo() {
@@ -7827,17 +7826,17 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
         </div>
 
         <div className="px-5 sm:px-7 py-3.5 border-t border-edge flex flex-col sm:flex-row sm:items-center gap-2.5 bg-surface shrink-0">
-          {/* Documentos del cliente (izquierda) */}
-          <div className="grid grid-cols-2 sm:flex gap-2 sm:mr-auto">
-            <button onClick={() => onPrint({ ...c, notas, vigencia_dias: Number(vigencia) || 15, aplica_iva: aplicaIva, base: String(baseMonto), iva: String(ivaMonto), total: String(totalMonto) })} disabled={!completa} title={!completa ? 'Agrega cliente y al menos un concepto' : undefined} className="py-2.5 sm:px-4 rounded-full border border-edge text-ink text-sm font-semibold hover:bg-surface-2 transition active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100 flex items-center justify-center gap-2">
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.7"><path d="M6 9V4h12v5M6 18H4v-6a2 2 0 012-2h12a2 2 0 012 2v6h-2M8 14h8v6H8z" /></svg>
-              Imprimir
-            </button>
-            <button onClick={descargarPDF} disabled={descargando || !completa} title={!completa ? 'Agrega cliente y al menos un concepto' : undefined} className="py-2.5 sm:px-4 rounded-full border border-edge text-ink text-sm font-semibold hover:bg-surface-2 transition active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100 flex items-center justify-center gap-2">
-              {descargando
-                ? <span className="w-4 h-4 border-2 border-ink/30 border-t-ink rounded-full animate-spin" />
-                : <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.8"><path strokeLinecap="round" strokeLinejoin="round" d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" /></svg>}
-              Descargar PDF
+          {/* El documento del cliente: UNA puerta, no tres.
+              Había "Imprimir" y "Descargar PDF" aquí, y la vista previa que abría
+              el primero ya trae dentro esos mismos dos botones — tres caminos
+              para dos acciones. Ahora se abre la orden y se decide viéndola:
+              nadie imprime a ciegas un documento que va a firmar un cliente. */}
+          <div className="sm:mr-auto">
+            <button onClick={() => onPrint({ ...c, notas, vigencia_dias: Number(vigencia) || 15, aplica_iva: aplicaIva, base: String(baseMonto), iva: String(ivaMonto), total: String(totalMonto) })} disabled={!completa} title={!completa ? 'Agrega cliente y al menos un concepto' : 'Ver la orden en carta: desde ahí se imprime o se descarga'} className="w-full sm:w-auto py-2.5 px-5 rounded-full border border-edge text-ink text-sm font-semibold hover:bg-surface-2 transition active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100 flex items-center justify-center gap-2">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /><path d="M8 13h8M8 17h5" />
+              </svg>
+              Ver la orden
             </button>
           </div>
 
@@ -7942,7 +7941,13 @@ const URGENCIA_TXT: Record<Urgencia, string> = {
   reparar: 'text-mute', manana: 'text-ink', proxima: 'text-mute',
 }
 
-function UbicacionesAdmin({ notify }: { notify: (m: string, t?: 'ok' | 'err') => void }) {
+function UbicacionesAdmin({ notify, empresas, unidades, onOrdenCreada }: {
+  notify: (m: string, t?: 'ok' | 'err') => void
+  /* Para recibir una máquina en taller sin salir de aquí. El técnico no tiene la
+     sección Reparaciones —sería duplicarle el día— pero sí recibe máquinas. */
+  empresas: Empresa[]; unidades: Unidad[]
+  onOrdenCreada: () => void
+}) {
   // Administración VE el tablero pero no lo toca: sin `jornada_campo` no hay
   // botones de entregar/recoger, no se abre la sábana de fotos ni el modal de
   // taller. Que el admin pudiera entregar desde aquí, sin estar en la obra ni
@@ -7955,6 +7960,7 @@ function UbicacionesAdmin({ notify }: { notify: (m: string, t?: 'ok' | 'err') =>
   const [cargando, setCargando] = useState(true)
   const [hoja, setHoja] = useState<Tarea | null>(null)      // sábana de entrega/recolección con fotos
   const [trabajando, setTrabajando] = useState<number | null>(null)
+  const [recibiendo, setRecibiendo] = useState(false)   // alta de orden de taller
 
   const cargar = useCallback(() => {
     api.get<{ tareas: Tarea[]; resumen: ResumenTareas }>('/rentas/tareas/')
@@ -7983,6 +7989,21 @@ function UbicacionesAdmin({ notify }: { notify: (m: string, t?: 'ok' | 'err') =>
 
   return (
     <div className="max-w-2xl mx-auto space-y-2.5">
+      {/* Recibir una máquina en taller. Va aquí y no en una sección aparte: el
+          técnico ya trabaja sus órdenes desde este tablero, y darle además la
+          sección Reparaciones sería mostrarle su mismo día en otra pantalla.
+          Es el MISMO modal de alta que usa administración, montado donde él
+          está parado. `soloLectura` lo esconde para quien solo supervisa. */}
+      {!soloLectura && puede('reparar') && (
+        <div className="flex justify-end">
+          <button onClick={() => setRecibiendo(true)}
+            className="h-10 px-4 rounded-xl border border-edge bg-surface text-[13px] font-bold text-ink hover:border-gold/40 transition-colors inline-flex items-center gap-2">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round"><path d="M12 5v14M5 12h14" /></svg>
+            Recibir máquina
+          </button>
+        </div>
+      )}
+
       {/* Un resumen de una línea, no un tablero. El técnico quiere el número, no gráficas. */}
       <div className="bg-surface border border-edge rounded-2xl px-5 sm:px-6 py-5">
         {cargando ? (
@@ -8056,6 +8077,20 @@ function UbicacionesAdmin({ notify }: { notify: (m: string, t?: 'ok' | 'err') =>
       )}
       {trabajando !== null && !soloLectura && (
         <TallerTrabajoModal ordenId={trabajando} onClose={() => setTrabajando(null)} onCambio={cargar} notify={notify} />
+      )}
+
+      {recibiendo && (
+        <NuevaOrdenModal
+          empresas={empresas} unidades={unidades} notify={notify}
+          onClose={() => setRecibiendo(false)}
+          onCreated={() => {
+            setRecibiendo(false)
+            // La orden nueva entra a su jornada como una tarea más: no hay que
+            // mandarlo a otra pantalla a buscarla.
+            cargar()
+            onOrdenCreada()
+          }}
+        />
       )}
     </div>
   )
@@ -9661,7 +9696,11 @@ function ConfiguracionAdmin({ notify, lang, onLang }: {
               </Ajuste>
             </Panel>
 
-            <PrintSettingsCard notify={notify} />
+            {/* La impresora térmica es del MOSTRADOR: imprime tickets de caja.
+                El técnico imprime órdenes en PDF desde el navegador, que no usa
+                nada de esto. Mostrárselo le pedía configurar un aparato que no
+                tiene enfrente. */}
+            {puede('usar_caja') && <PrintSettingsCard notify={notify} />}
           </div>
         )}
       </div>
