@@ -284,13 +284,19 @@ export default function VentaDetalleModal({ venta, onClose, onChanged, notify, o
           <div className="flex gap-2">
             {esRefaccion ? (
               <button onClick={() => setVerTicket(true)}
-                className="h-[44px] px-4 rounded-[12px] border border-edge bg-surface text-[14px] font-semibold text-ink hover:bg-surface-2 transition-colors whitespace-nowrap">
-                🖨 Reimprimir ticket
+                className="h-[44px] px-4 rounded-[12px] border border-edge bg-surface text-[14px] font-semibold text-ink hover:bg-surface-2 transition-colors whitespace-nowrap inline-flex items-center gap-2">
+                <svg className="w-[17px] h-[17px] shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M6 9V3h12v6" /><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" /><path d="M6 14h12v7H6z" />
+                </svg>
+                Reimprimir ticket
               </button>
             ) : (
               <button onClick={ordenCarta} disabled={pdf}
-                className="h-[44px] px-4 rounded-[12px] border border-edge bg-surface text-[14px] font-semibold text-ink hover:bg-surface-2 transition-colors whitespace-nowrap disabled:opacity-50">
-                {pdf ? 'Abriendo…' : '↓ Orden carta (PDF)'}
+                className="h-[44px] px-4 rounded-[12px] border border-edge bg-surface text-[14px] font-semibold text-ink hover:bg-surface-2 transition-colors whitespace-nowrap disabled:opacity-50 inline-flex items-center gap-2">
+                <svg className="w-[17px] h-[17px] shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />
+                </svg>
+                {pdf ? 'Abriendo…' : 'Orden carta (PDF)'}
               </button>
             )}
             {!cancelada && !factura && (
