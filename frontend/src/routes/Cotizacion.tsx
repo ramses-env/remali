@@ -8,9 +8,8 @@ import { useToast } from '../store/toast'
 import api from '../lib/api'
 import {
   listarBorradores, crearBorrador, actualizarBorrador, eliminarBorrador as borrarEnServidor,
-  enviarBorrador as enviarAlServidor, mandarAAutorizar, migrarBorradoresLocales,
-  reclamarEspacio, aLineasDeCarrito, tieneEquiposCaidos, totalBorrador,
-  MAX_BORRADORES, type Borrador,
+  mandarAAutorizar, migrarBorradoresLocales, reclamarEspacio,
+  aLineasDeCarrito, tieneEquiposCaidos, MAX_BORRADORES, type Borrador,
 } from '../lib/borradores'
 import Migas from '../components/Migas'
 import { waLink } from '../lib/whatsapp'
@@ -193,18 +192,6 @@ export default function Cotizacion() {
     }
     if (await crearPorAutorizar(state.items)) dispatch({ type: 'clear' })
   }
-  async function autorizarBorrador(b: Borrador) {
-    const datosValidos = validNombre && validEmpresa && validClientEmail &&
-      validTelefono && validDireccion && validResponsable && validObraTelefono
-    if (!datosValidos) {
-      cargarBorrador(b)
-      setShowErrors(true)
-      notify('Cargué el borrador; completa tus datos para mandarlo a autorizar', 'x')
-      return
-    }
-    await crearPorAutorizar(aLineasDeCarrito(b), b.id)
-  }
-
   async function handleSend() {
     if (!formValid) {
       notify('Completa los campos obligatorios para enviar la solicitud', 'x')
@@ -320,45 +307,6 @@ export default function Cotizacion() {
     try { await borrarEnServidor(id); await recargarBorradores() }
     catch { notify('No se pudo borrar el borrador', 'x') }
   }
-
-  /* Mandar UN borrador guardado directo a REMALI, sin tocar el carrito: hizo
-     cuatro versiones y manda solo la elegida. El servidor ya tiene sus
-     partidas y su precio del día; aquí solo se completan los datos de contacto
-     si el formulario los tiene. Al mandarse, el borrador pasa a "entregado" y
-     sale del taller — ya vive en el sistema, con folio. */
-  async function enviarBorrador(b: Borrador) {
-    const datosValidos = validNombre && validEmpresa && validClientEmail &&
-      validTelefono && validDireccion && validResponsable && validObraTelefono
-    if (!datosValidos) {
-      cargarBorrador(b)
-      setShowErrors(true)
-      notify('Cargué el borrador; completa tus datos de contacto y obra para enviarlo', 'x')
-      return
-    }
-    if (sending) return
-    setSending(true)
-    try {
-      await actualizarBorrador(b.id, datosDelFormulario())
-      const { folio } = await enviarAlServidor(b.id)
-      const lineas = aLineasDeCarrito(b)
-      const resumen = lineas.map(i => `${i.qty}x ${i.title}`).join(', ')
-      setSentWaMsg(`Hola, soy ${nombre}. Envié la solicitud de cotización ${folio}${resumen ? ` (${resumen})` : ''}. Quisiera continuar por aquí.`)
-      setSentPdfArgs({
-        items: lineas,
-        client: { nombre, empresa, email, telefono, direccion, responsable, obra_telefono: obraTelefono },
-        iva: factura,
-      })
-      setSentResumen({ items: lineas, total: totalBorrador(b), obra: direccion.trim() || empresa.trim() })
-      setSentLiga(null)
-      setSentFolio(folio)
-      await recargarBorradores()
-    } catch (err: any) {
-      notify(err?.response?.data?.detalle || 'No se pudo enviar la solicitud', 'x')
-    } finally {
-      setSending(false)
-    }
-  }
-
   if (sentAut) {
     const waJefe = `https://wa.me/?text=${encodeURIComponent(`Hola, te comparto la cotización de maquinaria para autorizar. Ábrela, revisa el total y autorízala aquí:\n${sentAut.liga}`)}`
     return (
@@ -529,13 +477,15 @@ export default function Cotizacion() {
           <p className="text-mute text-[15px] mt-2.5 max-w-[560px]">Ajusta cantidades, llena los datos de tu obra y envíala — te contactamos para confirmar disponibilidad.</p>
         </div>
 
-        {/* Mis borradores: varias versiones para comparar o mandar al jefe */}
+        {/* Mis borradores: un marcador, no un lanzador. Aquí se guardan y se
+            cargan versiones; mandarlas es una decisión de dinero y se toma
+            abajo, con la cotización entera a la vista. */}
         {(borradores.length > 0 || state.items.length > 0) && (
           <div className="mb-6 rounded-[20px] border border-edge bg-surface px-6 py-5">
             <div className="flex items-center justify-between gap-4 flex-wrap mb-3">
               <div>
                 <p className="text-[15px] font-bold">Mis borradores</p>
-                <p className="text-[12.5px] text-mute mt-0.5">Guarda versiones, baja el PDF de cada una, y envía a REMALI solo la elegida.</p>
+                <p className="text-[12.5px] text-mute mt-0.5">Guarda las versiones que quieras y carga la que vayas a trabajar. Se mandan desde abajo, con todo a la vista.</p>
               </div>
               {state.items.length > 0 && (
                 <button onClick={guardarBorrador} className="h-[40px] px-4 rounded-xl border border-gold/50 text-gold-ink text-[13.5px] font-bold hover:bg-gold-soft transition-colors">
@@ -546,29 +496,16 @@ export default function Cotizacion() {
             {borradores.length > 0 && (
               <div className="flex gap-2 flex-wrap">
                 {borradores.map(b => (
-                  <div key={b.id} className="relative group/bd">
+                  <div key={b.id} className="relative">
                     <button onClick={() => cargarBorrador(b)}
-                      className="flex flex-col items-start gap-0.5 pl-4 pr-24 py-2.5 rounded-xl border border-edge bg-app text-left hover:border-gold/60 transition-colors active:scale-[0.98]">
-                      <span className="text-[13.5px] font-bold text-ink">{b.nombre}</span>
+                      className="flex flex-col items-start gap-0.5 pl-4 pr-11 py-2.5 rounded-xl border border-edge bg-app text-left hover:border-gold/60 transition-colors active:scale-[0.98]">
+                      <span className="text-[13.5px] font-bold text-ink">{b.nombre || 'Borrador'}</span>
                       <span className="text-[11.5px] text-mute">{new Date(b.creado).toLocaleDateString('es-MX', { day: '2-digit', month: 'short' })} · toca para cargar</span>
                     </button>
-                    <button aria-label="Borrar borrador" onClick={() => borrarBorrador(b.id)}
-                      className="absolute top-1.5 right-1.5 w-5 h-5 grid place-items-center rounded-full text-mute hover:text-red-500 hover:bg-red-500/10 transition-colors">
-                      <svg viewBox="0 0 24 24" className="w-3 h-3 stroke-current fill-none" strokeWidth="2.2" strokeLinecap="round"><path d="M6 6l12 12M18 6L6 18" /></svg>
+                    <button aria-label={`Borrar ${b.nombre || 'borrador'}`} onClick={() => borrarBorrador(b.id)}
+                      className="absolute top-1/2 -translate-y-1/2 right-2 w-7 h-7 grid place-items-center rounded-full text-mute hover:text-red-500 hover:bg-red-500/10 transition-colors">
+                      <svg viewBox="0 0 24 24" className="w-3.5 h-3.5 stroke-current fill-none" strokeWidth="2.2" strokeLinecap="round"><path d="M6 6l12 12M18 6L6 18" /></svg>
                     </button>
-                    {/* Acciones del borrador: a autorización (jefe) o directo a REMALI */}
-                    <div className="absolute bottom-1.5 right-1.5 flex gap-1">
-                      <button onClick={() => autorizarBorrador(b)} disabled={sending} title="Su jefe recibe una liga y al autorizar llega sola a REMALI"
-                        className="inline-flex items-center gap-1 h-6 px-2 rounded-full border border-gold/50 text-gold-ink text-[10.5px] font-black hover:bg-gold-soft transition-colors disabled:opacity-50">
-                        <svg viewBox="0 0 24 24" className="w-3 h-3 stroke-current fill-none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 12l2 2 4-4" /><path d="M12 3l7 3v5c0 4.5-3 8.2-7 10-4-1.8-7-5.5-7-10V6z" /></svg>
-                        Autorizar
-                      </button>
-                      <button onClick={() => enviarBorrador(b)} disabled={sending}
-                        className="inline-flex items-center gap-1 h-6 px-2 rounded-full bg-gold text-black text-[10.5px] font-black hover:opacity-90 transition-opacity disabled:opacity-50">
-                        <svg viewBox="0 0 24 24" className="w-3 h-3 stroke-current fill-none" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 2 11 13" /><path d="M22 2 15 22l-4-9-9-4 20-7z" /></svg>
-                        Enviar
-                      </button>
-                    </div>
                   </div>
                 ))}
               </div>
