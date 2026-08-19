@@ -1211,7 +1211,7 @@ export default function Dashboard() {
             <PedidosAdmin datos={pedidos} reload={loadPedidos} equipos={equipos} empresas={empresas} notify={notify} />
           )}
           {section === 'cotizaciones' && (
-            <CotizacionesAdmin empresas={empresas} notify={notify} irAInventario={() => go('inventario')} />
+            <CotizacionesAdmin empresas={empresas} notify={notify} irAInventario={() => go('inventario')} irARentas={(id) => { fijarRentaAAbrir(id); go('rentas') }} />
           )}
           {section === 'catalogos' && (
             <CatalogosAdmin
@@ -3537,6 +3537,23 @@ function RentasAdmin({ reload, notify }: { reload: () => void; notify: (m: strin
     api.get<{ rentas: RentaFull[] }>(`/rentas/?estado=${estado}`).then(r => setRentas(r.data?.rentas || [])).catch(() => setRentas([])).finally(() => setLoading(false))
   }, [estado])
   useEffect(() => { load() }, [load])
+
+  /* Alguien llegó aquí desde otra pantalla pidiendo VER una renta concreta.
+     Se busca entre todas —no solo entre las del filtro actual—, porque la que
+     te mandaron a ver bien puede estar finalizada y el filtro abre en activas. */
+  useEffect(() => {
+    const id = tomarRentaAAbrir()
+    if (!id) return
+    api.get<{ rentas: RentaFull[] }>('/rentas/?estado=todas')
+      .then(r => {
+        const encontrada = (r.data?.rentas || []).find(x => x.id === id)
+        if (encontrada) setVerRenta(encontrada)
+        else notify(`No encontramos la renta #${id}`, 'err')
+      })
+      .catch(() => notify('No se pudo abrir la renta', 'err'))
+    // Solo al montar: el puente es de un solo uso.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   async function devolver(r: RentaFull) {
     if (!await confirmar({ titulo: `¿Marcar como devuelto el equipo de ${r.cliente_nombre || r.cliente || 'cliente'}?`, mensaje: 'La renta se cierra y la unidad vuelve a quedar disponible.', aceptar: 'Marcar devuelto' })) return
@@ -6671,6 +6688,21 @@ const COT_PAGE_SIZE = 25
    la lee al montar y la limpia al registrar. */
 type CotParaRenta = { id: number; folio: string | null; cliente: string; telefono: string; direccion: string; usuario_id: number | null; modalidad?: 'dia' | 'semana' | 'mes' | null; duracion?: number | null; equipo_id?: number | null; equipo_nombre?: string | null }
 let cotParaRenta: CotParaRenta | null = null
+/* Qué renta abrir al aterrizar en la sección. Mismo patrón que el puente de
+   cotización→renta: sessionStorage para que sobreviva al cambio de sección sin
+   meter la navegación en el estado global. */
+const RENTA_ABRIR_KEY = 'remali_renta_abrir'
+export function fijarRentaAAbrir(id: number | null) {
+  try { id ? sessionStorage.setItem(RENTA_ABRIR_KEY, String(id)) : sessionStorage.removeItem(RENTA_ABRIR_KEY) } catch { /* privado */ }
+}
+function tomarRentaAAbrir(): number | null {
+  try {
+    const v = sessionStorage.getItem(RENTA_ABRIR_KEY)
+    if (v) sessionStorage.removeItem(RENTA_ABRIR_KEY)   // de un solo uso
+    return v ? Number(v) : null
+  } catch { return null }
+}
+
 const COT_RENTA_KEY = 'remali_cot_para_renta'
 function leerCotParaRenta(): CotParaRenta | null {
   if (cotParaRenta) return cotParaRenta
@@ -6682,8 +6714,9 @@ function fijarCotParaRenta(v: CotParaRenta | null) {
   try { v ? sessionStorage.setItem(COT_RENTA_KEY, JSON.stringify(v)) : sessionStorage.removeItem(COT_RENTA_KEY) } catch { /* privado */ }
 }
 
-function CotizacionesAdmin({ empresas, notify, irAInventario }: {
+function CotizacionesAdmin({ empresas, notify, irAInventario, irARentas }: {
   empresas: Empresa[]; notify: (m: string, t?: 'ok' | 'err' | 'info') => void; irAInventario?: () => void
+  irARentas?: (rentaId: number) => void
 }) {
   const [q, setQ] = useState('')
   const [qDebounced, setQDebounced] = useState('')
@@ -6845,7 +6878,7 @@ function CotizacionesAdmin({ empresas, notify, irAInventario }: {
         )}
       </Card>
 
-      {detalle && <CotizacionDetalleModal cotizacion={detalle} empresas={empresas} recienCreada={recienCreada} notify={notify} onConcretarRenta={irAInventario} onClose={() => { setDetalle(null); setRecienCreada(false); recargar() }} onChanged={recargar} onPrint={(c) => setCarta(c)} onConvertida={(id) => { setDetalle(null); setRecienCreada(false); recargar(); abrirOrdenCartaPDF('ventas', id) }} />}
+      {detalle && <CotizacionDetalleModal cotizacion={detalle} empresas={empresas} recienCreada={recienCreada} notify={notify} onConcretarRenta={irAInventario} onVerRenta={irARentas} onClose={() => { setDetalle(null); setRecienCreada(false); recargar() }} onChanged={recargar} onPrint={(c) => setCarta(c)} onConvertida={(id) => { setDetalle(null); setRecienCreada(false); recargar(); abrirOrdenCartaPDF('ventas', id) }} />}
       {carta && <CotizacionCartaModal cotizacion={carta} onClose={() => setCarta(null)} />}
     </div>
   )
@@ -6889,9 +6922,9 @@ function Switch({ checked, onChange, disabled, label }: {
   )
 }
 
-function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, onClose, onChanged, onPrint, onConvertida, onConcretarRenta }: {
+function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, onClose, onChanged, onPrint, onConvertida, onConcretarRenta, onVerRenta }: {
   cotizacion: Cotizacion; empresas: Empresa[]; recienCreada?: boolean; notify: (m: string, t?: 'ok' | 'err' | 'info') => void
-  onClose: () => void; onChanged: () => void; onPrint: (c: Cotizacion) => void; onConvertida: (ventaId: number) => void; onConcretarRenta?: () => void
+  onClose: () => void; onChanged: () => void; onPrint: (c: Cotizacion) => void; onConvertida: (ventaId: number) => void; onConcretarRenta?: () => void; onVerRenta?: (rentaId: number) => void
 }) {
   // Vincular/cambiar la cuenta de la tienda dueña de esta cotización.
   async function vincularCuentaCot() {
@@ -7913,9 +7946,13 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
               Ver la orden en carta
             </button>
           ) : c.renta_id && c.tipo !== 'mixta' ? (
-            <button onClick={() => abrirOrdenCartaPDF('rentas', c.renta_id as number)} className="w-full sm:w-auto py-2.5 px-5 rounded-full text-sm font-bold transition active:scale-[0.98] flex items-center justify-center gap-2 border border-emerald-500/40 text-emerald-600 hover:bg-emerald-500/10">
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.9"><path strokeLinecap="round" strokeLinejoin="round" d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" /></svg>
+            /* Lleva A la renta. Antes bajaba su orden en PDF: dos botones con el
+               mismo ícono de descarga, uno al lado del otro, y el que decía
+               "Ver" no llevaba a ningún lado. Los documentos están a la
+               izquierda; esto es navegación. */
+            <button onClick={() => { onVerRenta?.(c.renta_id as number); onClose() }} className="w-full sm:w-auto py-2.5 px-5 rounded-full text-sm font-bold transition active:scale-[0.98] flex items-center justify-center gap-2 border border-emerald-500/40 text-emerald-600 hover:bg-emerald-500/10">
               Ver la renta #{c.renta_id}
+              <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
             </button>
           ) : c.tipo === 'renta' ? (
             <div className="w-full sm:w-auto py-2.5 px-4 rounded-full border border-edge text-mute text-[12px] font-medium flex items-center justify-center text-center" title="Las cotizaciones de renta se concretan creando la renta">
