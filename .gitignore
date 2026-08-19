@@ -57,3 +57,7 @@ backend/*backup*.json.gz
 
 # Config local de herramientas (Claude Code, etc.)
 .claude/
+
+# Herramientas de agente: no son código de Remali (skills-lock.json ya versiona lo que importa)
+.agents/
+.impeccable/
