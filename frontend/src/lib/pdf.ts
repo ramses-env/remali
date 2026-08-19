@@ -249,7 +249,7 @@ export async function downloadEquiposPdf(
 }
 
 type CartItem = { id: number; title: string; price: number; qty: number; duracion?: number }
-type ClientInfo = { nombre?: string; empresa?: string; email?: string; telefono?: string; direccion?: string; responsable?: string; obra_telefono?: string; obra_email?: string }
+type ClientInfo = { nombre?: string; empresa?: string; email?: string; telefono?: string; direccion?: string; responsable?: string; obra_telefono?: string }
 type Coupon = { code: string; discount: number }
 
 /** En una cotización cada partida es venta o renta por unidad de tiempo. */

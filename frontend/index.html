@@ -12,9 +12,12 @@
     <script>
       (function() {
         try {
-          var saved = localStorage.getItem('theme');
-          // Diseño REMALI: claro por defecto (el comp es tema claro)
-          var theme = (saved === 'light' || saved === 'dark') ? saved : 'light';
+          // Debe coincidir EXACTO con src/store/theme.tsx (clave y default): este
+          // script solo existe para pintar el tema antes de que React monte. Si se
+          // desincronizan, la página se pinta con un tema y salta al otro — que es
+          // justo el destello que este script debería evitar.
+          var saved = localStorage.getItem('remali_tema');
+          var theme = (saved === 'light' || saved === 'dark') ? saved : 'dark';
           document.documentElement.classList.toggle('dark', theme === 'dark');
           document.documentElement.style.colorScheme = theme;
           // Acento del dueño: se aplica ANTES de montar React. El perfil llega

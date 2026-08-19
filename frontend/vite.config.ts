@@ -22,6 +22,23 @@ function proxySinRuido(opts: ProxyOptions): ProxyOptions {
 export default defineConfig(({ mode }) => ({
   plugins: [react()],
   base: mode === 'production' ? '/static/' : '/',
+  build: {
+    rollupOptions: {
+      output: {
+        /* Sin esto, las librerías grandes se copian dentro del chunk de la primera
+           ruta que las toca, y cambiar una línea de esa ruta obliga al navegador a
+           volver a bajarlas. Separadas, se cachean una vez y sobreviven a los
+           despliegues. `react-vendor` va aparte porque lo necesita cualquier ruta;
+           las demás solo bajan cuando la pantalla que las usa se abre. */
+        manualChunks: {
+          'react-vendor': ['react', 'react-dom', 'react-router-dom'],
+          motion: ['framer-motion'],
+          iconos: ['lucide-react'],
+          codigos: ['qrcode', 'jsbarcode'],
+        },
+      },
+    },
+  },
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),

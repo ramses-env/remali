@@ -14,6 +14,7 @@ import { createPortal } from 'react-dom'
 import api from '../lib/api'
 import { formatMoney, soloTelefono } from '../lib/utils'
 import { usePuede } from '../lib/acceso'
+import Modal from '../components/Modal'
 import TicketModal from '../components/TicketModal'
 
 type Notify = (m: string, t?: 'ok' | 'err') => void
@@ -56,7 +57,32 @@ const CATEGORIAS = ['Todo', 'Puntas', 'Eléctricos', 'Discos', 'Motor', 'Lubrica
 const input = 'w-full bg-surface-2 border border-edge rounded-xl px-4 py-2.5 text-sm text-ink placeholder-mute focus:outline-none focus:border-gold/50 transition-colors'
 const label = 'block text-[11px] font-medium text-mute mb-1.5 uppercase tracking-wide'
 
-export default function CajaPOS({ notify }: { notify: Notify }) {
+/** Una unidad de maquinaria vista desde la caja. Lo mínimo para elegirla y
+ *  entregársela al Dashboard, que es quien abre la hoja de venta o de renta. */
+export type UnidadCaja = {
+  id: number; codigo: string; estado: string
+  equipo_modelo?: string
+  puede_venderse?: boolean; puede_rentarse?: boolean
+}
+
+export default function CajaPOS({
+  notify, unidades = [], puedeVenderMaquina = false, puedeRentarMaquina = false,
+  onVenderMaquina, onRentarMaquina,
+}: {
+  notify: Notify
+  /** Inventario que ya vive en el Dashboard: la caja no vuelve a pedirlo. */
+  unidades?: UnidadCaja[]
+  /* Los dos interruptores del negocio (Ajustes → Caja). El servidor los vuelve
+     a validar: esconder el botón por sí solo no apagaría nada. */
+  puedeVenderMaquina?: boolean
+  puedeRentarMaquina?: boolean
+  /* La caja NO abre las hojas: se las pide al Dashboard, que es el dueño de
+     SellModal y RentModal. Así hay una sola hoja de venta y una sola de renta en
+     todo el sistema, y arreglarlas una vez sirve en los dos lados. */
+  onVenderMaquina?: (u: UnidadCaja) => void
+  onRentarMaquina?: (u: UnidadCaja) => void
+}) {
+  const [pickMaquina, setPickMaquina] = useState<null | 'venta' | 'renta'>(null)
   const [refacciones, setRefacciones] = useState<Refaccion[]>([])
   const [cargando, setCargando] = useState(true)
   const [vista, setVista] = useState<'venta' | 'corte'>('venta')
@@ -165,7 +191,22 @@ export default function CajaPOS({ notify }: { notify: Notify }) {
     const exacta = refacciones.find(r => r.codigo_barras.toLowerCase() === s.toLowerCase())
     const r = exacta || refacciones.find(x => x.nombre.toLowerCase().includes(s.toLowerCase()))
     if (r && r.stock > 0) { agregar(r); setScan(''); marcarScan('ok') }
-    else marcarScan(r ? 'out' : 'fail')
+    else {
+      // No es refacción: puede ser el QR pegado en una MÁQUINA. Escanearlo es la
+      // forma natural de venderla o rentarla desde el mostrador, sin teclear.
+      const u = unidades.find(x => x.codigo.toLowerCase() === s.toLowerCase())
+      if (u) {
+        if (puedeVenderMaquina && u.puede_venderse !== false && onVenderMaquina) {
+          setScan(''); marcarScan('ok'); onVenderMaquina(u); return
+        }
+        if (puedeRentarMaquina && u.puede_rentarse !== false && onRentarMaquina) {
+          setScan(''); marcarScan('ok'); onRentarMaquina(u); return
+        }
+        notify(`${u.codigo} no se puede cobrar desde la caja ahora mismo.`, 'err')
+        marcarScan('out'); scanRef.current?.focus(); return
+      }
+      marcarScan(r ? 'out' : 'fail')
+    }
     scanRef.current?.focus()
   }
 
@@ -257,6 +298,40 @@ export default function CajaPOS({ notify }: { notify: Notify }) {
         <span className="text-mute">fondo {money(Number(sesion.monto_inicial))} · desde {new Date(sesion.abierta_en).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })}{sesion.usuario ? ` · ${sesion.usuario}` : ''}</span>
         <button onClick={() => setVista('corte')} className="ml-auto font-bold text-emerald-600 dark:text-emerald-400 hover:underline">Arqueo / cerrar caja →</button>
       </div>
+
+      {/* Cobrar una MÁQUINA. Solo aparece si el negocio lo encendió en Ajustes.
+          El camino rápido es escanear el QR de la unidad en la barra de arriba;
+          estos botones son para cuando la etiqueta no se deja leer. */}
+      {(puedeVenderMaquina || puedeRentarMaquina) && (
+        <div className="flex items-center gap-2 flex-wrap">
+          {puedeVenderMaquina && (
+            <button onClick={() => setPickMaquina('venta')}
+              className="h-10 px-4 rounded-xl border border-edge bg-surface text-[13px] font-bold text-ink hover:border-gold/40 transition-colors">
+              Vender máquina
+            </button>
+          )}
+          {puedeRentarMaquina && (
+            <button onClick={() => setPickMaquina('renta')}
+              className="h-10 px-4 rounded-xl border border-edge bg-surface text-[13px] font-bold text-ink hover:border-gold/40 transition-colors">
+              Rentar máquina
+            </button>
+          )}
+          <span className="text-[12px] text-mute">o escanea el QR pegado en la máquina</span>
+        </div>
+      )}
+
+      {pickMaquina && (
+        <ElegirUnidad
+          modo={pickMaquina}
+          unidades={unidades}
+          onClose={() => setPickMaquina(null)}
+          onElegir={u => {
+            const cb = pickMaquina === 'venta' ? onVenderMaquina : onRentarMaquina
+            setPickMaquina(null)
+            cb?.(u)
+          }}
+        />
+      )}
 
       {/* Barra de escaneo */}
       <div className="flex items-center gap-3.5 px-4 h-[68px] rounded-2xl border border-edge bg-surface">
@@ -982,5 +1057,62 @@ function DevolucionModal({ notify, onClose, onDone }: { notify: Notify; onClose:
       </div>
     </div>,
     document.body,
+  )
+}
+
+
+/* ─────────── Elegir la máquina a cobrar ───────────
+   Se filtra por lo que esa operación permite: no tiene sentido ofrecer para
+   renta una unidad nueva (que solo se vende) ni una que está en taller. */
+function ElegirUnidad({ modo, unidades, onClose, onElegir }: {
+  modo: 'venta' | 'renta'
+  unidades: UnidadCaja[]
+  onClose: () => void
+  onElegir: (u: UnidadCaja) => void
+}) {
+  const [q, setQ] = useState('')
+  const s = q.trim().toLowerCase()
+  const aptas = unidades.filter(u => (modo === 'venta' ? u.puede_venderse !== false : u.puede_rentarse !== false))
+  const lista = (s
+    ? aptas.filter(u => u.codigo.toLowerCase().includes(s) || (u.equipo_modelo || '').toLowerCase().includes(s))
+    : aptas
+  ).slice(0, 60)
+
+  return (
+    <Modal
+      className="fixed inset-0 z-[70] bg-black/40 backdrop-blur-[2px] flex items-start justify-center p-4 overflow-y-auto"
+      onClose={onClose}
+      label={modo === 'venta' ? 'Elegir máquina a vender' : 'Elegir máquina a rentar'}
+    >
+      <div onClick={e => e.stopPropagation()}
+        className="w-full sm:max-w-[560px] my-4 sm:my-auto bg-surface border border-edge rounded-2xl overflow-hidden">
+        <div className="px-6 py-4 border-b border-edge">
+          <h3 className="font-black text-ink">{modo === 'venta' ? 'Vender una máquina' : 'Rentar una máquina'}</h3>
+          <p className="text-xs text-mute mt-0.5">Escanea el QR en la barra de arriba, o búscala aquí.</p>
+        </div>
+        <div className="p-4">
+          <input
+            autoFocus value={q} onChange={e => setQ(e.target.value)}
+            aria-label="Buscar por código o modelo" placeholder="Código o modelo…"
+            className={input}
+          />
+          <div className="mt-3 max-h-[50vh] overflow-y-auto divide-y divide-edge">
+            {lista.length === 0 ? (
+              <p className="text-sm text-mute py-8 text-center">
+                {aptas.length === 0
+                  ? (modo === 'venta' ? 'No hay unidades disponibles para venta.' : 'No hay unidades disponibles para renta.')
+                  : 'Ninguna coincide con esa búsqueda.'}
+              </p>
+            ) : lista.map(u => (
+              <button key={u.id} onClick={() => onElegir(u)}
+                className="w-full text-left px-2 py-3 hover:bg-surface-2 transition-colors flex items-center gap-3">
+                <span className="font-mono font-bold text-ink text-[13px]">{u.codigo}</span>
+                <span className="text-[13px] text-mute truncate">{u.equipo_modelo || 'Equipo'}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    </Modal>
   )
 }

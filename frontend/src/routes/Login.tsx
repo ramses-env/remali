@@ -79,16 +79,29 @@ export default function Login() {
         setPendiente(data.email || (datos.usuario.includes('@') ? datos.usuario.trim().toLowerCase() : ''))
         return
       }
-      if (data?.detail) {
-        const d = String(data.detail).toLowerCase()
-        if (d.includes('no active account')) setError('Tu cuenta no está activa. Contacta al administrador.')
-        else setError(String(data.detail))
-      } else if (err?.response?.status === 429) {
-        setError('Demasiados intentos seguidos. Espera un minuto y vuelve a probar.')
-      } else {
+      // El ORDEN importa: `data.detail` iba primero y tapaba a los dos de abajo,
+      // así que al cliente le llegaba el texto del sistema en vez del suyo. El 401
+      // trae "credenciales inválidas" (en minúsculas, sin punto) y el 429 trae
+      // "Solicitud fue regulada (throttled)…". Los casos conocidos van primero y
+      // el `detail` queda de última red, solo para lo que no supimos prever.
+      const status = err?.response?.status
+      if (status === 429) {
+        // El servidor dice cuánto falta; "espera un minuto" cuando faltan diez
+        // deja al usuario probando a ciegas.
+        const seg = Number(err?.response?.headers?.['retry-after']) ||
+          Number(String(data?.detail || '').match(/(\d+) segundos/)?.[1]) || 0
+        const espera = seg > 90 ? `${Math.ceil(seg / 60)} minutos` : 'un minuto'
+        setError(`Demasiados intentos seguidos. Espera ${espera} y vuelve a probar.`)
+      } else if (status === 401) {
         // "No coinciden" no dice qué no coincide. Y no se precisa cuál de los dos
         // está mal a propósito: decirlo confirmaría a un atacante qué usuarios existen.
         setError('Usuario o contraseña incorrectos. Revísalos e intenta de nuevo.')
+      } else if (!err?.response) {
+        // Sin respuesta no es una credencial mala: es red, servidor caído o tiempo
+        // agotado. Mandarlo a revisar su contraseña lo pone a dudar de algo correcto.
+        setError('No hubo respuesta del servidor. Revisa tu conexión y vuelve a intentar.')
+      } else {
+        setError(String(data?.detail || 'No se pudo iniciar sesión. Vuelve a intentar.'))
       }
     }
   }

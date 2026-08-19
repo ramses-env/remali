@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import Modal from './Modal'
 import { createPortal } from 'react-dom'
 import JsBarcode from 'jsbarcode'
 import api from '../lib/api'
@@ -118,7 +119,7 @@ export default function TicketModal({ url, onClose }: { url: string; onClose: ()
   }
 
   return createPortal(
-    <div className="tk-overlay modal-in fixed inset-0 z-[90] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
+    <Modal className="tk-overlay modal-in fixed inset-0 z-[90] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4" onClose={onClose} label="Ticket de la venta">
       <div className="tk-card bg-surface border border-edge rounded-2xl overflow-hidden w-full flex flex-col max-h-[88vh]" style={{ maxWidth: mm >= 80 ? 420 : 360 }} onClick={e => e.stopPropagation()}>
         <div className="tk-head flex items-center justify-between gap-2 px-3 py-2 border-b border-edge bg-surface">
           <span className="text-[11px] font-semibold text-mute uppercase tracking-wide">Vista previa {mm}mm</span>
@@ -183,7 +184,7 @@ export default function TicketModal({ url, onClose }: { url: string; onClose: ()
         </div>
       </div>
       <style>{PRINT_CSS(mm, W)}</style>
-    </div>,
+    </Modal>,
     document.body
   )
 }

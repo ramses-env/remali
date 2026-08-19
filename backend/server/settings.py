@@ -535,6 +535,13 @@ else:
 # a la API desde el navegador de un usuario. En realidad casi no hace falta CORS —
 # en producción Django sirve el SPA desde el mismo origen y en desarrollo Vite hace
 # de proxy—, así que basta la lista de orígenes propios.
+# El encabezado del espacio de borradores del invitado. La lista por defecto de
+# django-cors-headers no incluye encabezados propios: sin esto, el navegador
+# tumba la petición en el preflight cuando el front no comparte origen.
+from corsheaders.defaults import default_headers  # noqa: E402
+
+CORS_ALLOW_HEADERS = (*default_headers, "x-espacio")
+
 CORS_ALLOWED_ORIGINS = _lista_env("CORS_ALLOWED_ORIGINS", [
     "https://remali.up.railway.app",
     "https://remali.mx",

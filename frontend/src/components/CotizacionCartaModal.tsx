@@ -1,4 +1,5 @@
 import { useCallback, useLayoutEffect, useRef, useState } from 'react'
+import Modal from './Modal'
 import { createPortal } from 'react-dom'
 import { Printer, X, FileText, Download } from 'lucide-react'
 import { usePrintSettings } from '../lib/printSettings'
@@ -124,7 +125,7 @@ export default function CotizacionCartaModal({ cotizacion, onClose }: { cotizaci
   const fecha = (v?: string | null) => (v ? new Date(v).toLocaleDateString('es-MX', { day: '2-digit', month: 'long', year: 'numeric' }) : '—')
 
   return createPortal(
-    <div className="oc-overlay modal-in fixed inset-0 z-[95] bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 overflow-y-auto" onClick={onClose}>
+    <Modal className="oc-overlay modal-in fixed inset-0 z-[95] bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 overflow-y-auto" onClose={onClose} label="Cotización en hoja carta">
       <div className="oc-card bg-surface border border-edge rounded-t-2xl sm:rounded-2xl overflow-hidden w-full max-w-[880px] sm:my-4 flex flex-col max-h-[92vh] sm:max-h-[88vh]" onClick={e => e.stopPropagation()}>
 
         {/* Barra superior del modal: identidad + cerrar (no se imprime) */}
@@ -269,7 +270,7 @@ export default function CotizacionCartaModal({ cotizacion, onClose }: { cotizaci
         </div>
       </div>
       <style>{CSS(acento)}</style>
-    </div>,
+    </Modal>,
     document.body,
   )
 }

@@ -15,6 +15,7 @@ import { soloTelefono } from '../lib/utils'
 import { KpiGrid } from './ui/kpi-grid'
 import { REGIMEN_FISCAL, USO_CFDI } from '../lib/sat'
 import type { Capacidades } from '../lib/acceso'
+import ModalBase from './Modal'
 
 const input =
   'w-full bg-surface-2 border border-edge rounded-xl px-4 py-2.5 text-sm text-ink placeholder-mute focus:outline-none focus:border-gold/50 transition-colors'
@@ -442,12 +443,12 @@ function FormularioCliente({ puedeFiscales, notify, onClose, onSaved }: {
 
         <div>
           <label className={label} htmlFor="cli-tel">Teléfono</label>
-          <input id="cli-tel" className={input} value={f.telefono} inputMode="numeric"
+          <input aria-label="Teléfono" id="cli-tel" className={input} value={f.telefono} inputMode="numeric"
                  onChange={e => set('telefono', soloTelefono(e.target.value))} placeholder="7441234567" />
         </div>
         <div>
           <label className={label} htmlFor="cli-email">Correo</label>
-          <input id="cli-email" className={input} type="email" value={f.email}
+          <input aria-label="Correo" id="cli-email" className={input} type="email" value={f.email}
                  onChange={e => set('email', e.target.value)} />
         </div>
 
@@ -458,22 +459,22 @@ function FormularioCliente({ puedeFiscales, notify, onClose, onSaved }: {
             </p>
             <div>
               <label className={label} htmlFor="cli-razon">Razón social</label>
-              <input id="cli-razon" className={input} value={f.razon_social} onChange={e => set('razon_social', e.target.value)} />
+              <input aria-label="Razón social" id="cli-razon" className={input} value={f.razon_social} onChange={e => set('razon_social', e.target.value)} />
             </div>
             <div>
               <label className={label} htmlFor="cli-rfc">RFC</label>
-              <input id="cli-rfc" className={`${input} uppercase`} value={f.rfc} onChange={e => set('rfc', e.target.value)} />
+              <input aria-label="RFC" id="cli-rfc" className={`${input} uppercase`} value={f.rfc} onChange={e => set('rfc', e.target.value)} />
             </div>
             <div>
               <label className={label} htmlFor="cli-regimen">Régimen fiscal</label>
-              <select id="cli-regimen" className={input} value={f.regimen_fiscal} onChange={e => set('regimen_fiscal', e.target.value)}>
+              <select aria-label="Régimen fiscal" id="cli-regimen" className={input} value={f.regimen_fiscal} onChange={e => set('regimen_fiscal', e.target.value)}>
                 <option value="">—</option>
                 {REGIMEN_FISCAL.map(r => <option key={r.code} value={r.code}>{r.label}</option>)}
               </select>
             </div>
             <div>
               <label className={label} htmlFor="cli-uso">Uso del CFDI</label>
-              <select id="cli-uso" className={input} value={f.uso_cfdi} onChange={e => set('uso_cfdi', e.target.value)}>
+              <select aria-label="Uso del CFDI" id="cli-uso" className={input} value={f.uso_cfdi} onChange={e => set('uso_cfdi', e.target.value)}>
                 <option value="">—</option>
                 {USO_CFDI.map(u => <option key={u.code} value={u.code}>{u.label}</option>)}
               </select>
@@ -486,18 +487,18 @@ function FormularioCliente({ puedeFiscales, notify, onClose, onSaved }: {
         </p>
         <div>
           <label className={label} htmlFor="cli-cnombre">Nombre</label>
-          <input id="cli-cnombre" className={input} value={f.contacto_nombre}
+          <input aria-label="Nombre" id="cli-cnombre" className={input} value={f.contacto_nombre}
                  onChange={e => set('contacto_nombre', e.target.value)} placeholder="Laura Méndez" />
         </div>
         <div>
           <label className={label} htmlFor="cli-ctel">Teléfono</label>
-          <input id="cli-ctel" className={input} value={f.contacto_telefono} inputMode="numeric"
+          <input aria-label="Teléfono" id="cli-ctel" className={input} value={f.contacto_telefono} inputMode="numeric"
                  onChange={e => set('contacto_telefono', soloTelefono(e.target.value))} />
         </div>
 
         <div className="sm:col-span-2">
           <label className={label} htmlFor="cli-notas">Notas</label>
-          <textarea id="cli-notas" className={input} rows={2} value={f.notas} onChange={e => set('notas', e.target.value)} />
+          <textarea aria-label="Notas" id="cli-notas" className={input} rows={2} value={f.notas} onChange={e => set('notas', e.target.value)} />
         </div>
       </div>
 
@@ -654,11 +655,11 @@ function FichaCliente({ ficha, puedeEditar, puedeFiscales, notify, onClose, onCh
 
         {nuevoContacto && (
           <div className="mt-3 p-3 rounded-xl border border-edge bg-surface-2 grid sm:grid-cols-3 gap-2">
-            <input className={input} placeholder="Nombre" value={nc.nombre}
+            <input aria-label="Nombre" className={input} placeholder="Nombre" value={nc.nombre}
                    onChange={e => setNc(p => ({ ...p, nombre: e.target.value }))} />
-            <input className={input} placeholder="Teléfono" inputMode="numeric" value={nc.telefono}
+            <input aria-label="Teléfono" className={input} placeholder="Teléfono" inputMode="numeric" value={nc.telefono}
                    onChange={e => setNc(p => ({ ...p, telefono: soloTelefono(e.target.value) }))} />
-            <input className={input} placeholder="Puesto" value={nc.puesto}
+            <input aria-label="Puesto" className={input} placeholder="Puesto" value={nc.puesto}
                    onChange={e => setNc(p => ({ ...p, puesto: e.target.value }))} />
             <div className="sm:col-span-3 flex justify-end gap-2">
               <button onClick={() => setNuevoContacto(false)} className="h-9 px-4 rounded-[10px] border border-edge bg-surface text-[13px] font-bold text-ink">
@@ -766,22 +767,21 @@ function FichaCliente({ ficha, puedeEditar, puedeFiscales, notify, onClose, onCh
 }
 
 /* ─────────── Modal ─────────── */
+/* Envoltura local: conserva la firma `<Modal titulo=… onClose=…>` que usan las
+   pantallas de este archivo, pero el comportamiento (foco atrapado, Escape,
+   scroll bloqueado, devolver el foco al abridor) lo pone la primitiva común.
+   Antes esto tenía rol y Escape propios pero ni trampa de foco ni scroll lock,
+   así que el Tab se escapaba al padrón de atrás. No cierra al tocar fuera: son
+   formularios de alta y edición de clientes, y perderlos de un clic cuesta caro. */
 function Modal({ titulo, children, onClose }: { titulo: string; children: React.ReactNode; onClose: () => void }) {
-  useEffect(() => {
-    const cerrarConEsc = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
-    document.addEventListener('keydown', cerrarConEsc)
-    return () => document.removeEventListener('keydown', cerrarConEsc)
-  }, [onClose])
-
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/50 p-4 sm:p-8">
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label={titulo}
-        className="w-full max-w-2xl bg-surface border border-edge rounded-2xl shadow-xl p-6"
-        onClick={e => e.stopPropagation()}
-      >
+    <ModalBase
+      onClose={onClose}
+      label={titulo}
+      cerrarAlTocarFuera={false}
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/50 p-4 sm:p-8"
+    >
+      <div className="w-full max-w-2xl bg-surface border border-edge rounded-2xl shadow-xl p-6">
         <div className="flex items-start justify-between gap-4 mb-4">
           <h2 className="text-lg font-black text-ink">{titulo}</h2>
           <button onClick={onClose} aria-label="Cerrar" className="text-mute hover:text-ink text-2xl leading-none transition-colors">
@@ -790,6 +790,6 @@ function Modal({ titulo, children, onClose }: { titulo: string; children: React.
         </div>
         {children}
       </div>
-    </div>
+    </ModalBase>
   )
 }

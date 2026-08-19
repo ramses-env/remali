@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import Modal from './Modal'
 import { createPortal } from 'react-dom'
 import api from '../lib/api'
 import { descargarBlob } from '../lib/descargar'
@@ -17,6 +18,8 @@ type VentaLike = {
   telefono_cliente?: string | null
   cuenta?: string | null
   unidad?: { codigo: string; equipo?: string | null } | null
+  /** Una entrada por máquina de la venta (con su serie y su precio). */
+  maquinas?: { id: number; codigo: string | null; numero_serie?: string | null; equipo?: string | null; precio: string; entregada: boolean }[]
   factura_estado?: string | null
   nota_ajuste?: string | null
   origen?: { folio: string; resumen: string } | null
@@ -27,11 +30,14 @@ const money = (n?: string | number) => `$${(Number(n) || 0).toLocaleString('en-U
 /** Detalle de una venta, fiel al diseño "Modal Venta REMALI": tarjeta del
  *  equipo, totales con el cobrado en grande, la liga de vinculación con sus
  *  estados y la confirmación de cancelar como franja inline (no diálogo). */
-export default function VentaDetalleModal({ venta, onClose, onChanged, notify }: {
+export default function VentaDetalleModal({ venta, onClose, onChanged, notify, onQuitarMaquina }: {
   venta: VentaLike
   onClose: () => void
   onChanged: () => void
   notify: (m: string, t?: 'ok' | 'err') => void
+  /** Sacar UNA máquina de la venta. Lo pide el panel (que es quien sabe pedir el
+   *  código de autorización); aquí solo se ofrece el botón. */
+  onQuitarMaquina?: (maquinaId: number) => void
 }) {
   const [liga, setLiga] = useState('')
   const [generando, setGenerando] = useState(false)
@@ -129,7 +135,7 @@ export default function VentaDetalleModal({ venta, onClose, onChanged, notify }:
     : (venta.origen ? `Cotización ${venta.origen.folio}` : 'mostrador')
 
   return createPortal(
-    <div className="modal-in fixed inset-0 z-[60] flex items-center justify-center p-4 sm:p-6 bg-black/45 backdrop-blur-[2px] overflow-y-auto" onClick={onClose}>
+    <Modal className="modal-in fixed inset-0 z-[60] flex items-center justify-center p-4 sm:p-6 bg-black/45 backdrop-blur-[2px] overflow-y-auto" onClose={onClose} label="Detalle de la venta">
       <div className="w-full max-w-[560px] bg-surface rounded-[22px] border border-edge shadow-[0_30px_70px_rgba(0,0,0,0.28)] overflow-hidden my-auto" onClick={e => e.stopPropagation()}>
 
         {/* Encabezado */}
@@ -155,14 +161,39 @@ export default function VentaDetalleModal({ venta, onClose, onChanged, notify }:
         </div>
 
         <div className="px-6 sm:px-[26px] pt-[22px]">
-          {/* Equipo */}
-          <div className="flex items-center gap-3.5 border border-edge rounded-[14px] px-4 py-3.5">
-            <div className="w-12 h-12 shrink-0 rounded-[11px]" style={{ background: 'repeating-linear-gradient(135deg, var(--c-surface-2, #f4f4f5) 0 7px, rgba(120,120,130,0.12) 7px 14px)' }} />
-            <div className="min-w-0">
-              <div className="text-[15.5px] font-bold text-ink truncate">{equipoNombre}</div>
-              <div className="text-[13px] text-mute mt-[3px] truncate">{equipoDetalle}</div>
+          {/* Equipo(s). Con varias máquinas se listan TODAS: cada una es una
+              pieza distinta, con su número de serie y su precio. */}
+          {(venta.maquinas?.length || 0) > 1 ? (
+            <div className="border border-edge rounded-[14px] divide-y divide-edge">
+              {venta.maquinas!.map(m => (
+                <div key={m.id} className="flex items-center gap-3.5 px-4 py-3">
+                  <div className="w-10 h-10 shrink-0 rounded-[10px]" style={{ background: 'repeating-linear-gradient(135deg, var(--c-surface-2, #f4f4f5) 0 7px, rgba(120,120,130,0.12) 7px 14px)' }} />
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[15px] font-bold text-ink truncate">{m.equipo || 'Maquinaria'}</div>
+                    <div className="text-[12.5px] text-mute mt-[2px] truncate">
+                      {m.codigo || 'por llegar'}{m.numero_serie ? ` · S/N ${m.numero_serie}` : ''}
+                      {m.entregada ? ' · entregada' : ''}
+                    </div>
+                  </div>
+                  <div className="text-[14px] font-bold text-ink whitespace-nowrap">{money(m.precio)}</div>
+                  {onQuitarMaquina && !cancelada && (
+                    <button onClick={() => onQuitarMaquina(m.id)} title="Quitar esta máquina de la venta"
+                      className="w-8 h-8 shrink-0 rounded-[9px] border border-red-500/30 text-red-600 dark:text-red-400 hover:bg-red-500/10 transition-colors grid place-items-center">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                    </button>
+                  )}
+                </div>
+              ))}
             </div>
-          </div>
+          ) : (
+            <div className="flex items-center gap-3.5 border border-edge rounded-[14px] px-4 py-3.5">
+              <div className="w-12 h-12 shrink-0 rounded-[11px]" style={{ background: 'repeating-linear-gradient(135deg, var(--c-surface-2, #f4f4f5) 0 7px, rgba(120,120,130,0.12) 7px 14px)' }} />
+              <div className="min-w-0">
+                <div className="text-[15.5px] font-bold text-ink truncate">{equipoNombre}</div>
+                <div className="text-[13px] text-mute mt-[3px] truncate">{equipoDetalle}</div>
+              </div>
+            </div>
+          )}
 
           {/* Cliente / pago */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-[18px]">
@@ -282,7 +313,7 @@ export default function VentaDetalleModal({ venta, onClose, onChanged, notify }:
           </div>
         )}
       </div>
-    </div>,
+    </Modal>,
     document.body,
   )
 }

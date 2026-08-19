@@ -5,7 +5,7 @@ import CampanaCliente from './CampanaCliente'
 import { useProfile } from '../store/profile'
 import { useCart } from '../store/cart'
 import { useFavoritos } from '../store/favoritos'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import ThemeToggle from './ThemeToggle'
 import { AvatarUsuario } from '@/components/ui/avatar-usuario'
@@ -23,6 +23,7 @@ export default function Navbar() {
   const { count: favCount } = useFavoritos()
   const [confirm, setConfirm] = useState(false)
   const [scrolled, setScrolled] = useState(false)
+  const barraRef = useRef<HTMLElement | null>(null)
 
   // Nivel 0 = cuenta sin rol en el panel, que es lo que son los clientes.
   const esCliente = Boolean(token) && (user?.puede?.nivel ?? 0) === 0
@@ -36,10 +37,26 @@ export default function Navbar() {
     return () => window.removeEventListener('scroll', handleScroll)
   }, [])
 
+  /* La barra cambia de alto al hacer scroll (py-5 → py-3). Publicamos ese alto
+     en --nav-h para que lo flotante (recordatorios) se acomode DEBAJO en vez
+     de quedar tapado por la barra, que va encima con z-50. */
+  useEffect(() => {
+    const el = barraRef.current
+    if (!el) return
+    const publicar = () => {
+      document.documentElement.style.setProperty('--nav-h', `${Math.round(el.getBoundingClientRect().height)}px`)
+    }
+    publicar()
+    const ro = new ResizeObserver(publicar)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+
   const isActive = (path: string) => location.pathname === path
 
   return (
     <header
+      ref={barraRef}
       className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 border-b ${
         scrolled
           ? 'bg-app/90 backdrop-blur-md border-edge py-3'

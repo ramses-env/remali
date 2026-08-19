@@ -1,4 +1,5 @@
 import { createPortal } from 'react-dom'
+import Modal from './Modal'
 import { useCart, esVenta, tipoCotizacion } from '../store/cart'
 import { useToast } from '../store/toast'
 
@@ -16,8 +17,8 @@ export default function CambioTipoCotizacion() {
   const n = state.items.length
 
   return createPortal(
-    <div className="modal-in fixed inset-0 z-[80] bg-black/60 backdrop-blur-sm flex items-center justify-center p-6"
-      onClick={() => dispatch({ type: 'conflicto-cancelar' })}>
+    <Modal className="modal-in fixed inset-0 z-[80] bg-black/60 backdrop-blur-sm flex items-center justify-center p-6"
+      onClose={() => dispatch({ type: 'conflicto-cancelar' })} label="Las cotizaciones no mezclan venta y renta">
       <div onClick={e => e.stopPropagation()}
         className="w-full max-w-sm bg-surface border border-edge rounded-2xl p-6 shadow-[0_24px_60px_rgba(0,0,0,0.45)]">
         <p className="text-[11px] font-bold uppercase tracking-wide text-gold-ink mb-2">Cotización de {tipoActual}</p>
@@ -39,7 +40,7 @@ export default function CambioTipoCotizacion() {
           </button>
         </div>
       </div>
-    </div>,
+    </Modal>,
     document.body
   )
 }

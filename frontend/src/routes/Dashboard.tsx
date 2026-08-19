@@ -1,6 +1,8 @@
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react'
+import Modal from '../components/Modal'
+import CajaPOS from './CajaPOS'
 import { createPortal } from 'react-dom'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useLocation } from 'react-router-dom'
 import QRCode from 'qrcode'
 import api from '../lib/api'
 import { formatMoney, soloTelefono } from '../lib/utils'
@@ -100,6 +102,8 @@ type Venta = {
   telefono_cliente?: string | null
   cuenta?: string | null
   unidad?: { id: number; codigo: string; numero_serie?: string | null; equipo?: string | null } | null
+  /** Una entrada por máquina. `unidad` es la primera; esto son todas. */
+  maquinas?: { id: number; unidad_id: number | null; codigo: string | null; numero_serie?: string | null; equipo?: string | null; precio: string; entregada: boolean }[]
   origen?: { folio: string; resumen: string } | null
 }
 type RentaActiva = {
@@ -180,6 +184,9 @@ type DashMetrics = {
  * en Inventario, que es su trabajo. Se lee del nivel recordado para no pintar
  * primero una sección que el usuario no puede ver.
  */
+/** Sección con la que abre quien llega a `/dashboard` PELADO, sin sección en la
+ *  URL. Ya no es "la sección del panel": esa vive en la dirección (ver `section`
+ *  más abajo), para que recargar, compartir un enlace o dar "atrás" funcionen. */
 function seccionInicial(): Section {
   try {
     // Quien ACTÚA en campo abre en su jornada. Se pregunta por la capacidad, no
@@ -224,10 +231,11 @@ function BotonExportar({ onClick }: { onClick: () => void }) {
   )
 }
 
-type Section = 'resumen' | 'equipos' | 'inventario' | 'refacciones' | 'reparaciones' | 'cotizaciones' | 'catalogos' | 'clientes' | 'rentas' | 'ventas' | 'pedidos' | 'facturacion' | 'adeudos' | 'cupones' | 'notificaciones' | 'perfil' | 'ubicaciones' | 'usuarios' | 'configuracion'
+type Section = 'resumen' | 'caja' | 'equipos' | 'inventario' | 'refacciones' | 'reparaciones' | 'cotizaciones' | 'catalogos' | 'clientes' | 'rentas' | 'ventas' | 'pedidos' | 'facturacion' | 'adeudos' | 'cupones' | 'notificaciones' | 'perfil' | 'ubicaciones' | 'usuarios' | 'configuracion'
 
 const SECTION_META: Record<Section, { title: string; subtitle: string }> = {
   resumen: { title: 'Resumen', subtitle: 'Monitorea tus métricas y gestiona tu operación.' },
+  caja: { title: 'Caja', subtitle: 'Cobra en el mostrador: refacciones, y maquinaria o rentas si están encendidas.' },
   equipos: { title: 'Productos', subtitle: 'Administra tu catálogo de maquinaria.' },
   inventario: { title: 'Inventario', subtitle: 'Controla cada unidad física y su estado.' },
   refacciones: { title: 'Refacciones', subtitle: 'Piezas para mantenimiento (y venta ocasional al público).' },
@@ -341,13 +349,13 @@ function CommandPalette({ equipos, unidades, rentas, ventas, go, onClose }: {
   }
 
   return (
-    <div className="modal-in fixed inset-0 z-[100] bg-black/30 backdrop-blur-md flex items-start justify-center pt-[12vh] px-4" onClick={onClose}>
+    <Modal className="modal-in fixed inset-0 z-[100] bg-black/30 backdrop-blur-md flex items-start justify-center pt-[12vh] px-4" onClose={onClose} label="Buscador rápido">
       <div onClick={e => e.stopPropagation()} className="relative w-full max-w-[560px] bg-surface/65 backdrop-blur-2xl backdrop-saturate-150 border border-white/15 rounded-2xl shadow-[0_24px_70px_rgba(17,24,39,0.45)] ring-1 ring-inset ring-white/10 overflow-hidden">
         {/* brillo superior tipo cristal */}
         <div className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-white/12 to-transparent" />
         <div className="relative flex items-center gap-3 px-4 py-3.5 border-b border-edge/50">
           <svg className="w-4 h-4 text-mute shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><circle cx="11" cy="11" r="7" /><path d="M21 21l-4-4" strokeLinecap="round" /></svg>
-          <input ref={inputRef} value={q} onChange={e => setQ(e.target.value)} onKeyDown={onKeyDown} placeholder={t('palette.search')} className="flex-1 bg-transparent text-[15px] outline-none placeholder-mute" />
+          <input aria-label="Buscar en el panel" ref={inputRef} value={q} onChange={e => setQ(e.target.value)} onKeyDown={onKeyDown} placeholder={t('palette.search')} className="flex-1 bg-transparent text-[15px] outline-none placeholder-mute" />
           <span className="text-[11px] font-bold text-mute bg-ink/10 rounded px-1.5 py-0.5 shrink-0">ESC</span>
         </div>
         <div className="relative max-h-[52vh] overflow-y-auto py-2">
@@ -380,7 +388,7 @@ function CommandPalette({ equipos, unidades, rentas, ventas, go, onClose }: {
           <span><b className="text-ink">esc</b> cerrar</span>
         </div>
       </div>
-    </div>
+    </Modal>
   )
 }
 
@@ -393,7 +401,24 @@ export default function Dashboard() {
   // Dónde abre el panel según quién entra. El nivel se recuerda del último
   // acceso porque el perfil llega por red: sin esto, un almacenista vería
   // Resumen (que no puede consultar) hasta que respondiera la API.
-  const [section, setSection] = useState<Section>(seccionInicial)
+  /* ── La sección vive en la URL, no en estado ──
+     Antes era `useState`, así que la dirección siempre decía `/dashboard` sin
+     importar dónde estuvieras: al recargar volvías al Resumen, el botón "atrás"
+     del navegador se salía del panel, y no había forma de mandarle a alguien
+     "mira este adeudo" más que de palabra. Ahora `/dashboard/adeudos` ES la
+     sección, y todo eso funciona solo. */
+  const location = useLocation()
+  const slug = location.pathname.replace(/^\/dashboard\/?/, '').split('/')[0]
+  const porDefecto = useRef<Section>(seccionInicial()).current
+  const section: Section = (slug in SECTION_META ? slug : porDefecto) as Section
+  const irASeccion = useCallback((s: Section, reemplazar = false) => {
+    nav(`/dashboard/${s}`, { replace: reemplazar })
+  }, [nav])
+  // Quien entra a `/dashboard` a secas se queda sin sección en la dirección, así
+  // que la fijamos de inmediato — con `replace` para no ensuciar el historial.
+  useEffect(() => {
+    if (!(slug in SECTION_META)) irASeccion(porDefecto, true)
+  }, [slug, porDefecto, irASeccion])
   const [sidebarOpen, setSidebarOpen] = useState(false)
   // Menú colapsado a solo-iconos (riel), solo en desktop. Se recuerda entre visitas.
   const [colapsado, setColapsado] = useState(() => { try { return localStorage.getItem('admin_sidebar_colapsado') === '1' } catch { return false } })
@@ -404,6 +429,15 @@ export default function Dashboard() {
     puede?: Capacidades
   } | null>(null)
   const [usuarios, setUsuarios] = useState<UsuarioPanel[]>([])
+
+  /* ── Caja del mostrador ──
+     El Dashboard es el dueño de las hojas de venta y renta; la caja solo las
+     pide. Así hay UNA hoja de cada cosa en todo el sistema en vez de una copia
+     para el mostrador, y el IVA, el depósito y el padrón se comportan igual
+     entren por donde entren. */
+  const [cajaVender, setCajaVender] = useState<Unidad | null>(null)
+  const [cajaRentar, setCajaRentar] = useState<Unidad | null>(null)
+  const [cajaCfg, setCajaCfg] = useState({ vende: false, renta: false })
 
   const [equipos, setEquipos] = useState<Equipo[]>([])
   const [coupons, setCoupons] = useState<Coupon[]>([])
@@ -597,6 +631,16 @@ export default function Dashboard() {
   useRecurso(['rentas'], loadAdeudos)   // los abonos tocan Renta: el saldo baja solo
   useRecurso(['notificaciones'], loadNotifs)
   useRecurso(['cotizaciones'], loadCotizaciones)
+
+  // Los dos interruptores de la caja. Se leen una vez al entrar al panel: son
+  // configuración del negocio, no cambian a media jornada. Si la lectura falla
+  // se quedan apagados —es el lado seguro: el servidor los valida de todos
+  // modos, así que un botón de más solo daría un error, no una venta indebida.
+  useEffect(() => {
+    api.get<{ caja_vende_maquinaria: boolean; caja_renta_maquinaria: boolean }>('/config/')
+      .then(r => setCajaCfg({ vende: !!r.data?.caja_vende_maquinaria, renta: !!r.data?.caja_renta_maquinaria }))
+      .catch(() => { /* sin permisos de configuración o red caída: quedan apagados */ })
+  }, [])
   // Latido del panel: lo que capturan OTROS (un cliente envía su cotización,
   // otro admin edita un producto o registra una renta) llega solo en ~2 s,
   // y solo se recarga el tema que de verdad cambió.
@@ -639,6 +683,7 @@ export default function Dashboard() {
   // administración entra a mirar, con capacidades distintas y la misma puerta.
   const REQUIERE: Partial<Record<Section, Cap | Cap[]>> = {
     resumen: 'ver_dinero',
+    caja: 'usar_caja',
     ventas: 'ver_dinero',   // la LISTA de ventas es historial del negocio
     cotizaciones: 'cotizar',
     facturacion: 'facturar',
@@ -682,6 +727,7 @@ export default function Dashboard() {
     {
       items: [
         { key: 'resumen', label: 'Resumen', icon: <><path d="M4 10.5L12 4l8 6.5V20a1.5 1.5 0 0 1-1.5 1.5H5.5A1.5 1.5 0 0 1 4 20z" /><path d="M9.5 21.5v-6.8a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v6.8" /></> },
+        { key: 'caja', label: 'Caja', icon: <><rect x="2.5" y="7" width="19" height="12" rx="2" /><path d="M2.5 11h19" /><path d="M7 15.5h3" /></> },
       ],
     },
     {
@@ -737,12 +783,14 @@ export default function Dashboard() {
     // toca, la primera de su menú, y como último recurso su perfil.
     const destino: Section = seccionPermitida('ubicaciones') ? 'ubicaciones'
       : (navGroups[0]?.items[0]?.key ?? 'perfil')
-    setSection(destino)
+    // `replace`: la sección a la que no tenía acceso no debe quedar en el
+    // historial, o el botón "atrás" lo devolvería a la pantalla que se le negó.
+    irASeccion(destino, true)
     // Solo reacciona a que lleguen las capacidades o cambie la sección.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [puede, section])
 
-  const go = (s: Section) => { setSection(s); setSidebarOpen(false) }
+  const go = (s: Section) => { irASeccion(s); setSidebarOpen(false) }
   // Desde Inventario: al enviar una máquina propia a taller se crea la orden interna
   // y saltamos a Reparaciones abriéndola.
   const abrirReparacion = (ordenId: number) => {
@@ -865,7 +913,7 @@ export default function Dashboard() {
           <div className="flex-1 min-w-0" />
           <div onClick={() => setPaletteOpen(true)} className="hidden md:flex items-center gap-2 border border-edge rounded-[9px] px-3.5 py-2 bg-app w-full max-w-[420px] min-w-0 hover:border-gold/40 transition-colors cursor-pointer">
             <svg className="w-3.5 h-3.5 text-mute shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><circle cx="11" cy="11" r="7" /><path d="M21 21l-4-4" strokeLinecap="round" /></svg>
-            <input ref={searchInputRef} readOnly placeholder={t('top.search')} className="flex-1 min-w-0 bg-transparent text-[13.5px] outline-none placeholder-mute cursor-pointer" />
+            <input aria-label="Buscar" ref={searchInputRef} readOnly placeholder={t('top.search')} className="flex-1 min-w-0 bg-transparent text-[13.5px] outline-none placeholder-mute cursor-pointer" />
             <span className="text-[11px] font-bold text-mute bg-surface-2 rounded px-1.5 py-0.5 shrink-0">⌘K</span>
           </div>
           <div className="flex-1 min-w-0" />
@@ -1119,6 +1167,20 @@ export default function Dashboard() {
               onEnviarTaller={abrirReparacion}
             />
           )}
+          {section === 'caja' && (
+            <CajaPOS
+              notify={notify}
+              unidades={unidades.map(u => ({
+                id: u.id, codigo: u.codigo, estado: u.estado,
+                equipo_modelo: u.equipo_modelo,
+                puede_venderse: u.puede_venderse, puede_rentarse: u.puede_rentarse,
+              }))}
+              puedeVenderMaquina={cajaCfg.vende}
+              puedeRentarMaquina={cajaCfg.renta}
+              onVenderMaquina={u => { const real = unidades.find(x => x.id === u.id); if (real) setCajaVender(real) }}
+              onRentarMaquina={u => { const real = unidades.find(x => x.id === u.id); if (real) setCajaRentar(real) }}
+            />
+          )}
           {section === 'refacciones' && (
             <RefaccionesAdmin refacciones={refacciones} reload={loadRefacciones} notify={notify} />
           )}
@@ -1239,6 +1301,25 @@ export default function Dashboard() {
       </div>
 
       {invEquipo && <InventoryModal equipo={invEquipo} onClose={() => setInvEquipo(null)} notify={notify} />}
+
+      {/* Las hojas que la CAJA pide. Viven aquí, no en CajaPOS, para que exista
+          una sola hoja de venta y una sola de renta en todo el panel. */}
+      {cajaVender && (
+        <SellModal
+          unit={cajaVender} equipo={equipoFromUnit(cajaVender)} desdeCaja
+          onClose={() => setCajaVender(null)}
+          onDone={() => { setCajaVender(null); loadUnidades(); loadMetrics() }}
+          notify={notify}
+        />
+      )}
+      {cajaRentar && (
+        <RentModal
+          unit={cajaRentar} equipo={equipoFromUnit(cajaRentar)} desdeCaja
+          onClose={() => setCajaRentar(null)}
+          onDone={() => { setCajaRentar(null); loadUnidades(); loadRentas(); loadMetrics() }}
+          notify={notify}
+        />
+      )}
 
       {paletteOpen && (
         <CommandPalette
@@ -1501,7 +1582,7 @@ function Resumen({ equipos, rentas, unidades, ventas, me, go, metrics, adeudos, 
               ))}
             </div>
             <div className="flex gap-1.5 mb-4">
-              <input value={taskInput} onChange={e => setTaskInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && addTask()} placeholder="Agregar una tarea..." className="flex-1 border border-edge rounded-lg px-3 py-2.5 text-[13.5px] bg-app text-ink placeholder-mute focus:outline-none focus:border-gold/50" />
+              <input aria-label="Agregar una tarea" value={taskInput} onChange={e => setTaskInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && addTask()} placeholder="Agregar una tarea..." className="flex-1 border border-edge rounded-lg px-3 py-2.5 text-[13.5px] bg-app text-ink placeholder-mute focus:outline-none focus:border-gold/50" />
               <button onClick={addTask} className="w-10 h-10 rounded-lg bg-gold text-gold-on flex items-center justify-center text-lg font-bold hover:opacity-90 shrink-0">+</button>
             </div>
             {visibleTasks.length === 0 ? (
@@ -1804,15 +1885,15 @@ function EquiposAdmin({ equipos, categorias, tipos, marcas, reload, notify }: {
     }
   }
 
-  function del(id?: number) {
-    if (!id || !confirm('¿Eliminar este producto?')) return
+  async function del(id?: number) {
+    if (!id || !await confirmar({ titulo: '¿Eliminar este producto?', mensaje: 'Se borra del catálogo. No se puede deshacer.', aceptar: 'Eliminar', tono: 'peligro' })) return
     api.delete(`/equipos/${id}/`)
       .then(() => { notify('Producto eliminado'); reload() })
       .catch(err => notify(err?.response?.data?.detail || 'Error al eliminar', 'err'))
   }
 
   const sel = (opts: Option[], current: Option | null | undefined, onPick: (o: Option | null) => void, placeholder: string) => (
-    <select
+    <select aria-label={placeholder}
       value={current?.id || ''}
       onChange={e => { const id = Number(e.target.value); onPick(id ? { id, nombre: opts.find(o => o.id === id)?.nombre || '' } : null) }}
       className={input}
@@ -1848,7 +1929,7 @@ function EquiposAdmin({ equipos, categorias, tipos, marcas, reload, notify }: {
           <div className="flex-1 flex items-center gap-3 sm:justify-end">
             <div className="relative flex-1 sm:max-w-xs">
               <svg className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-mute pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><circle cx="9" cy="9" r="6" /><path d="M15 15l3 3" strokeLinecap="round" /></svg>
-              <input value={q} onChange={e => setQ(e.target.value)} placeholder="Buscar producto..."
+              <input aria-label="Buscar producto" value={q} onChange={e => setQ(e.target.value)} placeholder="Buscar producto..."
                 className="w-full bg-surface-2 border border-edge rounded-full pl-9 pr-3 py-2 text-sm text-ink placeholder-mute focus:outline-none focus:border-gold/50 transition-colors" />
             </div>
             {puedeEditar && (
@@ -1961,7 +2042,7 @@ function EquiposAdmin({ equipos, categorias, tipos, marcas, reload, notify }: {
       {/* Panel lateral de formulario (crear/editar): se desliza desde la derecha
           y deja visible la lista detrás — el contexto no se pierde. */}
       {formOpen && (
-        <div className="fixed inset-0 z-[60] bg-black/40 backdrop-blur-[2px]" onClick={() => setFormOpen(false)}>
+        <Modal className="fixed inset-0 z-[60] bg-black/40 backdrop-blur-[2px]" onClose={() => setFormOpen(false)} label={editing ? 'Editar producto' : 'Nuevo producto'}>
           <motion.div
             initial={{ x: '100%' }} animate={{ x: 0 }} transition={{ duration: 0.3, ease: [0.23, 1, 0.32, 1] }}
             onClick={(e: React.MouseEvent) => e.stopPropagation()}
@@ -1976,11 +2057,11 @@ function EquiposAdmin({ equipos, categorias, tipos, marcas, reload, notify }: {
             <div className="p-6 space-y-4 flex-1 overflow-y-auto">
               <div>
                 <label className={label}>Modelo *</label>
-                <input className={input} value={form.modelo} onChange={e => setForm({ ...form, modelo: e.target.value })} placeholder="Ej. Mezcladora 9ft³" autoFocus />
+                <input aria-label="Modelo" aria-required="true" className={input} value={form.modelo} onChange={e => setForm({ ...form, modelo: e.target.value })} placeholder="Ej. Mezcladora 9ft³" autoFocus />
               </div>
               <div>
                 <label className={label}>Descripción</label>
-                <textarea className={`${input} resize-none`} rows={2} value={form.descripcion || ''} onChange={e => setForm({ ...form, descripcion: e.target.value })} placeholder="Características del equipo" />
+                <textarea aria-label="Descripción" className={`${input} resize-none`} rows={2} value={form.descripcion || ''} onChange={e => setForm({ ...form, descripcion: e.target.value })} placeholder="Características del equipo" />
               </div>
               {/* Al crear: la condición define qué precios aplican (nueva = solo venta) */}
               <div className="rounded-2xl border border-gold/20 bg-gold-soft/50 p-4">
@@ -1989,7 +2070,7 @@ function EquiposAdmin({ equipos, categorias, tipos, marcas, reload, notify }: {
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className={label}>Condición</label>
-                    <select className={input} value={cond} onChange={e => setCond(e.target.value as any)}>
+                    <select aria-label="Condición" className={input} value={cond} onChange={e => setCond(e.target.value as any)}>
                       <option value="seminueva" className="bg-surface">Seminueva (renta)</option>
                       <option value="nueva" className="bg-surface">Nueva (venta)</option>
                     </select>
@@ -1997,7 +2078,7 @@ function EquiposAdmin({ equipos, categorias, tipos, marcas, reload, notify }: {
                   {!editing && cond === 'seminueva' && (
                     <div>
                       <label className={label}>Unidades</label>
-                      <input type="number" min={1} max={100} className={input} value={cantidad} onChange={e => setCantidad(e.target.value)} />
+                      <input aria-label="Unidades" type="number" min={1} max={100} className={input} value={cantidad} onChange={e => setCantidad(e.target.value)} />
                     </div>
                   )}
                 </div>
@@ -2030,7 +2111,7 @@ function EquiposAdmin({ equipos, categorias, tipos, marcas, reload, notify }: {
                     ) : (
                       <div className="mt-2.5">
                         <label className={label}>¿Cuántas unidades entran a stock?</label>
-                        <input type="number" min={1} max={100} className={input} value={cantidad} onChange={e => setCantidad(e.target.value)} />
+                        <input aria-label="¿Cuántas unidades entran a stock?" type="number" min={1} max={100} className={input} value={cantidad} onChange={e => setCantidad(e.target.value)} />
                       </div>
                     )}
                   </div>
@@ -2041,18 +2122,18 @@ function EquiposAdmin({ equipos, categorias, tipos, marcas, reload, notify }: {
                   de venta de un equipo de RENTA es interno (el público no lo ve). */}
               <div className="grid grid-cols-2 gap-3">
                 {cond === 'seminueva' && (<>
-                  <div><label className={label}>Precio / día</label><input type="number" className={input} value={form.precio_dia ?? ''} onChange={e => setForm({ ...form, precio_dia: e.target.value })} placeholder="0.00" /></div>
-                  <div><label className={label}>Precio / semana</label><input type="number" className={input} value={form.precio_semana ?? ''} onChange={e => setForm({ ...form, precio_semana: e.target.value })} placeholder="0.00" /></div>
-                  <div><label className={label}>Precio / mes</label><input type="number" className={input} value={form.precio_mes ?? ''} onChange={e => setForm({ ...form, precio_mes: e.target.value })} placeholder="0.00" /></div>
+                  <div><label className={label}>Precio / día</label><input aria-label="Precio / día" type="number" className={input} value={form.precio_dia ?? ''} onChange={e => setForm({ ...form, precio_dia: e.target.value })} placeholder="0.00" /></div>
+                  <div><label className={label}>Precio / semana</label><input aria-label="Precio / semana" type="number" className={input} value={form.precio_semana ?? ''} onChange={e => setForm({ ...form, precio_semana: e.target.value })} placeholder="0.00" /></div>
+                  <div><label className={label}>Precio / mes</label><input aria-label="Precio / mes" type="number" className={input} value={form.precio_mes ?? ''} onChange={e => setForm({ ...form, precio_mes: e.target.value })} placeholder="0.00" /></div>
                 </>)}
                 <div className={cond === 'seminueva' ? '' : 'col-span-2'}>
                   <label className={label}>Precio venta{cond === 'seminueva' ? ' (interno)' : ''}</label>
-                  <input type="number" className={input} value={form.precio_venta ?? ''} onChange={e => setForm({ ...form, precio_venta: e.target.value })} placeholder="0.00" />
+                  <input aria-label="Precio de venta" type="number" className={input} value={form.precio_venta ?? ''} onChange={e => setForm({ ...form, precio_venta: e.target.value })} placeholder="0.00" />
                 </div>
                 {/* Los meses son POR MÁQUINA: 3 es lo normal, no una regla fija. */}
                 <div className="col-span-2">
                   <label className={label}>Garantía al comprador (meses)</label>
-                  <input
+                  <input aria-label="Garantía al comprador (meses)"
                     type="number" min={0} max={120} className={input}
                     value={(form as any).garantia_meses ?? ''}
                     onChange={e => setForm({ ...form, garantia_meses: e.target.value } as any)}
@@ -2068,7 +2149,7 @@ function EquiposAdmin({ equipos, categorias, tipos, marcas, reload, notify }: {
                 {cond === 'nueva' && (editing || esSobrePedido) && (
                   <div className="col-span-2">
                     <label className={label}>Días de entrega si es sobre pedido</label>
-                    <input type="number" min={0} max={365} className={input} value={form.dias_entrega_pedido ?? ''} onChange={e => setForm({ ...form, dias_entrega_pedido: e.target.value })} placeholder="Vacío = usar el tiempo general del negocio" />
+                    <input aria-label="Días de entrega si es sobre pedido" type="number" min={0} max={365} className={input} value={form.dias_entrega_pedido ?? ''} onChange={e => setForm({ ...form, dias_entrega_pedido: e.target.value })} placeholder="Vacío = usar el tiempo general del negocio" />
                     <p className="text-[11px] text-mute mt-1">Cuánto tarda el proveedor en surtir <b>esta</b> máquina cuando va sobre pedido. Vacío o 0 usa el tiempo general.</p>
                   </div>
                 )}
@@ -2082,7 +2163,7 @@ function EquiposAdmin({ equipos, categorias, tipos, marcas, reload, notify }: {
               </div>
               <div>
                 <label className={label}>Imagen <span className="text-mute font-normal normal-case">(JPG, PNG, WebP)</span></label>
-                <input type="file" accept="image/jpeg,image/png,image/webp,image/gif,image/*" onChange={e => setImageFile(e.target.files?.[0] || null)}
+                <input aria-label="Imagen del producto" type="file" accept="image/jpeg,image/png,image/webp,image/gif,image/*" onChange={e => setImageFile(e.target.files?.[0] || null)}
                   className="w-full text-xs text-mute file:mr-3 file:py-2 file:px-4 file:rounded-full file:border-0 file:bg-gold-soft file:text-gold-ink file:text-xs file:font-semibold hover:file:bg-gold/20 file:cursor-pointer" />
                 {editing && form.imagen && !imageFile && (
                   <img src={resolveMediaUrl(form.imagen)} alt="" className="mt-3 w-20 h-20 object-cover rounded-lg" />
@@ -2092,7 +2173,7 @@ function EquiposAdmin({ equipos, categorias, tipos, marcas, reload, notify }: {
               {cond === 'nueva' && (
               <div>
                 <label className={label}>Ficha técnica <span className="text-mute font-normal normal-case">(PDF — la que descarga el cliente)</span></label>
-                <input type="file" accept="application/pdf,.pdf" onChange={e => setFichaFile(e.target.files?.[0] || null)}
+                <input aria-label="Ficha técnica en PDF" type="file" accept="application/pdf,.pdf" onChange={e => setFichaFile(e.target.files?.[0] || null)}
                   className="w-full text-xs text-mute file:mr-3 file:py-2 file:px-4 file:rounded-full file:border-0 file:bg-gold-soft file:text-gold-ink file:text-xs file:font-semibold hover:file:bg-gold/20 file:cursor-pointer" />
                 {fichaFile
                   ? <p className="mt-2 text-[11px] text-emerald-600">Nueva ficha: {fichaFile.name}</p>
@@ -2115,8 +2196,8 @@ function EquiposAdmin({ equipos, categorias, tipos, marcas, reload, notify }: {
                   <div className="space-y-2 mt-3">
                     {specs.map((s, i) => (
                       <div key={i} className="flex gap-2 items-center">
-                        <input list="spec-sugeridas" className={`${input} flex-1`} value={s.etiqueta} onChange={e => setSpec(i, 'etiqueta', e.target.value)} placeholder="Etiqueta (ej. Frecuencia)" />
-                        <input className={`${input} flex-1`} value={s.valor} onChange={e => setSpec(i, 'valor', e.target.value)} placeholder="Valor (ej. 60 Hz)" />
+                        <input aria-label="Etiqueta (ej. Frecuencia)" list="spec-sugeridas" className={`${input} flex-1`} value={s.etiqueta} onChange={e => setSpec(i, 'etiqueta', e.target.value)} placeholder="Etiqueta (ej. Frecuencia)" />
+                        <input aria-label="Valor (ej. 60 Hz)" className={`${input} flex-1`} value={s.valor} onChange={e => setSpec(i, 'valor', e.target.value)} placeholder="Valor (ej. 60 Hz)" />
                         <button type="button" onClick={() => removeSpec(i)} title="Quitar" className="shrink-0 w-9 h-9 rounded-lg border border-red-500/20 text-red-400 hover:bg-red-500/10 transition-colors flex items-center justify-center">
                           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" d="M6 6l12 12M18 6L6 18" /></svg>
                         </button>
@@ -2147,7 +2228,7 @@ function EquiposAdmin({ equipos, categorias, tipos, marcas, reload, notify }: {
                     <p className="text-[11px] text-mute mt-0.5">Porcentaje que se descuenta del precio. Deja 0 si no hay promoción.</p>
                   </div>
                   <div className="flex items-center gap-1.5 shrink-0">
-                    <input type="number" min={0} max={90} className={`${input} !w-20 text-center`} value={form.promo_pct ?? 0}
+                    <input aria-label="Descuento de promoción" type="number" min={0} max={90} className={`${input} !w-20 text-center`} value={form.promo_pct ?? 0}
                       onChange={e => setForm(f => ({ ...f, promo_pct: Number(e.target.value) }))} />
                     <span className="text-lg font-bold text-mute">%</span>
                   </div>
@@ -2166,7 +2247,7 @@ function EquiposAdmin({ equipos, categorias, tipos, marcas, reload, notify }: {
                   <label className={`${label} !mb-0`}>Qué incluye</label>
                   <span className="text-[11px] text-mute">Una línea por punto · "Título: detalle"</span>
                 </div>
-                <textarea rows={4} className={`${input} mt-2 resize-y`} value={(form.que_incluye || []).join('\n')}
+                <textarea aria-label="Qué incluye" rows={4} className={`${input} mt-2 resize-y`} value={(form.que_incluye || []).join('\n')}
                   onChange={e => setForm(f => ({ ...f, que_incluye: e.target.value.split('\n') }))}
                   placeholder={'Punta y cincel plano: encastre hex 1-1/8\"\nMaletín metálico: con espacio para accesorios'} />
               </div>
@@ -2180,7 +2261,7 @@ function EquiposAdmin({ equipos, categorias, tipos, marcas, reload, notify }: {
               </button>
             </div>
           </motion.div>
-        </div>
+        </Modal>
       )}
 
       {invEquipo && <InventoryModal equipo={invEquipo} onClose={() => setInvEquipo(null)} notify={notify} />}
@@ -2333,8 +2414,8 @@ function InventoryModal({ equipo, onClose, notify }: {
       .finally(() => setAdding(false))
   }
 
-  function delUnit(u: Unidad) {
-    if (!confirm(`¿Eliminar la unidad ${u.codigo}?`)) return
+  async function delUnit(u: Unidad) {
+    if (!await confirmar({ titulo: `¿Eliminar la unidad ${u.codigo}?`, mensaje: 'Se borra del inventario. No se puede deshacer.', aceptar: 'Eliminar', tono: 'peligro' })) return
     api.delete(`/unidades/${u.id}/`)
       .then(() => { notify('Unidad eliminada'); load() })
       .catch(err => notify(err?.response?.data?.detail || err?.response?.data?.[0] || 'No se puede eliminar', 'err'))
@@ -2359,7 +2440,7 @@ function InventoryModal({ equipo, onClose, notify }: {
   )
 
   return (
-    <div className="modal-in fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm flex items-end sm:items-start justify-center p-0 sm:p-6" onClick={onClose}>
+    <Modal className="modal-in fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm flex items-end sm:items-start justify-center p-0 sm:p-6" onClose={onClose} label={`Unidades de ${equipo.modelo}`}>
       <div onClick={e => e.stopPropagation()} className="bg-surface w-full sm:max-w-5xl sm:rounded-3xl rounded-t-3xl border border-edge sm:my-auto max-h-[92vh] flex flex-col overflow-hidden shadow-[0_20px_50px_rgba(33,29,22,0.18)]">
         {/* Header */}
         <div className="px-6 sm:px-7 py-5 flex items-start justify-between gap-4">
@@ -2417,7 +2498,7 @@ function InventoryModal({ equipo, onClose, notify }: {
                 </button>
               ))}
             </div>
-            <input className={`${input} flex-1`} value={newSerie} onChange={e => setNewSerie(e.target.value)} placeholder="N° de serie (opcional)" />
+            <input aria-label="N° de serie (opcional)" className={`${input} flex-1`} value={newSerie} onChange={e => setNewSerie(e.target.value)} placeholder="N° de serie (opcional)" />
             <button onClick={() => { cargarProximo(); setConfirmando(true) }} className="shrink-0 px-5 py-2.5 rounded-xl border border-edge bg-surface-2 text-ink font-bold text-sm hover:border-gold/40 hover:text-gold-ink transition-colors whitespace-nowrap">
               Agregar
             </button>
@@ -2552,7 +2633,7 @@ function InventoryModal({ equipo, onClose, notify }: {
       {qrUnit && <QRModal unit={qrUnit} equipo={equipo} onClose={() => setQrUnit(null)} />}
       {rentUnit && <RentModal unit={rentUnit} equipo={equipo} onClose={() => setRentUnit(null)} onDone={() => { setRentUnit(null); load() }} notify={notify} />}
       {sellUnit && <SellModal unit={sellUnit} equipo={equipo} onClose={() => setSellUnit(null)} onDone={() => { setSellUnit(null); load() }} notify={notify} />}
-    </div>
+    </Modal>
   )
 }
 
@@ -2574,7 +2655,7 @@ function QRModal({ unit, equipo, onClose }: { unit: Unidad; equipo: Equipo; onCl
   }
 
   return (
-    <div className="modal-in fixed inset-0 z-[70] bg-black/70 backdrop-blur-sm flex items-center justify-center p-6" onClick={onClose}>
+    <Modal className="modal-in fixed inset-0 z-[70] bg-black/70 backdrop-blur-sm flex items-center justify-center p-6" onClose={onClose} label={`Código QR de ${unit.codigo}`}>
       <div onClick={e => e.stopPropagation()} className="bg-surface border border-edge rounded-3xl p-8 max-w-xs w-full text-center">
         <h3 className="font-black text-ink mb-1">{unit.codigo}</h3>
         <p className="text-xs text-mute mb-5">{equipo.modelo}{unit.numero_serie ? ` · ${unit.numero_serie}` : ''}</p>
@@ -2587,7 +2668,7 @@ function QRModal({ unit, equipo, onClose }: { unit: Unidad; equipo: Equipo; onCl
           <button onClick={download} className="flex-1 py-2.5 rounded-full bg-gold text-black text-sm font-bold hover:opacity-90 transition-opacity">Descargar</button>
         </div>
       </div>
-    </div>
+    </Modal>
   )
 }
 
@@ -2642,8 +2723,10 @@ function validarFactura(_requiere: boolean, _empresaId: string, _f: FacturaData)
 }
 
 /* ── Registrar renta ── */
-function RentModal({ unit, equipo, onClose, onDone, notify }: {
+function RentModal({ unit, equipo, onClose, onDone, notify, desdeCaja = false }: {
   unit: Unidad; equipo: Equipo; onClose: () => void; onDone: () => void; notify: (m: string, t?: 'ok' | 'err') => void
+  /** Levantada/vendida desde la caja: el cobro entra al turno del mostrador. */
+  desdeCaja?: boolean
 }) {
   const hoy = new Date().toISOString().slice(0, 10)
   const [sel, setSel] = useState<SeleccionCliente>(SELECCION_VACIA)
@@ -2667,6 +2750,26 @@ function RentModal({ unit, equipo, onClose, onDone, notify }: {
   const [monto1, setMonto1] = useState('')
   const [monto2, setMonto2] = useState('')
   const [busy, setBusy] = useState(false)
+
+  // "Sucio" = el operador ya invirtió trabajo aquí. Los valores que nacen con
+  // contenido (fecha de hoy, duración 1, método efectivo) no cuentan.
+  const sucio = Boolean(
+    sel.nombre.trim() || sel.telefono.trim() || sel.cliente || direccion.trim() ||
+    descuento.trim() || deposito.trim() || obraId || usuarioId || requiereFactura ||
+    duracion !== '1' || modalidad !== 'dia' || splitPago || monto1.trim() || monto2.trim(),
+  )
+
+  /* Cerrar con un clic afuera borraba catorce campos sin preguntar, y esto se
+     llena con el cliente enfrente. Solo estorba si de verdad hay algo escrito:
+     una hoja intacta se cierra de inmediato, como antes. */
+  async function cerrarConAviso() {
+    if (!sucio) { onClose(); return }
+    if (await confirmar({
+      titulo: '¿Descartar lo que llevas?',
+      mensaje: 'Cerraste la hoja sin registrar. Lo capturado se pierde.',
+      aceptar: 'Descartar', cancelar: 'Seguir aquí', tono: 'peligro',
+    })) onClose()
+  }
 
   useEffect(() => {
     // Cuentas de cliente, para vincular la renta a su panel ("Tus rentas").
@@ -2728,6 +2831,9 @@ function RentModal({ unit, equipo, onClose, onDone, notify }: {
     }
     setBusy(true)
     api.post('/rentas/crear/', {
+      // Levantada desde la caja: el cobro y el depósito entran al turno del
+      // mostrador. Sin esta bandera el backend no toca la caja para nada.
+      desde_caja: desdeCaja || undefined,
       inventario_id: unit.id, modalidad, duracion: Number(duracion) || 1,
       cliente: sel.nombre.trim(), telefono_cliente: sel.telefono, direccion: direccion.trim(),
       fecha_inicio: fechaInicio || undefined,
@@ -2738,6 +2844,11 @@ function RentModal({ unit, equipo, onClose, onDone, notify }: {
       requiere_factura: requiereFactura, factura,
     })
       .then(res => {
+        // Igual que en la venta: si el backend abrió el turno solo, hay que
+        // decirlo, porque el fondo inicial quedó en $0.
+        if (res.data?.turno_abierto) {
+          notify('Se abrió tu turno de caja con fondo $0. Ajústalo en el arqueo.')
+        }
         const est = res.data?.renta?.estado
         fijarCotParaRenta(null)   // puente consumido: la renta quedó ligada
         notify(est === 'reservada' ? 'Reserva registrada' : 'Renta registrada')
@@ -2750,7 +2861,7 @@ function RentModal({ unit, equipo, onClose, onDone, notify }: {
   }
 
   return (
-    <div className="fixed inset-0 z-[70] bg-black/40 backdrop-blur-[2px]" onClick={onClose}>
+    <Modal className="fixed inset-0 z-[70] bg-black/40 backdrop-blur-[2px]" onClose={cerrarConAviso} label={`${esReserva ? 'Reservar' : 'Rentar'} ${unit.codigo}`}>
       <motion.div
         initial={{ x: '100%' }} animate={{ x: 0 }} transition={{ duration: 0.3, ease: [0.23, 1, 0.32, 1] }}
         onClick={e => e.stopPropagation()}
@@ -2777,7 +2888,7 @@ function RentModal({ unit, equipo, onClose, onDone, notify }: {
           {sel.cliente && sel.cliente.obras.length > 0 && (
             <div>
               <label className={label}>Obra</label>
-              <select className={input} value={obraId} onChange={e => elegirObra(e.target.value)}>
+              <select aria-label="Obra" className={input} value={obraId} onChange={e => elegirObra(e.target.value)}>
                 <option value="" className="bg-surface">— Sin obra —</option>
                 {sel.cliente.obras.map(o => <option key={o.id} value={o.id} className="bg-surface">{o.nombre}</option>)}
               </select>
@@ -2786,26 +2897,26 @@ function RentModal({ unit, equipo, onClose, onDone, notify }: {
           {clientes.length > 0 && (
             <div>
               <label className={label}>Cuenta del cliente <span className="text-mute font-normal normal-case">(opcional — para que la vea en "Tus rentas")</span></label>
-              <select className={input} value={usuarioId} onChange={e => setUsuarioId(e.target.value)}>
+              <select aria-label="Cuenta del cliente" className={input} value={usuarioId} onChange={e => setUsuarioId(e.target.value)}>
                 <option value="" className="bg-surface">— Sin vincular —</option>
                 {clientes.map(c => <option key={c.id} value={c.id} className="bg-surface">{c.nombre}{c.empresa ? ` — ${c.empresa}` : ''}</option>)}
               </select>
             </div>
           )}
-          <div><label className={label}>Dirección / ubicación de obra *</label><input className={input} value={direccion} onChange={e => setDireccion(e.target.value)} placeholder="Dónde estará el equipo" /></div>
+          <div><label className={label}>Dirección / ubicación de obra *</label><input aria-label="Dirección / ubicación de obra" aria-required="true" className={input} value={direccion} onChange={e => setDireccion(e.target.value)} placeholder="Dónde estará el equipo" /></div>
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className={label}>Modalidad</label>
-              <select className={input} value={modalidad} onChange={e => setModalidad(e.target.value as any)}>
+              <select aria-label="Modalidad" className={input} value={modalidad} onChange={e => setModalidad(e.target.value as any)}>
                 <option value="dia" className="bg-surface">Por día</option>
                 <option value="semana" className="bg-surface">Por semana</option>
                 <option value="mes" className="bg-surface">Por mes</option>
               </select>
             </div>
-            <div><label className={label}>Duración</label><input type="number" min={1} className={input} value={duracion} onChange={e => setDuracion(e.target.value)} /></div>
+            <div><label className={label}>Duración</label><input aria-label="Duración" type="number" min={1} className={input} value={duracion} onChange={e => setDuracion(e.target.value)} /></div>
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <div><label className={label}>Fecha de inicio</label><input type="date" min={hoy} className={input} value={fechaInicio} onChange={e => setFechaInicio(e.target.value)} /></div>
+            <div><label className={label}>Fecha de inicio</label><input aria-label="Fecha de inicio" type="date" min={hoy} className={input} value={fechaInicio} onChange={e => setFechaInicio(e.target.value)} /></div>
             <div><label className={label}>Descuento</label><InputDinero valor={descuento} onValor={setDescuento} /></div>
           </div>
           <div><label className={label}>Depósito / garantía</label><InputDinero valor={deposito} onValor={setDeposito} /></div>
@@ -2817,7 +2928,7 @@ function RentModal({ unit, equipo, onClose, onDone, notify }: {
               </button>
             </div>
             {!splitPago ? (
-              <select className={input} value={metodo} onChange={e => setMetodo(e.target.value as any)}>
+              <select aria-label="Método de pago" className={input} value={metodo} onChange={e => setMetodo(e.target.value as any)}>
                 <option value="efectivo" className="bg-surface">Efectivo</option>
                 <option value="tarjeta" className="bg-surface">Tarjeta</option>
                 <option value="transferencia" className="bg-surface">Transferencia</option>
@@ -2825,7 +2936,7 @@ function RentModal({ unit, equipo, onClose, onDone, notify }: {
             ) : (
               <div className="space-y-2">
                 <div className="flex gap-2">
-                  <select className={`${input} flex-1`} value={metodo} onChange={e => setMetodo(e.target.value as any)}>
+                  <select aria-label="Método de pago 1" className={`${input} flex-1`} value={metodo} onChange={e => setMetodo(e.target.value as any)}>
                     <option value="efectivo" className="bg-surface">Efectivo</option>
                     <option value="tarjeta" className="bg-surface">Tarjeta</option>
                     <option value="transferencia" className="bg-surface">Transferencia</option>
@@ -2833,7 +2944,7 @@ function RentModal({ unit, equipo, onClose, onDone, notify }: {
                   <div className="w-[44%]"><InputDinero valor={monto1} onValor={setMonto1} placeholder="Monto" /></div>
                 </div>
                 <div className="flex gap-2">
-                  <select className={`${input} flex-1`} value={metodo2} onChange={e => setMetodo2(e.target.value as any)}>
+                  <select aria-label="Método de pago 2" className={`${input} flex-1`} value={metodo2} onChange={e => setMetodo2(e.target.value as any)}>
                     <option value="efectivo" className="bg-surface">Efectivo</option>
                     <option value="tarjeta" className="bg-surface">Tarjeta</option>
                     <option value="transferencia" className="bg-surface">Transferencia</option>
@@ -2875,13 +2986,15 @@ function RentModal({ unit, equipo, onClose, onDone, notify }: {
           <button onClick={submit} disabled={busy} className="btn-renta px-7 py-2.5 rounded-full text-sm font-bold">{esReserva ? 'Reservar' : 'Registrar renta'}</button>
         </div>
       </motion.div>
-    </div>
+    </Modal>
   )
 }
 
 /* ── Registrar venta ── */
-function SellModal({ unit, equipo, onClose, onDone, notify }: {
+function SellModal({ unit, equipo, onClose, onDone, notify, desdeCaja = false }: {
   unit: Unidad; equipo: Equipo; onClose: () => void; onDone: () => void; notify: (m: string, t?: 'ok' | 'err') => void
+  /** Levantada/vendida desde la caja: el cobro entra al turno del mostrador. */
+  desdeCaja?: boolean
 }) {
   const [metodo, setMetodo] = useState<'efectivo' | 'tarjeta' | 'transferencia'>('efectivo')
   // Pago dividido: dos métodos que reparten el total con IVA (p. ej. efectivo + tarjeta).
@@ -2894,6 +3007,26 @@ function SellModal({ unit, equipo, onClose, onDone, notify }: {
   const [requiereFactura, setRequiereFactura] = useState(false)
   const [factura, setFactura] = useState<FacturaData>(FACTURA_VACIA)
   const [busy, setBusy] = useState(false)
+
+  // "Sucio" = ya hay trabajo capturado. El precio arranca con el de catálogo,
+  // así que solo cuenta si lo cambiaron a mano.
+  const sucio = Boolean(
+    sel.nombre.trim() || sel.telefono.trim() || sel.cliente || requiereFactura ||
+    splitPago || monto1.trim() || monto2.trim() ||
+    total !== String(equipo.precio_venta ?? ''),
+  )
+
+  /* Cerrar con un clic afuera borraba catorce campos sin preguntar, y esto se
+     llena con el cliente enfrente. Solo estorba si de verdad hay algo escrito:
+     una hoja intacta se cierra de inmediato, como antes. */
+  async function cerrarConAviso() {
+    if (!sucio) { onClose(); return }
+    if (await confirmar({
+      titulo: '¿Descartar lo que llevas?',
+      mensaje: 'Cerraste la hoja sin registrar. Lo capturado se pierde.',
+      aceptar: 'Descartar', cancelar: 'Seguir aquí', tono: 'peligro',
+    })) onClose()
+  }
 
   // En VENTAS el precio de catálogo YA INCLUYE IVA: es el precio al público y no
   // se le suma nada encima. El IVA se DESGLOSA del total (total / 1.16), igual que
@@ -2919,6 +3052,8 @@ function SellModal({ unit, equipo, onClose, onDone, notify }: {
     }
     setBusy(true)
     api.post(`/unidades/${unit.id}/vender/`, {
+      // Vendida desde la caja: el cobro entra al turno del mostrador.
+      desde_caja: desdeCaja || undefined,
       nombre_cliente: sel.nombre.trim(), telefono_cliente: sel.telefono,
       metodo_pago: metodo, cliente_id: sel.cliente?.id || undefined, total: precioNum,
       pagos,
@@ -2926,6 +3061,12 @@ function SellModal({ unit, equipo, onClose, onDone, notify }: {
     })
       .then(res => {
         notify('Venta registrada')
+        // El backend abre el turno solo si hacía falta, para no detener al
+        // mostrador con el cliente enfrente. Se avisa porque el fondo inicial
+        // quedó en $0 y hay que corregirlo al cerrar, o el arqueo saldrá alto.
+        if (res.data?.turno_abierto) {
+          notify('Se abrió tu turno de caja con fondo $0. Ajústalo en el arqueo.')
+        }
         const id = res.data?.venta?.id
         if (id) abrirOrdenCartaPDF('ventas', id)   // orden carta en PDF (ya no ticket térmico)
         onDone()
@@ -2935,7 +3076,7 @@ function SellModal({ unit, equipo, onClose, onDone, notify }: {
   }
 
   return (
-    <div className="fixed inset-0 z-[70] bg-black/40 backdrop-blur-[2px]" onClick={onClose}>
+    <Modal className="fixed inset-0 z-[70] bg-black/40 backdrop-blur-[2px]" onClose={cerrarConAviso} label={`Vender ${unit.codigo}`}>
       <motion.div
         initial={{ x: '100%' }} animate={{ x: 0 }} transition={{ duration: 0.3, ease: [0.23, 1, 0.32, 1] }}
         onClick={e => e.stopPropagation()}
@@ -2961,7 +3102,7 @@ function SellModal({ unit, equipo, onClose, onDone, notify }: {
               </button>
             </div>
             {!splitPago ? (
-              <select className={input} value={metodo} onChange={e => setMetodo(e.target.value as any)}>
+              <select aria-label="Método de pago" className={input} value={metodo} onChange={e => setMetodo(e.target.value as any)}>
                 <option value="efectivo" className="bg-surface">Efectivo</option>
                 <option value="tarjeta" className="bg-surface">Tarjeta</option>
                 <option value="transferencia" className="bg-surface">Transferencia</option>
@@ -2969,7 +3110,7 @@ function SellModal({ unit, equipo, onClose, onDone, notify }: {
             ) : (
               <div className="space-y-2">
                 <div className="flex gap-2">
-                  <select className={`${input} flex-1`} value={metodo} onChange={e => setMetodo(e.target.value as any)}>
+                  <select aria-label="Método de pago 1" className={`${input} flex-1`} value={metodo} onChange={e => setMetodo(e.target.value as any)}>
                     <option value="efectivo" className="bg-surface">Efectivo</option>
                     <option value="tarjeta" className="bg-surface">Tarjeta</option>
                     <option value="transferencia" className="bg-surface">Transferencia</option>
@@ -2977,7 +3118,7 @@ function SellModal({ unit, equipo, onClose, onDone, notify }: {
                   <div className="w-[44%]"><InputDinero valor={monto1} onValor={setMonto1} placeholder="Monto" /></div>
                 </div>
                 <div className="flex gap-2">
-                  <select className={`${input} flex-1`} value={metodo2} onChange={e => setMetodo2(e.target.value as any)}>
+                  <select aria-label="Método de pago 2" className={`${input} flex-1`} value={metodo2} onChange={e => setMetodo2(e.target.value as any)}>
                     <option value="efectivo" className="bg-surface">Efectivo</option>
                     <option value="tarjeta" className="bg-surface">Tarjeta</option>
                     <option value="transferencia" className="bg-surface">Transferencia</option>
@@ -3014,7 +3155,7 @@ function SellModal({ unit, equipo, onClose, onDone, notify }: {
           <button onClick={submit} disabled={busy} className="px-7 py-2.5 rounded-full bg-gold text-black text-sm font-bold hover:opacity-90 transition-opacity disabled:opacity-50">Registrar venta</button>
         </div>
       </motion.div>
-    </div>
+    </Modal>
   )
 }
 
@@ -3099,11 +3240,11 @@ function InventarioGlobal({ unidades, equipos, reload, notify, onEnviarTaller }:
             {chip('vendido', 'Vendidas', counts.vendido)}
           </div>
           <div className="flex gap-2 flex-1 lg:justify-end">
-            <select value={equipoFiltro} onChange={e => setEquipoFiltro(e.target.value)} className={`${input} sm:w-48`}>
+            <select aria-label="Filtrar por producto" value={equipoFiltro} onChange={e => setEquipoFiltro(e.target.value)} className={`${input} sm:w-48`}>
               <option value="" className="bg-surface">Todos los productos</option>
               {equipos.map(e => <option key={e.id} value={e.id} className="bg-surface">{e.modelo}</option>)}
             </select>
-            <input className={`${input} sm:w-56`} value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar código o serie…" />
+            <input aria-label="Buscar código o serie" className={`${input} sm:w-56`} value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar código o serie…" />
           </div>
         </div>
 
@@ -3212,7 +3353,7 @@ function EnviarTallerModal({ unit, onClose, onCreated, notify }: {
   }
 
   return createPortal(
-    <div className="fixed inset-0 z-[70] bg-[rgba(33,29,22,0.4)] backdrop-blur-[2px] flex items-start justify-center p-4 overflow-y-auto" onClick={onClose}>
+    <Modal className="fixed inset-0 z-[70] bg-[rgba(33,29,22,0.4)] backdrop-blur-[2px] flex items-start justify-center p-4 overflow-y-auto" onClose={onClose} label="Enviar a taller">
       <div onClick={e => e.stopPropagation()} className="bg-surface rounded-[18px] w-full sm:max-w-[640px] my-4 sm:my-auto overflow-hidden shadow-[0_24px_60px_rgba(33,29,22,0.2)] border border-edge">
         {/* Header */}
         <div className="px-[26px] pt-6 pb-[18px] border-b border-edge flex items-start justify-between gap-3">
@@ -3239,7 +3380,7 @@ function EnviarTallerModal({ unit, onClose, onCreated, notify }: {
         {/* Motivo */}
         <div className="px-[26px] pt-5 pb-1.5">
           <div className="text-[10.5px] font-bold tracking-[0.5px] text-mute mb-2">FALLA / MOTIVO (OPCIONAL)</div>
-          <textarea value={diag} onChange={e => setDiag(e.target.value)} placeholder="Ej. No arranca, fuga de aceite, servicio preventivo…" autoFocus
+          <textarea aria-label="Falla reportada" value={diag} onChange={e => setDiag(e.target.value)} placeholder="Ej. No arranca, fuga de aceite, servicio preventivo…" autoFocus
             className="w-full min-h-[76px] border border-edge rounded-[9px] px-3.5 py-3 text-[13.5px] bg-surface-2 text-ink placeholder-mute resize-y focus:outline-none focus:border-gold focus:bg-surface transition-colors" />
         </div>
 
@@ -3252,7 +3393,7 @@ function EnviarTallerModal({ unit, onClose, onCreated, notify }: {
           </button>
         </div>
       </div>
-    </div>,
+    </Modal>,
     document.body,
   )
 }
@@ -3309,7 +3450,7 @@ function LabelModal({ unit, onClose }: { unit: Unidad; onClose: () => void }) {
   }
 
   return (
-    <div className="modal-in fixed inset-0 z-[70] bg-black/70 backdrop-blur-sm flex items-center justify-center p-6" onClick={onClose}>
+    <Modal className="modal-in fixed inset-0 z-[70] bg-black/70 backdrop-blur-sm flex items-center justify-center p-6" onClose={onClose} label="Etiqueta de identificación">
       <div onClick={e => e.stopPropagation()} className="bg-surface border border-edge rounded-3xl p-7 max-w-sm w-full">
         <p className="text-[11px] font-mono uppercase tracking-[0.2em] text-gold-ink mb-4">Etiqueta de identificación</p>
 
@@ -3336,7 +3477,7 @@ function LabelModal({ unit, onClose }: { unit: Unidad; onClose: () => void }) {
           </button>
         </div>
       </div>
-    </div>
+    </Modal>
   )
 }
 
@@ -3372,13 +3513,13 @@ function RentasAdmin({ reload, notify }: { reload: () => void; notify: (m: strin
   }, [estado])
   useEffect(() => { load() }, [load])
 
-  function devolver(r: RentaFull) {
-    if (!confirm(`¿Marcar como devuelto el equipo de ${r.cliente_nombre || r.cliente || 'cliente'}?`)) return
+  async function devolver(r: RentaFull) {
+    if (!await confirmar({ titulo: `¿Marcar como devuelto el equipo de ${r.cliente_nombre || r.cliente || 'cliente'}?`, mensaje: 'La renta se cierra y la unidad vuelve a quedar disponible.', aceptar: 'Marcar devuelto' })) return
     api.post(`/rentas/${r.id}/devolver/`).then(() => { notify('Equipo devuelto'); load(); reload() }).catch(e => notify(e?.response?.data?.detalle || 'Error', 'err'))
   }
 
-  function cancelar(r: RentaFull) {
-    if (!confirm(`¿Cancelar esta ${r.estado === 'reservada' ? 'reserva' : 'renta'}? Se liberará la unidad.`)) return
+  async function cancelar(r: RentaFull) {
+    if (!await confirmar({ titulo: `¿Cancelar esta ${r.estado === 'reservada' ? 'reserva' : 'renta'}?`, mensaje: 'Se liberará la unidad.', aceptar: 'Cancelar', cancelar: 'Volver', tono: 'peligro' })) return
     api.post(`/rentas/${r.id}/cancelar/`).then(() => { notify('Renta cancelada'); load(); reload() }).catch(e => notify(e?.response?.data?.detalle || 'Error', 'err'))
   }
 
@@ -3529,8 +3670,8 @@ function EvidenciasRenta({ rentaId }: { rentaId: number }) {
       .catch(err => setError(errorMsg(err, 'No se pudieron subir las fotos')))
       .finally(() => setSubiendo(null))
   }
-  function borrar(id: number) {
-    if (!confirm('¿Quitar esta foto? Es evidencia del estado del equipo.')) return
+  async function borrar(id: number) {
+    if (!await confirmar({ titulo: '¿Quitar esta foto?', mensaje: 'Es evidencia del estado del equipo: sin ella no hay respaldo si el cliente reclama un daño.', aceptar: 'Quitar', tono: 'peligro' })) return
     api.delete(`/rentas/${rentaId}/evidencias/${id}/`)
       .then(() => cargar())
       .catch(err => setError(errorMsg(err, 'No se pudo quitar')))
@@ -3546,7 +3687,7 @@ function EvidenciasRenta({ rentaId }: { rentaId: number }) {
             className="text-[11.5px] font-bold text-gold-ink hover:opacity-80 disabled:opacity-50">
             {subiendo === momento ? 'Subiendo…' : '+ Agregar fotos'}
           </button>
-          <input ref={el => { inputs.current[momento] = el }} type="file" accept="image/*" multiple className="hidden" onChange={e => subir(momento, e)} />
+          <input aria-label="Fotos de evidencia" ref={el => { inputs.current[momento] = el }} type="file" accept="image/*" multiple className="hidden" onChange={e => subir(momento, e)} />
         </div>
         {suyas.length === 0 ? (
           <button onClick={() => inputs.current[momento]?.click()}
@@ -3578,7 +3719,7 @@ function EvidenciasRenta({ rentaId }: { rentaId: number }) {
       {bloque('devolucion', 'Al recibir de vuelta')}
       {error && <p className="text-[12px] text-red-500">{error}</p>}
       {zoom && createPortal(
-        <div className="modal-in fixed inset-0 z-[70] bg-black/75 flex items-center justify-center p-4" onClick={() => setZoom(null)}>
+        <Modal className="modal-in fixed inset-0 z-[70] bg-black/75 flex items-center justify-center p-4" onClose={() => setZoom(null)} label="Foto de evidencia">
           <div className="max-w-3xl w-full" onClick={e => e.stopPropagation()}>
             <img src={resolveMediaUrl(zoom.imagen)} alt={zoom.nota} className="w-full max-h-[80vh] object-contain rounded-xl" />
             <p className="text-center text-[12.5px] text-white/80 mt-3">
@@ -3588,7 +3729,7 @@ function EvidenciasRenta({ rentaId }: { rentaId: number }) {
               {zoom.subida_por ? ` · ${zoom.subida_por}` : ''}
             </p>
           </div>
-        </div>, document.body)}
+        </Modal>, document.body)}
     </div>
   )
 }
@@ -3609,7 +3750,7 @@ function InputDinero({ valor, onValor, placeholder = '0', autoFocus, className =
   return (
     <div className={`relative ${className}`}>
       <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-mute font-bold text-sm pointer-events-none">$</span>
-      <input
+      <input aria-label={placeholder || 'Monto'}
         value={formatearDinero(valor)} autoFocus={autoFocus} disabled={disabled}
         inputMode="decimal" placeholder={placeholder}
         onChange={e => {
@@ -3638,7 +3779,7 @@ function AbonoModal({ saldo, onClose, onRegistrar }: {
   const n = Number(monto) || 0
 
   return createPortal(
-    <div className="modal-in fixed inset-0 z-[130] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
+    <Modal className="modal-in fixed inset-0 z-[130] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClose={onClose} label="Registrar abono">
       <div onClick={e => e.stopPropagation()} className="w-full max-w-sm bg-surface border border-edge rounded-2xl shadow-[0_24px_60px_rgba(0,0,0,0.3)] p-6">
         <h3 className="font-black text-ink">Registrar abono</h3>
         <p className="text-[12.5px] text-mute mt-1">Saldo actual: <b className="text-ink">{money(saldo)}</b></p>
@@ -3660,7 +3801,7 @@ function AbonoModal({ saldo, onClose, onRegistrar }: {
         </div>
 
         <label className="block text-[12px] font-semibold text-mute mt-4 mb-1.5">Fecha del abono</label>
-        <input type="date" value={fecha} max={hoyISO} onChange={e => setFecha(e.target.value)}
+        <input aria-label="Fecha del abono" type="date" value={fecha} max={hoyISO} onChange={e => setFecha(e.target.value)}
           className="w-full bg-surface-2 border border-edge rounded-xl px-3.5 py-2.5 text-sm text-ink focus:outline-none focus:border-gold/50 transition-colors" />
         <p className="text-[11px] text-mute mt-1">Cámbiala si se te pasó registrarlo ese día; no puede ser futura.</p>
 
@@ -3673,7 +3814,7 @@ function AbonoModal({ saldo, onClose, onRegistrar }: {
           </button>
         </div>
       </div>
-    </div>,
+    </Modal>,
     document.body,
   )
 }
@@ -3796,7 +3937,7 @@ function RentaDetalleModal({ renta: r, onClose, onTicket, notify, onChanged }: {
   )
 
   return createPortal(
-    <div className="fixed inset-0 z-[60] bg-[rgba(33,29,22,0.4)] backdrop-blur-[2px] flex items-start justify-center p-0 sm:p-6 overflow-y-auto" onClick={onClose}>
+    <Modal className="fixed inset-0 z-[60] bg-[rgba(33,29,22,0.4)] backdrop-blur-[2px] flex items-start justify-center p-0 sm:p-6 overflow-y-auto" onClose={onClose} label="Detalle de la renta">
       <div onClick={(e: React.MouseEvent) => e.stopPropagation()} className="w-full sm:max-w-[720px] bg-surface rounded-none sm:rounded-[16px] shadow-[0_24px_60px_rgba(33,29,22,0.2)] min-h-screen sm:min-h-0 sm:my-auto sm:max-h-[92vh] flex flex-col overflow-hidden border-0 sm:border border-edge">
         {/* Header */}
         <div className="px-6 sm:px-[26px] pt-[22px] pb-[18px] border-b border-edge flex items-start justify-between gap-3 shrink-0">
@@ -3843,7 +3984,7 @@ function RentaDetalleModal({ renta: r, onClose, onTicket, notify, onChanged }: {
                 {cuenta ? null : liga ? (
                   <div className="space-y-2">
                     <div className="flex items-center gap-2">
-                      <input readOnly value={liga} onFocus={e => e.currentTarget.select()} className="flex-1 bg-app border border-edge rounded-[9px] px-3 py-2 text-[11px] text-ink outline-none" />
+                      <input aria-label="Liga para compartir" readOnly value={liga} onFocus={e => e.currentTarget.select()} className="flex-1 bg-app border border-edge rounded-[9px] px-3 py-2 text-[11px] text-ink outline-none" />
                       <button onClick={async () => { try { await navigator.clipboard.writeText(liga); setCopiado(true); setTimeout(() => setCopiado(false), 1500) } catch { /* noop */ } }} className="shrink-0 px-3 py-2 rounded-[9px] bg-gold text-black text-[12px] font-bold">{copiado ? '✓' : 'Copiar'}</button>
                     </div>
                     {(() => {
@@ -3987,7 +4128,7 @@ function RentaDetalleModal({ renta: r, onClose, onTicket, notify, onChanged }: {
           <button onClick={onTicket} className="flex-1 h-11 rounded-[9px] bg-gold text-black text-[13.5px] font-bold hover:brightness-95 transition-all">Orden carta (PDF)</button>
         </div>
       </div>
-    </div>,
+    </Modal>,
     document.body
   )
 }
@@ -4035,9 +4176,65 @@ function VentasAdmin({ notify }: { notify: (m: string, t?: 'ok' | 'err') => void
   useEffect(() => { cargar() }, [cargar])
   useRecurso(['ventas'], cargar)   // realtime: si otro registra o cancela una venta
 
-  function cancelar(v: Venta) {
-    if (!confirm(`¿Cancelar la venta ${v.folio || '#' + v.id}? Se devolverá la máquina a inventario y se repondrá el stock.`)) return
-    api.post(`/ventas/${v.id}/cancelar/`).then(() => { notify('Venta cancelada'); cargar() }).catch(e => notify(e?.response?.data?.detalle || 'Error', 'err'))
+  /* Cancelar una venta es de las acciones más delicadas del panel: devuelve la
+     máquina a inventario, repone stock y genera un movimiento inverso de caja.
+     El backend ya exigía MOTIVO y CÓDIGO de autoridad (`cancelar_venta` en
+     ventas/views.py), pero el panel llamaba al endpoint con el cuerpo vacío: la
+     cancelación fallaba SIEMPRE y el usuario solo veía "Error". Aquí se piden
+     los dos, en el orden en que los pide la regla: primero por qué, luego quién
+     lo autoriza. */
+  async function cancelar(v: Venta) {
+    const etiqueta = v.folio || `#${v.id}`
+    if (!await confirmar({
+      titulo: `¿Cancelar la venta ${etiqueta}?`,
+      mensaje: 'La máquina vuelve a inventario, se repone el stock y queda un movimiento inverso en caja. No se puede deshacer.',
+      aceptar: 'Continuar', cancelar: 'Volver', tono: 'peligro',
+    })) return
+
+    const motivo = await pedir({
+      titulo: 'Motivo de la cancelación',
+      mensaje: 'Queda en el historial de la venta, junto con quién la autorizó.',
+      placeholder: 'Ej. El cliente se arrepintió; la máquina no salió del local.',
+    })
+    if (motivo === null) return
+    if (!motivo.trim()) { notify('El motivo es obligatorio para cancelar una venta', 'err'); return }
+
+    const codigo = await pedir({
+      titulo: 'Código de autorización',
+      mensaje: 'Los 6 dígitos de un administrador o gerente. Un operador no puede autorizar su propia cancelación.',
+      placeholder: '••••••', inputMode: 'decimal',
+    })
+    if (codigo === null) return
+
+    api.post(`/ventas/${v.id}/cancelar/`, { motivo: motivo.trim(), codigo_seguridad: codigo.trim() })
+      .then(() => { notify('Venta cancelada'); cargar() })
+      .catch(e => notify(e?.response?.data?.detalle || 'No se pudo cancelar la venta', 'err'))
+  }
+  /** Sacar UNA máquina de una venta de varias: vuelve al inventario y el total
+   *  baja. Es acción sensible, así que pide motivo y código, igual que cancelar. */
+  const quitarMaquina = async (v: Venta, maquinaId: number) => {
+    const m = v.maquinas?.find(x => x.id === maquinaId)
+    const motivo = await pedir({
+      titulo: `¿Quitar ${m?.codigo || 'la máquina'} de la venta?`,
+      mensaje: 'La máquina vuelve al inventario y el total de la venta baja. Queda registrado quién lo autorizó.',
+      placeholder: 'Ej. Salió con falla de fábrica; se dañó en el traslado.',
+    })
+    if (motivo === null) return
+    if (!motivo.trim()) { notify('El motivo es obligatorio', 'err'); return }
+    const codigo = await pedir({
+      titulo: 'Código de autorización',
+      mensaje: 'Los 6 dígitos de un administrador o gerente.',
+      placeholder: '••••••', inputMode: 'decimal',
+    })
+    if (codigo === null) return
+    try {
+      await api.post(`/ventas/${v.id}/maquinas/${maquinaId}/quitar/`, { motivo: motivo.trim(), codigo_seguridad: codigo.trim() })
+      notify('Máquina devuelta al inventario')
+      setDetalle(null)
+      cargar()
+    } catch (e: unknown) {
+      notify((e as { response?: { data?: { detalle?: string } } })?.response?.data?.detalle || 'No se pudo quitar la máquina', 'err')
+    }
   }
   const totalVendido = ventas.reduce((a, v) => a + (Number(v.total) || 0), 0)
   const maquinaria = ventas.filter(v => v.unidad)
@@ -4057,7 +4254,7 @@ function VentasAdmin({ notify }: { notify: (m: string, t?: 'ok' | 'err') => void
 
   return (
     <div className="space-y-5">
-      {detalle && <VentaDetalleModal venta={detalle} onClose={() => setDetalle(null)} onChanged={cargar} notify={notify} />}
+      {detalle && <VentaDetalleModal venta={detalle} onClose={() => setDetalle(null)} onChanged={cargar} notify={notify} onQuitarMaquina={(id) => quitarMaquina(detalle, id)} />}
       {/* KPIs */}
       <KpiGrid
         gridClassName="grid-cols-2 lg:grid-cols-4"
@@ -4076,7 +4273,7 @@ function VentasAdmin({ notify }: { notify: (m: string, t?: 'ok' | 'err') => void
           <SelectorPeriodo anio={anio} mes={mes} onAnio={setAnio} onMes={setMes} className="sm:ml-auto" />
           <div className="relative flex-1 sm:max-w-xs">
             <svg className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-mute pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><circle cx="9" cy="9" r="6" /><path d="M15 15l3 3" strokeLinecap="round" /></svg>
-            <input value={q} onChange={e => setQ(e.target.value)} placeholder="Buscar folio, cliente o equipo..."
+            <input aria-label="Buscar folio, cliente o equipo" value={q} onChange={e => setQ(e.target.value)} placeholder="Buscar folio, cliente o equipo..."
               className="w-full bg-surface-2 border border-edge rounded-full pl-9 pr-3 py-2 text-sm text-ink placeholder-mute focus:outline-none focus:border-gold/50 transition-colors" />
           </div>
           <button onClick={cargar} className="text-xs text-mute hover:text-gold-ink transition-colors shrink-0">Actualizar</button>
@@ -4123,7 +4320,17 @@ function VentasAdmin({ notify }: { notify: (m: string, t?: 'ok' | 'err') => void
                   </td>
                   <td data-col="Equipo" className="px-3 py-3">
                     <div>
-                      {v.unidad ? (
+                      {(v.maquinas?.length || 0) > 1 ? (
+                        /* Varias máquinas en una venta: se nombran todas. Decir
+                           solo la primera fue justo el error que dejaba máquinas
+                           fuera del inventario sin que nadie lo viera. */
+                        <>
+                          <p className="text-sm text-ink truncate">{v.maquinas![0].equipo} · <span className="font-semibold">{v.maquinas!.length} máquinas</span></p>
+                          <p className="font-mono text-[11px] text-mute truncate" title={v.maquinas!.map(m => m.codigo).join(', ')}>
+                            {v.maquinas!.map(m => m.codigo).join(' · ')}
+                          </p>
+                        </>
+                      ) : v.unidad ? (
                         <><p className="text-sm text-ink truncate">{v.unidad.equipo}</p><p className="font-mono text-[11px] text-mute">{v.unidad.codigo}</p></>
                       ) : v.origen ? (
                         <><p className="text-sm text-ink truncate">{v.origen.resumen || 'Venta desde cotización'}</p><p className="font-mono text-[11px] text-mute">{v.origen.folio} · sin unidad asignada</p></>
@@ -4309,7 +4516,7 @@ function NotificacionesAdmin({ notifs, reload, go, onOpen }: {
               </div>
               <div className="relative w-full sm:w-[320px]">
                 <svg className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-mute pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><circle cx="11" cy="11" r="7" /><path d="M20 20l-3-3" strokeLinecap="round" /></svg>
-                <input
+                <input aria-label="Buscar notificaciones"
                   value={q}
                   onChange={e => setQ(e.target.value)}
                   placeholder="Buscar notificaciones…"
@@ -4546,10 +4753,10 @@ function CatalogBlock({ title, singular, endpoint, data, uso, accent, icon, relo
       .catch(err => notify(err?.response?.data?.nombre?.[0] || 'Error al renombrar', 'err'))
   }
 
-  function del(o: Option) {
+  async function del(o: Option) {
     const n = uso.get(o.id) || 0
     if (n > 0) { notify(`"${o.nombre}" está en uso por ${n} producto${n > 1 ? 's' : ''}`, 'err'); return }
-    if (!confirm(`¿Eliminar "${o.nombre}"?`)) return
+    if (!await confirmar({ titulo: `¿Eliminar "${o.nombre}"?`, aceptar: 'Eliminar', tono: 'peligro' })) return
     api.delete(`${endpoint}${o.id}/`)
       .then(() => { notify('Eliminado'); reload() })
       .catch(err => notify(err?.response?.data?.detail || 'No se puede eliminar (en uso)', 'err'))
@@ -4569,7 +4776,7 @@ function CatalogBlock({ title, singular, endpoint, data, uso, accent, icon, relo
       <div className="p-5 space-y-3">
         {/* Agregar */}
         <div className="flex gap-2">
-          <input className={input} value={nombre} onChange={e => setNombre(e.target.value)} onKeyDown={e => e.key === 'Enter' && add()} placeholder={`Nueva ${singular}`} />
+          <input aria-label="Nombre" className={input} value={nombre} onChange={e => setNombre(e.target.value)} onKeyDown={e => e.key === 'Enter' && add()} placeholder={`Nueva ${singular}`} />
           <button onClick={add} disabled={busy}
             className="shrink-0 w-10 h-[42px] rounded-xl bg-gold text-black font-black hover:opacity-90 active:scale-[0.96] transition-[transform,opacity] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] disabled:opacity-50 flex items-center justify-center">
             {busy ? <span className="w-4 h-4 border-2 border-black/30 border-t-black rounded-full animate-spin" /> : '+'}
@@ -4577,7 +4784,7 @@ function CatalogBlock({ title, singular, endpoint, data, uso, accent, icon, relo
         </div>
         {/* Buscar (si hay muchas) */}
         {data.length > 6 && (
-          <input className={`${input} text-xs`} value={search} onChange={e => setSearch(e.target.value)} placeholder={`Filtrar ${title.toLowerCase()}…`} />
+          <input aria-label="Buscar" className={`${input} text-xs`} value={search} onChange={e => setSearch(e.target.value)} placeholder={`Filtrar ${title.toLowerCase()}…`} />
         )}
       </div>
 
@@ -4590,7 +4797,7 @@ function CatalogBlock({ title, singular, endpoint, data, uso, accent, icon, relo
               className="stagger-item relative flex items-center gap-2 px-3.5 py-3 rounded-[10px] border border-edge hover:bg-surface-2 hover:border-gold/25 transition-colors duration-150 group">
               {editId === o.id ? (
                 <>
-                  <input autoFocus className="flex-1 bg-surface-2 border border-gold/40 rounded-md px-2 py-1 text-sm text-ink focus:outline-none"
+                  <input aria-label="Nuevo nombre" autoFocus className="flex-1 bg-surface-2 border border-gold/40 rounded-md px-2 py-1 text-sm text-ink focus:outline-none"
                     value={editVal} onChange={e => setEditVal(e.target.value)}
                     onKeyDown={e => { if (e.key === 'Enter') guardarRename(o.id); if (e.key === 'Escape') setEditId(null) }} />
                   <button onClick={() => guardarRename(o.id)} className="text-emerald-500 hover:opacity-80 active:scale-90 transition-transform duration-100 p-1"><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg></button>
@@ -4643,8 +4850,8 @@ function CuponesAdmin({ coupons, reload, notify }: {
       .finally(() => setBusy(false))
   }
 
-  function del(id?: number) {
-    if (!id || !confirm('¿Eliminar cupón?')) return
+  async function del(id?: number) {
+    if (!id || !await confirmar({ titulo: '¿Eliminar cupón?', aceptar: 'Eliminar', tono: 'peligro' })) return
     api.delete(`/cupones/${id}/`).then(() => { notify('Cupón eliminado'); reload() }).catch(() => notify('Error', 'err'))
   }
 
@@ -4655,11 +4862,11 @@ function CuponesAdmin({ coupons, reload, notify }: {
         <div className="space-y-4">
           <div>
             <label className={label}>Código</label>
-            <input className={input} value={codigo} onChange={e => setCodigo(e.target.value.toUpperCase())} placeholder="VERANO2026" />
+            <input aria-label="Código" className={input} value={codigo} onChange={e => setCodigo(e.target.value.toUpperCase())} placeholder="VERANO2026" />
           </div>
           <div>
             <label className={label}>Descuento (%)</label>
-            <input type="number" min={0} max={100} className={input} value={percent} onChange={e => setPercent(e.target.value)} placeholder="15" />
+            <input aria-label="Descuento (%)" type="number" min={0} max={100} className={input} value={percent} onChange={e => setPercent(e.target.value)} placeholder="15" />
           </div>
           <button onClick={add} disabled={busy}
             className="w-full py-3 rounded-full bg-gold text-black font-bold text-sm hover:opacity-90 transition-colors disabled:opacity-50">
@@ -4741,16 +4948,16 @@ function VenderRefaccionModal({ refaccion, notify, onClose, onSold }: {
   }
 
   return (
-    <div className="modal-in fixed inset-0 z-[70] bg-black/70 backdrop-blur-sm flex items-center justify-center p-6" onClick={onClose}>
+    <Modal className="modal-in fixed inset-0 z-[70] bg-black/70 backdrop-blur-sm flex items-center justify-center p-6" onClose={onClose} label="Vender refacción">
       <div onClick={e => e.stopPropagation()} className="bg-surface border border-edge rounded-3xl p-6 max-w-sm w-full shadow-[0_20px_50px_rgba(33,29,22,0.18)]">
         <h3 className="font-black text-ink mb-1">Vender refacción</h3>
         <p className="text-xs text-mute mb-5">{refaccion.nombre} · stock {refaccion.stock} · <span className="font-mono">{refaccion.codigo_barras}</span></p>
         <div className="space-y-3">
-          <div><label className={label}>Cantidad</label><input type="number" min={1} max={refaccion.stock} className={input} value={cant} onChange={e => setCant(e.target.value)} /></div>
-          <div><label className={label}>Cliente (opcional)</label><input className={input} value={cliente} onChange={e => setCliente(e.target.value)} placeholder="Nombre del comprador" /></div>
+          <div><label className={label}>Cantidad</label><input aria-label="Cantidad" type="number" min={1} max={refaccion.stock} className={input} value={cant} onChange={e => setCant(e.target.value)} /></div>
+          <div><label className={label}>Cliente (opcional)</label><input aria-label="Cliente (opcional)" className={input} value={cliente} onChange={e => setCliente(e.target.value)} placeholder="Nombre del comprador" /></div>
           <div>
             <label className={label}>Método de pago</label>
-            <select className={input} value={metodo} onChange={e => setMetodo(e.target.value as any)}>
+            <select aria-label="Método de pago" className={input} value={metodo} onChange={e => setMetodo(e.target.value as any)}>
               <option value="efectivo" className="bg-surface">Efectivo</option>
               <option value="tarjeta" className="bg-surface">Tarjeta</option>
               <option value="transferencia" className="bg-surface">Transferencia</option>
@@ -4768,7 +4975,7 @@ function VenderRefaccionModal({ refaccion, notify, onClose, onSold }: {
           <button onClick={submit} disabled={busy} className="flex-1 py-2.5 rounded-full bg-gold text-black text-sm font-bold hover:opacity-90 transition-opacity disabled:opacity-50">Registrar venta</button>
         </div>
       </div>
-    </div>
+    </Modal>
   )
 }
 
@@ -4816,8 +5023,8 @@ function RefaccionesAdmin({ refacciones, reload, notify }: {
       .finally(() => setSaving(false))
   }
 
-  function del(r: Refaccion) {
-    if (!confirm(`¿Eliminar "${r.nombre}"?`)) return
+  async function del(r: Refaccion) {
+    if (!await confirmar({ titulo: `¿Eliminar "${r.nombre}"?`, aceptar: 'Eliminar', tono: 'peligro' })) return
     api.delete(`/refacciones/${r.id}/`)
       .then(() => { notify('Refacción eliminada'); reload() })
       .catch(err => notify(err?.response?.data?.detail || 'No se pudo eliminar (¿en una venta?)', 'err'))
@@ -4841,7 +5048,7 @@ function RefaccionesAdmin({ refacciones, reload, notify }: {
           <div className="flex-1" />
           <div className="relative w-full sm:w-64">
             <svg className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-mute pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><circle cx="9" cy="9" r="6" /><path d="M15 15l3 3" strokeLinecap="round" /></svg>
-            <input value={q} onChange={e => setQ(e.target.value)} placeholder="Buscar nombre o código…" className="w-full bg-surface-2 border border-edge rounded-full pl-9 pr-3 py-2 text-sm text-ink placeholder-mute focus:outline-none focus:border-gold/50 transition-colors" />
+            <input aria-label="Buscar nombre o código" value={q} onChange={e => setQ(e.target.value)} placeholder="Buscar nombre o código…" className="w-full bg-surface-2 border border-edge rounded-full pl-9 pr-3 py-2 text-sm text-ink placeholder-mute focus:outline-none focus:border-gold/50 transition-colors" />
           </div>
           <button onClick={openNew} className="shrink-0 inline-flex items-center gap-2 px-4 py-2 rounded-full bg-gold text-black text-sm font-bold hover:opacity-90 transition-opacity">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.2"><path strokeLinecap="round" d="M12 5v14M5 12h14" /></svg>
@@ -4901,7 +5108,7 @@ function RefaccionesAdmin({ refacciones, reload, notify }: {
       </Card>
 
       {formOpen && (
-        <div className="fixed inset-0 z-[60] bg-black/40 backdrop-blur-[2px]" onClick={() => setFormOpen(false)}>
+        <Modal className="fixed inset-0 z-[60] bg-black/40 backdrop-blur-[2px]" onClose={() => setFormOpen(false)} label={editing ? 'Editar refacción' : 'Nueva refacción'}>
           <motion.div
             initial={{ x: '100%' }} animate={{ x: 0 }} transition={{ duration: 0.3, ease: [0.23, 1, 0.32, 1] }}
             onClick={(e: React.MouseEvent) => e.stopPropagation()}
@@ -4914,17 +5121,17 @@ function RefaccionesAdmin({ refacciones, reload, notify }: {
               </button>
             </div>
             <div className="p-6 space-y-4 flex-1 overflow-y-auto">
-              <div><label className={label}>Nombre *</label><input className={input} value={form.nombre} onChange={e => setForm({ ...form, nombre: e.target.value })} placeholder="Ej. Filtro de aceite" autoFocus /></div>
-              <div><label className={label}>Descripción</label><textarea className={`${input} resize-none`} rows={2} value={form.descripcion} onChange={e => setForm({ ...form, descripcion: e.target.value })} placeholder="Detalle / compatibilidad" /></div>
+              <div><label className={label}>Nombre *</label><input aria-label="Nombre" aria-required="true" className={input} value={form.nombre} onChange={e => setForm({ ...form, nombre: e.target.value })} placeholder="Ej. Filtro de aceite" autoFocus /></div>
+              <div><label className={label}>Descripción</label><textarea aria-label="Descripción" className={`${input} resize-none`} rows={2} value={form.descripcion} onChange={e => setForm({ ...form, descripcion: e.target.value })} placeholder="Detalle / compatibilidad" /></div>
               <div className="grid grid-cols-2 gap-3">
-                <div><label className={label}>Precio de venta{(form as any).condicion === 'seminueva' && <span className="text-mute font-normal"> · interno, el cliente NO lo ve</span>}</label><input type="number" className={input} value={form.precio_venta} onChange={e => setForm({ ...form, precio_venta: e.target.value })} placeholder="0.00" /></div>
-                <div><label className={label}>Ubicación (taller)</label><input className={input} value={form.ubicacion} onChange={e => setForm({ ...form, ubicacion: e.target.value })} placeholder="Estante / caja" /></div>
-                <div><label className={label}>Stock</label><input type="number" min={0} className={input} value={form.stock} onChange={e => setForm({ ...form, stock: e.target.value })} /></div>
-                <div><label className={label}>Stock mínimo (alerta)</label><input type="number" min={0} className={input} value={form.stock_minimo} onChange={e => setForm({ ...form, stock_minimo: e.target.value })} /></div>
+                <div><label className={label}>Precio de venta{(form as any).condicion === 'seminueva' && <span className="text-mute font-normal"> · interno, el cliente NO lo ve</span>}</label><input aria-label="Precio de venta" type="number" className={input} value={form.precio_venta} onChange={e => setForm({ ...form, precio_venta: e.target.value })} placeholder="0.00" /></div>
+                <div><label className={label}>Ubicación (taller)</label><input aria-label="Ubicación (taller)" className={input} value={form.ubicacion} onChange={e => setForm({ ...form, ubicacion: e.target.value })} placeholder="Estante / caja" /></div>
+                <div><label className={label}>Stock</label><input aria-label="Stock" type="number" min={0} className={input} value={form.stock} onChange={e => setForm({ ...form, stock: e.target.value })} /></div>
+                <div><label className={label}>Stock mínimo (alerta)</label><input aria-label="Stock mínimo (alerta)" type="number" min={0} className={input} value={form.stock_minimo} onChange={e => setForm({ ...form, stock_minimo: e.target.value })} /></div>
               </div>
               <div>
                 <label className={label}>Código de barras</label>
-                <input className={`${input} font-mono`} value={form.codigo_barras} onChange={e => setForm({ ...form, codigo_barras: e.target.value })} placeholder="Escanéalo o déjalo vacío" />
+                <input aria-label="Código de barras" className={`${input} font-mono`} value={form.codigo_barras} onChange={e => setForm({ ...form, codigo_barras: e.target.value })} placeholder="Escanéalo o déjalo vacío" />
                 <p className="text-[11px] text-mute mt-1.5">Si la refacción ya trae código, escríbelo o escanéalo. Si lo dejas <b>vacío</b>, el sistema genera uno único automáticamente.</p>
               </div>
             </div>
@@ -4936,7 +5143,7 @@ function RefaccionesAdmin({ refacciones, reload, notify }: {
               </button>
             </div>
           </motion.div>
-        </div>
+        </Modal>
       )}
 
       {labelRef && <EtiquetaModal refaccion={labelRef} onClose={() => setLabelRef(null)} />}
@@ -5015,7 +5222,7 @@ function ReparacionesAdmin({ ordenes, refacciones, unidades, empresas, reload, n
           <div className="flex-1" />
           <div className="relative w-full sm:w-64">
             <svg className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-mute pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><circle cx="9" cy="9" r="6" /><path d="M15 15l3 3" strokeLinecap="round" /></svg>
-            <input value={q} onChange={e => setQ(e.target.value)} placeholder="Buscar folio, cliente o equipo…" className="w-full bg-surface-2 border border-edge rounded-full pl-9 pr-3 py-2 text-sm text-ink placeholder-mute focus:outline-none focus:border-gold/50 transition-colors" />
+            <input aria-label="Buscar folio, cliente o equipo" value={q} onChange={e => setQ(e.target.value)} placeholder="Buscar folio, cliente o equipo…" className="w-full bg-surface-2 border border-edge rounded-full pl-9 pr-3 py-2 text-sm text-ink placeholder-mute focus:outline-none focus:border-gold/50 transition-colors" />
           </div>
           <button onClick={() => setNuevaOpen(true)} className="shrink-0 inline-flex items-center gap-2 px-4 py-2 rounded-full bg-gold text-black text-sm font-bold hover:opacity-90 transition-opacity">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.2"><path strokeLinecap="round" d="M12 5v14M5 12h14" /></svg>
@@ -5132,7 +5339,7 @@ function NuevaOrdenModal({ empresas, unidades, notify, onClose, onCreated }: {
   }
 
   return (
-    <div className="fixed inset-0 z-[60] bg-black/40 backdrop-blur-[2px]" onClick={onClose}>
+    <Modal className="fixed inset-0 z-[60] bg-black/40 backdrop-blur-[2px]" onClose={onClose} label="Nueva orden de reparación">
       <motion.div
         initial={{ x: '100%' }} animate={{ x: 0 }} transition={{ duration: 0.3, ease: [0.23, 1, 0.32, 1] }}
         onClick={(e: React.MouseEvent) => e.stopPropagation()}
@@ -5151,25 +5358,25 @@ function NuevaOrdenModal({ empresas, unidades, notify, onClose, onCreated }: {
           {tipo === 'cliente' ? (
             <>
               <div className="grid grid-cols-2 gap-3">
-                <div><label className={label}>Cliente</label><input className={input} value={form.cliente_nombre} onChange={e => setForm({ ...form, cliente_nombre: e.target.value })} placeholder="Nombre del cliente" autoFocus /></div>
-                <div><label className={label}>Teléfono</label><input type="tel" inputMode="numeric" maxLength={10} className={input} value={form.cliente_telefono} onChange={e => setForm({ ...form, cliente_telefono: soloTelefono(e.target.value) })} placeholder="Opcional" /></div>
+                <div><label className={label}>Cliente</label><input aria-label="Cliente" className={input} value={form.cliente_nombre} onChange={e => setForm({ ...form, cliente_nombre: e.target.value })} placeholder="Nombre del cliente" autoFocus /></div>
+                <div><label className={label}>Teléfono</label><input aria-label="Teléfono" type="tel" inputMode="numeric" maxLength={10} className={input} value={form.cliente_telefono} onChange={e => setForm({ ...form, cliente_telefono: soloTelefono(e.target.value) })} placeholder="Opcional" /></div>
               </div>
               <div>
                 <label className={label}>Empresa (opcional)</label>
-                <select className={input} value={form.empresa} onChange={e => setForm({ ...form, empresa: e.target.value })}>
+                <select aria-label="Empresa (opcional)" className={input} value={form.empresa} onChange={e => setForm({ ...form, empresa: e.target.value })}>
                   <option value="">— Cliente particular —</option>
                   {empresasActivas(empresas).map(e => <option key={e.id} value={e.id}>{e.nombre}</option>)}
                 </select>
               </div>
               <div className="grid grid-cols-2 gap-3">
-                <div className="col-span-2"><label className={label}>Equipo del cliente *</label><input className={input} value={form.equipo_descripcion} onChange={e => setForm({ ...form, equipo_descripcion: e.target.value })} placeholder="Ej. Compresor Truper 100L" /></div>
-                <div className="col-span-2"><label className={label}>Número de serie</label><input className={input} value={form.numero_serie} onChange={e => setForm({ ...form, numero_serie: e.target.value })} placeholder="Opcional" /></div>
+                <div className="col-span-2"><label className={label}>Equipo del cliente *</label><input aria-label="Equipo del cliente" aria-required="true" className={input} value={form.equipo_descripcion} onChange={e => setForm({ ...form, equipo_descripcion: e.target.value })} placeholder="Ej. Compresor Truper 100L" /></div>
+                <div className="col-span-2"><label className={label}>Número de serie</label><input aria-label="Número de serie" className={input} value={form.numero_serie} onChange={e => setForm({ ...form, numero_serie: e.target.value })} placeholder="Opcional" /></div>
               </div>
             </>
           ) : (
             <div>
               <label className={label}>Unidad propia *</label>
-              <select className={input} value={form.unidad} onChange={e => setForm({ ...form, unidad: e.target.value })} autoFocus>
+              <select aria-label="Unidad propia" aria-required="true" className={input} value={form.unidad} onChange={e => setForm({ ...form, unidad: e.target.value })} autoFocus>
                 <option value="">— Selecciona una unidad —</option>
                 {/* Solo máquinas de RENTA (seminuevas). Las nuevas se venden, no se reparan aquí. */}
                 {unidades.filter(u => (u.equipo_info?.modo ?? (u.condicion === 'seminueva' ? 'renta' : 'venta')) === 'renta').map(u => <option key={u.id} value={u.id}>{u.codigo} · {u.equipo_modelo || u.equipo_info?.modelo || ''}</option>)}
@@ -5178,7 +5385,7 @@ function NuevaOrdenModal({ empresas, unidades, notify, onClose, onCreated }: {
             </div>
           )}
 
-          <div><label className={label}>Falla reportada / diagnóstico inicial</label><textarea className={`${input} resize-none`} rows={3} value={form.diagnostico} onChange={e => setForm({ ...form, diagnostico: e.target.value })} placeholder="Qué reporta el cliente / síntomas" /></div>
+          <div><label className={label}>Falla reportada / diagnóstico inicial</label><textarea aria-label="Falla reportada / diagnóstico inicial" className={`${input} resize-none`} rows={3} value={form.diagnostico} onChange={e => setForm({ ...form, diagnostico: e.target.value })} placeholder="Qué reporta el cliente / síntomas" /></div>
         </div>
         <div className="px-6 py-4 border-t border-edge flex justify-end gap-3 shrink-0 bg-surface">
           <button onClick={onClose} className="px-6 py-2.5 rounded-full border border-edge text-ink text-sm font-semibold hover:bg-surface-2 transition-colors">Cancelar</button>
@@ -5188,7 +5395,7 @@ function NuevaOrdenModal({ empresas, unidades, notify, onClose, onCreated }: {
           </button>
         </div>
       </motion.div>
-    </div>
+    </Modal>
   )
 }
 
@@ -5283,7 +5490,7 @@ function OrdenDetalleModal({ orden, refacciones, notify, onClose, onChanged, onP
   const capLabel = 'text-[11px] font-bold tracking-[0.5px] text-mute'
 
   return createPortal(
-    <div className="fixed inset-0 z-[60] bg-[rgba(33,29,22,0.4)] backdrop-blur-[2px] flex items-start justify-center p-0 sm:p-6 overflow-y-auto" onClick={onClose}>
+    <Modal className="fixed inset-0 z-[60] bg-[rgba(33,29,22,0.4)] backdrop-blur-[2px] flex items-start justify-center p-0 sm:p-6 overflow-y-auto" onClose={onClose} label="Detalle de la orden de reparación">
       <div onClick={(e: React.MouseEvent) => e.stopPropagation()} className="w-full sm:max-w-[1080px] bg-surface rounded-none sm:rounded-[18px] shadow-[0_24px_60px_rgba(33,29,22,0.2)] min-h-screen sm:min-h-0 sm:my-auto sm:max-h-[92vh] flex flex-col overflow-hidden border-0 sm:border border-edge">
         {/* Header */}
         <div className="flex items-center justify-between gap-3 px-7 pt-[22px] pb-3 shrink-0">
@@ -5317,11 +5524,11 @@ function OrdenDetalleModal({ orden, refacciones, notify, onClose, onChanged, onP
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 mb-5">
               <div>
                 <div className={`${capLabel} mb-2`}>FALLA REPORTADA / DIAGNÓSTICO</div>
-                <textarea value={diag} onChange={e => setDiag(e.target.value)} className={`${inp} min-h-[72px] resize-y`} />
+                <textarea aria-label="Diagnóstico" value={diag} onChange={e => setDiag(e.target.value)} className={`${inp} min-h-[72px] resize-y`} />
               </div>
               <div>
                 <div className={`${capLabel} mb-2`}>TRABAJO REALIZADO</div>
-                <textarea value={trabajo} onChange={e => setTrabajo(e.target.value)} placeholder="Describe lo que se le hizo al equipo" className={`${inp} min-h-[72px] resize-y`} />
+                <textarea aria-label="Describe lo que se le hizo al equipo" value={trabajo} onChange={e => setTrabajo(e.target.value)} placeholder="Describe lo que se le hizo al equipo" className={`${inp} min-h-[72px] resize-y`} />
               </div>
             </div>
 
@@ -5349,17 +5556,17 @@ function OrdenDetalleModal({ orden, refacciones, notify, onClose, onChanged, onP
               </div>
               {origen === 'stock' ? (
                 <div className="flex gap-2 mb-2.5">
-                  <select value={refId} onChange={e => setRefId(e.target.value)} className="flex-1 border border-edge rounded-[7px] px-[11px] py-[9px] text-[13px] bg-surface-2 text-ink focus:outline-none focus:border-gold">
+                  <select aria-label="Refacción del stock" value={refId} onChange={e => setRefId(e.target.value)} className="flex-1 border border-edge rounded-[7px] px-[11px] py-[9px] text-[13px] bg-surface-2 text-ink focus:outline-none focus:border-gold">
                     <option value="">Selecciona una refacción…</option>
                     {disponibles.map(r => <option key={r.id} value={r.id}>{r.nombre} · {orMoney(r.precio_venta)} · stock {r.stock}</option>)}
                   </select>
-                  <input type="number" min={1} value={cant} onChange={e => setCant(e.target.value)} title="Cantidad" className="w-[70px] border border-edge rounded-[7px] px-[11px] py-[9px] text-[13px] bg-surface-2 text-ink text-center focus:outline-none focus:border-gold" />
+                  <input aria-label="Cantidad" type="number" min={1} value={cant} onChange={e => setCant(e.target.value)} title="Cantidad" className="w-[70px] border border-edge rounded-[7px] px-[11px] py-[9px] text-[13px] bg-surface-2 text-ink text-center focus:outline-none focus:border-gold" />
                 </div>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto_auto] gap-2 mb-2.5">
-                  <input value={extNombre} onChange={e => setExtNombre(e.target.value)} placeholder="Nombre de la pieza (pedida aparte)" className="border border-edge rounded-[7px] px-[11px] py-[9px] text-[13px] bg-surface-2 text-ink placeholder-mute focus:outline-none focus:border-gold" />
-                  <input type="number" value={extCosto} onChange={e => setExtCosto(e.target.value)} placeholder="Costo c/u" className="sm:w-28 border border-edge rounded-[7px] px-[11px] py-[9px] text-[13px] bg-surface-2 text-ink placeholder-mute focus:outline-none focus:border-gold" />
-                  <input type="number" min={1} value={cant} onChange={e => setCant(e.target.value)} title="Cantidad" className="sm:w-[70px] border border-edge rounded-[7px] px-[11px] py-[9px] text-[13px] bg-surface-2 text-ink text-center focus:outline-none focus:border-gold" />
+                  <input aria-label="Nombre de la pieza (pedida aparte)" value={extNombre} onChange={e => setExtNombre(e.target.value)} placeholder="Nombre de la pieza (pedida aparte)" className="border border-edge rounded-[7px] px-[11px] py-[9px] text-[13px] bg-surface-2 text-ink placeholder-mute focus:outline-none focus:border-gold" />
+                  <input aria-label="Costo c/u" type="number" value={extCosto} onChange={e => setExtCosto(e.target.value)} placeholder="Costo c/u" className="sm:w-28 border border-edge rounded-[7px] px-[11px] py-[9px] text-[13px] bg-surface-2 text-ink placeholder-mute focus:outline-none focus:border-gold" />
+                  <input aria-label="Cantidad" type="number" min={1} value={cant} onChange={e => setCant(e.target.value)} title="Cantidad" className="sm:w-[70px] border border-edge rounded-[7px] px-[11px] py-[9px] text-[13px] bg-surface-2 text-ink text-center focus:outline-none focus:border-gold" />
                 </div>
               )}
               <button onClick={agregarItem} disabled={busy} className="w-full py-2.5 rounded-[7px] border border-dashed border-edge text-mute font-bold text-[13px] hover:text-ink hover:border-gold/50 transition-colors disabled:opacity-50 flex items-center justify-center gap-1.5">
@@ -5373,8 +5580,8 @@ function OrdenDetalleModal({ orden, refacciones, notify, onClose, onChanged, onP
             {o.tipo === 'cliente' && (
               <div className="mb-5">
                 <div className={`${capLabel} mb-2`}>CLIENTE</div>
-                <input value={clienteNombre} onChange={e => setClienteNombre(e.target.value)} placeholder="Nombre del cliente" className={`${inpSide} mb-2`} />
-                <input value={clienteTel} onChange={e => setClienteTel(e.target.value)} inputMode="numeric" maxLength={10} placeholder="Teléfono (10 dígitos)" className={inpSide} />
+                <input aria-label="Nombre del cliente" value={clienteNombre} onChange={e => setClienteNombre(e.target.value)} placeholder="Nombre del cliente" className={`${inpSide} mb-2`} />
+                <input aria-label="Teléfono (10 dígitos)" value={clienteTel} onChange={e => setClienteTel(e.target.value)} inputMode="numeric" maxLength={10} placeholder="Teléfono (10 dígitos)" className={inpSide} />
                 {/* Vincular a su cuenta: liga de un solo uso, como ventas/rentas. */}
                 {o.cuenta ? (
                   <p className="mt-2.5 text-[12px] text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-1.5">
@@ -5390,7 +5597,7 @@ function OrdenDetalleModal({ orden, refacciones, notify, onClose, onChanged, onP
                   <div className="mt-2.5">
                     <p className="text-[11px] text-mute mb-1.5">Mándale esta liga al cliente; al abrirla con su cuenta, la orden aparece en “Mis reparaciones”.</p>
                     <div className="flex gap-1.5">
-                      <input readOnly value={liga} onFocus={e => e.currentTarget.select()} className="flex-1 min-w-0 bg-surface border border-edge rounded-[8px] px-2.5 py-1.5 text-[11px] text-ink outline-none" />
+                      <input aria-label="Liga para compartir" readOnly value={liga} onFocus={e => e.currentTarget.select()} className="flex-1 min-w-0 bg-surface border border-edge rounded-[8px] px-2.5 py-1.5 text-[11px] text-ink outline-none" />
                       <button onClick={copiarLiga} className={`px-2.5 py-1.5 rounded-[8px] text-[12px] font-bold border transition-colors ${ligaCopiada ? 'border-emerald-500/50 text-emerald-600' : 'border-edge text-ink hover:bg-surface'}`}>{ligaCopiada ? '✓' : 'Copiar'}</button>
                     </div>
                   </div>
@@ -5398,9 +5605,9 @@ function OrdenDetalleModal({ orden, refacciones, notify, onClose, onChanged, onP
               </div>
             )}
             <div className={`${capLabel} mb-2`}>MANO DE OBRA ($)</div>
-            <input type="number" value={mano} onChange={e => setMano(e.target.value)} placeholder="0.00" className={`${inpSide} mb-3.5`} />
+            <input aria-label="Mano de obra" type="number" value={mano} onChange={e => setMano(e.target.value)} placeholder="0.00" className={`${inpSide} mb-3.5`} />
             <div className={`${capLabel} mb-2`}>NOTAS INTERNAS</div>
-            <input value={notas} onChange={e => setNotas(e.target.value)} placeholder="Opcional" className={`${inpSide} mb-5`} />
+            <input aria-label="Notas internas" value={notas} onChange={e => setNotas(e.target.value)} placeholder="Opcional" className={`${inpSide} mb-5`} />
 
             <div className={`${capLabel} mb-2.5`}>RESUMEN</div>
             <div className="flex justify-between text-[12.5px] text-mute mb-1.5"><span>Refacciones</span><span>{orMoney(o.total_refacciones)}</span></div>
@@ -5419,7 +5626,7 @@ function OrdenDetalleModal({ orden, refacciones, notify, onClose, onChanged, onP
           </div>
         </div>
       </div>
-    </div>,
+    </Modal>,
     document.body,
   )
 }
@@ -5438,6 +5645,8 @@ type Pedido = {
   fecha_estimada_entrega: string | null; pedido_fase: string; entregada_en: string | null
   vendedor: string | null; equipo: string | null; equipo_id: number | null
   unidad: { id: number; codigo: string; equipo: string | null } | null
+  /** Las máquinas del pedido: cuáles llegaron y cuáles se esperan. */
+  maquinas?: { id: number; unidad_id: number | null; codigo: string | null; numero_serie?: string | null; equipo?: string | null; precio: string; entregada: boolean }[]
 }
 type PedidosDatos = { pedidos: Pedido[]; total: string; clientes: number }
 
@@ -5579,7 +5788,7 @@ function NuevoPedidoModal({ desde, equipos = [], empresas, onClose, onDone, noti
   }
 
   return (
-    <div className="fixed inset-0 z-[70] bg-black/40 backdrop-blur-[2px]" onClick={onClose}>
+    <Modal className="fixed inset-0 z-[70] bg-black/40 backdrop-blur-[2px]" onClose={onClose} label="Nuevo pedido">
       <motion.div
         initial={{ x: '100%' }} animate={{ x: 0 }} transition={{ duration: 0.3, ease: [0.23, 1, 0.32, 1] }}
         onClick={e => e.stopPropagation()}
@@ -5606,7 +5815,7 @@ function NuevoPedidoModal({ desde, equipos = [], empresas, onClose, onDone, noti
           ) : (
             <div>
               <label className={label}>Equipo a pedir</label>
-              <select value={equipoId} onChange={e => setEquipoId(e.target.value)} className={input}>
+              <select aria-label="Equipo a pedir" value={equipoId} onChange={e => setEquipoId(e.target.value)} className={input}>
                 <option value="">Elige el equipo…</option>
                 {equiposPedibles.map(e => (
                   <option key={e.id} value={e.id}>{e.modelo}{e.unidades_total ? ' · agotado' : ' · sobre pedido'}</option>
@@ -5641,15 +5850,15 @@ function NuevoPedidoModal({ desde, equipos = [], empresas, onClose, onDone, noti
             </div>
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <div><label className={label}>Cliente</label><input value={cliente} onChange={e => setCliente(e.target.value)} placeholder="Nombre" className={input} /></div>
-            <div><label className={label}>Teléfono</label><input type="tel" inputMode="numeric" maxLength={10} value={telefono} onChange={e => setTelefono(soloTelefono(e.target.value))} placeholder="Opcional" className={input} /></div>
+            <div><label className={label}>Cliente</label><input aria-label="Cliente" value={cliente} onChange={e => setCliente(e.target.value)} placeholder="Nombre" className={input} /></div>
+            <div><label className={label}>Teléfono</label><input aria-label="Teléfono" type="tel" inputMode="numeric" maxLength={10} value={telefono} onChange={e => setTelefono(soloTelefono(e.target.value))} placeholder="Opcional" className={input} /></div>
           </div>
           {desde ? (
             <p className="text-[11px] text-mute px-1">Se liga al cliente de la cotización #{desde.id} (verá su pedido en "Mis compras").</p>
           ) : (
             <div>
               <label className={label}>Ligar a cuenta de cliente (opcional)</label>
-              <select value={clienteCuenta} onChange={e => { setClienteCuenta(e.target.value); const c = clientes.find(x => String(x.id) === e.target.value); if (c && !cliente.trim()) setCliente(c.nombre) }} className={input}>
+              <select aria-label="Ligar a cuenta de cliente (opcional)" value={clienteCuenta} onChange={e => { setClienteCuenta(e.target.value); const c = clientes.find(x => String(x.id) === e.target.value); if (c && !cliente.trim()) setCliente(c.nombre) }} className={input}>
                 <option value="">Sin cuenta (solo nombre)</option>
                 {clientes.map(c => <option key={c.id} value={c.id}>{c.nombre}{c.empresa ? ` · ${c.empresa}` : ''}</option>)}
               </select>
@@ -5659,18 +5868,18 @@ function NuevoPedidoModal({ desde, equipos = [], empresas, onClose, onDone, noti
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className={label}>Empresa (opcional)</label>
-              <select value={empresaId} onChange={e => setEmpresaId(e.target.value)} className={input}>
+              <select aria-label="Empresa (opcional)" value={empresaId} onChange={e => setEmpresaId(e.target.value)} className={input}>
                 <option value="">Sin empresa</option>
                 {empresas.map(em => <option key={em.id} value={em.id}>{em.nombre}</option>)}
               </select>
             </div>
-            <div><label className={label}>Llega aprox.</label><input type="date" value={fecha} onChange={e => setFecha(e.target.value)} className={input} /></div>
+            <div><label className={label}>Llega aprox.</label><input aria-label="Llega aprox." type="date" value={fecha} onChange={e => setFecha(e.target.value)} className={input} /></div>
           </div>
           {anticipoBajo && (
             <div className="rounded-xl border border-amber-500/40 bg-amber-500/[0.07] px-3.5 py-3 space-y-2">
               <p className="text-[12.5px] font-bold text-amber-700 dark:text-amber-300">Recibir menos del {pctMin}% requiere autorización</p>
               <p className="text-[11.5px] text-mute">Queda a criterio de administración. Escribe el código de 6 dígitos de un administrador o gerente para registrar este anticipo bajo.</p>
-              <input type="password" autoComplete="one-time-code" inputMode="numeric" maxLength={6} value={codigo}
+              <input aria-label="Código de seguridad" type="password" autoComplete="one-time-code" inputMode="numeric" maxLength={6} value={codigo}
                 onChange={e => setCodigo(e.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="••••••"
                 className={`${input} text-center font-mono tracking-[0.4em]`} />
             </div>
@@ -5681,7 +5890,7 @@ function NuevoPedidoModal({ desde, equipos = [], empresas, onClose, onDone, noti
           <button onClick={submit} disabled={busy} className="px-7 py-2.5 rounded-full bg-gold text-black text-sm font-bold hover:opacity-90 active:scale-[0.96] transition disabled:opacity-50">{busy ? 'Guardando…' : 'Registrar pedido'}</button>
         </div>
       </motion.div>
-    </div>
+    </Modal>
   )
 }
 
@@ -5743,7 +5952,24 @@ function PedidosAdmin({ datos, reload, equipos, empresas, notify }: {
   async function entregar(p: Pedido) {
     if (Number(p.saldo || 0) > 0) { notify('Falta liquidar el saldo antes de entregar.', 'err'); return }
     let unidad_id: number | undefined
-    if (p.sobre_pedido || !p.unidad) {
+    let unidad_ids: number[] | undefined
+
+    // Pedido de VARIAS máquinas: rara vez llegan todas el mismo día, así que se
+    // elige cuáles se entregan hoy. Las que falten dejan el pedido abierto.
+    const pendientes = (p.maquinas || []).filter(m => !m.entregada && m.codigo)
+    if (pendientes.length > 1) {
+      const sel = await elegir({
+        titulo: '¿Qué máquinas se entregan?',
+        mensaje: 'Las que no elijas siguen apartadas y el pedido queda abierto por ellas.',
+        multiple: true,
+        opciones: pendientes.map(m => ({
+          valor: String(m.unidad_id), label: m.codigo || '—',
+          detalle: m.numero_serie ? `S/N ${m.numero_serie}` : (m.equipo || ''),
+        })),
+      })
+      if (!sel || !sel.length) return
+      unidad_ids = sel.map(Number)
+    } else if (p.sobre_pedido || !p.unidad) {
       try {
         const resp = await api.get<Unidad[]>(`/equipos/${p.equipo_id}/unidades/`, { fondo: true } as never)
         const libres = (resp.data || []).filter(u => u.estado === 'disponible')
@@ -5758,8 +5984,10 @@ function PedidosAdmin({ datos, reload, equipos, empresas, notify }: {
       } catch { notify('No se pudieron cargar las unidades', 'err'); return }
     }
     try {
-      await api.post(`/ventas/${p.id}/entregar/`, { unidad_id })
-      notify('Pedido entregado')
+      const r = await api.post<{ pedido?: { estado?: string } }>(`/ventas/${p.id}/entregar/`, { unidad_id, unidad_ids })
+      notify(r.data?.pedido?.estado === 'apartada'
+        ? 'Máquinas entregadas · el pedido sigue abierto por las que faltan'
+        : 'Pedido entregado')
       reload()
     } catch (e) { notify((e as { response?: { data?: { detalle?: string } } })?.response?.data?.detalle || 'No se pudo entregar', 'err') }
   }
@@ -5776,7 +6004,7 @@ function PedidosAdmin({ datos, reload, equipos, empresas, notify }: {
       />
 
       <div className="flex flex-wrap items-center gap-2">
-        <input value={busca} onChange={e => setBusca(e.target.value)} placeholder="Buscar cliente, equipo o folio…"
+        <input aria-label="Buscar cliente, equipo o folio" value={busca} onChange={e => setBusca(e.target.value)} placeholder="Buscar cliente, equipo o folio…"
           className={`${input} flex-1 min-w-[200px]`} />
         <button onClick={() => setNuevo(true)}
           className="h-10 px-4 rounded-full bg-gold text-black text-sm font-bold hover:brightness-95 transition whitespace-nowrap active:scale-[0.97]">
@@ -6196,7 +6424,7 @@ function FacturacionAdmin({ solicitudes, reload, notify }: {
           <div className="flex-1" />
           <div className="relative w-full sm:w-56">
             <svg className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-mute pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><circle cx="9" cy="9" r="6" /><path d="M15 15l3 3" strokeLinecap="round" /></svg>
-            <input value={q} onChange={e => setQ(e.target.value)} placeholder="Buscar RFC, cliente, folio…" className="w-full bg-surface-2 border border-edge rounded-full pl-9 pr-3 py-2 text-sm text-ink placeholder-mute focus:outline-none focus:border-gold/50 transition-colors" />
+            <input aria-label="Buscar RFC, cliente, folio" value={q} onChange={e => setQ(e.target.value)} placeholder="Buscar RFC, cliente, folio…" className="w-full bg-surface-2 border border-edge rounded-full pl-9 pr-3 py-2 text-sm text-ink placeholder-mute focus:outline-none focus:border-gold/50 transition-colors" />
           </div>
           <button onClick={exportar} className="shrink-0 inline-flex items-center gap-2 px-4 py-2 rounded-full border border-edge text-ink text-sm font-semibold hover:bg-surface-2 transition-colors">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.8"><path d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14" strokeLinecap="round" strokeLinejoin="round" /></svg>
@@ -6317,7 +6545,7 @@ function SolicitudFacturaModal({ solicitud, notify, onClose, onChanged }: {
 
   const m = factEstadoMeta(s.estado)
   return (
-    <div className="modal-in fixed inset-0 z-[80] bg-black/60 backdrop-blur-sm flex items-start justify-center p-4 sm:p-6 overflow-y-auto" onClick={onClose}>
+    <Modal className="modal-in fixed inset-0 z-[80] bg-black/60 backdrop-blur-sm flex items-start justify-center p-4 sm:p-6 overflow-y-auto" onClose={onClose} label="Detalle de facturación">
       <div onClick={e => e.stopPropagation()} className="w-full sm:max-w-[820px] bg-surface border border-edge rounded-2xl overflow-hidden sm:my-auto max-h-[92vh] flex flex-col shadow-[0_20px_50px_rgba(33,29,22,0.18)]">
         <div className="px-6 py-4 border-b border-edge flex items-center justify-between shrink-0">
           <div>
@@ -6345,19 +6573,19 @@ function SolicitudFacturaModal({ solicitud, notify, onClose, onChanged }: {
               <button onClick={copiarDatos} className="text-[11px] text-gold-ink hover:underline">Copiar datos</button>
             </div>
             <div className="grid grid-cols-2 gap-2">
-              <input className={`${input} font-mono`} value={s.rfc} onChange={e => set('rfc', e.target.value.toUpperCase())} placeholder="RFC" disabled={facturada} />
-              <input className={input} value={s.codigo_postal} onChange={e => set('codigo_postal', e.target.value)} placeholder="C.P." disabled={facturada} />
-              <input className={`${input} col-span-2`} value={s.razon_social} onChange={e => set('razon_social', e.target.value)} placeholder="Razón social" disabled={facturada} />
-              <select className={input} value={s.regimen_fiscal} onChange={e => set('regimen_fiscal', e.target.value)} disabled={facturada}>
+              <input aria-label="RFC" className={`${input} font-mono`} value={s.rfc} onChange={e => set('rfc', e.target.value.toUpperCase())} placeholder="RFC" disabled={facturada} />
+              <input aria-label="C.P." className={input} value={s.codigo_postal} onChange={e => set('codigo_postal', e.target.value)} placeholder="C.P." disabled={facturada} />
+              <input aria-label="Razón social" className={`${input} col-span-2`} value={s.razon_social} onChange={e => set('razon_social', e.target.value)} placeholder="Razón social" disabled={facturada} />
+              <select aria-label="Régimen fiscal" className={input} value={s.regimen_fiscal} onChange={e => set('regimen_fiscal', e.target.value)} disabled={facturada}>
                 <option value="">Régimen fiscal</option>
                 {REGIMEN_FISCAL.map(o => <option key={o.code} value={o.code} className="bg-surface">{o.label}</option>)}
               </select>
-              <select className={input} value={s.uso_cfdi} onChange={e => set('uso_cfdi', e.target.value)} disabled={facturada}>
+              <select aria-label="Uso del CFDI" className={input} value={s.uso_cfdi} onChange={e => set('uso_cfdi', e.target.value)} disabled={facturada}>
                 <option value="">Uso CFDI</option>
                 {USO_CFDI.map(o => <option key={o.code} value={o.code} className="bg-surface">{o.label}</option>)}
               </select>
-              <input type="email" className={`${input} col-span-2`} value={s.email} onChange={e => set('email', e.target.value)} placeholder="Email" disabled={facturada} />
-              <select className={`${input} col-span-2`} value={s.forma_pago} onChange={e => set('forma_pago', e.target.value)} disabled={facturada}>
+              <input aria-label="Email" type="email" className={`${input} col-span-2`} value={s.email} onChange={e => set('email', e.target.value)} placeholder="Email" disabled={facturada} />
+              <select aria-label="Forma de pago" className={`${input} col-span-2`} value={s.forma_pago} onChange={e => set('forma_pago', e.target.value)} disabled={facturada}>
                 <option value="">Forma de pago (SAT)</option>
                 {Object.entries(FORMA_PAGO_LABEL).map(([code, lbl]) => <option key={code} value={code} className="bg-surface">{lbl}</option>)}
               </select>
@@ -6375,7 +6603,7 @@ function SolicitudFacturaModal({ solicitud, notify, onClose, onChanged }: {
           ) : (
             <div>
               <label className={label}>Folio fiscal (UUID) — al timbrar en tu PAC</label>
-              <input className={`${input} font-mono`} value={uuid} onChange={e => setUuid(e.target.value)} placeholder="Ej. 3F2504E0-4F89-11D3-9A0C-0305E82C3301" />
+              <input aria-label="Folio fiscal (UUID) — al timbrar en tu PAC" className={`${input} font-mono`} value={uuid} onChange={e => setUuid(e.target.value)} placeholder="Ej. 3F2504E0-4F89-11D3-9A0C-0305E82C3301" />
             </div>
           )}
         </div>
@@ -6387,7 +6615,7 @@ function SolicitudFacturaModal({ solicitud, notify, onClose, onChanged }: {
             : <button onClick={marcarFacturada} disabled={busy} className="flex-1 py-2.5 rounded-full bg-gold text-black text-sm font-bold hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center justify-center gap-2">{busy ? <span className="w-4 h-4 border-2 border-black/30 border-t-black rounded-full animate-spin" /> : null}Marcar facturada</button>}
         </div>
       </div>
-    </div>
+    </Modal>
   )
 }
 
@@ -6507,7 +6735,7 @@ function CotizacionesAdmin({ empresas, notify, irAInventario }: {
           <SelectorPeriodo anio={anio} mes={mes} onAnio={setAnio} onMes={setMes} />
           <div className="relative w-full sm:w-56">
             <svg className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-mute pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><circle cx="9" cy="9" r="6" /><path d="M15 15l3 3" strokeLinecap="round" /></svg>
-            <input value={q} onChange={e => setQ(e.target.value)} placeholder="Buscar folio o cliente…" className="w-full bg-surface-2 border border-edge rounded-full pl-9 pr-3 py-2 text-sm text-ink placeholder-mute focus:outline-none focus:border-gold/50 transition-colors" />
+            <input aria-label="Buscar folio o cliente" value={q} onChange={e => setQ(e.target.value)} placeholder="Buscar folio o cliente…" className="w-full bg-surface-2 border border-edge rounded-full pl-9 pr-3 py-2 text-sm text-ink placeholder-mute focus:outline-none focus:border-gold/50 transition-colors" />
           </div>
           <button onClick={crearNueva} disabled={creando} className="shrink-0 inline-flex items-center gap-2 px-4 py-2 rounded-full bg-gold text-black text-sm font-bold hover:opacity-90 transition active:scale-[0.98] disabled:opacity-60">
             {creando
@@ -6729,7 +6957,7 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
 
   // Cierre: si es un borrador recién creado y quedó vacío (sin partidas, sin
   // cliente ni fotos), se descarta para no dejar cotizaciones huérfanas.
-  function cerrar() {
+  async function cerrar() {
     // Una cotización sin cliente o sin conceptos no tiene sentido: un borrador
     // recién creado así NO se conserva. Con datos parciales se pregunta antes de
     // descartar; totalmente vacío se descarta en silencio.
@@ -6739,7 +6967,7 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
       if (sinCliente || sinConceptos) {
         const algo = clienteNombre.trim() || empresaSel || c.items.length > 0 || fotos.length > 0
         const faltan = [sinCliente && 'el nombre del cliente', sinConceptos && 'al menos un concepto'].filter(Boolean).join(' y ')
-        if (algo && !confirm(`No se puede guardar la cotización sin ${faltan}. ¿Descartarla?`)) return
+        if (algo && !await confirmar({ titulo: '¿Descartar la cotización?', mensaje: `No se puede guardar sin ${faltan}.`, aceptar: 'Descartar', cancelar: 'Seguir editando', tono: 'peligro' })) return
         api.delete(`/cotizaciones/${c.id}/`).then(() => onChanged()).catch(() => {})
         onClose()
         return
@@ -7102,7 +7330,7 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
   // que cae directo en aceptada). Antes de eso no hay nada que prometer.
   const verEntrega = c.estado === 'aceptada' || Boolean(c.entrega_prometida)
   return (
-    <div className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm flex items-start justify-center p-0 sm:p-6 overflow-y-auto modal-in" onClick={cerrar}>
+    <Modal className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm flex items-start justify-center p-0 sm:p-6 overflow-y-auto modal-in" onClose={cerrar} label="Detalle de la cotización">
       <div onClick={(e: React.MouseEvent) => e.stopPropagation()} className="w-full sm:max-w-5xl my-0 sm:my-auto bg-surface border border-edge rounded-none sm:rounded-2xl shadow-[0_20px_50px_rgba(33,29,22,0.18)] min-h-screen sm:min-h-0 sm:max-h-[92vh] flex flex-col sm:overflow-hidden">
         <div className="px-5 sm:px-7 py-4 sm:py-5 border-b border-edge flex items-start justify-between gap-4 bg-surface shrink-0">
           <div className="min-w-0">
@@ -7349,20 +7577,20 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
               </div>
             )}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <select disabled={bloqueada || identidadBloqueada || !!c.usuario_nombre} title={c.usuario_nombre || identidadBloqueada ? 'La identidad la puso el cliente: no se cambia por una empresa' : undefined} value={empresaSel} onChange={e => cambiarEmpresa(e.target.value)} className={`${input} sm:col-span-2 disabled:opacity-60`}>
+              <select aria-label="Cuenta del cliente" disabled={bloqueada || identidadBloqueada || !!c.usuario_nombre} title={c.usuario_nombre || identidadBloqueada ? 'La identidad la puso el cliente: no se cambia por una empresa' : undefined} value={empresaSel} onChange={e => cambiarEmpresa(e.target.value)} className={`${input} sm:col-span-2 disabled:opacity-60`}>
                 <option value="">— Cliente particular —</option>
                 {empresasActivas(empresas).map(e => <option key={e.id} value={e.id}>{e.nombre}</option>)}
               </select>
-              <input disabled={bloqueada || identidadBloqueada || !!empresaSel || !!c.usuario_nombre} value={clienteNombre} onChange={e => setClienteNombre(e.target.value)}
+              <input aria-label="Nombre del cliente" disabled={bloqueada || identidadBloqueada || !!empresaSel || !!c.usuario_nombre} value={clienteNombre} onChange={e => setClienteNombre(e.target.value)}
                 title={empresaSel ? 'El nombre lo define la empresa seleccionada' : undefined}
                 className={`${input} disabled:opacity-60`} placeholder="Nombre del cliente" />
               <div>
-                <input type="tel" inputMode="numeric" maxLength={10} disabled={bloqueada || identidadBloqueada} value={clienteTel}
+                <input aria-label="Teléfono (10 dígitos)" type="tel" inputMode="numeric" maxLength={10} disabled={bloqueada || identidadBloqueada} value={clienteTel}
                   onChange={e => setClienteTel(e.target.value.replace(/\D/g, '').slice(0, 10))}
                   className={`${input} disabled:opacity-60`} placeholder="Teléfono (10 dígitos)" />
                 {clienteTel.length > 0 && clienteTel.length < 10 && <p className="text-[11px] text-red-600 dark:text-red-500 mt-1">Deben ser 10 dígitos.</p>}
               </div>
-              <input type="email" disabled={bloqueada || identidadBloqueada} value={email} onChange={e => setEmail(e.target.value)} className={`${input} sm:col-span-2 disabled:opacity-60`} placeholder="Correo (cliente@correo.com)" />
+              <input aria-label="Correo (cliente@correo.com)" type="email" disabled={bloqueada || identidadBloqueada} value={email} onChange={e => setEmail(e.target.value)} className={`${input} sm:col-span-2 disabled:opacity-60`} placeholder="Correo (cliente@correo.com)" />
             </div>
             {identidadBloqueada && !bloqueada && (
               <p className="text-[11.5px] text-mute mt-2">El nombre, teléfono y correo los puso el cliente en su solicitud — se corrigen desde su cuenta.</p>
@@ -7396,7 +7624,7 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
                   {c.items.map(it => (
                     <div key={it.id} className="flex flex-col md:flex-row md:items-center gap-1 md:gap-2 px-3 py-2 md:py-0 border-b border-edge last:border-0">
                       <div className="flex-1 min-w-0 py-1">
-                        <input key={`${it.id}-${it.descripcion}`} defaultValue={it.descripcion} disabled={conceptosBloqueados} placeholder="Concepto"
+                        <input aria-label="Concepto" key={`${it.id}-${it.descripcion}`} defaultValue={it.descripcion} disabled={conceptosBloqueados} placeholder="Concepto"
                           onBlur={e => { const v = e.target.value.trim(); if (v && v !== it.descripcion) editarItem(it.id, 'descripcion', v) }}
                           className={celda} />
                       </div>
@@ -7406,7 +7634,7 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
                       <div className="flex flex-wrap items-end gap-2 md:contents">
                       <div className="w-full md:w-32 shrink-0 py-1">
                         <span className="md:hidden block text-[9.5px] font-bold uppercase tracking-[0.06em] text-mute pl-2">Modalidad</span>
-                        <select value={it.modalidad} disabled={conceptosBloqueados} title="¿Se vende o se renta?"
+                        <select aria-label="¿Se vende o se renta?" value={it.modalidad} disabled={conceptosBloqueados} title="¿Se vende o se renta?"
                           onChange={e => cambiarModalidad(it.id, e.target.value as Modalidad)}
                           className={`${celda} cursor-pointer font-medium`}>
                           {MODALIDADES.map(mm => <option key={mm.key} value={mm.key} className="bg-surface text-ink">{mm.corto}</option>)}
@@ -7414,7 +7642,7 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
                       </div>
                       <div className="w-16 shrink-0 py-1">
                         <span className="md:hidden block text-[9.5px] font-bold uppercase tracking-[0.06em] text-mute text-center">Equipos</span>
-                        <input type="number" min={1} defaultValue={it.cantidad} disabled={conceptosBloqueados} title="Cuántas máquinas"
+                        <input aria-label="Cantidad" type="number" min={1} defaultValue={it.cantidad} disabled={conceptosBloqueados} title="Cuántas máquinas"
                           onBlur={e => { const v = Math.max(1, Number(e.target.value) || 1); if (v !== it.cantidad) editarItem(it.id, 'cantidad', v) }}
                           className={`${celda} text-center`} />
                       </div>
@@ -7423,14 +7651,14 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
                         {/* Duración = periodos de renta; en venta no aplica. */}
                         {it.modalidad === 'venta'
                           ? <div className={`${celda} text-center text-mute cursor-default`}>—</div>
-                          : <input key={`${it.id}-dur-${it.duracion}`} type="number" min={1} defaultValue={it.duracion || 1} disabled={conceptosBloqueados}
+                          : <input aria-label="Duración" key={`${it.id}-dur-${it.duracion}`} type="number" min={1} defaultValue={it.duracion || 1} disabled={conceptosBloqueados}
                               title="Cuántos días / semanas / meses"
                               onBlur={e => { const v = Math.max(1, Number(e.target.value) || 1); if (v !== (it.duracion || 1)) editarItem(it.id, 'duracion', v) }}
                               className={`${celda} text-center`} />}
                       </div>
                       <div className="flex-1 min-w-[96px] md:flex-none md:w-28 shrink-0 py-1">
                         <span className="md:hidden block text-[9.5px] font-bold uppercase tracking-[0.06em] text-mute text-right pr-2">P. Unit</span>
-                        <input key={`${it.id}-${it.precio_unitario}`} type="number" min={0} step="0.01" defaultValue={it.precio_unitario} disabled={conceptosBloqueados}
+                        <input aria-label="Precio unitario" key={`${it.id}-${it.precio_unitario}`} type="number" min={0} step="0.01" defaultValue={it.precio_unitario} disabled={conceptosBloqueados}
                           onBlur={e => { const v = Number(e.target.value) || 0; if (v !== Number(it.precio_unitario)) editarItem(it.id, 'precio_unitario', v) }}
                           className={`${celda} text-right font-bold tabular-nums`} />
                         {Number(it.precio_lista) > 0 && Number(it.precio_unitario) !== Number(it.precio_lista) && (
@@ -7522,7 +7750,7 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
           <div>
             <label className={labelCot}>Vigencia</label>
             <div className="relative sm:max-w-[220px]">
-              <input type="number" min={1} disabled={bloqueada} value={vigencia} onChange={e => setVigencia(e.target.value)} className={`${input} pr-14 disabled:opacity-60`} />
+              <input aria-label="Vigencia" type="number" min={1} disabled={bloqueada} value={vigencia} onChange={e => setVigencia(e.target.value)} className={`${input} pr-14 disabled:opacity-60`} />
               <span className="absolute right-3.5 top-1/2 -translate-y-1/2 text-mute text-sm pointer-events-none">días</span>
             </div>
             <p className="text-[11.5px] text-mute mt-2">Los datos del cliente y la vigencia se guardan con “Guardar”. El envío por correo se conectará más adelante.</p>
@@ -7531,7 +7759,7 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
           {/* Notas */}
           <div>
             <label className={labelCot}>Notas</label>
-            <textarea className={`${input} resize-none disabled:opacity-60`} rows={3} disabled={bloqueada} value={notas} onChange={e => setNotas(e.target.value)} placeholder="Condiciones, entrega, etc." />
+            <textarea aria-label="Notas" className={`${input} resize-none disabled:opacity-60`} rows={3} disabled={bloqueada} value={notas} onChange={e => setNotas(e.target.value)} placeholder="Condiciones, entrega, etc." />
           </div>
 
           {/* Fotos: apoyo visual del equipo. Se guardan al instante y salen en
@@ -7545,7 +7773,7 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
                   {subiendoFotos ? 'Subiendo…' : '+ Agregar fotos'}
                 </button>
               )}
-              <input ref={fotoInput} type="file" accept="image/*" multiple className="hidden" onChange={subirFotos} />
+              <input aria-label="Fotos de la cotización" ref={fotoInput} type="file" accept="image/*" multiple className="hidden" onChange={subirFotos} />
             </div>
             {fotos.length === 0 ? (
               bloqueada ? (
@@ -7634,13 +7862,13 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
         />
       )}
       {zoomFoto && createPortal(
-        <div className="modal-in fixed inset-0 z-[70] bg-black/75 flex items-center justify-center p-4" onClick={() => setZoomFoto(null)}>
+        <Modal className="modal-in fixed inset-0 z-[70] bg-black/75 flex items-center justify-center p-4" onClose={() => setZoomFoto(null)} label="Foto de la cotización">
           <img src={resolveMediaUrl(zoomFoto.imagen)} alt="Foto de la cotización" onClick={e => e.stopPropagation()}
             className="max-w-3xl w-full max-h-[85vh] object-contain rounded-xl" />
-        </div>,
+        </Modal>,
         document.body,
       )}
-    </div>
+    </Modal>
   )
 }
 
@@ -7929,7 +8157,7 @@ function EntregaHoja({ tarea, onClose, onHecho, notify }: {
 
   // Sube las fotos (si hay) y luego marca la entrega/recolección. Si la subida
   // falla, NO se marca: la evidencia es parte del acto, no un extra.
-  async function confirmar(conFotos: boolean) {
+  async function enviarEntrega(conFotos: boolean) {
     setOcupado(true)
     try {
       if (conFotos && fotos.length) {
@@ -7952,7 +8180,7 @@ function EntregaHoja({ tarea, onClose, onHecho, notify }: {
   }
 
   return createPortal(
-    <div className="fixed inset-0 z-[60] bg-[rgba(33,29,22,0.45)] backdrop-blur-[2px] flex items-end sm:items-center justify-center" onClick={onClose}>
+    <Modal className="fixed inset-0 z-[60] bg-[rgba(33,29,22,0.45)] backdrop-blur-[2px] flex items-end sm:items-center justify-center" onClose={onClose} label="Hoja de entrega">
       <div onClick={e => e.stopPropagation()} className="w-full sm:max-w-[520px] bg-surface rounded-t-3xl sm:rounded-2xl shadow-[0_-8px_40px_rgba(33,29,22,0.2)] sm:shadow-[0_24px_60px_rgba(33,29,22,0.25)] max-h-[92vh] flex flex-col overflow-hidden border-t sm:border border-edge">
         <div className="px-6 pt-5 pb-4 border-b border-edge flex items-start justify-between gap-3">
           <div className="min-w-0">
@@ -7970,7 +8198,7 @@ function EntregaHoja({ tarea, onClose, onHecho, notify }: {
             <p className="text-[12.5px] text-mute mb-3">
               {esRecoger ? 'Cómo regresó la máquina. Respalda el estado por si hay reclamo.' : 'El estado en que sale. Es tu respaldo si el cliente reporta un daño.'}
             </p>
-            <input ref={inputRef} type="file" accept="image/*" capture="environment" multiple className="hidden" onChange={agregar} />
+            <input aria-label="Fotos de la entrega" ref={inputRef} type="file" accept="image/*" capture="environment" multiple className="hidden" onChange={agregar} />
             <div className="grid grid-cols-4 gap-2">
               <button onClick={() => inputRef.current?.click()}
                 className="aspect-square rounded-xl border-2 border-dashed border-edge grid place-items-center text-mute hover:text-gold-ink hover:border-gold/50 transition-colors">
@@ -7990,7 +8218,7 @@ function EntregaHoja({ tarea, onClose, onHecho, notify }: {
 
           <div>
             <label className="text-[11px] font-extrabold tracking-[0.5px] text-gold-ink mb-2 block">NOTA (OPCIONAL)</label>
-            <input value={nota} onChange={e => setNota(e.target.value)} placeholder="Ej. Rayón en la tapa, tanque lleno…"
+            <input aria-label="NOTA (OPCIONAL)" value={nota} onChange={e => setNota(e.target.value)} placeholder="Ej. Rayón en la tapa, tanque lleno…"
               className="w-full bg-surface-2 border border-edge rounded-xl px-3.5 py-2.5 text-sm text-ink placeholder-mute focus:outline-none focus:border-gold/50 transition-colors" />
           </div>
         </div>
@@ -7998,14 +8226,14 @@ function EntregaHoja({ tarea, onClose, onHecho, notify }: {
         <div className="px-6 py-5 border-t border-edge">
           {/* El camino esperado es CON fotos: el botón principal se activa al
               tener al menos una. Sin fotos es una decisión explícita, abajo. */}
-          <button onClick={() => confirmar(true)} disabled={ocupado || fotos.length === 0}
+          <button onClick={() => enviarEntrega(true)} disabled={ocupado || fotos.length === 0}
             className={`${esRecoger ? 'btn-renta' : 'btn-acento'} w-full h-12 rounded-full text-[14px] font-black`}>
             {ocupado ? 'Guardando…'
               : fotos.length ? `Confirmar con ${fotos.length} foto${fotos.length > 1 ? 's' : ''}`
               : (esRecoger ? 'Confirmar recolección' : 'Confirmar entrega')}
           </button>
           {fotos.length === 0 ? (
-            <button onClick={() => { if (confirm('¿Seguro sin fotos? Sin evidencia no hay respaldo si el cliente reclama un daño.')) confirmar(false) }} disabled={ocupado}
+            <button onClick={async () => { if (await confirmar({ titulo: '¿Entregar sin fotos?', mensaje: 'Sin evidencia no hay respaldo si el cliente reclama un daño.', aceptar: 'Sin fotos', cancelar: 'Tomar fotos', tono: 'peligro' })) enviarEntrega(false) }}
               className="w-full mt-2.5 h-9 text-[13px] font-semibold text-mute hover:text-ink transition-colors">
               {esRecoger ? 'Recoger sin fotos' : 'Entregar sin fotos'}
             </button>
@@ -8014,7 +8242,7 @@ function EntregaHoja({ tarea, onClose, onHecho, notify }: {
           )}
         </div>
       </div>
-    </div>,
+    </Modal>,
     document.body
   )
 }
@@ -8091,9 +8319,9 @@ function TallerTrabajoModal({ ordenId, onClose, onCambio, notify }: {
       .catch(err => notify(errorMsg(err, 'No se pudo iniciar'), 'err'))
       .finally(() => setOcupado(false))
   }
-  function terminar() {
+  async function terminar() {
     if (trabajo.trim().length < 4) { notify('Escribe qué le hiciste antes de terminar.', 'err'); return }
-    if (!confirm('¿La máquina ya quedó lista para entregar?\n\nAl terminar sale de tus pendientes.')) return
+    if (!await confirmar({ titulo: '¿La máquina ya quedó lista para entregar?', mensaje: 'Al terminar sale de tus pendientes.', aceptar: 'Sí, está lista' })) return
     setOcupado(true)
     api.patch(`/reparaciones/${ordenId}/`, { estado: 'terminada', trabajo_realizado: trabajo.trim() })
       .then(() => { notify('Reparación terminada'); onCambio(); onClose() })
@@ -8108,7 +8336,7 @@ function TallerTrabajoModal({ ordenId, onClose, onCambio, notify }: {
   const est = estado ? ESTADO_ORDEN[estado] : undefined
 
   return createPortal(
-    <div className="fixed inset-0 z-[60] bg-[rgba(33,29,22,0.4)] backdrop-blur-[2px] flex items-end sm:items-center justify-center" onClick={cerrar}>
+    <Modal className="fixed inset-0 z-[60] bg-[rgba(33,29,22,0.4)] backdrop-blur-[2px] flex items-end sm:items-center justify-center" onClose={cerrar} label="Detalle de la reparación">
       <div onClick={e => e.stopPropagation()} className="w-full sm:max-w-[560px] bg-surface rounded-t-3xl sm:rounded-2xl shadow-[0_-8px_40px_rgba(33,29,22,0.2)] sm:shadow-[0_24px_60px_rgba(33,29,22,0.25)] max-h-[92vh] flex flex-col overflow-hidden border-t sm:border border-edge">
         <div className="px-6 pt-5 pb-4 border-b border-edge flex items-start justify-between gap-3">
           <div className="min-w-0">
@@ -8170,7 +8398,7 @@ function TallerTrabajoModal({ ordenId, onClose, onCambio, notify }: {
                 <p className="text-[11px] font-extrabold tracking-[0.5px] text-gold-ink mb-2">TOMAR DEL INVENTARIO</p>
                 <div className="relative mb-2">
                   <svg className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-mute pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><circle cx="11" cy="11" r="7" /><path d="M20 20l-3.5-3.5" /></svg>
-                  <input value={busqueda} onChange={e => setBusqueda(e.target.value)} placeholder="Buscar refacción…"
+                  <input aria-label="Buscar refacción" value={busqueda} onChange={e => setBusqueda(e.target.value)} placeholder="Buscar refacción…"
                     className="w-full bg-surface-2 border border-edge rounded-xl pl-9 pr-3 py-2.5 text-sm text-ink placeholder-mute focus:outline-none focus:border-gold/50 transition-colors" />
                 </div>
                 <div className="max-h-44 overflow-y-auto space-y-1.5">
@@ -8189,7 +8417,7 @@ function TallerTrabajoModal({ ordenId, onClose, onCambio, notify }: {
               {/* Qué se hizo: obligatorio para terminar */}
               <div>
                 <p className="text-[11px] font-extrabold tracking-[0.5px] text-gold-ink mb-2">¿QUÉ LE HICISTE?</p>
-                <textarea value={trabajo} onChange={e => setTrabajo(e.target.value)} onBlur={guardarTrabajo} rows={3}
+                <textarea aria-label="Qué le hiciste al equipo" value={trabajo} onChange={e => setTrabajo(e.target.value)} onBlur={guardarTrabajo} rows={3}
                   placeholder="Ej. Cambié el filtro y limpié el carburador. Probada y funcionando."
                   className="w-full bg-surface-2 border border-edge rounded-xl px-3.5 py-2.5 text-sm text-ink placeholder-mute focus:outline-none focus:border-gold/50 transition-colors resize-none" />
                 <p className="text-[12px] text-mute mt-1.5">Se guarda solo. Descríbelo antes de marcarla terminada.</p>
@@ -8219,7 +8447,7 @@ function TallerTrabajoModal({ ordenId, onClose, onCambio, notify }: {
           )}
         </div>
       </div>
-    </div>,
+    </Modal>,
     document.body
   )
 }
@@ -8470,19 +8698,19 @@ function UsuariosAdmin({ usuarios, reload, notify, yoId }: {
           ] as const).map(([k, etiqueta, ph]) => (
             <div key={k}>
               <label className="block text-[12px] font-semibold text-mute mb-1.5">{etiqueta}</label>
-              <input value={f[k]} onChange={e => setF({ ...f, [k]: e.target.value })} placeholder={ph}
+              <input aria-label={etiqueta} value={f[k]} onChange={e => setF({ ...f, [k]: e.target.value })} placeholder={ph}
                 className="w-full bg-surface-2 border border-edge rounded-xl px-3.5 py-2.5 text-sm text-ink placeholder-mute focus:outline-none focus:border-gold/50 transition-colors" />
             </div>
           ))}
           <div className="grid grid-cols-2 gap-2">
             <div>
               <label className="block text-[12px] font-semibold text-mute mb-1.5">Desde</label>
-              <input type="date" value={f.desde} onChange={e => setF({ ...f, desde: e.target.value })}
+              <input aria-label="Desde" type="date" value={f.desde} onChange={e => setF({ ...f, desde: e.target.value })}
                 className="w-full bg-surface-2 border border-edge rounded-xl px-3 py-2.5 text-sm text-ink focus:outline-none focus:border-gold/50 transition-colors" />
             </div>
             <div>
               <label className="block text-[12px] font-semibold text-mute mb-1.5">Hasta</label>
-              <input type="date" value={f.hasta} onChange={e => setF({ ...f, hasta: e.target.value })}
+              <input aria-label="Hasta" type="date" value={f.hasta} onChange={e => setF({ ...f, hasta: e.target.value })}
                 className="w-full bg-surface-2 border border-edge rounded-xl px-3 py-2.5 text-sm text-ink focus:outline-none focus:border-gold/50 transition-colors" />
             </div>
           </div>
@@ -8711,7 +8939,7 @@ function AsignarRolModal({ u, roles, onClose, onSaved, notify }: {
   }
 
   return createPortal(
-    <div className="fixed inset-0 z-[60] bg-black/40 backdrop-blur-[2px]" onClick={onClose}>
+    <Modal className="fixed inset-0 z-[60] bg-black/40 backdrop-blur-[2px]" onClose={onClose} label="Asignar rol">
       <motion.div
         initial={{ x: '100%' }} animate={{ x: 0 }} transition={{ duration: 0.3, ease: [0.23, 1, 0.32, 1] }}
         onClick={e => e.stopPropagation()}
@@ -8750,7 +8978,7 @@ function AsignarRolModal({ u, roles, onClose, onSaved, notify }: {
           </button>
         </div>
       </motion.div>
-    </div>,
+    </Modal>,
     document.body,
   )
 }
@@ -8772,7 +9000,7 @@ function UsuarioDetalle({ u, soyYo, onClose, onEditar }: {
     <span className={`inline-flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1 rounded-full whitespace-nowrap ${cls}`}>{children}</span>
   )
   return createPortal(
-    <div className="fixed inset-0 z-[60] bg-black/40 backdrop-blur-[2px]" onClick={onClose}>
+    <Modal className="fixed inset-0 z-[60] bg-black/40 backdrop-blur-[2px]" onClose={onClose} label="Detalle de usuario">
       <motion.div
         initial={{ x: '100%' }} animate={{ x: 0 }} transition={{ duration: 0.3, ease: [0.23, 1, 0.32, 1] }}
         onClick={e => e.stopPropagation()}
@@ -8836,7 +9064,7 @@ function UsuarioDetalle({ u, soyYo, onClose, onEditar }: {
           {!esCliente(u) && <button onClick={onEditar} className="px-7 py-2.5 rounded-full bg-gold text-black text-sm font-bold hover:opacity-90 transition-opacity">Editar</button>}
         </div>
       </motion.div>
-    </div>,
+    </Modal>,
     document.body,
   )
 }
@@ -8882,7 +9110,7 @@ function UsuarioModal({ usuario, roles, soyYo, onClose, onSaved, notify }: {
   const etiqueta = 'block text-[12px] font-semibold text-mute mb-1.5'
 
   return createPortal(
-    <div className="fixed inset-0 z-[60] bg-black/40 backdrop-blur-[2px]" onClick={onClose}>
+    <Modal className="fixed inset-0 z-[60] bg-black/40 backdrop-blur-[2px]" onClose={onClose} label={nuevo ? 'Agregar usuario' : 'Editar usuario'}>
       <motion.div
         initial={{ x: '100%' }} animate={{ x: 0 }} transition={{ duration: 0.3, ease: [0.23, 1, 0.32, 1] }}
         onClick={e => e.stopPropagation()}
@@ -8902,26 +9130,26 @@ function UsuarioModal({ usuario, roles, soyYo, onClose, onSaved, notify }: {
 
         <div className="px-6 sm:px-7 py-5 space-y-5 overflow-y-auto flex-1">
           <div className="grid sm:grid-cols-2 gap-4">
-            <div><label className={etiqueta}>Nombre</label><input className={campo} value={f.first_name} onChange={e => set('first_name', e.target.value)} placeholder="Pedro" /></div>
-            <div><label className={etiqueta}>Apellido</label><input className={campo} value={f.last_name} onChange={e => set('last_name', e.target.value)} placeholder="Ruiz" /></div>
+            <div><label className={etiqueta}>Nombre</label><input aria-label="Nombre" className={campo} value={f.first_name} onChange={e => set('first_name', e.target.value)} placeholder="Pedro" /></div>
+            <div><label className={etiqueta}>Apellido</label><input aria-label="Apellido" className={campo} value={f.last_name} onChange={e => set('last_name', e.target.value)} placeholder="Ruiz" /></div>
           </div>
 
           {nuevo && (
             <div className="grid sm:grid-cols-2 gap-4">
               <div>
                 <label className={etiqueta}>Usuario para entrar</label>
-                <input className={campo} value={f.username} onChange={e => set('username', e.target.value.toLowerCase().replace(/\s/g, ''))} placeholder="pedro" autoComplete="off" />
+                <input aria-label="Usuario para entrar" className={campo} value={f.username} onChange={e => set('username', e.target.value.toLowerCase().replace(/\s/g, ''))} placeholder="pedro" autoComplete="off" />
               </div>
               <div>
                 <label className={etiqueta}>Contraseña</label>
-                <input className={campo} type="text" value={f.password} onChange={e => set('password', e.target.value)} placeholder="Mínimo 8 caracteres" autoComplete="new-password" />
+                <input aria-label="Contraseña" className={campo} type="text" value={f.password} onChange={e => set('password', e.target.value)} placeholder="Mínimo 8 caracteres" autoComplete="new-password" />
               </div>
             </div>
           )}
 
           <div className="grid sm:grid-cols-2 gap-4">
-            <div><label className={etiqueta}>Correo</label><input className={campo} type="email" value={f.email} onChange={e => set('email', e.target.value)} placeholder="pedro@ejemplo.com" /></div>
-            <div><label className={etiqueta}>Teléfono</label><input type="tel" inputMode="numeric" maxLength={10} className={campo} value={f.telefono} onChange={e => set('telefono', soloTelefono(e.target.value))} placeholder="10 dígitos" /></div>
+            <div><label className={etiqueta}>Correo</label><input aria-label="Correo" className={campo} type="email" value={f.email} onChange={e => set('email', e.target.value)} placeholder="pedro@ejemplo.com" /></div>
+            <div><label className={etiqueta}>Teléfono</label><input aria-label="Teléfono" type="tel" inputMode="numeric" maxLength={10} className={campo} value={f.telefono} onChange={e => set('telefono', soloTelefono(e.target.value))} placeholder="10 dígitos" /></div>
           </div>
 
           <div>
@@ -8962,20 +9190,20 @@ function UsuarioModal({ usuario, roles, soyYo, onClose, onSaved, notify }: {
           {esAutoridad && (
             <div>
               <label className={etiqueta}>Código de seguridad (PIN de 6 dígitos)</label>
-              <input className={`${campo} font-mono tracking-[0.3em]`} type="password" inputMode="numeric" maxLength={6} autoComplete="one-time-code"
+              <input aria-label="Código de seguridad (PIN de 6 dígitos)" className={`${campo} font-mono tracking-[0.3em]`} type="password" inputMode="numeric" maxLength={6} autoComplete="one-time-code"
                 value={f.codigo_seguridad} onChange={e => set('codigo_seguridad', e.target.value.replace(/\D/g, '').slice(0, 6))}
                 placeholder={nuevo ? '6 dígitos' : 'Dejar vacío para no cambiarlo'} />
               <p className="text-[12px] text-mute mt-1.5">Solo Administrador y Gerente pueden autorizar acciones sensibles (ajustes de precio, anticipos bajos, devoluciones). Este PIN es su firma.</p>
             </div>
           )}
 
-          <div><label className={etiqueta}>Puesto</label><input className={campo} value={f.puesto} onChange={e => set('puesto', e.target.value)} placeholder="Técnico de servicio, asesor de ventas…" /></div>
+          <div><label className={etiqueta}>Puesto</label><input aria-label="Puesto" className={campo} value={f.puesto} onChange={e => set('puesto', e.target.value)} placeholder="Técnico de servicio, asesor de ventas…" /></div>
 
           {!nuevo && (
             <div className="pt-5 border-t border-edge">
               <label className={etiqueta}>Cambiar su contraseña</label>
               <div className="flex flex-col sm:flex-row gap-2">
-                <input className={`${campo} flex-1`} type="text" value={f.password} onChange={e => set('password', e.target.value)} placeholder="Nueva contraseña, mínimo 8 caracteres" autoComplete="new-password" />
+                <input aria-label="Cambiar su contraseña" className={`${campo} flex-1`} type="text" value={f.password} onChange={e => set('password', e.target.value)} placeholder="Nueva contraseña, mínimo 8 caracteres" autoComplete="new-password" />
                 <button onClick={cambiarPassword} disabled={!f.password}
                   className="shrink-0 h-[42px] px-4 rounded-xl border border-edge bg-surface-2 text-[13px] font-bold text-ink hover:border-gold/40 disabled:opacity-40 transition-colors">
                   Cambiar
@@ -8994,7 +9222,7 @@ function UsuarioModal({ usuario, roles, soyYo, onClose, onSaved, notify }: {
           </button>
         </div>
       </motion.div>
-    </div>,
+    </Modal>,
     document.body
   )
 }
@@ -9006,6 +9234,8 @@ type ConfigSitio = {
   negocio_email: string; negocio_web: string
   negocio_rfc: string; negocio_representante: string; negocio_footer: string
   cotizacion_condiciones: string; cotizacion_condiciones_renta: string; datos_bancarios: string; cotizacion_cierre: string
+  /* Qué puede cobrarse desde la caja del mostrador. Nacen apagados. */
+  caja_vende_maquinaria: boolean; caja_renta_maquinaria: boolean
 }
 type CorreoAviso = { id: number; email: string; etiqueta: string; verificado: boolean; creado: string }
 
@@ -9051,7 +9281,7 @@ const btnSecundario = 'h-11 px-5 rounded-[10px] border border-edge bg-surface-2 
 
 /** Configuración editable del sitio: WhatsApp, datos del negocio y correos de aviso. */
 function NegocioAdmin({ notify }: { notify: (m: string, t?: 'ok' | 'err') => void }) {
-  const vacia: ConfigSitio = { whatsapp_principal: '', whatsapp_respaldos: [], negocio_nombre: '', negocio_telefono: '', negocio_direccion: '', negocio_email: '', negocio_web: '', negocio_rfc: '', negocio_representante: '', negocio_footer: '', cotizacion_condiciones: '', cotizacion_condiciones_renta: '', datos_bancarios: '', cotizacion_cierre: '' }
+  const vacia: ConfigSitio = { whatsapp_principal: '', whatsapp_respaldos: [], negocio_nombre: '', negocio_telefono: '', negocio_direccion: '', negocio_email: '', negocio_web: '', negocio_rfc: '', negocio_representante: '', negocio_footer: '', cotizacion_condiciones: '', cotizacion_condiciones_renta: '', datos_bancarios: '', cotizacion_cierre: '', caja_vende_maquinaria: false, caja_renta_maquinaria: false }
   const [cfg, setCfg] = useState<ConfigSitio>(vacia)
   const [guardado, setGuardado] = useState<ConfigSitio>(vacia)   // lo último confirmado por el servidor
   const [correos, setCorreos] = useState<CorreoAviso[]>([])
@@ -9102,8 +9332,8 @@ function NegocioAdmin({ notify }: { notify: (m: string, t?: 'ok' | 'err') => voi
       .then(r => notify(r.data?.enviado ? 'Confirmación reenviada' : 'No se pudo enviar', r.data?.enviado ? 'ok' : 'err'))
       .catch(() => notify('No se pudo reenviar', 'err'))
   }
-  function eliminarCorreo(c: CorreoAviso) {
-    if (!confirm(`¿Dejar de avisar a ${c.email}?`)) return
+  async function eliminarCorreo(c: CorreoAviso) {
+    if (!await confirmar({ titulo: `¿Dejar de avisar a ${c.email}?`, aceptar: 'Dejar de avisar', tono: 'peligro' })) return
     api.delete(`/config/correos/${c.id}/`).then(() => { notify('Ya no recibirá avisos'); load() }).catch(() => notify('No se pudo quitar', 'err'))
   }
 
@@ -9113,7 +9343,7 @@ function NegocioAdmin({ notify }: { notify: (m: string, t?: 'ok' | 'err') => voi
     <div className="space-y-2.5 pb-24">
       <Panel titulo="WhatsApp" desc="El número principal es el que ve el cliente en la tienda. Los de respaldo son la referencia de tu equipo para dar seguimiento.">
         <Ajuste titulo="Número principal" desc="Aparece en el botón de WhatsApp de la tienda y en el acuse que recibe el cliente.">
-          <input className={`${campoCfg} sm:w-56`} value={cfg.whatsapp_principal} onChange={e => set('whatsapp_principal', e.target.value)} placeholder="7443737201" inputMode="numeric" />
+          <input aria-label="WhatsApp del negocio" className={`${campoCfg} sm:w-56`} value={cfg.whatsapp_principal} onChange={e => set('whatsapp_principal', e.target.value)} placeholder="7443737201" inputMode="numeric" />
         </Ajuste>
 
         <Ajuste titulo="Números de respaldo" desc="No se muestran al cliente. Sirven para que otra persona pueda retomar una solicitud." apilado
@@ -9130,8 +9360,8 @@ function NegocioAdmin({ notify }: { notify: (m: string, t?: 'ok' | 'err') => voi
               <div className="space-y-2 w-full">
                 {resp.map((r, i) => (
                   <div key={i} className="flex gap-2 items-center">
-                    <input className={`${campoCfg} flex-1`} value={r.label} onChange={e => setResp(resp.map((x, j) => j === i ? { ...x, label: e.target.value } : x))} placeholder="Quién es" />
-                    <input className={`${campoCfg} flex-1`} value={r.number} onChange={e => setResp(resp.map((x, j) => j === i ? { ...x, number: e.target.value } : x))} placeholder="7441234567" inputMode="numeric" />
+                    <input aria-label="Quién es" className={`${campoCfg} flex-1`} value={r.label} onChange={e => setResp(resp.map((x, j) => j === i ? { ...x, label: e.target.value } : x))} placeholder="Quién es" />
+                    <input aria-label="Número de WhatsApp de respaldo" className={`${campoCfg} flex-1`} value={r.number} onChange={e => setResp(resp.map((x, j) => j === i ? { ...x, number: e.target.value } : x))} placeholder="7441234567" inputMode="numeric" />
                     <button onClick={() => setResp(resp.filter((_, j) => j !== i))} aria-label="Quitar respaldo"
                       className="shrink-0 w-9 h-9 rounded-lg grid place-items-center text-mute hover:text-red-500 hover:bg-red-500/10 transition-colors">
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" d="M6 6l12 12M18 6L6 18" /></svg>
@@ -9145,49 +9375,72 @@ function NegocioAdmin({ notify }: { notify: (m: string, t?: 'ok' | 'err') => voi
 
       <Panel titulo="Datos del negocio" desc="Se imprimen en tickets, fichas técnicas y cotizaciones. Son los mismos en todas las computadoras.">
         <Ajuste titulo="Nombre" desc="Encabeza cada documento que entregas.">
-          <input className={`${campoCfg} sm:w-72`} value={cfg.negocio_nombre} onChange={e => set('negocio_nombre', e.target.value)} placeholder="REMALI" />
+          <input aria-label="Nombre del negocio" className={`${campoCfg} sm:w-72`} value={cfg.negocio_nombre} onChange={e => set('negocio_nombre', e.target.value)} placeholder="REMALI" />
         </Ajuste>
         <Ajuste titulo="Teléfono" desc="El que ve el cliente en la cotización si tiene dudas.">
-          <input type="tel" inputMode="numeric" maxLength={10} className={`${campoCfg} sm:w-56`} value={cfg.negocio_telefono} onChange={e => set('negocio_telefono', soloTelefono(e.target.value))} placeholder="10 dígitos" />
+          <input aria-label="Teléfono del negocio" type="tel" inputMode="numeric" maxLength={10} className={`${campoCfg} sm:w-56`} value={cfg.negocio_telefono} onChange={e => set('negocio_telefono', soloTelefono(e.target.value))} placeholder="10 dígitos" />
         </Ajuste>
         <Ajuste titulo="Correo" desc="Aparece en el encabezado de la cotización.">
-          <input type="email" className={`${campoCfg} sm:w-72`} value={cfg.negocio_email} onChange={e => set('negocio_email', e.target.value)} placeholder="contacto@remali.mx" />
+          <input aria-label="Correo del negocio" type="email" className={`${campoCfg} sm:w-72`} value={cfg.negocio_email} onChange={e => set('negocio_email', e.target.value)} placeholder="contacto@remali.mx" />
         </Ajuste>
         <Ajuste titulo="Página web">
-          <input className={`${campoCfg} sm:w-56`} value={cfg.negocio_web} onChange={e => set('negocio_web', e.target.value)} placeholder="remali.mx" />
+          <input aria-label="Sitio web del negocio" className={`${campoCfg} sm:w-56`} value={cfg.negocio_web} onChange={e => set('negocio_web', e.target.value)} placeholder="remali.mx" />
         </Ajuste>
         <Ajuste titulo="Dirección" apilado>
-          <input className={campoCfg} value={cfg.negocio_direccion} onChange={e => set('negocio_direccion', e.target.value)} placeholder="Calle, colonia, ciudad" />
+          <input aria-label="Calle, colonia, ciudad" className={campoCfg} value={cfg.negocio_direccion} onChange={e => set('negocio_direccion', e.target.value)} placeholder="Calle, colonia, ciudad" />
         </Ajuste>
         <Ajuste titulo="RFC" desc="Solo si facturas. Se omite del documento cuando está vacío.">
-          <input className={`${campoCfg} sm:w-56 font-mono`} value={cfg.negocio_rfc} onChange={e => set('negocio_rfc', e.target.value.toUpperCase())} placeholder="XAXX010101000" />
+          <input aria-label="RFC del negocio" className={`${campoCfg} sm:w-56 font-mono`} value={cfg.negocio_rfc} onChange={e => set('negocio_rfc', e.target.value.toUpperCase())} placeholder="XAXX010101000" />
         </Ajuste>
         <Ajuste titulo="Representante (firma)" desc="Nombre que firma la cotización al pie. Si lo dejas vacío, no se muestra la firma.">
-          <input className={`${campoCfg} sm:w-72`} value={cfg.negocio_representante} onChange={e => set('negocio_representante', e.target.value)} placeholder="C.P. Nombre Apellido" />
+          <input aria-label="Representante que firma" className={`${campoCfg} sm:w-72`} value={cfg.negocio_representante} onChange={e => set('negocio_representante', e.target.value)} placeholder="C.P. Nombre Apellido" />
         </Ajuste>
         <Ajuste titulo="Pie del ticket" desc="La última línea del comprobante.">
-          <input className={`${campoCfg} sm:w-72`} value={cfg.negocio_footer} onChange={e => set('negocio_footer', e.target.value)} placeholder="¡Gracias por su preferencia!" />
+          <input aria-label="Frase de pie de página" className={`${campoCfg} sm:w-72`} value={cfg.negocio_footer} onChange={e => set('negocio_footer', e.target.value)} placeholder="¡Gracias por su preferencia!" />
+        </Ajuste>
+      </Panel>
+
+      <Panel titulo="Caja del mostrador" desc="Qué se puede cobrar desde la caja, además de refacciones. Lo que apagues aquí desaparece de la caja y el servidor también lo rechaza.">
+        <Ajuste
+          titulo="Vender maquinaria desde la caja"
+          desc="El mostrador podrá escanear el QR de una máquina y venderla sin salir de la caja. El cobro entra al turno y el arqueo lo espera."
+        >
+          <Switch
+            checked={!!cfg.caja_vende_maquinaria}
+            onChange={v => set('caja_vende_maquinaria', v)}
+            label="Vender maquinaria desde la caja"
+          />
+        </Ajuste>
+        <Ajuste
+          titulo="Levantar rentas desde la caja"
+          desc="Abre la misma hoja de renta de siempre (cliente, obra, fechas, depósito). El cobro y el depósito entran al turno."
+        >
+          <Switch
+            checked={!!cfg.caja_renta_maquinaria}
+            onChange={v => set('caja_renta_maquinaria', v)}
+            label="Levantar rentas desde la caja"
+          />
         </Ajuste>
       </Panel>
 
       <Panel titulo="Cotizaciones · condiciones y pago" desc="Aparecen en la carta y en el PDF que recibe el cliente. Puedes usar varias líneas.">
         <Ajuste titulo="Condiciones · VENTA" desc="Anticipo, saldo, descuentos. Salen en las cotizaciones de venta." apilado>
-          <textarea className={`${campoCfg} resize-y min-h-[84px]`} rows={3} value={cfg.cotizacion_condiciones}
+          <textarea aria-label="Condiciones para cotización de venta" className={`${campoCfg} resize-y min-h-[84px]`} rows={3} value={cfg.cotizacion_condiciones}
             onChange={e => set('cotizacion_condiciones', e.target.value)}
             placeholder={'Anticipo del 60% para iniciar el pedido; el resto contra entrega.\nPago de contado: 5% de descuento.'} />
         </Ajuste>
         <Ajuste titulo="Condiciones · RENTA" desc="Uso, mantenimiento y responsabilidad. Salen en las cotizaciones de renta." apilado>
-          <textarea className={`${campoCfg} resize-y min-h-[120px]`} rows={5} value={cfg.cotizacion_condiciones_renta}
+          <textarea aria-label="Condiciones para cotización de renta" className={`${campoCfg} resize-y min-h-[120px]`} rows={5} value={cfg.cotizacion_condiciones_renta}
             onChange={e => set('cotizacion_condiciones_renta', e.target.value)}
             placeholder={'El equipo se entrega limpio; de lo contrario, cargo de $300 + IVA.\nVerificar aceite a diario. Cambio de aceite cada 25 h…'} />
         </Ajuste>
         <Ajuste titulo="Datos bancarios" desc="Banco, titular, cuenta y CLABE. Si lo dejas vacío, no se muestra." apilado>
-          <textarea className={`${campoCfg} resize-y min-h-[84px]`} rows={4} value={cfg.datos_bancarios}
+          <textarea aria-label="Datos bancarios" className={`${campoCfg} resize-y min-h-[84px]`} rows={4} value={cfg.datos_bancarios}
             onChange={e => set('datos_bancarios', e.target.value)}
             placeholder={'Titular: Nombre o razón social\nBanco: XYZ\nCuenta: 0000000000\nCLABE: 000000000000000000'} />
         </Ajuste>
         <Ajuste titulo="Despedida" desc="Frase de cortesía al final de la cotización. Si la dejas vacía, no se muestra." apilado>
-          <textarea className={`${campoCfg} resize-y min-h-[72px]`} rows={2} value={cfg.cotizacion_cierre}
+          <textarea aria-label="Frase de despedida" className={`${campoCfg} resize-y min-h-[72px]`} rows={2} value={cfg.cotizacion_cierre}
             onChange={e => set('cotizacion_cierre', e.target.value)}
             placeholder={'En espera de que lo anterior merezca su conformidad…'} />
         </Ajuste>
@@ -9225,8 +9478,8 @@ function NegocioAdmin({ notify }: { notify: (m: string, t?: 'ok' | 'err') => voi
 
         <Ajuste titulo="Agregar un correo" desc="Le mandamos un enlace para que confirme. Hasta que lo abra, no recibe avisos." apilado>
           <div className="flex flex-col sm:flex-row gap-2 w-full">
-            <input className={`${campoCfg} flex-1`} type="email" value={nuevoCorreo.email} onChange={e => setNuevoCorreo({ ...nuevoCorreo, email: e.target.value })} placeholder="correo@ejemplo.com" />
-            <input className={`${campoCfg} sm:w-44`} value={nuevoCorreo.etiqueta} onChange={e => setNuevoCorreo({ ...nuevoCorreo, etiqueta: e.target.value })} placeholder="Quién es" />
+            <input aria-label="Correo a agregar" className={`${campoCfg} flex-1`} type="email" value={nuevoCorreo.email} onChange={e => setNuevoCorreo({ ...nuevoCorreo, email: e.target.value })} placeholder="correo@ejemplo.com" />
+            <input aria-label="Quién es" className={`${campoCfg} sm:w-44`} value={nuevoCorreo.etiqueta} onChange={e => setNuevoCorreo({ ...nuevoCorreo, etiqueta: e.target.value })} placeholder="Quién es" />
             <button onClick={agregarCorreo} disabled={busy || !nuevoCorreo.email.trim()} className={`${btnPrimario} shrink-0`}>
               {busy ? 'Enviando…' : 'Agregar'}
             </button>
@@ -9301,12 +9554,12 @@ function ConfiguracionAdmin({ notify, lang, onLang }: {
         {tab === 'seguridad' && (
           <Panel titulo="Cambiar contraseña" desc="Al cambiarla seguirás con la sesión iniciada aquí, pero tendrás que entrar de nuevo en tus otros dispositivos.">
             <Ajuste titulo="Contraseña actual" apilado>
-              <input type="password" className={`${campoCfg} sm:max-w-sm`} value={pw.actual} onChange={e => setPw({ ...pw, actual: e.target.value })} placeholder="La que usas ahora" autoComplete="current-password" />
+              <input aria-label="Contraseña actual" type="password" className={`${campoCfg} sm:max-w-sm`} value={pw.actual} onChange={e => setPw({ ...pw, actual: e.target.value })} placeholder="La que usas ahora" autoComplete="current-password" />
             </Ajuste>
             <Ajuste titulo="Contraseña nueva" desc={pw.nueva && pw.nueva.length < 8 ? 'Muy corta: usa al menos 8 caracteres.' : 'Al menos 8 caracteres.'} apilado>
               <div className="grid sm:grid-cols-2 gap-3">
-                <input type="password" className={campoCfg} value={pw.nueva} onChange={e => setPw({ ...pw, nueva: e.target.value })} placeholder="Nueva contraseña" autoComplete="new-password" />
-                <input type="password" className={campoCfg} value={pw.confirma} onChange={e => setPw({ ...pw, confirma: e.target.value })} placeholder="Repítela" autoComplete="new-password" />
+                <input aria-label="Nueva contraseña" type="password" className={campoCfg} value={pw.nueva} onChange={e => setPw({ ...pw, nueva: e.target.value })} placeholder="Nueva contraseña" autoComplete="new-password" />
+                <input aria-label="Repítela" type="password" className={campoCfg} value={pw.confirma} onChange={e => setPw({ ...pw, confirma: e.target.value })} placeholder="Repítela" autoComplete="new-password" />
               </div>
               {pw.confirma && pw.nueva !== pw.confirma && <p className="text-[13px] text-red-500 mt-2">No coinciden.</p>}
             </Ajuste>
@@ -9416,7 +9669,7 @@ function PrintSettingsCard({ notify }: { notify: (m: string, t?: 'ok' | 'err') =
 
       {metodo === 'serial' && (
         <Ajuste titulo="Velocidad del puerto serie" desc="Si imprime símbolos raros, casi siempre es esto.">
-          <select className="bg-surface-2 border border-edge rounded-lg px-3 py-2.5 text-[13px] text-ink" value={ps.baud} onChange={e => setPs({ baud: Number(e.target.value) })}>
+          <select aria-label="Velocidad del puerto serie" className="bg-surface-2 border border-edge rounded-lg px-3 py-2.5 text-[13px] text-ink" value={ps.baud} onChange={e => setPs({ baud: Number(e.target.value) })}>
             {[9600, 19200, 38400, 115200].map(b => <option key={b} value={b} className="bg-surface">{b} baud</option>)}
           </select>
         </Ajuste>
@@ -9526,7 +9779,7 @@ function PerfilAdmin({ notify }: { notify: (m: string, t?: 'ok' | 'err') => void
                 <path strokeLinecap="round" strokeLinejoin="round" d="M3 9a2 2 0 012-2h.93a2 2 0 001.66-.9l.82-1.2A2 2 0 0110.07 4h3.86a2 2 0 011.66.9l.82 1.2a2 2 0 001.66.9H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
                 <circle cx="12" cy="13" r="3" />
               </svg>
-              <input type="file" accept="image/*" className="hidden" onChange={e => onPickAvatar(e.target.files?.[0] || null)} />
+              <input aria-label="Foto de perfil" type="file" accept="image/*" className="hidden" onChange={e => onPickAvatar(e.target.files?.[0] || null)} />
             </label>
           </div>
           <div className="min-w-0 flex-1 text-center sm:text-left">
@@ -9545,27 +9798,27 @@ function PerfilAdmin({ notify }: { notify: (m: string, t?: 'ok' | 'err') => void
         <div className="grid sm:grid-cols-2 gap-5">
           <div>
             <label className={labelG}>Nombre</label>
-            <input className={inputG} value={form.first_name || ''} onChange={e => setForm({ ...form, first_name: e.target.value })} placeholder="Tu nombre" />
+            <input aria-label="Nombre" className={inputG} value={form.first_name || ''} onChange={e => setForm({ ...form, first_name: e.target.value })} placeholder="Tu nombre" />
           </div>
           <div>
             <label className={labelG}>Apellido</label>
-            <input className={inputG} value={form.last_name || ''} onChange={e => setForm({ ...form, last_name: e.target.value })} placeholder="Tu apellido" />
+            <input aria-label="Apellido" className={inputG} value={form.last_name || ''} onChange={e => setForm({ ...form, last_name: e.target.value })} placeholder="Tu apellido" />
           </div>
           <div className="sm:col-span-2">
             <label className={labelG}>Correo electrónico</label>
-            <input type="email" className={inputG} value={form.email || ''} onChange={e => setForm({ ...form, email: e.target.value })} placeholder="tu@correo.com" />
+            <input aria-label="Correo electrónico" type="email" className={inputG} value={form.email || ''} onChange={e => setForm({ ...form, email: e.target.value })} placeholder="tu@correo.com" />
           </div>
           <div>
             <label className={labelG}>Teléfono</label>
-            <input type="tel" inputMode="numeric" maxLength={10} className={inputG} value={form.telefono || ''} onChange={e => setForm({ ...form, telefono: soloTelefono(e.target.value) })} placeholder="10 dígitos" />
+            <input aria-label="Teléfono" type="tel" inputMode="numeric" maxLength={10} className={inputG} value={form.telefono || ''} onChange={e => setForm({ ...form, telefono: soloTelefono(e.target.value) })} placeholder="10 dígitos" />
           </div>
           <div>
             <label className={labelG}>Puesto</label>
-            <input className={inputG} value={form.puesto || ''} onChange={e => setForm({ ...form, puesto: e.target.value })} placeholder="Ej. Gerente" />
+            <input aria-label="Puesto" className={inputG} value={form.puesto || ''} onChange={e => setForm({ ...form, puesto: e.target.value })} placeholder="Ej. Gerente" />
           </div>
           <div className="sm:col-span-2">
             <label className={labelG}>Bio</label>
-            <textarea className={`${inputG} resize-none`} rows={3} value={form.bio || ''} onChange={e => setForm({ ...form, bio: e.target.value })} placeholder="Algo sobre ti" />
+            <textarea aria-label="Bio" className={`${inputG} resize-none`} rows={3} value={form.bio || ''} onChange={e => setForm({ ...form, bio: e.target.value })} placeholder="Algo sobre ti" />
           </div>
         </div>
 
