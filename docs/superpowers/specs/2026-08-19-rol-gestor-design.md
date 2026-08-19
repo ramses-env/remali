@@ -115,8 +115,57 @@ Reglas de borde, todas fail-closed:
   correcto: es una alarma, no un estorbo.
 
 **Nota de operación:** hoy la cuenta `admin` (el dueño) **no tiene PIN
-configurado**. Hay que definirlo antes de dar de alta al primer Gestor, o no
-podrá ejecutar ninguna de las seis acciones.
+configurado**, porque hasta ahora no había dónde ponérselo (ver "La pantalla del
+NIP"). Una vez que exista esa pantalla, el dueño debe fijar el suyo **antes** de
+dar de alta al primer Gestor, o no podrá autorizarle ninguna de las seis
+acciones.
+
+## La pantalla del NIP (falta por completo)
+
+Al diseñar esto se encontró que **el panel nunca ha tenido dónde fijar el NIP**.
+El endpoint existe y está bien hecho (`auth/codigo-seguridad/`: pide la
+contraseña de la cuenta, valida 6 dígitos, guarda hasheado y resetea el bloqueo),
+pero **el frontend no lo llama desde ningún lado**. Configuración → Seguridad
+solo tiene "Cambiar contraseña". El único lugar donde hoy se puede escribir un
+NIP es el formulario de alta de usuarios, es decir, poniéndoselo a otra persona.
+
+Por eso la cuenta del dueño no tiene NIP: no es un descuido, es una pantalla que
+falta. Y sin ella, todo el mecanismo de autorización de este diseño no arranca.
+
+### El NIP es individual
+
+Uno por persona, no uno compartido. Si hay tres administradores son tres NIPs
+distintos, y el del dueño es otro más. Ya es así en el modelo
+(`PerfilUsuario.codigo_seguridad`, hasheado por usuario); lo que falta es la
+interfaz.
+
+### Qué se agrega
+
+Un bloque **"Código de autorización"** en Configuración → Seguridad, junto a
+"Cambiar contraseña":
+
+- Fija o cambia **el propio**, nunca el de alguien más.
+- Pide la **contraseña de la cuenta** para confirmar identidad. El endpoint ya lo
+  exige; la pantalla solo tiene que pedirla.
+- Dice si ya hay uno configurado, leyendo `tiene_codigo_seguridad` de
+  `/auth/me/` —que el panel ya recibe y hoy ignora—. Nunca muestra el NIP
+  guardado: está hasheado y no se puede leer, solo reemplazar.
+- Explica para qué sirve, porque un NIP sin explicación se configura mal o no se
+  configura: es lo que autoriza cancelar una venta, ajustar un precio y resolver
+  un depósito.
+
+### Quién lo ve
+
+Solo quien puede tener NIP: **Dueño y Administrador**.
+
+- **El Gestor no lo ve.** No lo ocuparía: para él la autorización es el NIP del
+  dueño, no el suyo. Dárselo sería darle la llave que este diseño le quita.
+- Cajero y Técnico tampoco: su nivel no autoriza nada.
+
+Cambio en el backend: `definir_codigo_seguridad` usa `IsAdminGroupOrStaff`, así
+que un Gestor —que es nivel administración— pasaría. Debe rechazarlo
+explícitamente, con el mismo criterio que el resto del diseño: se valida en el
+servidor, no solo escondiendo el bloque.
 
 ## Dónde se cuelgan los candados
 
@@ -159,6 +208,9 @@ a diferencia de ajustar el precio en una venta puntual.
 - Que el Administrador siga autorizándose con el suyo (no hay regresión).
 - Que el Gestor vea la lista de ventas pero no el Resumen.
 - Simulación del menú por rol, para dejar grabado qué ve cada quien.
+- Que `definir_codigo_seguridad` rechace al Gestor **llamando al endpoint
+  directo**, y lo acepte para Administrador y Dueño.
+- Que fijar el NIP sin la contraseña correcta de la cuenta falle.
 
 ## Fuera de alcance
 
