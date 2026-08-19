@@ -622,6 +622,24 @@ def crear_renta(request):
         return Response({'detalle': 'Modalidad inválida. Usa dia, semana o mes.'}, status=400)
     if not inventario_id:
         return Response({'detalle': 'inventario_id es requerido'}, status=400)
+
+    # Una cotización se concreta UNA sola vez. El botón del panel ya se esconde
+    # cuando la renta existe, pero eso es maquillaje: una pestaña vieja, dos
+    # personas trabajando a la vez o el puente guardado en otra pestaña bastan
+    # para colgar una SEGUNDA renta de la misma cotización — y entonces el
+    # cliente tiene una máquina en la obra y REMALI dos rentas cobrándole.
+    # Va ANTES de crear nada: si fallara al final habría que deshacer la renta,
+    # la unidad ocupada y el movimiento de caja.
+    if cotizacion_id:
+        ya = (Renta.objects.filter(cotizacion_id=cotizacion_id)
+              .exclude(estado='cancelada').only('id').first())
+        if ya:
+            return Response({
+                'detalle': f'Esa cotización ya se concretó en la renta #{ya.id}. '
+                           'Si el trato cambió, cancela esa renta antes de levantar otra.',
+                'codigo': 'ya_concretada',
+                'renta_id': ya.id,
+            }, status=409)
     if not direccion:
         return Response({'detalle': 'direccion es requerida'}, status=400)
 

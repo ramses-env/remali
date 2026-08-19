@@ -2856,7 +2856,17 @@ function RentModal({ unit, equipo, onClose, onDone, notify, desdeCaja = false }:
         if (id) abrirOrdenCartaPDF('rentas', id)   // orden carta en PDF (ya no ticket térmico)
         onDone()
       })
-      .catch(err => notify(err?.response?.data?.detalle || 'Error al rentar', 'err'))
+      .catch(err => {
+        const d = err?.response?.data
+        // El servidor dice que esa cotización ya se concretó. El puente traía
+        // una cotización quemada (pestaña vieja, o alguien más la concretó):
+        // se suelta, o el admin se queda reintentando contra el mismo error.
+        if (d?.codigo === 'ya_concretada') {
+          fijarCotParaRenta(null)
+          setDeCot(null)
+        }
+        notify(d?.detalle || 'Error al rentar', 'err')
+      })
       .finally(() => setBusy(false))
   }
 
@@ -7354,7 +7364,10 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
             <div className="flex items-start gap-2.5 rounded-xl border border-emerald-500/25 bg-emerald-500/5 px-4 py-3">
               <svg className="w-4 h-4 mt-0.5 shrink-0 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.9"><path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zM16 11V7a4 4 0 00-8 0v4" /></svg>
               <p className="text-[12.5px] text-ink leading-relaxed">
-                Esta cotización ya se convirtió en {c.renta_id && !c.venta_id ? 'renta' : 'venta'}, así que quedó <b>bloqueada</b>. Es su respaldo; para cambiar algo, hazlo en la {c.renta_id && !c.venta_id ? 'renta' : 'venta'}.
+                Esta cotización ya se concretó en {c.renta_id && !c.venta_id
+                  ? <>la <b>renta #{c.renta_id}</b></>
+                  : <>la <b>venta #{c.venta_id}</b></>}, así que quedó <b>bloqueada</b> y no se puede volver a concretar.
+                Es su respaldo; para cambiar algo, hazlo en la {c.renta_id && !c.venta_id ? 'renta' : 'venta'}.
               </p>
             </div>
           )}

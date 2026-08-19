@@ -559,13 +559,11 @@ class CotizacionDetail(generics.RetrieveUpdateDestroyAPIView):
 
     def destroy(self, request, *args, **kwargs):
         cot = self.get_object()
-        venta = cot.conversiones.first()
-        if venta:
-            return Response(
-                {'detalle': f'No se puede eliminar "{cot.folio}": ya se convirtió en la venta #{venta.id}. '
-                           'Borrarla dejaría esa venta sin el detalle de sus partidas.'},
-                status=status.HTTP_409_CONFLICT,
-            )
+        bloqueo = _bloqueada_si_convertida(cot)
+        if bloqueo:
+            # Borrarla dejaría a la venta o a la renta sin el detalle de sus
+            # partidas, que es el único comprobante de qué se acordó.
+            return bloqueo
         return super().destroy(request, *args, **kwargs)
 
 
@@ -606,12 +604,25 @@ def cotizacion_stats(request):
 
 
 def _bloqueada_si_convertida(cot):
-    """Una cotización ya convertida en venta queda de solo lectura en sus
-    partidas: editarlas desincronizaría el total y el comprobante de la venta."""
+    """Una cotización ya concretada queda de solo lectura en sus partidas.
+
+    Vale igual para la venta y para la RENTA. Antes solo miraba las ventas, así
+    que a una cotización de renta ya concretada se le podía cambiar el equipo o
+    la cantidad con la máquina ya en la obra: el papel dejaba de describir lo
+    que el cliente tiene enfrente.
+    """
     venta = cot.conversiones.first()
     if venta:
         return Response(
-            {'detalle': f'La cotización ya se convirtió en la venta #{venta.id}; sus partidas están bloqueadas.'},
+            {'detalle': f'La cotización ya se convirtió en la venta #{venta.id}; sus partidas están bloqueadas.',
+             'codigo': 'ya_convertida'},
+            status=status.HTTP_409_CONFLICT,
+        )
+    renta = cot.rentas_convertidas.exclude(estado='cancelada').first()
+    if renta:
+        return Response(
+            {'detalle': f'La cotización ya se concretó en la renta #{renta.id}; sus partidas están bloqueadas.',
+             'codigo': 'ya_concretada'},
             status=status.HTTP_409_CONFLICT,
         )
     return None
