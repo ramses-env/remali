@@ -3,7 +3,6 @@ import Modal from './Modal'
 import { createPortal } from 'react-dom'
 import JsBarcode from 'jsbarcode'
 import api from '../lib/api'
-import { descargarBlob } from '../lib/descargar'
 import { usePrintSettings, charsPerLine } from '../lib/printSettings'
 import { buildTicket, layoutTicket, type Comprobante } from '../lib/escpos'
 import { imprimirTermico, metodoSoportado } from '../lib/printer'
@@ -168,18 +167,11 @@ export default function TicketModal({ url, onClose }: { url: string; onClose: ()
             )}
             <button onClick={() => window.print()} disabled={!data || animando} title="Imprime con el diálogo del navegador o guarda PDF" className="flex-1 py-2.5 rounded-full border border-edge text-ink text-sm font-semibold hover:bg-surface-2 transition-colors disabled:opacity-50">PDF / Diálogo</button>
           </div>
-          {/* Orden CARTA presentable (el térmico queda para refacciones en mostrador) */}
-          <button
-            onClick={async () => {
-              try {
-                const r = await api.get(url.replace(/^\/api(?=\/)/, '').replace('/comprobante/', '/ticket/'), { responseType: 'blob' })
-                descargarBlob(r.data as Blob, 'orden.pdf')
-              } catch { /* el toast global del interceptor ya avisa */ }
-            }}
-            disabled={animando}
-            className="py-2.5 rounded-full border border-gold/50 text-gold-ink text-sm font-bold hover:bg-gold-soft transition-colors disabled:opacity-50">
-            Orden carta (PDF) — para el cliente
-          </button>
+          {/* Aquí NO va la orden en carta. Este modal es el ticket térmico y el
+              ticket es de refacciones: los tres lugares que lo abren (la caja,
+              VenderRefaccionModal y el detalle de una venta de refacción) venden
+              refacciones. La orden en carta es el documento de la maquinaria y
+              vive en el detalle de esa venta. */}
           <button onClick={onClose} className="py-2 rounded-full text-mute text-sm font-medium hover:text-ink transition-colors">Cerrar</button>
         </div>
       </div>
