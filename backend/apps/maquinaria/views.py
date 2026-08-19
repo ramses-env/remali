@@ -38,7 +38,7 @@ from .models import (
     ObraCliente, SelloTema, nombre_propio, espejar_obra_predeterminada,
     Favorito,
 )
-from .permissions import IsAdminGroupOrStaff, EsOperador, nivel_de, puede_de
+from .permissions import IsAdminGroupOrStaff, EsOperador, PuedeVerDinero, nivel_de, puede_de
 from .serializers import (
     EquipoSerializer, CategoriaSerializer, MarcaSerializer, TipoSerializer,
     CuponSerializer, NotificacionSerializer, PerfilUsuarioSerializer,
@@ -49,11 +49,26 @@ from .serializers import (
 
 
 class ProtectedDestroyMixin:
-    """Convierte un PROTECT relacional en un 400 claro para la UI."""
+    """Convierte un PROTECT relacional en un 400 claro para la UI, y exige la
+    capacidad de BORRAR del catálogo.
+
+    Agregar al catálogo es de administración; quitar es del dueño. Borrar un
+    producto o una unidad es como se encubre una máquina que falta: si no está en
+    el sistema, nadie la busca. El candado vive aquí —en el mixin que envuelven
+    todas las vistas de catálogo— y no repetido en cada una, para que agregar una
+    vista nueva no abra el hueco por olvido.
+    """
     en_uso_label = 'registro relacionado'
     en_uso_label_plural = 'registros relacionados'
 
     def destroy(self, request, *args, **kwargs):
+        from .permissions import puede_de
+        if not puede_de(request.user).get('borrar_catalogo'):
+            return Response({
+                'detalle': 'Solo el dueño puede borrar del catálogo. Si ya no se usa, '
+                           'desactívalo en vez de borrarlo.',
+                'codigo': 'sin_permiso_borrar',
+            }, status=status.HTTP_403_FORBIDDEN)
         instance = self.get_object()
         try:
             self.perform_destroy(instance)
@@ -135,7 +150,8 @@ class EquipoListCreate(generics.ListCreateAPIView):
         return qs
 
 
-class EquipoRetrieveUpdateDestroy(generics.RetrieveUpdateDestroyAPIView):
+class EquipoRetrieveUpdateDestroy(ProtectedDestroyMixin, generics.RetrieveUpdateDestroyAPIView):
+    en_uso_label_plural = 'unidades o movimientos'
     queryset = (Equipo.objects
                 .select_related('categoria', 'tipo', 'marca')
                 .prefetch_related('unidades', 'imagenes'))
@@ -145,6 +161,30 @@ class EquipoRetrieveUpdateDestroy(generics.RetrieveUpdateDestroyAPIView):
         if self.request.method in ('PUT', 'PATCH', 'DELETE'):
             return [IsAdminGroupOrStaff()]
         return [permissions.AllowAny()]
+
+    PRECIOS = ('precio_dia', 'precio_semana', 'precio_mes', 'precio_venta')
+
+    def perform_update(self, serializer):
+        """Guarda el cambio y, si tocó un precio de lista, deja rastro de quién.
+
+        Cambiar precios es trabajo legítimo de administración y por eso no se
+        bloquea. Pero bajar el precio de lista y vender "a precio normal" es la
+        forma más discreta de sacar dinero por diferencia, y a diferencia del
+        ajuste en una venta puntual no dejaba ninguna huella. Ahora sí.
+        """
+        antes = {c: getattr(serializer.instance, c) for c in self.PRECIOS}
+        equipo = serializer.save()
+        from .models import CambioPrecioLista
+        from .permissions import rol_de
+        user = self.request.user if self.request.user.is_authenticated else None
+        for campo in self.PRECIOS:
+            viejo_v, nuevo_v = antes[campo], getattr(equipo, campo)
+            if viejo_v == nuevo_v:
+                continue
+            CambioPrecioLista.objects.create(
+                equipo=equipo, campo=campo, anterior=viejo_v, nuevo=nuevo_v,
+                usuario=user, rol=rol_de(user) if user else '',
+            )
 
 
 @api_view(['POST'])
@@ -229,6 +269,18 @@ def configuracion_publica(request):
         'cotizacion_condiciones_renta': cfg.cotizacion_condiciones_renta,
         'datos_bancarios': cfg.datos_bancarios,
         'cotizacion_cierre': cfg.cotizacion_cierre,
+        # Personalización del ticket: la caja la necesita para imprimir igual en
+        # todas las computadoras (el logo incluido, ya en 1 bit).
+        'ticket_logo': cfg.ticket_logo,
+        'ticket_logo_escala': cfg.ticket_logo_escala,
+        'ticket_mostrar_logo': cfg.ticket_mostrar_logo,
+        'ticket_lema': cfg.ticket_lema,
+        'ticket_mostrar_direccion': cfg.ticket_mostrar_direccion,
+        'ticket_mostrar_telefono': cfg.ticket_mostrar_telefono,
+        'ticket_mostrar_rfc': cfg.ticket_mostrar_rfc,
+        'ticket_mostrar_web': cfg.ticket_mostrar_web,
+        'ticket_codigo_barras': cfg.ticket_codigo_barras,
+        'ticket_leyenda': cfg.ticket_leyenda,
         'descuento_contado_pct': cfg.descuento_contado_pct,
         'anticipo_minimo_pct': cfg.anticipo_minimo_pct,
         # El código de autorización ahora es PERSONAL por operador (cada quien el
@@ -251,7 +303,7 @@ def validar_codigo_ajuste(request):
 
 
 @api_view(['POST'])
-@permission_classes([IsAdminGroupOrStaff])   # solo autoridad (admin/gerente) tiene PIN
+@permission_classes([IsAdminGroupOrStaff])   # solo el nivel de autoridad tiene NIP
 def definir_codigo_seguridad(request):
     """Fija o cambia el código de seguridad del PROPIO usuario. Pide su
     contraseña de la cuenta para confirmar identidad (no basta la sesión).
@@ -259,6 +311,17 @@ def definir_codigo_seguridad(request):
     Solo Administrador/Gerente: el PIN autoriza acciones sensibles y esas las
     aprueba un superior, no un operador. Un cajero/asesor/técnico no tiene PIN."""
     from .seguridad import formato_valido, definir_codigo
+    from .permissions import puede_de
+    # El GESTOR no tiene NIP. Para él la autorización es el NIP del DUEÑO; si
+    # pudiera ponerse el suyo se autorizaría solo y el mecanismo quedaría vacío.
+    # Se pregunta por CAPACIDAD y no por nombre de rol, para que el día que exista
+    # la pantalla de permisos configurables esto se respete solo.
+    if not puede_de(request.user).get('tener_codigo_propio'):
+        return Response({
+            'detalle': 'Tu rol no usa código propio: las acciones que lo requieren '
+                       'las autoriza el dueño con el suyo.',
+            'codigo': 'gestor_sin_codigo',
+        }, status=403)
     d = request.data or {}
     password = d.get('password') or ''
     codigo = str(d.get('codigo') or '').strip()
@@ -1082,13 +1145,80 @@ def latido_panel(request):
 # ─────────────────────────────────────────────
 #  MÉTRICAS / NOTIFICACIONES
 # ─────────────────────────────────────────────
+def _cubetas_de_meses(hoy, cuantas=6):
+    """(año, mes) del mes en curso y los anteriores, del más viejo al más nuevo."""
+    cubetas = []
+    for atras in range(cuantas - 1, -1, -1):
+        mes = hoy.month - atras
+        anio = hoy.year
+        while mes <= 0:
+            mes += 12
+            anio -= 1
+        cubetas.append((anio, mes))
+    return cubetas
+
+
+MESES_CORTOS = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun',
+                'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
+
+
+def _ingresos_del_negocio():
+    """Lo que de VERDAD entró, por día, de ventas y de rentas.
+
+    Un ingreso es un pago recibido, en la fecha en que se recibió. No el total de
+    la venta, ni el día que se registró, ni el día que se entregó: un apartado de
+    $12,350 con anticipo de $10,000 no fueron $12,350 el día que se levantó el
+    pedido — fueron $10,000 ese día y $2,350 el día que el cliente liquidó.
+
+    Se recorren los pagos en Python porque viven dentro de un JSON y no se pueden
+    sumar en SQL. Con el volumen de un negocio de maquinaria es instantáneo; el
+    día que deje de serlo, el camino es normalizarlos a su propia tabla y sembrarla
+    desde estos mismos datos (como se hizo con los renglones de venta).
+    """
+    from ventas.models import Venta
+    from renta.models import Renta
+    from server.cobranza import cobrado_por_dia
+
+    # Cancelada = ese dinero no es del negocio. Se traen solo los pagos: es la
+    # única columna que se lee, y así una venta con muchos renglones no pesa.
+    pagos_venta = Venta.objects.exclude(estado='cancelada').values_list('pagos', flat=True)
+    pagos_renta = Renta.objects.exclude(estado='cancelada').values_list('pagos', flat=True)
+    return cobrado_por_dia(pagos_venta), cobrado_por_dia(pagos_renta)
+
+
 @api_view(['GET'])
-@permission_classes([EsOperador])
+@permission_classes([PuedeVerDinero])
 def dashboard_metrics(request):
+    """Las cifras del Resumen: qué entró hoy y qué entró cada mes.
+
+    Vivía como cascarón (`revenue: 0.0`), así que el panel siempre caía a su
+    cálculo de respaldo, que sumaba el total de cada venta el día que se registró.
+    Eso daba por cobrado dinero que todavía no llegaba y dejaba en cero los meses
+    en que solo se recibieron anticipos.
+    """
+    from decimal import Decimal
+    hoy = timezone.localdate()
+    por_dia_venta, por_dia_renta = _ingresos_del_negocio()
+
+    def suma(por_dia, filtro):
+        return float(sum((m for d, m in por_dia.items() if filtro(d)), Decimal('0')))
+
+    es_hoy = lambda d: d == hoy                                    # noqa: E731
+    del_mes = lambda a, m: (lambda d: d.year == a and d.month == m)  # noqa: E731
+
+    por_mes = []
+    for anio, mes in _cubetas_de_meses(hoy):
+        v = suma(por_dia_venta, del_mes(anio, mes))
+        r = suma(por_dia_renta, del_mes(anio, mes))
+        por_mes.append({'label': MESES_CORTOS[mes - 1], 'ventas': v, 'rentas': r, 'total': v + r})
+
     return Response({
         'products': Equipo.objects.count(),
         'orders': 0,
         'revenue': 0.0,
+        'ingresos_hoy': suma(por_dia_venta, es_hoy) + suma(por_dia_renta, es_hoy),
+        'ingresos_mes': por_mes[-1] and {k: por_mes[-1][k] for k in ('ventas', 'rentas', 'total')},
+        'ingresos_por_mes': por_mes,
     })
 
 

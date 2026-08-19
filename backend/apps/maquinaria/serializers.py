@@ -312,10 +312,35 @@ class ConfiguracionSitioSerializer(serializers.ModelSerializer):
             'negocio_nombre', 'negocio_telefono', 'negocio_direccion', 'negocio_email', 'negocio_web',
             'negocio_rfc', 'negocio_representante', 'negocio_footer',
             'cotizacion_condiciones', 'cotizacion_condiciones_renta', 'datos_bancarios', 'cotizacion_cierre',
-            'caja_vende_maquinaria', 'caja_renta_maquinaria',
+            'caja_vende_maquinaria', 'caja_renta_maquinaria', 'caja_cobra_abonos',
+            'ticket_logo', 'ticket_logo_origen', 'ticket_logo_escala', 'ticket_mostrar_logo', 'ticket_lema',
+            'ticket_mostrar_direccion', 'ticket_mostrar_telefono', 'ticket_mostrar_rfc', 'ticket_mostrar_web',
+            'ticket_codigo_barras', 'ticket_leyenda',
             'actualizada',
         ]
         read_only_fields = ['actualizada']
+
+    def validate_datos_bancarios(self, value):
+        """El titular, banco, cuenta y CLABE se imprimen en CADA cotización y en
+        el PDF que recibe el cliente. Cambiarlos desvía los pagos a otra cuenta, y
+        no se nota hasta que alguien diga "ya te pagué" y el dinero no esté.
+
+        Por eso son del dueño y no de quien administra. Se valida aquí, en el
+        servidor: esconder el campo en el panel no detendría a nadie que llame al
+        endpoint directo.
+        """
+        from .permissions import puede_de
+        pedido = (value or '').strip()
+        actual = (getattr(self.instance, 'datos_bancarios', '') or '').strip()
+        if pedido == actual:
+            return value   # no lo está cambiando: pasa aunque no pueda editarlo
+        user = getattr(self.context.get('request'), 'user', None)
+        if not puede_de(user).get('editar_datos_bancarios'):
+            raise serializers.ValidationError(
+                'Solo el dueño puede cambiar los datos bancarios: son los que se '
+                'imprimen en las cotizaciones.'
+            )
+        return value
 
     def validate_whatsapp_respaldos(self, value):
         """Normaliza la lista de respaldos: solo {label, number} con número válido."""
@@ -342,6 +367,33 @@ class ConfiguracionSitioSerializer(serializers.ModelSerializer):
         if num and len(num) < 10:
             raise serializers.ValidationError('El número debe tener al menos 10 dígitos.')
         return num
+
+    # El logo llega ya monocromo desde el panel (data URI PNG). Aquí solo se
+    # comprueba que sea eso y que quepa: es un campo de texto en la base y un
+    # PNG a color de 2 MB la inflaría sin que nadie lo note hasta que duela.
+    LOGO_MAX_BYTES = 400_000
+
+    def validate_ticket_logo(self, value):
+        v = (value or '').strip()
+        if not v:
+            return ''
+        if not v.startswith('data:image/png;base64,'):
+            raise serializers.ValidationError('El logo debe venir como PNG monocromo del panel.')
+        if len(v) > self.LOGO_MAX_BYTES:
+            raise serializers.ValidationError('El logo es demasiado grande. Usa una imagen más chica.')
+        return v
+
+    def validate_ticket_logo_origen(self, value):
+        v = (value or '').strip()
+        if v and not v.startswith('data:image/'):
+            raise serializers.ValidationError('Formato de imagen no reconocido.')
+        if len(v) > self.LOGO_MAX_BYTES * 2:
+            raise serializers.ValidationError('La imagen original es demasiado grande.')
+        return v
+
+    def validate_ticket_logo_escala(self, value):
+        # Menos del 30 % no se distingue; más del 100 % no cabe en el papel.
+        return max(30, min(100, int(value or 70)))
 
 
 class CorreoAvisoSerializer(serializers.ModelSerializer):

@@ -11,7 +11,7 @@ from django.db import models
 from django.utils import timezone
 
 from .permissions import (
-    ROL_ADMIN, ROL_ASESOR, ROL_CAJERO, ROL_GERENTE, ROL_TECNICO,
+    ROL_ADMIN, ROL_CAJERO, ROL_GESTOR, ROL_TECNICO,
 )
 
 
@@ -45,9 +45,8 @@ def nombre_propio(texto: str) -> str:
 ROL_ARCHIVO = {
     'Dueño':        'admin',   # el dueño se ve como administración, no como su grupo
     ROL_ADMIN:      'admin',
-    ROL_GERENTE:    'gerente',
+    ROL_GESTOR:     'gestor',
     ROL_CAJERO:     'cajero',
-    ROL_ASESOR:     'asesor',
     ROL_TECNICO:    'tecnico',
     'Almacén':      'tecnico',
     'Cliente':      'cliente',
@@ -56,9 +55,8 @@ ROL_ARCHIVO = {
 # Paleta usada cuando el PNG del rol NO existe (fallback SVG).
 ROL_PALETA = {
     ROL_ADMIN:      {'fondo': '#FFD369', 'texto': '#181715', 'acento': '#FFD369', 'inicial': 'A'},
-    ROL_GERENTE:    {'fondo': '#3B3A37', 'texto': '#FFD369', 'acento': '#FFD369', 'inicial': 'G'},
+    ROL_GESTOR:     {'fondo': '#2A2438', 'texto': '#C4B5FD', 'acento': '#C4B5FD', 'inicial': 'G'},
     ROL_CAJERO:     {'fondo': '#1F2937', 'texto': '#60A5FA', 'acento': '#60A5FA', 'inicial': '$'},
-    ROL_ASESOR:     {'fondo': '#132A25', 'texto': '#34D399', 'acento': '#34D399', 'inicial': '✎'},
     ROL_TECNICO:    {'fondo': '#2A1F1A', 'texto': '#FB923C', 'acento': '#FB923C', 'inicial': '⚙'},
     'Almacén':      {'fondo': '#2A1F1A', 'texto': '#FB923C', 'acento': '#FB923C', 'inicial': '⚙'},
     'Cliente':      {'fondo': '#2B2A28', 'texto': '#E6E6E6', 'acento': '#E6E6E6', 'inicial': 'C'},
@@ -136,7 +134,7 @@ def _rol_de_usuario(usuario) -> str:
 
     # Grupo escrito a mano sin acento ("Tecnico"): rol_de no lo reconoce y
     # devolvería la etiqueta del nivel. Aquí sí lo rescatamos por el grupo.
-    alias = {'administrador': ROL_ADMIN, 'gerente': ROL_GERENTE, 'asesor': ROL_ASESOR,
+    alias = {'administrador': ROL_ADMIN, 'gestor': ROL_GESTOR,
              'cajero': ROL_CAJERO, 'tecnico': ROL_TECNICO, 'almacén': ROL_TECNICO,
              'almacen': ROL_TECNICO, 'cliente': 'Cliente'}
     for n in usuario.groups.values_list('name', flat=True):
@@ -788,6 +786,38 @@ def crear_notificacion(tipo, titulo, mensaje='', seccion='', ref='', data=None, 
     return Notificacion.objects.create(**kwargs)
 
 
+
+class CambioPrecioLista(models.Model):
+    """Quién cambió el precio de lista de un producto, cuándo y de cuánto a cuánto.
+
+    Bajar el precio de lista y luego vender "a precio normal" NO deja rastro de
+    descuento, a diferencia de ajustar el precio en una venta puntual, que sí
+    queda registrado en `Venta.nota_ajuste`. Es la vía más discreta de sacar
+    dinero por diferencia, y no se bloquea porque cambiar precios es trabajo
+    legítimo de administración. Se hace VISIBLE en su lugar.
+
+    Append-only: nunca se borra ni se edita.
+    """
+    equipo = models.ForeignKey('maquinaria.Equipo', on_delete=models.CASCADE,
+                               related_name='cambios_precio')
+    campo = models.CharField(max_length=20)   # precio_dia | precio_semana | precio_mes | precio_venta
+    anterior = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    nuevo = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    usuario = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+                                null=True, blank=True, related_name='cambios_precio')
+    rol = models.CharField(max_length=30, blank=True, default='')
+    creado_en = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'cambio_precio_lista'
+        ordering = ['-creado_en']
+        verbose_name = 'Cambio de precio de lista'
+        verbose_name_plural = 'Cambios de precio de lista'
+
+    def __str__(self):
+        return f'{self.equipo_id} · {self.campo}: {self.anterior} → {self.nuevo}'
+
+
 class ConfiguracionSitio(models.Model):
     whatsapp_principal = models.CharField(max_length=20, blank=True, default='')
     whatsapp_respaldos = models.JSONField(blank=True, default=list)
@@ -803,6 +833,25 @@ class ConfiguracionSitio(models.Model):
     cotizacion_condiciones_renta = models.TextField(blank=True, default='')
     datos_bancarios = models.TextField(blank=True, default='')
     cotizacion_cierre = models.TextField(blank=True, default='')
+
+    # ── Personalización del TICKET térmico ──
+    # Lo que el admin arma en Configuración › Ticket y ve en la vista previa.
+    # El logo se guarda YA convertido a 1 bit (data URI PNG monocromo) porque la
+    # térmica solo sabe imprimir puntos: guardar el original obligaría a volver a
+    # decidir umbral/tramado en cada caja y el ticket saldría distinto en cada una.
+    ticket_logo = models.TextField(blank=True, default='')
+    # El original (reducido) solo lo usa el panel: sin él, cambiar el umbral o
+    # el tramado obligaría a volver a buscar el archivo del logo.
+    ticket_logo_origen = models.TextField(blank=True, default='')
+    ticket_logo_escala = models.PositiveSmallIntegerField(default=70)   # % del ancho del papel
+    ticket_mostrar_logo = models.BooleanField(default=True)
+    ticket_lema = models.CharField(max_length=80, blank=True, default='Renta · Venta · Servicio')
+    ticket_mostrar_direccion = models.BooleanField(default=True)
+    ticket_mostrar_telefono = models.BooleanField(default=True)
+    ticket_mostrar_rfc = models.BooleanField(default=True)
+    ticket_mostrar_web = models.BooleanField(default=False)
+    ticket_codigo_barras = models.BooleanField(default=True)
+    ticket_leyenda = models.TextField(blank=True, default='')           # aviso al pie (devoluciones, garantía)
     dias_entrega_pedido = models.PositiveIntegerField(default=0)
     # Descuento (%) que se ofrece al pagar de CONTADO en efectivo al vender una
     # máquina. Es política de la empresa: se aplica sin código de autorización.
@@ -823,6 +872,9 @@ class ConfiguracionSitio(models.Model):
     caja_renta_maquinaria = models.BooleanField(
         default=False,
         help_text='Permite levantar rentas desde la caja del mostrador.')
+    caja_cobra_abonos = models.BooleanField(
+        default=False,
+        help_text='Permite recibir abonos de pedidos y rentas desde la caja del mostrador.')
     # Código de 6 dígitos que autoriza AJUSTAR el precio a mano al vender (fuera
     # del descuento de contado). Se guarda hasheado; nunca se devuelve en claro.
     codigo_ajuste = models.CharField(max_length=128, blank=True, default='', editable=False)
