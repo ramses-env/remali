@@ -15,6 +15,7 @@ from maquinaria.throttling import TokenPublicoThrottle
 
 from maquinaria.models import Equipo
 from maquinaria.permissions import IsAdminGroupOrStaff, EsOperador
+from maquinaria.views import ProtectedDestroyMixin
 from .models import Inventario, OrdenReparacion, OrdenReparacionItem
 from .serializers import InventarioSerializer, OrdenReparacionSerializer
 
@@ -122,7 +123,8 @@ class UnidadesGlobal(generics.ListAPIView):
         return qs.order_by('estado', 'codigo')
 
 
-class UnidadDetail(generics.RetrieveUpdateDestroyAPIView):
+class UnidadDetail(ProtectedDestroyMixin, generics.RetrieveUpdateDestroyAPIView):
+    en_uso_label_plural = 'rentas o ventas'
     queryset = Inventario.objects.all().select_related('equipo').prefetch_related('rentas')
     serializer_class = InventarioSerializer
 

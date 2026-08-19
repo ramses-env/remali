@@ -135,9 +135,9 @@ def usuarios(request):
     # (cajero/asesor/técnico) NO autoriza nada —eso lo aprueba un superior—, así
     # que no se le pide ni se le guarda PIN (si el formulario lo mandara, se ignora).
     from .seguridad import formato_valido, hash_codigo
-    from .permissions import ROL_ADMIN, ROL_GERENTE
+    from .permissions import ROL_ADMIN
     rol = (d.get('rol') or '').strip()
-    es_autoridad = rol in (ROL_ADMIN, ROL_GERENTE)
+    es_autoridad = rol == ROL_ADMIN
     codigo = str(d.get('codigo_seguridad') or '').strip()
     if es_autoridad and not formato_valido(codigo):
         return Response({'detalle': 'Define el código de seguridad (6 dígitos): el administrador o gerente lo usa para autorizar acciones sensibles.'}, status=400)
@@ -260,11 +260,10 @@ def usuario_detalle(request, pk: int):
         u.save(update_fields=campos)
     if 'rol' in d:
         _asignar_rol(u, nuevo_rol)
-        # Al DEGRADAR (deja de ser autoridad: ya no admin/gerente/staff/superuser)
+        # Al DEGRADAR (deja de ser autoridad: ya no admin/staff/superuser)
         # se borra su PIN. Un operador no autoriza nada; no debe quedar un código
         # colgando (aunque verificar_codigo ya lo neutraliza por rol).
-        from .permissions import ROL_GERENTE
-        es_autoridad_final = u.is_superuser or u.is_staff or nuevo_rol in (ROL_ADMIN, ROL_GERENTE)
+        es_autoridad_final = u.is_superuser or u.is_staff or nuevo_rol == ROL_ADMIN
         if not es_autoridad_final:
             from .models import PerfilUsuario
             PerfilUsuario.objects.filter(usuario=u).exclude(codigo_seguridad='').update(

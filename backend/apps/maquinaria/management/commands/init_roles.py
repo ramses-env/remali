@@ -22,21 +22,27 @@ APPS_PANEL = ['maquinaria', 'inventario', 'refacciones', 'renta', 'ventas', 'cot
 
 ROLES = {
     'Administrador': 'todo',
-    # Gerente opera al nivel de administración; el nombre distingue al encargado
-    # de piso del dueño. Mismos permisos finos que Administrador (cosméticos).
-    'Gerente': 'todo',
+    # Administración DELEGADA. Mismos permisos finos de Django que el
+    # Administrador: lo que lo distingue (no ve las métricas, no borra del
+    # catálogo, no toca los datos bancarios y sus acciones delicadas las autoriza
+    # el DUEÑO con su NIP) lo impone `puede_de` y las clases de permiso, no esta
+    # tabla, que solo alimenta el admin de Django.
+    'Gestor': 'todo',
     'Técnico': ['view', 'change'],   # ve y ajusta equipo; no borra ni configura
     # Cajero solo consulta en el admin de Django; la caja de verdad (vender
     # refacciones, corte) la gobierna PuedeUsarCaja, no estos permisos.
     'Cajero': ['view'],
-    # Asesor consulta y crea (cotizaciones, clientes); la regla real la impone
-    # PuedeCotizar. No edita ni borra, no convierte a venta.
-    'Asesor': ['view', 'add'],
 }
+
+# Roles retirados. Se BORRAN al correr el comando para que no vuelvan a aparecer
+# en el selector de rol cada vez que se despliega. 'Gerente' era idéntico a
+# Administrador y 'Asesor' no lo usaba nadie; si mañana hace falta un puesto
+# intermedio se creará con sus propias reglas, no reviviendo un duplicado.
+ROLES_RETIRADOS = ['Gerente', 'Asesor']
 
 
 class Command(BaseCommand):
-    help = 'Crea los roles del panel (Administrador, Gerente, Técnico, Cajero, Asesor) y asigna sus permisos.'
+    help = 'Crea los roles del panel (Administrador, Gestor, Técnico, Cajero) y asigna sus permisos.'
 
     def add_arguments(self, parser):
         parser.add_argument('--limpiar', action='store_true',
@@ -67,3 +73,25 @@ class Command(BaseCommand):
             self.stdout.write(self.style.SUCCESS(
                 f'{"Creado" if creado else "Actualizado"} rol "{nombre}" con {permisos.count()} permisos.'
             ))
+
+        # Roles retirados: se borran SIEMPRE, no solo con --limpiar. Si el grupo
+        # sobrevive, vuelve a salir en el selector de rol del panel y alguien
+        # puede asignarlo sin querer. Quien lo tuviera queda sin rol y sin acceso
+        # al panel hasta que se le asigne uno de los vigentes: es lo acordado, y
+        # es el lado seguro (nadie se queda con permisos de un rol que ya no se
+        # mantiene).
+        for nombre in ROLES_RETIRADOS:
+            grupo = Group.objects.filter(name=nombre).first()
+            if not grupo:
+                continue
+            afectados = list(grupo.user_set.values_list('username', flat=True))
+            grupo.delete()
+            if afectados:
+                self.stdout.write(self.style.WARNING(
+                    f'Rol retirado "{nombre}" borrado. Se quedaron SIN ROL (y sin acceso '
+                    f'al panel): {", ".join(afectados)}. Asígnales un rol vigente.'
+                ))
+            else:
+                self.stdout.write(self.style.SUCCESS(
+                    f'Rol retirado "{nombre}" borrado (no lo tenía nadie).'
+                ))

@@ -37,10 +37,17 @@ from typing import NamedTuple, Optional
 
 from rest_framework import permissions
 
+# Tres roles con nombre, más el Dueño (superusuario), que no es un grupo.
+# 'Gerente' y 'Asesor' se retiraron: Gerente era idéntico a Administrador y
+# Asesor no lo usaba nadie. Si vuelve a hacer falta un puesto intermedio se
+# creará con sus propias especificaciones, no reviviendo un duplicado.
 ROL_ADMIN = 'Administrador'
-ROL_GERENTE = 'Gerente'
+# Administración DELEGADA: alguien contratado que opera el sistema por el dueño.
+# Comparte el nivel del Administrador —no es un escalón nuevo en la jerarquía—
+# y se diferencia por ajustes de puesto. Ver el diseño en
+# docs/superpowers/specs/2026-08-19-rol-gestor-design.md
+ROL_GESTOR = 'Gestor'
 ROL_CAJERO = 'Cajero'
-ROL_ASESOR = 'Asesor'
 ROL_TECNICO = 'Técnico'
 # El rol se llamaba 'Almacén'. Se sigue aceptando para que una cuenta vieja no
 # se quede fuera si la migración no corrió todavía.
@@ -80,13 +87,11 @@ def nivel_de(user) -> int:
     if user.is_staff:
         return NIVEL_ADMIN
     grupos = _grupos(user)
-    # Gerente opera al nivel de administración (encargado de piso); el número es
-    # el mismo, el nombre no.
-    if ROL_ADMIN in grupos or ROL_GERENTE in grupos:
+    if ROL_ADMIN in grupos or ROL_GESTOR in grupos:
         return NIVEL_ADMIN
-    # Cajero y Asesor comparten el nivel del técnico para entrar al panel; qué
-    # puede hacer cada uno dentro lo decide puede_de, no el número.
-    if (ROL_CAJERO in grupos or ROL_ASESOR in grupos
+    # Cajero y Técnico comparten el nivel para entrar al panel; qué puede hacer
+    # cada uno dentro lo decide puede_de, no el número.
+    if (ROL_CAJERO in grupos
             or ROL_TECNICO in grupos or ROL_TECNICO_ANTERIOR in grupos):
         return NIVEL_TECNICO
     return SIN_ACCESO
@@ -94,13 +99,13 @@ def nivel_de(user) -> int:
 
 def rol_de(user) -> str:
     """Etiqueta del rol para mostrar, tomada del grupo. Cajero y Técnico comparten
-    nivel; Gerente y Administrador también. El número no alcanza para nombrarlos."""
+    nivel, así que el número no alcanza para nombrarlos."""
     if not user or not user.is_authenticated or not user.is_active:
         return ETIQUETA_NIVEL[SIN_ACCESO]
     if user.is_superuser:
         return ETIQUETA_NIVEL[NIVEL_DUENO]
     grupos = _grupos(user)
-    for rol in (ROL_ADMIN, ROL_GERENTE, ROL_CAJERO, ROL_ASESOR, ROL_TECNICO):
+    for rol in (ROL_ADMIN, ROL_GESTOR, ROL_CAJERO, ROL_TECNICO):
         if rol in grupos:
             return rol
     if ROL_TECNICO_ANTERIOR in grupos:
@@ -109,17 +114,20 @@ def rol_de(user) -> str:
     return ETIQUETA_NIVEL[nivel_de(user)]
 
 
+def es_gestor(user) -> bool:
+    """Gestor puro: en el grupo 'Gestor' y sin un nivel más alto que lo eleve.
+
+    Se distingue del Administrador por el grupo, porque comparten el número. La
+    diferencia importa: al Gestor las acciones delicadas le piden el NIP del
+    DUEÑO, no el suyo.
+    """
+    return nivel_de(user) == NIVEL_ADMIN and ROL_GESTOR in _grupos(user)
+
+
 def es_cajero(user) -> bool:
     """Cajero puro: en el grupo 'Cajero' y sin un nivel más alto que lo eleve. Se
     distingue del técnico por el grupo, porque comparten el número."""
     return nivel_de(user) == NIVEL_TECNICO and ROL_CAJERO in _grupos(user)
-
-
-def es_asesor(user) -> bool:
-    """Asesor puro: en el grupo 'Asesor' y sin un nivel más alto. Atiende
-    cotizaciones y las manda a autorizar; comparte nivel con el técnico, pero su
-    trabajo es el mostrador de presupuestos, no el campo."""
-    return nivel_de(user) == NIVEL_TECNICO and ROL_ASESOR in _grupos(user)
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -146,8 +154,25 @@ CATALOGO = (
               'Dar de alta al equipo y cambiarle el rol.', NIVEL_DUENO),
     Capacidad('configurar_negocio', 'Configurar el negocio',
               'Datos del negocio, correos de aviso, códigos de seguridad.', NIVEL_DUENO),
+    # `ver_dinero` y `ver_operacion` estaban revueltas en una sola. Separarlas es
+    # lo que permite que alguien opere el negocio sin saber cuánto gana el
+    # negocio: el Gestor tiene que poder abrir una venta para cancelarla, y no
+    # tiene por qué ver los ingresos del mes.
     Capacidad('ver_dinero', 'Ver las cuentas del negocio',
-              'Ingresos, métricas e historial completo. Distinto de cobrar.', NIVEL_ADMIN),
+              'El Resumen, los ingresos del día/mes/año, las gráficas y los reportes '
+              'exportables. Distinto de ver la operación y de cobrar.', NIVEL_ADMIN),
+    Capacidad('ver_operacion', 'Ver la operación comercial',
+              'La lista de ventas, rentas, adeudos y pedidos con sus montos, para '
+              'poder trabajarlos. No incluye las métricas del negocio.', NIVEL_ADMIN),
+    Capacidad('borrar_catalogo', 'Borrar del catálogo',
+              'Eliminar productos, unidades y refacciones. Agregar es de administración; '
+              'BORRAR es del dueño: es como se encubre una máquina que falta.', NIVEL_DUENO),
+    Capacidad('tener_codigo_propio', 'Tener código de autorización propio',
+              'Fijar un NIP propio que autoriza acciones delicadas. El Gestor NO lo '
+              'tiene: las suyas las autoriza el dueño con el de él.', NIVEL_ADMIN),
+    Capacidad('editar_datos_bancarios', 'Editar los datos bancarios',
+              'El titular, banco, cuenta y CLABE que se imprimen en cada cotización. '
+              'Cambiarlos desvía los pagos de los clientes.', NIVEL_DUENO),
     Capacidad('ver_montos_operacion', 'Ver montos de lo que opera',
               'Cobrar lo que uno mismo atiende: el técnico en campo, el cajero en '
               'el mostrador. No incluye las cuentas del negocio.', NIVEL_TECNICO),
@@ -161,7 +186,18 @@ CATALOGO = (
               'Meter máquinas nuevas al inventario.', NIVEL_ADMIN),
     Capacidad('operar_inventario', 'Mover unidades',
               'Cambiar de ubicación y estado las unidades que ya existen.', NIVEL_TECNICO),
-    Capacidad('reparar', 'Reparar', 'Órdenes de reparación y mantenimiento.', NIVEL_TECNICO),
+    # `reparar` y `gestionar_reparaciones` son dos trabajos distintos que antes se
+    # confundían en uno. REPARAR es hacer el trabajo: recibir la máquina,
+    # trabajarla y terminarla; el técnico lo hace todo desde "Mi jornada", que ya
+    # le trae sus órdenes abiertas sin importar cuántos días lleven. GESTIONAR es
+    # llevar el taller: el historial completo, las cuatro etapas, los costos y
+    # entregarle la máquina al cliente. Abrirle al técnico la sección completa era
+    # duplicarle su propio día en otra pantalla.
+    Capacidad('reparar', 'Reparar',
+              'Recibir máquinas en taller y trabajar las órdenes desde Mi jornada.', NIVEL_TECNICO),
+    Capacidad('gestionar_reparaciones', 'Llevar el taller',
+              'La sección Reparaciones: historial, costos y entrega al cliente. '
+              'Distinto de reparar, que es hacer el trabajo.', NIVEL_ADMIN),
     Capacidad('usar_caja', 'Usar la caja',
               'Vender refacciones en el mostrador y cobrar.', NIVEL_ADMIN),
     Capacidad('corte_caja', 'Hacer corte de caja',
@@ -188,15 +224,26 @@ CATALOGO = (
 # pantalla de permisos configurables, leerá lo que el admin haya guardado y
 # caerá aquí solo si no hay nada configurado.
 AJUSTES_POR_PUESTO = {
-    # Mostrador de refacciones: vende y cobra, no anda en campo.
+    # Administración DELEGADA. Opera el negocio por el dueño, pero es gente
+    # contratada: el diseño entero existe para que no pueda robar sin que se vea.
+    #  · `ver_dinero` apagado: no ve el Resumen ni las métricas del mes o del año.
+    #    Sí ve la operación (`ver_operacion`, que le llega por nivel), porque para
+    #    cancelar una venta hay que poder abrirla.
+    #  · `configurar_negocio` encendido: es trabajo de escritorio que el dueño
+    #    delega. Los DATOS BANCARIOS se le bloquean aparte, con su propia
+    #    capacidad de nivel dueño.
+    #  · Borrar del catálogo y dar de alta gente le quedan fuera por nivel.
+    ROL_GESTOR: {'ver_dinero': False, 'configurar_negocio': True,
+                 'tener_codigo_propio': False},
+    # Mostrador: vende y cobra en la caja, no anda en campo.
     ROL_CAJERO: {'rentar': False, 'reparar': False, 'operar_inventario': False,
                  'usar_caja': True, 'corte_caja': True},
-    # Mostrador de presupuestos: cotiza y manda a autorizar. No vende, no renta,
-    # no repara, no toca inventario ni precios ni las cuentas.
-    ROL_ASESOR: {'vender': False, 'rentar': False, 'reparar': False,
-                 'operar_inventario': False, 'cotizar': True},
-    # Técnico de campo puro (sin puesto especializado): suyo es Mi jornada.
-    None: {'jornada_campo': True},
+    # Técnico de campo: REPARA, ENTREGA, RECOGE y COBRA lo que él atiende.
+    # No vende ni renta —eso se levanta en el mostrador o en administración—,
+    # así que esas dos se apagan aunque su nivel las encendería. Sin esto el
+    # panel le prometía dos cosas que no le tocan y que además no tenía dónde
+    # hacer, porque Ventas y Rentas piden `ver_dinero`.
+    None: {'jornada_campo': True, 'vender': False, 'rentar': False},
 }
 
 
@@ -212,8 +259,9 @@ def puede_de(user) -> dict:
     interfaz, nunca la única defensa.
 
     El grueso sale del NIVEL (jerárquico, cascadea hacia arriba). Encima, los
-    puestos que comparten el nivel 1 aplican su ajuste. Se distinguen por grupo,
-    no por número, porque cajero, asesor y técnico son todos nivel 1.
+    puestos que COMPARTEN un nivel aplican su ajuste. Se distinguen por grupo, no
+    por número: cajero y técnico son ambos nivel 1, y administrador y gestor son
+    ambos nivel 2.
     """
     n = nivel_de(user)
     caps = {c.nombre: (c.nivel_minimo is not None and n >= c.nivel_minimo)
@@ -222,8 +270,10 @@ def puede_de(user) -> dict:
     caps['rol'] = rol_de(user)
 
     if n == NIVEL_TECNICO:
-        puesto = ROL_CAJERO if es_cajero(user) else (ROL_ASESOR if es_asesor(user) else None)
+        puesto = ROL_CAJERO if es_cajero(user) else None
         caps.update(AJUSTES_POR_PUESTO[puesto])
+    elif n == NIVEL_ADMIN and es_gestor(user):
+        caps.update(AJUSTES_POR_PUESTO[ROL_GESTOR])
     return caps
 
 
@@ -270,6 +320,17 @@ class EsOperador(_NivelMinimo):
     """Técnico hacia arriba: quien entrega, recoge y repara."""
     nivel_requerido = NIVEL_TECNICO
     message = 'Necesitas acceso al panel.'
+
+
+class PuedeVerDinero(ExigeCapacidad):
+    """Las cuentas del negocio: el Resumen y sus métricas.
+
+    Existe desde que el Resumen dejó de ser un cascarón. Mientras devolvía ceros
+    daba igual quién lo llamara; ahora dice cuánto entró cada día y cada mes, que
+    es justo lo que el Gestor NO debe ver aunque opere el negocio completo.
+    """
+    capacidad = 'ver_dinero'
+    message = 'No tienes acceso a las cuentas del negocio.'
 
 
 class PuedeUsarCaja(permissions.BasePermission):
