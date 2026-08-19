@@ -15,6 +15,8 @@ type Cot = {
   folio: string; estado: string; estado_label: string; tipo: string; total: string
   creada?: string; vence_el?: string | null; pdf?: string | null; atendida_por?: string | null; atendida?: boolean; convertida?: boolean; entrega_prometida?: string | null
   renta_id?: number | null; venta_id?: number | null; entregada_en?: string | null
+  /** Quien la firmó del lado del cliente, si pasó por su autorizador. */
+  autorizada_por?: string | null
   items: { descripcion: string; cantidad: number }[]
   carrito?: { id: number; title: string; qty: number; duracion?: number; unit?: string; image?: string }[]
 }
@@ -94,12 +96,11 @@ export default function MisCotizacionEstado() {
   // la liga del jefe, o el propio cliente cuando no hay a quién pedirle). Por
   // eso el flujo real es: recibida (autorizada) → existencia → fecha/hora →
   // entrega. No hay un paso de "autorización" a media revisión.
-  const porAutorizar = cot.estado === 'por_autorizar'
   // Ya con fecha/hora agendada (entrega_prometida), el paso "Fecha y hora" queda
   // HECHO y el activo pasa a "Entrega en obra" (3). Antes, una venta aceptada se
   // quedaba en 2 aunque ya hubiera fecha, y el paso no se ponía verde con palomita.
   const entregaAgendada = acep && !!cot.entrega_prometida
-  const activo = compl ? 4 : rentaPorEntregar ? 3 : entregaAgendada ? 3 : acep ? 2 : porAutorizar ? 0 : 1
+  const activo = compl ? 4 : rentaPorEntregar ? 3 : entregaAgendada ? 3 : acep ? 2 : 1
   const entrega = cot.entrega_prometida
     ? new Date(cot.entrega_prometida).toLocaleString('es-MX', { weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
     : null
@@ -107,7 +108,10 @@ export default function MisCotizacionEstado() {
     ? new Date(cot.entregada_en).toLocaleString('es-MX', { weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
     : ''
   const pasos = [
-    { t: 'Cotización recibida', d: porAutorizar ? 'Falta que tu autorizador la apruebe para que llegue a REMALI.' : `Autorizada · folio ${cot.folio}.` },
+    // "Autorizada" solo si de verdad pasó por un autorizador: la que el cliente
+    // mandó directo se recibió, no se autorizó, y decirle lo contrario le
+    // inventa un paso que nunca ocurrió.
+    { t: 'Cotización recibida', d: cot.autorizada_por ? `Autorizada por ${cot.autorizada_por} · folio ${cot.folio}.` : `Recibida · folio ${cot.folio}.` },
     { t: 'Revisión de disponibilidad', d: 'Confirmamos que hay existencias en inventario.' },
     { t: 'Fecha y hora de entrega', d: entrega ? `Programada: ${entrega}.` : acep ? 'Coordinamos contigo el día y la hora por WhatsApp.' : 'Al confirmar existencias, agendamos la entrega.' },
     { t: 'Entrega en obra', d: entregado ? `Entregado el ${entregadoTxt}.` : ventaConv ? 'Compra completada.' : rentaPorEntregar ? (entrega ? `Programada: ${entrega}. Aún no sale; te avisamos al entregarlo.` : 'Pendiente de entrega; te avisamos al salir.') : 'Llevamos el equipo probado a tu obra.' },
@@ -120,7 +124,6 @@ export default function MisCotizacionEstado() {
     : rentaPorEntregar ? { txt: 'Paso 4 de 4 · pendiente de entrega', cls: 'text-gold-ink border-gold/40' }
     : entregaAgendada ? { txt: 'Paso 4 de 4 · pendiente de entrega', cls: 'text-gold-ink border-gold/40' }
     : acep ? { txt: 'Paso 3 de 4 · agendando fecha y hora', cls: 'text-gold-ink border-gold/40' }
-    : porAutorizar ? { txt: 'Paso 1 de 4 · esperando autorización', cls: 'text-gold-ink border-gold/40' }
     : { txt: 'Paso 2 de 4 · revisando existencias', cls: 'text-gold-ink border-gold/40' }
 
   const wa = waLink(cfg.whatsapp_principal, `Hola REMALI, quiero seguimiento de mi cotización ${cot.folio}.`)

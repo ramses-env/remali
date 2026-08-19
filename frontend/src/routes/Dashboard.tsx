@@ -141,7 +141,7 @@ type CotizacionItem = { id: number; descripcion: string; cantidad: number; durac
 type CotizacionFoto = { id: number; imagen: string; orden: number }
 type Cotizacion = {
   id: number; folio: string | null; tipo: 'venta' | 'renta' | 'mixta'
-  estado: 'borrador' | 'por_autorizar' | 'enviada' | 'aceptada' | 'rechazada' | 'cancelada'
+  estado: 'borrador' | 'enviada' | 'aceptada' | 'rechazada' | 'cancelada'
   entrega_prometida?: string | null
   cliente_nombre: string; cliente_telefono: string; cliente_email?: string; empresa?: number | null; empresa_nombre?: string
   vigencia_dias: number; aplica_iva: boolean; notas: string
@@ -152,7 +152,6 @@ type Cotizacion = {
   usuario_nombre?: string | null
   autorizada_por?: string | null
   autorizada_en?: string | null
-  autorizacion_rechazo?: string
   cancelacion_solicitada?: string | null
   cancelacion_motivo?: string
   usuario?: number | null
@@ -6675,11 +6674,7 @@ const COT_ESTADOS: { key: Cotizacion['estado']; label: string; cls: string; dot:
   { key: 'rechazada', label: 'Rechazada', cls: 'bg-red-500/10 text-red-500', dot: '#B91C1C' },
   { key: 'cancelada', label: 'Cancelada', cls: 'bg-red-500/10 text-red-500', dot: '#7F1D1D' },
 ]
-const cotEstadoMeta = (e: string) =>
-  e === 'por_autorizar'
-    // En autorización interna del cliente: visible para el admin, pero no es suya.
-    ? { key: 'por_autorizar' as const, label: 'Por autorizar', cls: 'bg-amber-500/10 text-amber-600', dot: '#B45309' }
-    : COT_ESTADOS.find(x => x.key === e) || COT_ESTADOS[0]
+const cotEstadoMeta = (e: string) => COT_ESTADOS.find(x => x.key === e) || COT_ESTADOS[0]
 
 type CotStats = { total: number; borrador: number; enviada: number; aceptada: number; rechazada: number; vencida: number; abiertas: number; monto_aceptado: string }
 type PaginaCot = { count: number; next: string | null; previous: string | null; results: Cotizacion[] }
@@ -7549,13 +7544,13 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
                 style={{ gridTemplateColumns: 'repeat(4, minmax(0, 1fr))' }}>
                 {[
                   { key: 'borrador', label: 'Borrador' },
-                  { key: c.estado === 'por_autorizar' ? 'por_autorizar' : 'enviada', label: c.estado === 'por_autorizar' ? 'Por autorizar' : 'Enviada' },
+                  { key: 'enviada', label: 'Enviada' },
                   { key: 'aceptada', label: 'Aceptada' },
                   { key: c.estado === 'cancelada' ? 'cancelada' : 'rechazada', label: c.estado === 'cancelada' ? 'Cancelada' : 'Rechazada' },
                 ].map(e => (
                   <span key={e.key} className={`text-center px-2 py-1.5 rounded-lg text-[13px] font-bold transition-colors ${
                     c.estado === e.key
-                      ? (e.key === 'rechazada' || e.key === 'cancelada' ? 'bg-red-600 text-white' : e.key === 'por_autorizar' ? 'bg-amber-500 text-black' : 'bg-ink text-app')
+                      ? (e.key === 'rechazada' || e.key === 'cancelada' ? 'bg-red-600 text-white' : 'bg-ink text-app')
                       : 'text-mute'
                   }`}>{e.label}</span>
                 ))}
@@ -7597,11 +7592,15 @@ function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, on
                   Concretar renta →
                 </button>
               )}
-              {/* Vino autorizada por el jefe del cliente: dinero ya aprobado. */}
-              {c.autorizada_por && !c.autorizacion_rechazo && (
+              {/* Vino firmada por quien autoriza del lado del cliente. Es un
+                  hecho, no una tarea: en cuanto se concreta deja de invitar a
+                  concretarla —lo contrario mandaba a hacer algo ya hecho, que
+                  además el servidor rechaza. */}
+              {c.autorizada_por && (
                 <div className="mt-2 inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 text-[12.5px] font-bold">
                   <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round"><path d="M5 13l4 4L19 7" /></svg>
-                  Autorizada por {c.autorizada_por}{c.autorizada_en ? ` · ${new Date(c.autorizada_en).toLocaleDateString('es-MX', { day: 'numeric', month: 'short' })}` : ''} — lista para concretar
+                  Autorizada por {c.autorizada_por}{c.autorizada_en ? ` · ${new Date(c.autorizada_en).toLocaleDateString('es-MX', { day: 'numeric', month: 'short' })}` : ''}
+                  {!bloqueada && c.estado === 'aceptada' ? ' — lista para concretar' : ''}
                 </div>
               )}
             </div>
