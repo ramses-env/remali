@@ -4,7 +4,7 @@ import { useCallback, useLayoutEffect, useRef, useState } from 'react'
 import { Printer, X, FileText } from 'lucide-react'
 import { usePrintSettings } from '../lib/printSettings'
 import resolveMediaUrl from '../lib/resolveMediaUrl'
-import LogoRemali from './ui/logo-remali'
+import { LogoRemaliDoc } from './ui/logo-remali'
 
 type Spec = { etiqueta: string; valor: string }
 type Equipo = {
@@ -169,7 +169,7 @@ export default function FichaTecnicaModal({ equipo, onClose }: { equipo: Equipo;
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10mm 14mm 0' }}>
                 <div className="band">Ficha técnica</div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <LogoRemali className="h-10 w-10" title="REMALI" />
+                  <LogoRemaliDoc className="h-10 w-10" />
                   <div className="brand">{neg.nombre || 'REMALI'}<small>Renta · Venta · Servicio</small></div>
                 </div>
               </div>

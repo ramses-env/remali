@@ -12,6 +12,8 @@ from reportlab.lib.units import mm
 from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.pdfgen import canvas
 
+from server.documentos import dibujar_logo
+
 TINTA = colors.HexColor('#111827')
 GRIS = colors.HexColor('#6B7280')
 LINEA = colors.HexColor('#E5E7EB')
@@ -88,10 +90,7 @@ def render_orden_reparacion_pdf(orden) -> bytes:
     # ── Encabezado: marca + título ──
     lg = 11 * mm
     ly = y - 3.5 * mm
-    c.setFillColor(ACENTO)
-    c.roundRect(m, ly, lg, lg, 2 * mm, stroke=0, fill=1)
-    c.setFillColor(colors.white); c.setFont('Helvetica-Bold', 14)
-    c.drawCentredString(m + lg / 2, ly + lg / 2 - 5, 'R')
+    dibujar_logo(c, m, ly, lg, respaldo=ACENTO)
 
     c.setFillColor(ACENTO); c.setFont('Helvetica-Bold', 18)
     c.drawString(m + lg + 4 * mm, y, cfg.negocio_nombre or 'REMALI')

@@ -2,7 +2,7 @@ import { createPortal } from 'react-dom'
 import Modal from './Modal'
 import { usePrintSettings } from '../lib/printSettings'
 import { formatMoney } from '../lib/utils'
-import LogoRemali from './ui/logo-remali'
+import { LogoRemaliDoc } from './ui/logo-remali'
 
 type Item = { id: number; origen: string; nombre: string; cantidad: number; costo_unitario: string; subtotal: string }
 type Orden = {
@@ -56,7 +56,7 @@ export default function OrdenCartaModal({ orden, onClose }: { orden: Orden; onCl
             <div className="row" style={{ alignItems: 'flex-start', borderBottom: '2px solid #111827', paddingBottom: 12 }}>
               <div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-                  <LogoRemali className="h-10 w-10" title="REMALI" />
+                  <LogoRemaliDoc className="h-10 w-10" />
                   <h1>REMALI</h1>
                 </div>
                 <div className="muted" style={{ fontSize: '9.5pt', marginTop: 2 }}>Renta · Venta · Servicio de maquinaria</div>

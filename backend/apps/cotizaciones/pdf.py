@@ -14,6 +14,8 @@ from reportlab.lib.units import mm
 from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.pdfgen import canvas
 
+from server.documentos import dibujar_logo, lector_imagen
+
 GRIS = colors.HexColor('#6B7280')
 TINTA = colors.HexColor('#111827')
 LINEA = colors.HexColor('#E5E7EB')
@@ -127,22 +129,23 @@ def _dibujar_fotos(c, cot, ancho, alto, m, y, acento):
     # de una cotización que armó el propio cliente desde la tienda), se respalda
     # con la imagen de cada equipo cotizado —sin repetir— para que la cotización
     # de venta salga con fotos igual que la de renta.
-    imagenes = [f.imagen for f in cot.fotos.all() if f.imagen]
-    if not imagenes:
+    campos = [f.imagen for f in cot.fotos.all() if f.imagen]
+    if not campos:
         vistos = set()
         for it in cot.items.all():
             eq = it.equipo
             if eq and getattr(eq, 'imagen', None) and eq.id not in vistos:
                 vistos.add(eq.id)
-                imagenes.append(eq.imagen)
+                campos.append(eq.imagen)
+    # Se abren TODAS antes de medir: una foto ilegible no debe dejar un hueco en
+    # la rejilla ni el título 'FOTOS' encabezando una sección vacía.
+    imagenes = [img for img in (lector_imagen(c_) for c_ in campos) if img is not None]
     if not imagenes:
         return y
 
-    from reportlab.lib.utils import ImageReader
-
     GAP = 6 * mm
     cell_w = (ancho - 2 * m - GAP) / 2
-    cell_h = 45 * mm
+    cell_h = 48 * mm   # la misma altura de celda que la vista previa (48 mm)
     RESERVA_PIE = 24 * mm          # aire para que el pie no toque la última fila
 
     def nueva_pagina():
@@ -157,20 +160,22 @@ def _dibujar_fotos(c, cot, ancho, alto, m, y, acento):
     c.drawString(m, y, 'FOTOS')
     y -= 6 * mm
 
+    PAD = 1.5 * mm                 # aire entre el marco y la foto
     for idx in range(0, len(imagenes), 2):
         if y - cell_h < m + RESERVA_PIE:
             y = nueva_pagina()
-        for col, imagen in enumerate(imagenes[idx:idx + 2]):
-            try:
-                img = ImageReader(imagen.path)
-                iw, ih = img.getSize()
-            except Exception:
-                continue           # una foto ilegible no debe tumbar el PDF
-            escala = min(cell_w / iw, cell_h / ih)
-            w, h = iw * escala, ih * escala
+        for col, img in enumerate(imagenes[idx:idx + 2]):
             x0 = m + col * (cell_w + GAP)
-            c.drawImage(img, x0 + (cell_w - w) / 2, y - h, width=w, height=h,
-                        preserveAspectRatio=True, anchor='n')
+            # Marco de la celda, igual que en la vista previa: una foto vertical
+            # y una horizontal se ven como un par, no como dos recortes sueltos.
+            c.setFillColor(colors.HexColor('#FAFAFA')); c.setStrokeColor(LINEA)
+            c.setLineWidth(0.6)
+            c.roundRect(x0, y - cell_h, cell_w, cell_h, 1.5 * mm, stroke=1, fill=1)
+            iw, ih = img.getSize()
+            escala = min((cell_w - 2 * PAD) / iw, (cell_h - 2 * PAD) / ih)
+            w, h = iw * escala, ih * escala
+            c.drawImage(img, x0 + (cell_w - w) / 2, y - (cell_h + h) / 2, width=w, height=h,
+                        preserveAspectRatio=True, anchor='c', mask='auto')
         y -= cell_h + 4 * mm
     return y
 
@@ -188,15 +193,10 @@ def render_cotizacion_pdf(cot) -> bytes:
     y = alto - m
 
     # ── Encabezado ──
-    # Marca REMALI: cuadro oscuro redondeado con la R en blanco. La carta HTML
-    # usa el SVG exacto; aquí, sin dependencias, va esta marca equivalente.
+    # El logo tal cual: el mismo archivo que se ve en la web y en la vista previa.
     lg = 11 * mm
     ly = y - 3.5 * mm
-    c.setFillColor(acento)
-    c.roundRect(m, ly, lg, lg, 2 * mm, stroke=0, fill=1)
-    c.setFillColor(colors.white)
-    c.setFont('Helvetica-Bold', 14)
-    c.drawCentredString(m + lg / 2, ly + lg / 2 - 5, 'R')
+    dibujar_logo(c, m, ly, lg, respaldo=acento)
 
     c.setFillColor(acento)
     c.setFont('Helvetica-Bold', 18)

@@ -94,12 +94,9 @@ class Ticket:
                 c.line(self.margin, y + o['size'] * 0.4, self.width - self.margin, y + o['size'] * 0.4)
                 continue
             if kind == 'logo':
+                from server.documentos import dibujar_logo
                 s = o['size']
-                c.setFillColorRGB(0.067, 0.090, 0.153)                     # cuadro (tinta)
-                c.roundRect((self.width - s) / 2, y, s, s, s * 0.18, stroke=0, fill=1)
-                c.setFillColorRGB(1, 1, 1)                                  # R en blanco
-                c.setFont('Helvetica-Bold', s * 0.6)
-                c.drawCentredString(self.width / 2, y + s * 0.26, 'R')
+                dibujar_logo(c, (self.width - s) / 2, y, s)
                 c.setFillColorRGB(0, 0, 0)                                  # restaurar para el texto
                 continue
             font = 'Helvetica-Bold' if o['bold'] else 'Helvetica'

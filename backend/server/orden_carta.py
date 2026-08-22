@@ -12,6 +12,8 @@ from reportlab.lib.pagesizes import letter
 from reportlab.lib.units import mm
 from reportlab.pdfgen import canvas
 
+from server.documentos import dibujar_logo
+
 TINTA = colors.HexColor('#111827')
 GRIS = colors.HexColor('#6b7280')
 LINEA = colors.HexColor('#e5e7eb')
@@ -32,11 +34,7 @@ def render_orden_carta_pdf(d: dict) -> bytes:
 
     # ── Membrete (mismo lenguaje que la cotización) ──
     lg = 11 * mm
-    c.setFillColor(acento)
-    c.roundRect(m, y - lg + 2 * mm, lg, lg, 2 * mm, stroke=0, fill=1)
-    c.setFillColor(colors.white)
-    c.setFont('Helvetica-Bold', 14)
-    c.drawCentredString(m + lg / 2, y - lg / 2 - 2, 'R')
+    dibujar_logo(c, m, y - lg + 2 * mm, lg, respaldo=acento)
     c.setFillColor(acento)
     c.setFont('Helvetica-Bold', 17)
     c.drawString(m + lg + 4 * mm, y - 3 * mm, cfg.negocio_nombre or 'REMALI')

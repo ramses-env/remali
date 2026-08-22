@@ -5,7 +5,7 @@ import { X, FileText, Minus, Plus, Maximize2 } from 'lucide-react'
 import { usePrintSettings } from '../lib/printSettings'
 import { formatMoney } from '../lib/utils'
 import resolveMediaUrl from '../lib/resolveMediaUrl'
-import LogoRemali from './ui/logo-remali'
+import { LogoRemaliDoc } from './ui/logo-remali'
 
 type Item = { id: number; descripcion: string; cantidad: number; precio_unitario: string; subtotal: string; modalidad_label?: string; equipo?: number | null; equipo_imagen?: string | null }
 type Foto = { id: number; imagen: string; orden: number }
@@ -183,7 +183,7 @@ export default function CotizacionCartaModal({ cotizacion, onClose }: { cotizaci
               <div className="row" style={{ alignItems: 'flex-start', borderBottom: '2px solid #111827', paddingBottom: 12 }}>
                 <div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 9, color: acento }}>
-                    <LogoRemali className="h-10 w-10" title="REMALI" />
+                    <LogoRemaliDoc className="h-10 w-10" />
                     <h1 style={{ color: acento }}>{neg.nombre || 'REMALI'}</h1>
                   </div>
                   <div className="muted" style={{ fontSize: '9.5pt', marginTop: 2 }}>Renta · Venta · Servicio de maquinaria</div>
