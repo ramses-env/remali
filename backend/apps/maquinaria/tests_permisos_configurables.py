@@ -108,3 +108,20 @@ class CatalogoTest(TestCase):
         fila = next(c for c in catalogo_capacidades() if c['nombre'] == 'cotizar')
         self.assertEqual(fila['area'], 'Mostrador')
         self.assertFalse(fila['nucleo'])
+
+
+from maquinaria.models import CambioPermisoRol, PermisoRol
+
+
+class TablasTest(TestCase):
+
+    def test_un_rol_no_repite_capacidad(self):
+        from django.db import IntegrityError
+        PermisoRol.objects.create(rol='Cajero', capacidad='cotizar', permitido=True)
+        with self.assertRaises(IntegrityError):
+            PermisoRol.objects.create(rol='Cajero', capacidad='cotizar', permitido=False)
+
+    def test_la_bitacora_guarda_de_que_a_que(self):
+        fila = CambioPermisoRol.objects.create(
+            rol='Cajero', capacidad='cotizar', anterior=False, nuevo=True)
+        self.assertEqual(str(fila), 'Cajero · cotizar: False → True')

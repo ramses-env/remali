@@ -1,13 +1,15 @@
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from secrets import token_urlsafe
 from urllib.parse import quote
 
 from django.conf import settings
 from django.contrib.staticfiles import finders
 from django.contrib.staticfiles.storage import staticfiles_storage
+from django.core.exceptions import ValidationError
 from django.core.files.storage import default_storage
 from django.core.validators import FileExtensionValidator
 from django.db import models
+from django.db.models import Q
 from django.utils import timezone
 
 from .permissions import (
@@ -421,6 +423,56 @@ class Equipo(models.Model):
 
     fecha_creacion = models.DateTimeField(auto_now_add=True)
 
+    # Etiqueta legible de cada precio, para poder decir CUÁL está mal.
+    PRECIOS = (
+        ('precio_venta', 'precio de venta'),
+        ('precio_dia', 'precio por día'),
+        ('precio_semana', 'precio por semana'),
+        ('precio_mes', 'precio por mes'),
+    )
+
+    def errores_de_precio(self):
+        """Los precios de este equipo, revisados. Lista de mensajes; vacía si está bien.
+
+        Dos reglas, y las dos existen porque un precio en cero no es un precio:
+        es una máquina que sale del patio gratis sin que nadie lo note. Ya pasó
+        con las rentas —el total salía en $0 en silencio cuando el equipo no
+        tenía tarifa capturada—, y en el Resumen eso se ve como un mes flojo, no
+        como un error.
+
+          1. Un precio capturado tiene que ser mayor a 0. Dejarlo VACÍO sí se
+             vale: significa "este equipo no se ofrece así" (una máquina de línea
+             que no se renta, una seminueva que no se vende).
+          2. Al menos uno de los cuatro tiene que existir. Un equipo sin ningún
+             precio no se puede vender ni rentar: es un renglón de catálogo que
+             no sirve para nada y que tarde o temprano alguien intenta cobrar.
+        """
+        errores = []
+        vivos = 0
+        for campo, etiqueta in self.PRECIOS:
+            valor = getattr(self, campo, None)
+            if valor is None or valor == '':
+                continue
+            try:
+                valor = Decimal(str(valor))
+            except (InvalidOperation, TypeError, ValueError):
+                errores.append(f'El {etiqueta} no es un número válido.')
+                continue
+            if valor <= 0:
+                errores.append(f'El {etiqueta} debe ser mayor a 0. Déjalo vacío si este equipo no se ofrece así.')
+            else:
+                vivos += 1
+        if not errores and not vivos:
+            errores.append('Ponle al menos un precio: de venta, o por día, semana o mes. '
+                           'Sin precio no se puede vender ni rentar.')
+        return errores
+
+    def clean(self):
+        super().clean()
+        errores = self.errores_de_precio()
+        if errores:
+            raise ValidationError(errores)
+
     def get_precio_por_unidad(self, unidad):
         unidad = (unidad or '').strip().lower()
         if unidad == 'dia':
@@ -816,6 +868,60 @@ class CambioPrecioLista(models.Model):
 
     def __str__(self):
         return f'{self.equipo_id} · {self.campo}: {self.anterior} → {self.nuevo}'
+
+
+class PermisoRol(models.Model):
+    """Una capacidad que el dueño movió respecto de fábrica, para un rol.
+
+    Solo se guarda lo que DIFIERE: si vuelve a su valor original, la fila se
+    borra. Así "¿qué toqué yo?" es una consulta y no un diff, y el punto dorado
+    de la pantalla es literalmente "¿existe la fila?".
+
+    `rol` y `capacidad` van como texto y no como llave foránea porque el catálogo
+    vive en el código, que es donde están la etiqueta y la explicación. Se validan
+    contra `permissions.CATALOGO` al guardar desde la API.
+    """
+    rol = models.CharField(max_length=30)
+    capacidad = models.CharField(max_length=40)
+    permitido = models.BooleanField()
+    actualizado_por = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+                                        null=True, blank=True, related_name='permisos_rol')
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'permiso_rol'
+        unique_together = ('rol', 'capacidad')
+        ordering = ['rol', 'capacidad']
+        verbose_name = 'Permiso por rol'
+        verbose_name_plural = 'Permisos por rol'
+
+    def __str__(self):
+        return f'{self.rol} · {self.capacidad} = {self.permitido}'
+
+
+class CambioPermisoRol(models.Model):
+    """Quién cambió qué permiso, cuándo y de qué a qué. Append-only.
+
+    Gemela de `CambioPrecioLista`, y por la misma razón: repartir permisos es
+    trabajo legítimo del dueño, no se bloquea; se hace VISIBLE.
+    """
+    rol = models.CharField(max_length=30)
+    capacidad = models.CharField(max_length=40)
+    anterior = models.BooleanField(null=True, blank=True)   # null = venía de fábrica
+    nuevo = models.BooleanField(null=True, blank=True)      # null = se restableció
+    usuario = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+                                null=True, blank=True, related_name='cambios_permiso')
+    rol_usuario = models.CharField(max_length=30, blank=True, default='')
+    creado_en = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'cambio_permiso_rol'
+        ordering = ['-creado_en']
+        verbose_name = 'Cambio de permiso'
+        verbose_name_plural = 'Cambios de permisos'
+
+    def __str__(self):
+        return f'{self.rol} · {self.capacidad}: {self.anterior} → {self.nuevo}'
 
 
 class ConfiguracionSitio(models.Model):
