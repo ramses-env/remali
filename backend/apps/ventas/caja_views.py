@@ -15,7 +15,7 @@ from django.utils import timezone
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 
-from maquinaria.permissions import PuedeUsarCaja, puede_de
+from maquinaria.permissions import PuedeHacerCorteCaja, PuedeUsarCaja, puede_de
 from .models import Caja, SesionCaja, MovimientoCaja, Venta
 
 
@@ -172,7 +172,7 @@ def abrir_sesion(request):
 
 
 @api_view(['POST'])
-@permission_classes([PuedeUsarCaja])
+@permission_classes([PuedeHacerCorteCaja])   # cerrar el turno es el corte, no usar la caja
 def cerrar_sesion(request, pk: int):
     """Cierra el turno con el arqueo: contado vs esperado → diferencia."""
     s = SesionCaja.objects.filter(pk=pk).select_related('caja').first()

@@ -8,7 +8,9 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework import permissions
 
-from maquinaria.permissions import IsAdminGroupOrStaff, EsOperador, PuedeUsarCaja, puede_de
+from maquinaria.permissions import (
+    IsAdminGroupOrStaff, EsOperador, PuedeHacerCorteCaja, PuedeUsarCaja, puede_de,
+)
 from .models import Venta, ItemVenta, SesionCaja, MovimientoCaja
 
 logger = logging.getLogger(__name__)
@@ -136,7 +138,7 @@ def venta_mostrador(request):
 
 
 @api_view(['GET'])
-@permission_classes([PuedeUsarCaja])
+@permission_classes([PuedeHacerCorteCaja])   # el arqueo del día, no el cobro
 def corte_caja(request):
     """Corte del día: lo que pasó por la CAJA, desglosado por origen.
 

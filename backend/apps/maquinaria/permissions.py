@@ -481,6 +481,18 @@ class PuedeUsarCaja(ExigeCapacidad):
     message = 'No tienes acceso a la caja.'
 
 
+class PuedeHacerCorteCaja(ExigeCapacidad):
+    """Cerrar el turno y leer el arqueo del día.
+
+    Iba pegada a `usar_caja` —abrir la caja y cerrarla pedían lo mismo—, así que
+    la casilla "Hacer corte de caja" de la matriz no le quitaba nada a nadie. No
+    exige ADEMÁS `usar_caja` a propósito: el reparto que hace falta es al revés,
+    que alguien cobre todo el día y que el cierre lo haga otro.
+    """
+    capacidad = 'corte_caja'
+    message = 'No puedes hacer el corte de caja.'
+
+
 class PuedeCotizar(ExigeCapacidad):
     """Cotizaciones. No es un nivel: el asesor cotiza aunque comparta número con
     el técnico (que no cotiza), y de administración para arriba también. Por eso

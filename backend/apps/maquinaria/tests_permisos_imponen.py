@@ -196,3 +196,38 @@ class LaConfiguracionDelNegocioSeImponeTest(TestCase):
         PermisoRol.objects.create(rol='Administrador', capacidad='configurar_negocio',
                                   permitido=True)
         self.assertEqual(self.api_admin.get('/api/config/').status_code, 200)
+
+
+class ElCorteDeCajaSeImponeTest(TestCase):
+    """`corte_caja`: cerrar el turno y leer el arqueo.
+
+    Era el interruptor decorativo de manual: abrir la caja y cerrarla pedían lo
+    mismo (`usar_caja`), así que apagarle "Hacer corte de caja" a un cajero no le
+    quitaba nada. Separarlas es lo que permite lo que el dueño quería: que
+    alguien cobre en el mostrador todo el día y que el cierre lo haga otro.
+    """
+
+    def setUp(self):
+        self.cajero = User.objects.create_user('caj3', 'caj3@x.com', 'pass12345')
+        self.cajero.groups.add(Group.objects.get_or_create(name='Cajero')[0])
+        self.api = APIClient(); self.api.force_authenticate(self.cajero)
+
+    def test_el_cajero_hace_su_corte(self):
+        self.assertEqual(self.api.get('/api/ventas/corte/').status_code, 200)
+
+    def test_apagarle_el_corte_no_le_quita_el_mostrador(self):
+        """La prueba de que las dos capacidades ya no son la misma: sin corte
+        sigue cobrando, y eso es justo el reparto que la matriz promete."""
+        PermisoRol.objects.create(rol='Cajero', capacidad='corte_caja', permitido=False)
+        self.assertEqual(self.api.get('/api/ventas/corte/').status_code, 403)
+        r = self.api.post('/api/ventas/mostrador/', {'items': []}, format='json')
+        self.assertNotEqual(r.status_code, 403)
+
+    def test_cerrar_el_turno_tambien_pide_el_corte(self):
+        """Al cajero con corte lo para la sesión que no existe (404); sin corte
+        lo para el permiso antes de tocar la base."""
+        self.assertEqual(
+            self.api.post('/api/caja/sesiones/999/cerrar/', {}, format='json').status_code, 404)
+        PermisoRol.objects.create(rol='Cajero', capacidad='corte_caja', permitido=False)
+        self.assertEqual(
+            self.api.post('/api/caja/sesiones/999/cerrar/', {}, format='json').status_code, 403)
