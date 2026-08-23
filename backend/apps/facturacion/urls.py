@@ -10,5 +10,6 @@ urlpatterns = [
     path('facturacion/solicitudes/<int:pk>/reabrir/', views.reabrir_solicitud),
     path('facturacion/solicitudes/<int:pk>/factura/', views.subir_factura),
     path('facturacion/facturas/<int:pk>/xml/', views.descargar_xml),
+    path('facturacion/facturas/<int:pk>/pdf/', views.descargar_pdf),
     path('facturacion/facturas/<int:pk>/cancelar/', views.cancelar_factura),
 ]

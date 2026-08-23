@@ -187,6 +187,28 @@ def descargar_xml(request, pk: int):
     return resp
 
 
+@api_view(['GET'])
+@permission_classes([permissions.IsAuthenticated])
+def descargar_pdf(request, pk: int):
+    """La representación impresa del CFDI, generada por REMALI.
+
+    No se guarda en ningún lado: se arma cada vez a partir del XML. Así el
+    documento no puede desincronizarse de su CFDI, y cambiar el logo o el
+    formato reescribe también las facturas viejas sin migrar nada.
+    """
+    from django.http import HttpResponse
+
+    from .pdf import render_factura_pdf
+
+    f = _factura_visible(request.user, pk)
+    if f is None:
+        return Response({'detalle': 'Factura no encontrada'}, status=404)
+    nombre = f'{f.serie}{f.folio}' if (f.serie or f.folio) else f.uuid[:8]
+    resp = HttpResponse(render_factura_pdf(f), content_type='application/pdf')
+    resp['Content-Disposition'] = f'inline; filename="factura-{nombre}.pdf"'
+    return resp
+
+
 @api_view(['POST'])
 @permission_classes([IsAdminGroupOrStaff])
 def cancelar_factura(request, pk: int):
