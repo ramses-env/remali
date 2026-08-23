@@ -563,6 +563,31 @@ def registrar_abono_venta(request, pk: int):
         v.save(update_fields=['pagos', 'metodo_pago'])
         aviso = _abono_a_caja(request.user, monto=monto, metodo=metodo, venta=v,
                               concepto=f'Abono {v.folio or v.id}')
+    # Igual que en renta: el cliente ve su abono y su saldo nuevo en "Mis
+    # adeudos". Un apartado sobre pedido se paga en varias vueltas y nadie va a
+    # llamar para preguntar cuánto lleva.
+    try:
+        if v.cliente_usuario_id:
+            from maquinaria.models import crear_notificacion
+            saldo_nuevo = v.saldo_pendiente()
+            equipo_nombre = ((v.inventario.equipo.modelo if v.inventario_id and v.inventario.equipo else None)
+                             or (v.equipo.modelo if v.equipo_id else None) or 'tu apartado')
+            if saldo_nuevo > 0:
+                _titulo = 'Registramos tu abono'
+                _cuerpo = (f'Recibimos ${monto} a cuenta de {equipo_nombre}. '
+                           f'Te queda un saldo de ${saldo_nuevo}.')
+            else:
+                _titulo = '¡Ya está liquidado!'
+                _cuerpo = (f'Con este abono de ${monto} liquidaste {equipo_nombre}. '
+                           'Ya lo puedes recoger' + (' en cuanto llegue a sucursal.' if v.sobre_pedido else '.'))
+            crear_notificacion(
+                'venta', _titulo, _cuerpo, seccion='mis-adeudos',
+                ref=f'abono-venta-{v.id}-{len(v.pagos or [])}',
+                usuario=v.cliente_usuario,
+                data={'venta_id': v.id, 'saldo': str(saldo_nuevo)},
+            )
+    except Exception:
+        logger.exception('No se pudo avisarle al cliente de su abono')
     salida = {'detalle': 'Abono registrado', 'pedido': _serialize_pedido(v)}
     if aviso:
         salida['caja'] = aviso
@@ -655,6 +680,12 @@ def entregar_venta(request, pk: int):
         try:
             v.entregar(unidades=unidades or None, user=request.user)
         except ValueError as e:
+            # Salir con `return` desde DENTRO de un atomic() no revierte
+            # nada: el bloque termina sin excepción y COMMITEA lo ya escrito.
+            # Así quedó una venta en $0 con su renglón vivo y la máquina
+            # todavía en el patio. `set_rollback` es la puerta de Django para
+            # abortar sin dejar que la excepción suba.
+            transaction.set_rollback(True)
             return Response({'detalle': str(e)}, status=400)
         try:
             from maquinaria.models import crear_notificacion
