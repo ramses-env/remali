@@ -273,3 +273,76 @@ class LaFacturacionSeImponeTest(TestCase):
             self.api_adm.post('/api/rentas/999/por-facturar/', {}, format='json').status_code, 404)
         self.assertEqual(
             self.api_adm.post('/api/ventas/999/por-facturar/', {}, format='json').status_code, 404)
+
+
+class ElTrabajoDeTallerSeImponeTest(TestCase):
+    """`reparar`: recibir la máquina y trabajar la orden desde Mi jornada.
+
+    Es lo que el técnico hace todo el día y pedía solo nivel, así que el cajero
+    —que no pisa el taller— podía abrir cualquier orden y consumirle refacciones.
+    """
+
+    def setUp(self):
+        self.tecnico = User.objects.create_user('tec4', 'tec4@x.com', 'pass12345')
+        self.tecnico.groups.add(Group.objects.get_or_create(name='Técnico')[0])
+        self.cajero = User.objects.create_user('caj4', 'caj4@x.com', 'pass12345')
+        self.cajero.groups.add(Group.objects.get_or_create(name='Cajero')[0])
+        self.api_tec = APIClient(); self.api_tec.force_authenticate(self.tecnico)
+        self.api_caj = APIClient(); self.api_caj.force_authenticate(self.cajero)
+
+    def test_el_cajero_no_trabaja_ordenes(self):
+        self.assertEqual(self.api_caj.get('/api/reparaciones/999/').status_code, 403)
+        self.assertEqual(
+            self.api_caj.post('/api/reparaciones/999/items/', {}, format='json').status_code, 403)
+        self.assertEqual(
+            self.api_caj.delete('/api/reparaciones/999/items/1/').status_code, 403)
+
+    def test_el_tecnico_si(self):
+        """Al técnico lo para la orden que no existe (404): pasó el permiso."""
+        self.assertEqual(self.api_tec.get('/api/reparaciones/999/').status_code, 404)
+        self.assertEqual(
+            self.api_tec.post('/api/reparaciones/999/items/', {}, format='json').status_code, 404)
+
+    def test_recibir_una_maquina_en_taller_es_reparar(self):
+        """El POST de la sección NO es la sección: es el técnico recibiendo una
+        máquina. Al cajero lo para el permiso; al técnico, la orden incompleta."""
+        self.assertEqual(self.api_caj.post('/api/reparaciones/', {}, format='json').status_code, 403)
+        self.assertNotEqual(
+            self.api_tec.post('/api/reparaciones/', {}, format='json').status_code, 403)
+
+    def test_apagarsela_al_tecnico_lo_saca_del_taller(self):
+        PermisoRol.objects.create(rol='Técnico', capacidad='reparar', permitido=False)
+        self.assertEqual(self.api_tec.get('/api/reparaciones/999/').status_code, 403)
+        self.assertEqual(self.api_tec.post('/api/reparaciones/', {}, format='json').status_code, 403)
+
+
+class LaSeccionDeTallerSeImponeTest(TestCase):
+    """`gestionar_reparaciones`: llevar el taller, que no es repararlo.
+
+    La sección trae el historial completo, las cuatro etapas y los costos, y
+    abrírsela al técnico era duplicarle su propio día en otra pantalla: lo suyo
+    ya le llega por Mi jornada. Borrar la orden va aquí por lo mismo: reintegra
+    el stock consumido y borra el rastro del trabajo.
+    """
+
+    def setUp(self):
+        self.tecnico = User.objects.create_user('tec5', 'tec5@x.com', 'pass12345')
+        self.tecnico.groups.add(Group.objects.get_or_create(name='Técnico')[0])
+        self.admin = User.objects.create_user('adm5', 'adm5@x.com', 'pass12345')
+        self.admin.groups.add(Group.objects.get_or_create(name='Administrador')[0])
+        self.api_tec = APIClient(); self.api_tec.force_authenticate(self.tecnico)
+        self.api_adm = APIClient(); self.api_adm.force_authenticate(self.admin)
+
+    def test_el_tecnico_repara_pero_no_lleva_el_taller(self):
+        self.assertEqual(self.api_tec.get('/api/reparaciones/999/').status_code, 404)
+        self.assertEqual(self.api_tec.get('/api/reparaciones/').status_code, 403)
+        self.assertEqual(self.api_tec.delete('/api/reparaciones/999/').status_code, 403)
+
+    def test_administracion_si_lo_lleva(self):
+        self.assertEqual(self.api_adm.get('/api/reparaciones/').status_code, 200)
+        self.assertEqual(self.api_adm.delete('/api/reparaciones/999/').status_code, 404)
+
+    def test_el_override_se_la_enciende_al_tecnico(self):
+        PermisoRol.objects.create(rol='Técnico', capacidad='gestionar_reparaciones',
+                                  permitido=True)
+        self.assertEqual(self.api_tec.get('/api/reparaciones/').status_code, 200)

@@ -14,7 +14,9 @@ from rest_framework.exceptions import ValidationError
 from maquinaria.throttling import TokenPublicoThrottle
 
 from maquinaria.models import Equipo
-from maquinaria.permissions import IsAdminGroupOrStaff, EsOperador
+from maquinaria.permissions import (
+    IsAdminGroupOrStaff, EsOperador, PuedeGestionarReparaciones, PuedeReparar,
+)
 from maquinaria.views import ProtectedDestroyMixin
 from .models import Inventario, OrdenReparacion, OrdenReparacionItem
 from .serializers import InventarioSerializer, OrdenReparacionSerializer
@@ -571,7 +573,15 @@ def _sincronizar_estado_unidad(orden):
 
 class OrdenReparacionListCreate(generics.ListCreateAPIView):
     serializer_class = OrdenReparacionSerializer
-    permission_classes = [EsOperador]
+    permission_classes = [PuedeGestionarReparaciones]
+
+    def get_permissions(self):
+        # Los dos trabajos del taller entran por la misma ruta. RECIBIR una
+        # máquina es hacer el trabajo (el técnico, desde Mi jornada); LISTAR el
+        # historial completo es llevar el taller, y eso es la sección.
+        if self.request.method == 'POST':
+            return [PuedeReparar()]
+        return super().get_permissions()
 
     def get_queryset(self):
         from django.db.models import Q
@@ -593,8 +603,16 @@ class OrdenReparacionListCreate(generics.ListCreateAPIView):
 
 class OrdenReparacionDetail(generics.RetrieveUpdateDestroyAPIView):
     serializer_class = OrdenReparacionSerializer
-    permission_classes = [EsOperador]
+    permission_classes = [PuedeReparar]
     queryset = OrdenReparacion.objects.all().select_related('cliente', 'unidad', 'unidad__equipo').prefetch_related('items', 'items__refaccion')
+
+    def get_permissions(self):
+        # Abrir y avanzar la orden es reparar. BORRARLA no: reintegra el stock
+        # que ya se consumió y se lleva el rastro del trabajo, así que se queda
+        # con quien lleva el taller.
+        if self.request.method == 'DELETE':
+            return [PuedeGestionarReparaciones()]
+        return super().get_permissions()
 
     def perform_update(self, serializer):
         from django.utils import timezone
@@ -629,7 +647,7 @@ class OrdenReparacionDetail(generics.RetrieveUpdateDestroyAPIView):
 
 
 @api_view(['POST'])
-@permission_classes([EsOperador])
+@permission_classes([PuedeReparar])
 def orden_agregar_item(request, pk: int):
     """Agrega una refacción a la orden. origen='stock' descuenta inventario; 'externa' se compra aparte."""
     from refacciones.models import Refaccion
@@ -677,7 +695,7 @@ def orden_agregar_item(request, pk: int):
 
 
 @api_view(['DELETE'])
-@permission_classes([EsOperador])
+@permission_classes([PuedeReparar])
 def orden_eliminar_item(request, pk: int, item_id: int):
     """Quita una pieza de la orden. Si era de stock, la reintegra al inventario."""
     try:
@@ -694,7 +712,7 @@ def orden_eliminar_item(request, pk: int, item_id: int):
 
 
 @api_view(['POST'])
-@permission_classes([EsOperador])
+@permission_classes([PuedeReparar])   # se entrega al recibir la máquina
 def generar_vinculo_orden(request, pk: int):
     """Liga de un solo uso para que el cliente ligue esta orden a su cuenta."""
     import secrets

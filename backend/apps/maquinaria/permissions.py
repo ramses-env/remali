@@ -525,6 +525,32 @@ class PuedeOperarJornada(ExigeCapacidad):
     message = 'No puedes operar las entregas y devoluciones de campo.'
 
 
+class PuedeReparar(ExigeCapacidad):
+    """Hacer el trabajo del taller: recibir la máquina y trabajar la orden.
+
+    Es lo que el técnico hace desde Mi jornada, y pedía solo nivel: el cajero,
+    que comparte su número y no pisa el taller, podía abrir cualquier orden y
+    consumirle refacciones. No es `gestionar_reparaciones`, que es la SECCIÓN
+    —historial, costos, entrega al cliente— y vive un nivel más arriba.
+    """
+    capacidad = 'reparar'
+    message = 'No puedes trabajar órdenes de reparación.'
+
+
+class PuedeGestionarReparaciones(ExigeCapacidad):
+    """Llevar el taller: la sección Reparaciones completa.
+
+    Es el otro lado de `reparar`. Aquí vive el historial de las cuatro etapas,
+    los costos y la entrega al cliente; el técnico no la necesita porque sus
+    órdenes abiertas ya le llegan por Mi jornada, y abrírsela era duplicarle su
+    propio día en otra pantalla. BORRAR la orden va aquí por la misma razón que
+    borrar del catálogo va con el dueño: reintegra el stock consumido y borra el
+    rastro de un trabajo que ya se hizo.
+    """
+    capacidad = 'gestionar_reparaciones'
+    message = 'No puedes administrar las órdenes de reparación.'
+
+
 class PuedeEmitirCupones(ExigeCapacidad):
     """Los cupones de descuento. Aparte de `editar_catalogo` porque emitir uno
     no cambia el precio de lista: regala margen sobre el que ya está, y listar
