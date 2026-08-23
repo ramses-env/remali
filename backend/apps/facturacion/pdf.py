@@ -28,7 +28,7 @@ from reportlab.lib.units import mm
 from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.pdfgen import canvas
 
-from server.documentos import dibujar_logo
+from server.documentos import dibujar_logo, fuentes
 
 from .letras import importe_con_letra
 
@@ -41,6 +41,11 @@ ORO_SUAVE = colors.HexColor('#FBF6EA')
 ROJO = colors.HexColor('#B91C1C')
 
 logger = logging.getLogger(__name__)
+
+# La letra de la casa. Los sellos y la cadena original se quedan en Courier a
+# propósito: son cadenas base64 de máquina, y el ancho fijo las hace legibles
+# de un vistazo y las separa de lo que el cliente sí lee.
+TEXTO, MEDIA, FUERTE, ITALICA = fuentes()
 
 #: A dónde apunta el QR para verificar el comprobante en el portal del SAT.
 VERIFICADOR_SAT = 'https://verificacfdi.facturaelectronica.sat.gob.mx/default.aspx'
@@ -203,16 +208,16 @@ def render_factura_pdf(factura) -> bytes:
     dibujar_logo(c, m, y - 3.5 * mm, lg, respaldo=TINTA)
 
     c.setFillColor(TINTA)
-    c.setFont('Helvetica-Bold', 17)
+    c.setFont(FUERTE, 17)
     c.drawString(m + lg + 4 * mm, y, cfg.negocio_nombre or 'REMALI')
 
     # "FACTURA" con las letras separadas: a ese tamaño el espaciado hace que
     # se lea como un rótulo y no como una palabra más.
     titulo, tam = 'F A C T U R A', 15
-    c.setFont('Helvetica-Bold', tam)
+    c.setFont(FUERTE, tam)
     c.drawRightString(ancho - m, y, titulo)
     c.setFillColor(GRIS)
-    c.setFont('Helvetica', 7.5)
+    c.setFont(TEXTO, 7.5)
     c.drawRightString(ancho - m, y - 4.6 * mm, 'Comprobante Fiscal Digital por Internet · CFDI 4.0')
 
     # El folio, donde se pidió: pegado al rótulo, en dorado y grande. Es el
@@ -220,16 +225,16 @@ def render_factura_pdf(factura) -> bytes:
     serie_folio = f'{factura.serie or ""}{factura.folio or ""}'.strip()
     if serie_folio:
         c.setFillColor(ORO)
-        c.setFont('Helvetica-Bold', 20)
+        c.setFont(FUERTE, 20)
         c.drawRightString(ancho - m, y - 12.5 * mm, serie_folio)
     c.setFillColor(GRIS)
-    c.setFont('Helvetica', 7.5)
+    c.setFont(TEXTO, 7.5)
     c.drawRightString(ancho - m, y - 17 * mm, f'Timbrada el {_fecha_corta(factura.fecha_certificacion)}')
 
     # Datos fiscales del emisor, bajo el nombre.
     y -= 6 * mm
     c.setFillColor(GRIS)
-    c.setFont('Helvetica', 8)
+    c.setFont(TEXTO, 8)
     izq = m + lg + 4 * mm
     for dato in (
         f'RFC {factura.rfc_emisor}' if factura.rfc_emisor else '',
@@ -241,7 +246,7 @@ def render_factura_pdf(factura) -> bytes:
         f'Lugar de expedición {factura.lugar_expedicion}' if factura.lugar_expedicion else '',
     ):
         if dato:
-            c.drawString(izq, y, _recortar(c, dato, 'Helvetica', 8, util * 0.58))
+            c.drawString(izq, y, _recortar(c, dato, TEXTO, 8, util * 0.58))
             y -= 4 * mm
 
     y = min(y, alto - m - 22 * mm) - 3 * mm
@@ -258,17 +263,17 @@ def render_factura_pdf(factura) -> bytes:
     col2 = m + util * 0.56
     y_ini = y
     c.setFillColor(TINTA)
-    c.setFont('Helvetica-Bold', 7.5)
+    c.setFont(FUERTE, 7.5)
     c.drawString(m, y, 'F A C T U R A R   A')
     c.drawString(col2, y, 'O R I G E N   E N   R E M A L I')
     y -= 5 * mm
 
     c.setFillColor(TINTA)
-    c.setFont('Helvetica-Bold', 10.5)
-    c.drawString(m, y, _recortar(c, factura.nombre_receptor or '—', 'Helvetica-Bold', 10.5, util * 0.52))
+    c.setFont(FUERTE, 10.5)
+    c.drawString(m, y, _recortar(c, factura.nombre_receptor or '—', FUERTE, 10.5, util * 0.52))
     y_recep = y - 4.6 * mm
     c.setFillColor(GRIS)
-    c.setFont('Helvetica', 8)
+    c.setFont(TEXTO, 8)
     for dato in (
         f'RFC {factura.rfc_receptor}' if factura.rfc_receptor else '',
         f'C.P. {factura.cp_receptor}' if factura.cp_receptor else '',
@@ -281,13 +286,13 @@ def render_factura_pdf(factura) -> bytes:
 
     y_orig = y
     c.setFillColor(TINTA)
-    c.setFont('Helvetica-Bold', 10.5)
+    c.setFont(FUERTE, 10.5)
     c.drawString(col2, y_orig, factura.solicitud.folio_origen)
     y_orig -= 4.6 * mm
     c.setFillColor(GRIS)
-    c.setFont('Helvetica', 8)
+    c.setFont(TEXTO, 8)
     for dato in _unidades_de_remali(factura)[:4]:
-        c.drawString(col2, y_orig, _recortar(c, dato, 'Helvetica', 8, util * 0.42))
+        c.drawString(col2, y_orig, _recortar(c, dato, TEXTO, 8, util * 0.42))
         y_orig -= 4 * mm
 
     y = min(y_recep, y_orig) - 3 * mm
@@ -302,7 +307,7 @@ def render_factura_pdf(factura) -> bytes:
     c.setFillColor(TINTA)
     c.rect(m, y - 1.5 * mm, util, 6.5 * mm, stroke=0, fill=1)
     c.setFillColor(colors.white)
-    c.setFont('Helvetica-Bold', 7.5)
+    c.setFont(FUERTE, 7.5)
     x_cant, x_desc = m + 3 * mm, m + 20 * mm
     x_unit, x_imp = ancho - m - 52 * mm, ancho - m - 3 * mm
     c.drawString(x_cant, y, 'CANT.')
@@ -328,11 +333,11 @@ def render_factura_pdf(factura) -> bytes:
             c.setFillColor(PAPEL)
             c.rect(m, y - 1.8 * mm, util, fila_alto, stroke=0, fill=1)
         c.setFillColor(TINTA)
-        c.setFont('Helvetica', 9)
+        c.setFont(TEXTO, 9)
         cant = con.get('cantidad') or 0
         cant_txt = f'{cant:g}' if isinstance(cant, (int, float, Decimal)) else str(cant)
         c.drawString(x_cant, y, cant_txt)
-        c.drawString(x_desc, y, _recortar(c, con.get('descripcion'), 'Helvetica', 9, ancho_desc))
+        c.drawString(x_desc, y, _recortar(c, con.get('descripcion'), TEXTO, 9, ancho_desc))
         c.drawRightString(x_unit + 26 * mm, y, _money(con.get('valor_unitario')))
         c.drawRightString(x_imp, y, _money(con.get('importe')))
         y -= fila_alto
@@ -341,7 +346,7 @@ def render_factura_pdf(factura) -> bytes:
         # como anotación de la casa, no como contenido del CFDI.
         if i < len(unidades):
             c.setFillColor(ORO)
-            c.setFont('Helvetica', 7.5)
+            c.setFont(TEXTO, 7.5)
             c.drawString(x_desc + 3 * mm, y + 0.8 * mm, f'↳ {unidades[i]}')
             y -= 4.2 * mm
 
@@ -369,12 +374,12 @@ def render_factura_pdf(factura) -> bytes:
     c.setStrokeColor(LINEA)
     c.rect(m, y - alto_letra + 5 * mm, ancho_letra, alto_letra, stroke=1, fill=1)
     c.setFillColor(GRIS)
-    c.setFont('Helvetica-Bold', 6.5)
+    c.setFont(FUERTE, 6.5)
     c.drawString(m + 3 * mm, y + 1.5 * mm, 'I M P O R T E   C O N   L E T R A')
     c.setFillColor(TINTA)
-    c.setFont('Helvetica-Bold', 8.5)
+    c.setFont(FUERTE, 8.5)
     letra = importe_con_letra(factura.total, factura.moneda or 'MXN')
-    renglones = _wrap(letra, 'Helvetica-Bold', 8.5, ancho_letra - 6 * mm)[:2]
+    renglones = _wrap(letra, FUERTE, 8.5, ancho_letra - 6 * mm)[:2]
     yl = y - 3.5 * mm
     for r in renglones:
         c.drawString(m + 3 * mm, yl, r)
@@ -382,7 +387,7 @@ def render_factura_pdf(factura) -> bytes:
 
     x_lbl, x_val = ancho - m - 52 * mm, ancho - m - 3 * mm
     yt = y + 2 * mm
-    c.setFont('Helvetica', 9)
+    c.setFont(TEXTO, 9)
     filas = [('Subtotal', factura.subtotal)]
     if Decimal(str(factura.descuento or 0)) > 0:
         filas.append(('Descuento', factura.descuento))
@@ -403,22 +408,22 @@ def render_factura_pdf(factura) -> bytes:
     c.setStrokeColor(ORO)
     c.rect(x_lbl - 3 * mm, yt - 2.5 * mm, (x_val + 3 * mm) - (x_lbl - 3 * mm), caja_alto, stroke=1, fill=1)
     c.setFillColor(TINTA)
-    c.setFont('Helvetica-Bold', 8)
+    c.setFont(FUERTE, 8)
     c.drawString(x_lbl, yt, f'TOTAL {factura.moneda or "MXN"}')
-    c.setFont('Helvetica-Bold', 12)
+    c.setFont(FUERTE, 12)
     c.drawRightString(x_val, yt - 0.5 * mm, _money(factura.total))
 
     y = min(y - alto_letra + 2 * mm, yt - 8 * mm)
 
     # ── Pago ──────────────────────────────────────────────────────────────
     c.setFillColor(GRIS)
-    c.setFont('Helvetica', 8)
+    c.setFont(TEXTO, 8)
     pago = '        '.join(x for x in (
         f'Forma de pago: {_clave(FORMA_PAGO, factura.forma_pago)}',
         f'Método: {_clave(METODO_PAGO, factura.metodo_pago)}',
         f'Tipo: {factura.tipo_comprobante or "—"}',
     ) if x)
-    c.drawString(m, y, _recortar(c, pago, 'Helvetica', 8, util))
+    c.drawString(m, y, _recortar(c, pago, TEXTO, 8, util))
     y -= 7 * mm
 
     # ── Bloque de validación fiscal ───────────────────────────────────────
@@ -449,7 +454,7 @@ def render_factura_pdf(factura) -> bytes:
     yd = panel_y + panel_alto - 6 * mm
 
     c.setFillColor(TINTA)
-    c.setFont('Helvetica-Bold', 6.5)
+    c.setFont(FUERTE, 6.5)
     c.drawString(xd, yd, 'F O L I O   F I S C A L   ( U U I D )')
     yd -= 4.2 * mm
     c.setFont('Courier-Bold', 8.5)
@@ -461,7 +466,7 @@ def render_factura_pdf(factura) -> bytes:
         if not valor:
             return
         c.setFillColor(GRIS)
-        c.setFont('Helvetica-Bold', 6)
+        c.setFont(FUERTE, 6)
         c.drawString(xd, yd, etiqueta)
         yd -= 3.2 * mm
         c.setFillColor(TINTA)
@@ -480,7 +485,7 @@ def render_factura_pdf(factura) -> bytes:
            factura.cadena_original, maximo=4)
 
     c.setFillColor(GRIS)
-    c.setFont('Helvetica-Oblique', 7)
+    c.setFont(ITALICA, 7)
     c.drawString(m + 4 * mm, panel_y + 3.5 * mm,
                  'Este documento es una representación impresa de un CFDI')
 
@@ -492,7 +497,7 @@ def render_factura_pdf(factura) -> bytes:
         c.setFillColor(colors.Color(ROJO.red, ROJO.green, ROJO.blue, alpha=0.16))
         c.translate(ancho / 2, alto / 2)
         c.rotate(32)
-        c.setFont('Helvetica-Bold', 78)
+        c.setFont(FUERTE, 78)
         c.drawCentredString(0, 0, 'CANCELADA')
         c.restoreState()
 
