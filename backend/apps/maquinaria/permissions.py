@@ -141,51 +141,71 @@ def es_cajero(user) -> bool:
 #
 # `nivel_minimo=None` significa "no se enciende por nivel": es un puesto, no un
 # poder que cascadee hacia arriba (ver `jornada_campo`).
+#
+# El `area` agrupa la matriz de la pantalla para que se lea de corrido —"esto es
+# dinero, esto es mostrador"— y nada más: es TEMÁTICA. Que una capacidad viva en
+# 'Llaves del negocio' no la protege; lo que lleva candado lo decide `NUCLEO`.
 
 class Capacidad(NamedTuple):
     nombre: str
     etiqueta: str
     descripcion: str
     nivel_minimo: Optional[int]
+    area: str
 
 
 CATALOGO = (
     Capacidad('gestionar_usuarios', 'Gestionar usuarios',
-              'Dar de alta al equipo y cambiarle el rol.', NIVEL_DUENO),
+              'Dar de alta al equipo y cambiarle el rol.', NIVEL_DUENO,
+              'Llaves del negocio'),
     Capacidad('configurar_negocio', 'Configurar el negocio',
-              'Datos del negocio, correos de aviso, códigos de seguridad.', NIVEL_DUENO),
+              'Datos del negocio, correos de aviso, códigos de seguridad.', NIVEL_DUENO,
+              'Llaves del negocio'),
     # `ver_dinero` y `ver_operacion` estaban revueltas en una sola. Separarlas es
     # lo que permite que alguien opere el negocio sin saber cuánto gana el
     # negocio: el Gestor tiene que poder abrir una venta para cancelarla, y no
     # tiene por qué ver los ingresos del mes.
     Capacidad('ver_dinero', 'Ver las cuentas del negocio',
               'El Resumen, los ingresos del día/mes/año, las gráficas y los reportes '
-              'exportables. Distinto de ver la operación y de cobrar.', NIVEL_ADMIN),
+              'exportables. Distinto de ver la operación y de cobrar.', NIVEL_ADMIN,
+              'Dinero y cuentas'),
     Capacidad('ver_operacion', 'Ver la operación comercial',
               'La lista de ventas, rentas, adeudos y pedidos con sus montos, para '
-              'poder trabajarlos. No incluye las métricas del negocio.', NIVEL_ADMIN),
+              'poder trabajarlos. No incluye las métricas del negocio.', NIVEL_ADMIN,
+              'Dinero y cuentas'),
     Capacidad('borrar_catalogo', 'Borrar del catálogo',
               'Eliminar productos, unidades y refacciones. Agregar es de administración; '
-              'BORRAR es del dueño: es como se encubre una máquina que falta.', NIVEL_DUENO),
+              'BORRAR es del dueño: es como se encubre una máquina que falta.', NIVEL_DUENO,
+              'Catálogo e inventario'),
     Capacidad('tener_codigo_propio', 'Tener código de autorización propio',
               'Fijar un NIP propio que autoriza acciones delicadas. El Gestor NO lo '
-              'tiene: las suyas las autoriza el dueño con el de él.', NIVEL_ADMIN),
+              'tiene: las suyas las autoriza el dueño con el de él.', NIVEL_ADMIN,
+              'Llaves del negocio'),
     Capacidad('editar_datos_bancarios', 'Editar los datos bancarios',
               'El titular, banco, cuenta y CLABE que se imprimen en cada cotización. '
-              'Cambiarlos desvía los pagos de los clientes.', NIVEL_DUENO),
+              'Cambiarlos desvía los pagos de los clientes.', NIVEL_DUENO,
+              'Llaves del negocio'),
     Capacidad('ver_montos_operacion', 'Ver montos de lo que opera',
               'Cobrar lo que uno mismo atiende: el técnico en campo, el cajero en '
-              'el mostrador. No incluye las cuentas del negocio.', NIVEL_TECNICO),
-    Capacidad('vender', 'Vender', 'Registrar ventas de maquinaria.', NIVEL_TECNICO),
-    Capacidad('rentar', 'Rentar', 'Levantar rentas y devoluciones.', NIVEL_TECNICO),
-    Capacidad('cotizar', 'Cotizar', 'Hacer presupuestos y mandarlos a autorizar.', NIVEL_ADMIN),
-    Capacidad('facturar', 'Facturar', 'Atender la bandeja de por facturar.', NIVEL_ADMIN),
+              'el mostrador. No incluye las cuentas del negocio.', NIVEL_TECNICO,
+              'Dinero y cuentas'),
+    Capacidad('vender', 'Vender', 'Registrar ventas de maquinaria.', NIVEL_TECNICO,
+              'Mostrador'),
+    Capacidad('rentar', 'Rentar', 'Levantar rentas y devoluciones.', NIVEL_TECNICO,
+              'Campo y taller'),
+    Capacidad('cotizar', 'Cotizar', 'Hacer presupuestos y mandarlos a autorizar.', NIVEL_ADMIN,
+              'Mostrador'),
+    Capacidad('facturar', 'Facturar', 'Atender la bandeja de por facturar.', NIVEL_ADMIN,
+              'Mostrador'),
     Capacidad('editar_catalogo', 'Editar el catálogo',
-              'Equipos, marcas, precios de lista. Cambia el patrimonio.', NIVEL_ADMIN),
+              'Equipos, marcas, precios de lista. Cambia el patrimonio.', NIVEL_ADMIN,
+              'Catálogo e inventario'),
     Capacidad('alta_inventario', 'Dar de alta unidades',
-              'Meter máquinas nuevas al inventario.', NIVEL_ADMIN),
+              'Meter máquinas nuevas al inventario.', NIVEL_ADMIN,
+              'Catálogo e inventario'),
     Capacidad('operar_inventario', 'Mover unidades',
-              'Cambiar de ubicación y estado las unidades que ya existen.', NIVEL_TECNICO),
+              'Cambiar de ubicación y estado las unidades que ya existen.', NIVEL_TECNICO,
+              'Campo y taller'),
     # `reparar` y `gestionar_reparaciones` son dos trabajos distintos que antes se
     # confundían en uno. REPARAR es hacer el trabajo: recibir la máquina,
     # trabajarla y terminarla; el técnico lo hace todo desde "Mi jornada", que ya
@@ -194,29 +214,57 @@ CATALOGO = (
     # entregarle la máquina al cliente. Abrirle al técnico la sección completa era
     # duplicarle su propio día en otra pantalla.
     Capacidad('reparar', 'Reparar',
-              'Recibir máquinas en taller y trabajar las órdenes desde Mi jornada.', NIVEL_TECNICO),
+              'Recibir máquinas en taller y trabajar las órdenes desde Mi jornada.', NIVEL_TECNICO,
+              'Campo y taller'),
     Capacidad('gestionar_reparaciones', 'Llevar el taller',
               'La sección Reparaciones: historial, costos y entrega al cliente. '
-              'Distinto de reparar, que es hacer el trabajo.', NIVEL_ADMIN),
+              'Distinto de reparar, que es hacer el trabajo.', NIVEL_ADMIN,
+              'Campo y taller'),
     Capacidad('usar_caja', 'Usar la caja',
-              'Vender refacciones en el mostrador y cobrar.', NIVEL_ADMIN),
+              'Vender refacciones en el mostrador y cobrar.', NIVEL_ADMIN, 'Mostrador'),
     Capacidad('corte_caja', 'Hacer corte de caja',
-              'Arqueo del turno.', NIVEL_ADMIN),
+              'Arqueo del turno.', NIVEL_ADMIN, 'Mostrador'),
     # ── Padrón de clientes ──
     Capacidad('ver_clientes', 'Ver clientes',
               'Buscar en el padrón y abrir la ficha de un cliente. Sin esto, el '
-              'buscador del mostrador no sirve.', NIVEL_TECNICO),
+              'buscador del mostrador no sirve.', NIVEL_TECNICO, 'Clientes'),
     Capacidad('editar_clientes', 'Editar clientes',
               'Dar de alta clientes y contactos. Los datos fiscales y fundir dos '
-              'clientes siguen siendo de administración.', NIVEL_TECNICO),
+              'clientes siguen siendo de administración.', NIVEL_TECNICO, 'Clientes'),
     Capacidad('jornada_campo', 'Mi jornada',
               'El escritorio del técnico de campo: entregar, recoger y subir las '
-              'fotos. Es un puesto, no un poder, por eso no cascadea hacia arriba.', None),
+              'fotos. Es un puesto, no un poder, por eso no cascadea hacia arriba.', None,
+              'Campo y taller'),
     Capacidad('ver_jornada', 'Ver la jornada del técnico',
               'Mirar el tablero de campo (qué falta entregar, qué está vencido) sin '
               'poder tocarlo. Supervisión: entregar y recoger se hace desde Rentas.',
-              NIVEL_ADMIN),
+              NIVEL_ADMIN, 'Campo y taller'),
+    Capacidad('configurar_permisos', 'Configurar los permisos',
+              'Encender y apagar capacidades por rol. Solo el Dueño: quien tenga '
+              'esta pantalla se puede conceder todo lo demás.', NIVEL_DUENO,
+              'Llaves del negocio'),
 )
+
+
+#: Capacidades que NINGUNA pantalla reparte. Que estén aquí no significa que
+#: nadie las tenga: significa que su valor es el de fábrica y ahí se queda.
+#: `tener_codigo_propio` entra porque quien tiene NIP se autoriza a sí mismo las
+#: excepciones —ajustar el precio al vender, entre otras—, que es la vía discreta
+#: de sacar dinero que documenta `CambioPrecioLista`.
+NUCLEO = frozenset({
+    'gestionar_usuarios', 'editar_datos_bancarios', 'borrar_catalogo',
+    'tener_codigo_propio', 'configurar_permisos',
+})
+
+#: Los roles que la pantalla configura. El Dueño no está: lo puede todo, siempre,
+#: y una casilla suya solo sería una forma de encerrarse fuera de su sistema.
+ROLES_EDITABLES = (ROL_GESTOR, ROL_ADMIN, ROL_CAJERO, ROL_TECNICO)
+
+#: Nivel de partida de cada rol editable.
+NIVEL_POR_ROL = {
+    ROL_GESTOR: NIVEL_ADMIN, ROL_ADMIN: NIVEL_ADMIN,
+    ROL_CAJERO: NIVEL_TECNICO, ROL_TECNICO: NIVEL_TECNICO,
+}
 
 
 # Ajustes por PUESTO, para los que comparten el nivel 1 y hacen trabajos
@@ -247,9 +295,29 @@ AJUSTES_POR_PUESTO = {
 }
 
 
+def capacidades_fabrica(rol: str) -> dict:
+    """Lo que un rol puede ANTES de que el dueño configure nada.
+
+    Es la misma cuenta que hacía `puede_de` —nivel, más el ajuste del puesto—,
+    pero indexada por ROL en vez de por usuario: la pantalla necesita saber qué
+    trae de fábrica un puesto sin tener a nadie de ese puesto enfrente.
+    """
+    nivel = NIVEL_POR_ROL.get(rol, SIN_ACCESO)
+    caps = {c.nombre: (c.nivel_minimo is not None and nivel >= c.nivel_minimo)
+            for c in CATALOGO}
+    if rol == ROL_GESTOR:
+        caps.update(AJUSTES_POR_PUESTO[ROL_GESTOR])
+    elif rol == ROL_CAJERO:
+        caps.update(AJUSTES_POR_PUESTO[ROL_CAJERO])
+    elif rol == ROL_TECNICO:
+        caps.update(AJUSTES_POR_PUESTO[None])
+    return caps
+
+
 def catalogo_capacidades() -> list:
-    """El catálogo como datos serializables, para que el panel lo pinte solo."""
-    return [c._asdict() for c in CATALOGO]
+    """El catálogo como datos serializables, para que el panel pinte la matriz
+    sola: etiqueta, explicación, área y si lleva candado."""
+    return [{**c._asdict(), 'nucleo': c.nombre in NUCLEO} for c in CATALOGO]
 
 
 def puede_de(user) -> dict:

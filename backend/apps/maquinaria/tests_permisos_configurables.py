@@ -8,6 +8,9 @@ from django.contrib.auth.models import Group, User
 from django.test import TestCase
 
 from maquinaria.permissions import puede_de
+from maquinaria.permissions import (
+    CATALOGO, NUCLEO, ROLES_EDITABLES, capacidades_fabrica, catalogo_capacidades,
+)
 
 
 def _usuario(nombre, grupo=None, staff=False, superusuario=False):
@@ -71,3 +74,37 @@ class FabricaCongeladaTest(TestCase):
         caps = puede_de(_usuario('cliente'))
         self.assertEqual(caps['nivel'], 0)
         self.assertFalse(caps['ver_operacion'])
+
+
+class CatalogoTest(TestCase):
+
+    def test_toda_capacidad_tiene_area(self):
+        for cap in CATALOGO:
+            self.assertTrue(cap.area, f'{cap.nombre} sin área')
+
+    def test_existe_configurar_permisos_y_es_del_nucleo(self):
+        nombres = {c.nombre for c in CATALOGO}
+        self.assertIn('configurar_permisos', nombres)
+        self.assertIn('configurar_permisos', NUCLEO)
+
+    def test_el_nucleo_son_cinco(self):
+        self.assertEqual(NUCLEO, frozenset({
+            'gestionar_usuarios', 'editar_datos_bancarios', 'borrar_catalogo',
+            'tener_codigo_propio', 'configurar_permisos',
+        }))
+
+    def test_roles_editables_no_incluyen_al_dueno(self):
+        self.assertEqual(ROLES_EDITABLES,
+                         ('Gestor', 'Administrador', 'Cajero', 'Técnico'))
+
+    def test_fabrica_por_rol_coincide_con_puede_de(self):
+        """`capacidades_fabrica('Cajero')` dice lo mismo que un cajero real."""
+        caps_usuario = puede_de(_usuario('cajero2', 'Cajero'))
+        caps_rol = capacidades_fabrica('Cajero')
+        for cap in CATALOGO:
+            self.assertEqual(caps_rol[cap.nombre], caps_usuario[cap.nombre], cap.nombre)
+
+    def test_el_catalogo_serializado_lleva_area_y_nucleo(self):
+        fila = next(c for c in catalogo_capacidades() if c['nombre'] == 'cotizar')
+        self.assertEqual(fila['area'], 'Mostrador')
+        self.assertFalse(fila['nucleo'])
