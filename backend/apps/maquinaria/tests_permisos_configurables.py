@@ -169,3 +169,32 @@ class OverridesTest(TestCase):
             caps = puede_de(cajero)
         self.assertFalse(caps['cotizar'])     # fail-closed: no se reparte de más
         self.assertTrue(caps['usar_caja'])    # y lo de fábrica sigue trabajando
+
+
+class NivelSigueSiendoElPisoTest(TestCase):
+    """`is_staff` eleva el nivel aunque el grupo sea de mostrador o de campo.
+
+    Sin esto, un `is_staff` con grupo Cajero pasaba los gates por nivel
+    (`IsAdminGroupOrStaff` lo deja entrar) mientras el mapa de capacidades lo
+    trataba como cajero: el panel le escondía lo que la API sí le permite. La
+    combinación no la produce el panel —solo se llega a mano desde /admin/—,
+    pero mientras `nivel_de` la reconozca, `puede_de` tiene que coincidir.
+    """
+
+    def test_staff_con_grupo_de_nivel_1_conserva_lo_de_administracion(self):
+        staff_solo = puede_de(_usuario('staff_solo', staff=True))
+        staff_cajero = puede_de(_usuario('staff_cajero', 'Cajero', staff=True))
+        for cap in CATALOGO:
+            if cap.nivel_minimo is None:
+                continue          # los puestos (jornada_campo) no cascadean
+            self.assertEqual(staff_cajero[cap.nombre], staff_solo[cap.nombre], cap.nombre)
+
+    def test_un_cajero_normal_no_se_eleva(self):
+        caps = puede_de(_usuario('cajero_normal', 'Cajero'))
+        self.assertFalse(caps['ver_dinero'])
+        self.assertFalse(caps['cotizar'])
+
+    def test_el_gestor_conserva_su_ajuste(self):
+        """Gestor comparte nivel con Administrador: el nivel NO lo eleva, así que
+        `ver_dinero` sigue apagado. Es el rol entero."""
+        self.assertFalse(puede_de(_usuario('gestor_x', 'Gestor'))['ver_dinero'])

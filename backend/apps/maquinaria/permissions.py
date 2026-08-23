@@ -355,6 +355,16 @@ def puede_de(user) -> dict:
         caps = capacidades_fabrica(rol) if rol in ROLES_EDITABLES else {
             c.nombre: (c.nivel_minimo is not None and n >= c.nivel_minimo) for c in CATALOGO
         }
+        # `is_staff` con un grupo de nivel 1 (cajero, técnico) vale nivel
+        # ADMINISTRACIÓN aunque su grupo diga otra cosa: `nivel_de` lo eleva y las
+        # clases por nivel lo dejan pasar. Si aquí lo tratáramos solo como cajero,
+        # el panel le escondería lo que la API sí le permite —y ese desfase es el
+        # que produce botones que responden 403 y funciones invisibles que sí
+        # existen—. El nivel sigue siendo el piso; el puesto solo ajusta ENCIMA.
+        if rol in ROLES_EDITABLES and n > NIVEL_POR_ROL.get(rol, SIN_ACCESO):
+            for c in CATALOGO:
+                if c.nivel_minimo is not None and n >= c.nivel_minimo:
+                    caps[c.nombre] = True
         caps.update(overrides_de_rol(rol))
     caps['nivel'] = n
     caps['rol'] = rol
