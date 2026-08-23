@@ -55,12 +55,17 @@ Se complementó con tres pasadas más, porque el script tiene tres puntos ciegos
    vista o del serializer, sin `permission_classes`. Se encontraron con
    `grep -rn "puede_de(" apps/`. Ver §6.
 
-También hay que saber que **`PuedeUsarCaja` y `PuedeCotizar` NO heredan de
-`ExigeCapacidad`**: son `BasePermission` que preguntan `puede_de(...).get(...)`
+También había que saber que **`PuedeUsarCaja` y `PuedeCotizar` NO heredaban de
+`ExigeCapacidad`**: eran `BasePermission` que preguntaban `puede_de(...).get(...)`
 a mano (`apps/maquinaria/permissions.py`). Por eso 19 rutas que SÍ se gatean por
-capacidad no aparecen en el recolector, ni en la prueba nueva. Convertirlas es
-trabajo de la Tarea 11 y es la conversión más barata de todas: cambiar la clase
-base y poner `capacidad = '...'`.
+capacidad no aparecían en el recolector, ni en la prueba nueva.
+
+> **RESUELTO en la Tarea 10 (2026-08-22).** Las dos heredan ya de
+> `ExigeCapacidad` con `capacidad = 'usar_caja'` / `capacidad = 'cotizar'`.
+> Sus cuerpos eran letra por letra los de `ExigeCapacidad.has_permission`, así
+> que no se aplanó ningún comportamiento; solo se conservaron sus `message`, que
+> son texto para el usuario. Las 19 rutas se volvieron visibles de golpe y la
+> lista de huérfanas bajó de 14 a 12 sin tocar una sola vista.
 
 ---
 
@@ -87,7 +92,9 @@ base y poner `capacidad = '...'`.
 ### 2.2 Con clase ad-hoc (capacidad de verdad, invisible para la prueba) — 19
 
 `PuedeUsarCaja` → capacidad `usar_caja` · `PuedeCotizar` → capacidad `cotizar`.
-**Tarea 11: hacerlas heredar de `ExigeCapacidad`.**
+**HECHO (Tarea 10): las dos heredan ya de `ExigeCapacidad`, así que estas 19
+rutas dejaron de ser invisibles y pasaron a contar en §2.1.** Lo que sigue
+pendiente de ellas es solo el reparto fino: las dos marcadas `→ corte_caja`.
 
 | Ruta | Clase | archivo:línea |
 |---|---|---|
@@ -202,7 +209,7 @@ nada. Es el ejemplo perfecto del interruptor decorativo que la prueba busca.
 
 | Ruta | Gate hoy | archivo:línea | Marca |
 |---|---|---|---|
-| `/api/cotizaciones/stats/` | `IsAdminGroupOrStaff` | `apps/cotizaciones/views.py:575` | **`→ cotizar`** — son los KPIs y las pestañas de la propia sección. |
+| `/api/cotizaciones/stats/` | ~~`IsAdminGroupOrStaff`~~ → `PuedeCotizar` + `PuedeVerDinero` | `apps/cotizaciones/views.py:576` | **HECHO (Tarea 10)** — son los KPIs y las pestañas de la propia sección, pero devuelve `monto_aceptado` (la suma de TODAS las aceptadas del periodo), que es dinero agregado del negocio. Por la regla del Paso 3 se conservó `ver_dinero` junto a la capacidad. **Consecuencia a revisar con el dueño: el Gestor tiene `cotizar` por nivel pero `ver_dinero` apagado a propósito, así que pierde los KPIs y los conteos de las pestañas de Cotizaciones (`cotizaciones.tsx` pinta el banner rojo de fallo, `Dashboard.tsx:382` se traga el 403 y deja el globito en 0).** A cambio se cierra el hueco de hoy: con nivel 2 el Gestor ya veía `monto_aceptado`. La salida limpia, si el dueño la quiere, es dejar la ruta en `PuedeCotizar` y omitir `monto_aceptado` a quien no tenga `ver_dinero`. |
 | `/api/cotizaciones/<int:pk>/convertir/` | `IsAdminGroupOrStaff` | `apps/cotizaciones/views.py:752` | **`→ vender`** — lo dice el docstring de `PuedeCotizar`: "cotizar NO es convertir a venta". |
 | `/api/cotizaciones/<int:pk>/vincular/` | `EsOperador` | `apps/cotizaciones/views.py:260` | **`→ editar_clientes`** · ver §5.2 |
 | `/api/cotizaciones/<int:pk>/vinculo/` | `EsOperador` | `apps/cotizaciones/views.py:301` | **`→ editar_clientes`** · ver §5.2 |
@@ -420,6 +427,21 @@ Dónde aterriza cada una, según las marcas de arriba:
 | `ver_operacion` | `/api/rentas/`, `/api/rentas/adeudos/`, `/api/rentas/alertas/`, `/api/ventas/lista/`, `/api/ventas/pedidos/` |
 
 Las 14 tienen destino. Ninguna se va a `SOLO_PANTALLA`.
+
+### Después de la Tarea 10: quedan 12
+
+`cotizar` y `usar_caja` salieron de la lista sin convertir una sola ruta: solo
+había que hacer que sus clases de permiso heredaran de `ExigeCapacidad` (§1).
+`cotizar` además ganó su ruta que faltaba (`/api/cotizaciones/stats/`, §3.5).
+
+```
+- ['alta_inventario', 'configurar_negocio', 'corte_caja', 'editar_catalogo',
+-  'facturar', 'gestionar_reparaciones', 'operar_inventario', 'rentar',
+-  'reparar', 'vender', 'ver_montos_operacion', 'ver_operacion']
+```
+
+Suite completa el 2026-08-22: **398 pruebas, 1 fallo** — este mismo, que es el
+marcador de lo que le queda a la Tarea 11.
 
 ---
 

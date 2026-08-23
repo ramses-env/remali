@@ -441,25 +441,21 @@ class PuedeConfigurarPermisos(ExigeCapacidad):
     message = 'Solo el dueño configura los permisos.'
 
 
-class PuedeUsarCaja(permissions.BasePermission):
+class PuedeUsarCaja(ExigeCapacidad):
     """La caja (POS de refacciones). No es un nivel: el cajero la usa aunque
     comparta número con el técnico, y el técnico de campo no, aunque lo comparta
     con el cajero. Por eso pregunta por la capacidad, no por el nivel."""
+    capacidad = 'usar_caja'
     message = 'No tienes acceso a la caja.'
 
-    def has_permission(self, request, view):
-        return bool(puede_de(getattr(request, 'user', None)).get('usar_caja'))
 
-
-class PuedeCotizar(permissions.BasePermission):
+class PuedeCotizar(ExigeCapacidad):
     """Cotizaciones. No es un nivel: el asesor cotiza aunque comparta número con
     el técnico (que no cotiza), y de administración para arriba también. Por eso
     pregunta por la capacidad. Ojo: cotizar NO es convertir a venta ni facturar;
     esos siguen pidiendo su propia capacidad (vender / ver_dinero / admin)."""
+    capacidad = 'cotizar'
     message = 'No puedes gestionar cotizaciones.'
-
-    def has_permission(self, request, view):
-        return bool(puede_de(getattr(request, 'user', None)).get('cotizar'))
 
 
 class EsOperadorEditaAdmin(permissions.BasePermission):

@@ -18,7 +18,9 @@ class CotizacionPagination(PageNumberPagination):
     page_size_query_param = 'page_size'
     max_page_size = 100
 
-from maquinaria.permissions import IsAdminGroupOrStaff, EsOperador, PuedeCotizar, puede_de
+from maquinaria.permissions import (
+    IsAdminGroupOrStaff, EsOperador, PuedeCotizar, PuedeVerDinero, puede_de,
+)
 from maquinaria.throttling import SolicitudPublicaThrottle, SubidaEvidenciaThrottle
 from maquinaria.ws_events import push_user_event
 from . import precios
@@ -568,12 +570,18 @@ class CotizacionDetail(generics.RetrieveUpdateDestroyAPIView):
 
 
 @api_view(['GET'])
-@permission_classes([IsAdminGroupOrStaff])
+@permission_classes([PuedeCotizar, PuedeVerDinero])
 def cotizacion_stats(request):
     """Conteos para los KPIs y las pestañas, calculados en la BD (no en el cliente).
 
     Con la lista paginada, el navegador ya no tiene todas las filas para contar;
     esto las cuenta de una sola pasada.
+
+    Dos candados, no uno. `cotizar` porque son los KPIs y las pestañas de esta
+    sección: quien la trabaja los necesita, y antes se pedían por NIVEL, así que
+    encender `cotizar` en la pantalla no alcanzaba para verlos. `ver_dinero`
+    porque `monto_aceptado` suma TODAS las cotizaciones aceptadas del periodo, y
+    eso ya no es la sección: son las cuentas del negocio. DRF exige las dos.
     """
     from django.db.models import Count
     from server.periodos import rango_periodo
