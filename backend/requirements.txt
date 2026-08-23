@@ -7,6 +7,7 @@ cloudinary==1.44.1
 # producción puede acabar con una cryptography vulnerable sin que nadie lo note.
 cryptography==50.0.0
 pyOpenSSL==26.4.0
+defusedxml==0.7.1
 distlib==0.4.0
 dj-database-url==3.1.0
 Django==5.2.17
