@@ -459,6 +459,20 @@ class PuedeConfigurarPermisos(ExigeCapacidad):
     message = 'Solo el dueño configura los permisos.'
 
 
+class PuedeConfigurarNegocio(ExigeCapacidad):
+    """Los datos del negocio y los correos de aviso.
+
+    Antes pedía nivel de administración, y eso decía lo contrario que la
+    pantalla: la pestaña "Negocio y contacto" se reparte por `configurar_negocio`
+    —nivel dueño, encendida de fábrica para el Gestor porque es escritorio
+    delegado—, así que el Administrador podía cambiar el nombre y los correos del
+    negocio por API desde una pestaña que nunca vio. Los datos BANCARIOS siguen
+    aparte, filtrados en el serializer por `editar_datos_bancarios`.
+    """
+    capacidad = 'configurar_negocio'
+    message = 'No puedes configurar el negocio.'
+
+
 class PuedeUsarCaja(ExigeCapacidad):
     """La caja (POS de refacciones). No es un nivel: el cajero la usa aunque
     comparta número con el técnico, y el técnico de campo no, aunque lo comparta

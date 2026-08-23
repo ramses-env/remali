@@ -162,3 +162,37 @@ class LosCuponesSeImponenTest(TestCase):
     def test_apagarselo_a_administracion_lo_detiene(self):
         PermisoRol.objects.create(rol='Administrador', capacidad='emitir_cupones', permitido=False)
         self.assertEqual(self.api_adm.get('/api/cupones/').status_code, 403)
+
+
+class LaConfiguracionDelNegocioSeImponeTest(TestCase):
+    """`configurar_negocio`: los datos del negocio y los correos de aviso.
+
+    Aquí el nivel y la capacidad decían cosas distintas y la pantalla ya le
+    hacía caso a la capacidad: la pestaña "Negocio y contacto" solo aparece con
+    `configurar_negocio` (nivel dueño, encendida de fábrica para el Gestor),
+    mientras la API la abría a cualquier administración por nivel. El Gestor
+    entraba porque la pantalla se lo dejaba ver, no porque el endpoint lo
+    exigiera; y el Administrador podía cambiar el nombre del negocio por API
+    aunque no tuviera la pestaña.
+    """
+
+    def setUp(self):
+        self.gestor = User.objects.create_user('gest', 'g@x.com', 'pass12345')
+        self.gestor.groups.add(Group.objects.get_or_create(name='Gestor')[0])
+        self.admin = User.objects.create_user('admc', 'ac@x.com', 'pass12345')
+        self.admin.groups.add(Group.objects.get_or_create(name='Administrador')[0])
+        self.api_gestor = APIClient(); self.api_gestor.force_authenticate(self.gestor)
+        self.api_admin = APIClient(); self.api_admin.force_authenticate(self.admin)
+
+    def test_el_gestor_configura_porque_su_puesto_lo_trae_encendido(self):
+        self.assertEqual(self.api_gestor.get('/api/config/').status_code, 200)
+        self.assertEqual(self.api_gestor.get('/api/config/correos/').status_code, 200)
+
+    def test_el_administrador_no_configura_el_negocio(self):
+        """La pestaña nunca fue suya; ahora la API tampoco."""
+        self.assertEqual(self.api_admin.get('/api/config/').status_code, 403)
+
+    def test_el_override_se_lo_enciende(self):
+        PermisoRol.objects.create(rol='Administrador', capacidad='configurar_negocio',
+                                  permitido=True)
+        self.assertEqual(self.api_admin.get('/api/config/').status_code, 200)

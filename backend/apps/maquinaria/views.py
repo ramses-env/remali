@@ -39,8 +39,8 @@ from .models import (
     Favorito,
 )
 from .permissions import (
-    IsAdminGroupOrStaff, EsOperador, PuedeEmitirCupones, PuedeVerDinero,
-    nivel_de, puede_de,
+    IsAdminGroupOrStaff, EsOperador, PuedeConfigurarNegocio, PuedeEmitirCupones,
+    PuedeVerDinero, nivel_de, puede_de,
 )
 from .serializers import (
     EquipoSerializer, CategoriaSerializer, MarcaSerializer, TipoSerializer,
@@ -338,7 +338,7 @@ def definir_codigo_seguridad(request):
 
 class ConfiguracionDetail(generics.RetrieveUpdateAPIView):
     serializer_class = ConfiguracionSitioSerializer
-    permission_classes = [IsAdminGroupOrStaff]
+    permission_classes = [PuedeConfigurarNegocio]
 
     def get_object(self):
         return ConfiguracionSitio.get_solo()
@@ -362,14 +362,14 @@ def verificar_correo_aviso(request):
 class CorreosAvisoList(generics.ListCreateAPIView):
     queryset = CorreoAviso.objects.all().order_by('email')
     serializer_class = CorreoAvisoSerializer
-    permission_classes = [IsAdminGroupOrStaff]
+    permission_classes = [PuedeConfigurarNegocio]
 
     def perform_create(self, serializer):
         serializer.save()
 
 
 @api_view(['DELETE'])
-@permission_classes([IsAdminGroupOrStaff])
+@permission_classes([PuedeConfigurarNegocio])
 def correo_aviso_eliminar(request, pk: int):
     correo = get_object_or_404(CorreoAviso, pk=pk)
     correo.delete()
@@ -377,7 +377,7 @@ def correo_aviso_eliminar(request, pk: int):
 
 
 @api_view(['POST'])
-@permission_classes([IsAdminGroupOrStaff])
+@permission_classes([PuedeConfigurarNegocio])
 def correo_aviso_reenviar(request, pk: int):
     correo = get_object_or_404(CorreoAviso, pk=pk)
     correo.nuevo_token()
