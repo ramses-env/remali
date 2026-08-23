@@ -30,7 +30,7 @@ factura ya no se pierde, aunque el cliente la siga recibiendo por fuera.
 |---|---|
 | `backend/requirements.txt` | `defusedxml` |
 | `backend/apps/facturacion/models.py` | Modelo `Factura` y su ciclo de vida |
-| `backend/apps/facturacion/migrations/0002_factura.py` | Tabla nueva |
+| `backend/apps/facturacion/migrations/0003_factura.py` | Tabla nueva |
 | `backend/apps/facturacion/cfdi.py` | Leer un CFDI: XML de texto a diccionario de campos |
 | `backend/apps/facturacion/validacion.py` | Los cinco candados contra la solicitud |
 | `backend/apps/facturacion/serializers.py` | `FacturaSerializer` + facturas dentro de la solicitud |

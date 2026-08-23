@@ -214,6 +214,48 @@ def descargar_xml(request, pk: int):
     return resp
 
 
+@api_view(['POST'])
+@permission_classes([IsAdminGroupOrStaff])
+def cancelar_factura(request, pk: int):
+    """Registra que el CFDI se canceló ANTE EL SAT. REMALI no cancela nada allá.
+
+    La solicitud regresa a pendiente y reaparece en Por facturar: una factura
+    cancelada que deja la solicitud en "facturada" es dinero facturado que nadie
+    volvió a emitir, y nadie se entera porque ya no se ve en ningún lado.
+    """
+    from django.db import transaction
+    from .models import Factura
+    from .serializers import FacturaSerializer
+
+    f = Factura.objects.select_related('solicitud').filter(pk=pk).first()
+    if f is None:
+        return Response({'detalle': 'Factura no encontrada'}, status=404)
+    if f.estado == 'cancelada':
+        return Response({'detalle': 'Esta factura ya está cancelada.'}, status=409)
+    motivo = (request.data.get('motivo') or '').strip()
+    if not motivo:
+        return Response(
+            {'detalle': 'Escribe por qué se canceló: queda en el rastro de la factura.'},
+            status=400,
+        )
+
+    with transaction.atomic():
+        f.estado = 'cancelada'
+        f.cancelada_en = timezone.now()
+        f.cancelada_motivo = motivo[:255]
+        f.save(update_fields=['estado', 'cancelada_en', 'cancelada_motivo'])
+
+        sol = f.solicitud
+        vigente = sol.facturas.filter(estado='vigente').first()
+        sol.uuid = vigente.uuid if vigente else ''
+        sol.fecha_timbrado = vigente.subida_en if vigente else None
+        sol.estado = 'facturada' if vigente else 'pendiente'
+        sol.save(update_fields=['uuid', 'fecha_timbrado', 'estado', 'actualizada'])
+
+    return Response({'detalle': 'Factura marcada como cancelada',
+                     'factura': FacturaSerializer(f).data})
+
+
 @api_view(['GET'])
 @permission_classes([IsAdminGroupOrStaff])
 def exportar_csv(request):

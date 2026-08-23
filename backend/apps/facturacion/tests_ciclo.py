@@ -80,3 +80,69 @@ class DescargarXMLTest(TestCase):
     def test_sin_sesion_tampoco(self):
         r = self.client.get(f'/api/facturacion/facturas/{self.factura.id}/xml/')
         self.assertIn(r.status_code, (401, 403))
+
+
+class CancelarYRefacturarTest(TestCase):
+
+    def setUp(self):
+        self.admin = get_user_model().objects.create_superuser('duena', 'd@x.com', 'pass12345')
+        self.client = APIClient()
+        self.client.force_authenticate(self.admin)
+        self.sol = solicitud(estado='facturada', uuid='A1B2C3D4-E5F6-4A7B-8C9D-0E1F2A3B4C5D')
+        self.factura = Factura.objects.create(
+            solicitud=self.sol, xml='<x/>',
+            uuid='A1B2C3D4-E5F6-4A7B-8C9D-0E1F2A3B4C5D', total=Decimal('2000.00'),
+        )
+
+    def _cancelar(self, motivo='Datos fiscales equivocados'):
+        return self.client.post(
+            f'/api/facturacion/facturas/{self.factura.id}/cancelar/',
+            {'motivo': motivo}, format='json',
+        )
+
+    def test_cancelar_regresa_la_solicitud_a_pendiente(self):
+        """Si no, la cancelación se vuelve una factura que nadie reemitió."""
+        self.assertEqual(self._cancelar().status_code, 200)
+        self.factura.refresh_from_db()
+        self.sol.refresh_from_db()
+        self.assertEqual(self.factura.estado, 'cancelada')
+        self.assertEqual(self.sol.estado, 'pendiente')
+        self.assertEqual(self.sol.uuid, '')
+
+    def test_la_cancelada_se_conserva(self):
+        self._cancelar()
+        self.assertEqual(Factura.objects.count(), 1)
+        self.assertEqual(self.factura.solicitud.facturas.count(), 1)
+
+    def test_exige_motivo(self):
+        self.assertEqual(self._cancelar(motivo='').status_code, 400)
+
+    def test_no_se_cancela_dos_veces(self):
+        self._cancelar()
+        self.assertEqual(self._cancelar().status_code, 409)
+
+    def test_refacturar_deja_las_dos_ligadas(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        from facturacion.tests_cfdi import cfdi_xml
+        from maquinaria.models import ConfiguracionSitio
+
+        cfg = ConfiguracionSitio.objects.first() or ConfiguracionSitio.objects.create()
+        cfg.negocio_rfc = 'REM010101AAA'
+        cfg.save()
+        self._cancelar()
+
+        nuevo = cfdi_xml(folio='124').replace(
+            'A1B2C3D4-E5F6-4A7B-8C9D-0E1F2A3B4C5D',
+            'F9E8D7C6-B5A4-4321-9876-543210FEDCBA',
+        )
+        r = self.client.post(
+            f'/api/facturacion/solicitudes/{self.sol.id}/factura/',
+            {'xml': SimpleUploadedFile('n.xml', nuevo.encode(), 'text/xml')},
+            format='multipart',
+        )
+        self.assertEqual(r.status_code, 201, r.data)
+        self.sol.refresh_from_db()
+        self.assertEqual(self.sol.facturas.count(), 2)
+        self.assertEqual(self.sol.facturas.filter(estado='vigente').count(), 1)
+        self.assertEqual(self.sol.estado, 'facturada')
