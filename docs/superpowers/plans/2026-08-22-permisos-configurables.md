@@ -56,7 +56,7 @@ en silencio.
 **Archivos:**
 - Crear: `backend/apps/maquinaria/tests_permisos_configurables.py`
 
-- [ ] **Paso 1: escribir la prueba de no-regresión**
+- [x] **Paso 1: escribir la prueba de no-regresión**
 
 ```python
 """Los permisos configurables no le quitan nada a nadie en silencio.
@@ -134,13 +134,13 @@ class FabricaCongeladaTest(TestCase):
         self.assertFalse(caps['ver_operacion'])
 ```
 
-- [ ] **Paso 2: correrla y ver que pasa TODA**
+- [x] **Paso 2: correrla y ver que pasa TODA**
 
 Correr: `cd backend && python manage.py test maquinaria.tests_permisos_configurables -v 2`
 Esperado: PASS (6 pruebas). Si alguna falla aquí, el diseño partió de una
 suposición equivocada — **detente y avisa**, no la ajustes para que pase.
 
-- [ ] **Paso 3: commit**
+- [x] **Paso 3: commit**
 
 ```bash
 git add backend/apps/maquinaria/tests_permisos_configurables.py
@@ -155,7 +155,7 @@ git commit -m "Prueba: congelar qué puede hoy cada rol, antes de tocar nada"
 - Modificar: `backend/apps/maquinaria/permissions.py:145-250`
 - Prueba: `backend/apps/maquinaria/tests_permisos_configurables.py`
 
-- [ ] **Paso 1: prueba que falla**
+- [x] **Paso 1: prueba que falla**
 
 Agregar al archivo de pruebas:
 
@@ -199,12 +199,12 @@ class CatalogoTest(TestCase):
         self.assertFalse(fila['nucleo'])
 ```
 
-- [ ] **Paso 2: correr y ver el fallo**
+- [x] **Paso 2: correr y ver el fallo**
 
 Correr: `cd backend && python manage.py test maquinaria.tests_permisos_configurables.CatalogoTest -v 2`
 Esperado: FAIL con `ImportError: cannot import name 'NUCLEO'`.
 
-- [ ] **Paso 3: implementar**
+- [x] **Paso 3: implementar**
 
 En `permissions.py`, cambiar la tupla `Capacidad` y agregar el área a las 23
 entradas existentes (el área es temática; el candado lo decide `NUCLEO`, no el
@@ -291,13 +291,13 @@ def catalogo_capacidades() -> list:
     return [{**c._asdict(), 'nucleo': c.nombre in NUCLEO} for c in CATALOGO]
 ```
 
-- [ ] **Paso 4: correr las pruebas**
+- [x] **Paso 4: correr las pruebas**
 
 Correr: `cd backend && python manage.py test maquinaria.tests_permisos_configurables -v 2`
 Esperado: PASS, incluidas las seis de la Tarea 1 (la refactorización no cambió
 lo que puede nadie).
 
-- [ ] **Paso 5: commit**
+- [x] **Paso 5: commit**
 
 ```bash
 git add backend/apps/maquinaria/permissions.py backend/apps/maquinaria/tests_permisos_configurables.py
@@ -312,7 +312,7 @@ git commit -m "Catálogo de capacidades con área, núcleo intocable y fábrica 
 - Modificar: `backend/apps/maquinaria/models.py` (después de `CambioPrecioLista`, ~línea 871)
 - Crear: migración
 
-- [ ] **Paso 1: prueba que falla**
+- [x] **Paso 1: prueba que falla**
 
 ```python
 from maquinaria.models import CambioPermisoRol, PermisoRol
@@ -332,12 +332,12 @@ class TablasTest(TestCase):
         self.assertEqual(str(fila), 'Cajero · cotizar: False → True')
 ```
 
-- [ ] **Paso 2: correr y ver el fallo**
+- [x] **Paso 2: correr y ver el fallo**
 
 Correr: `cd backend && python manage.py test maquinaria.tests_permisos_configurables.TablasTest -v 2`
 Esperado: FAIL, `ImportError: cannot import name 'PermisoRol'`.
 
-- [ ] **Paso 3: implementar los modelos**
+- [x] **Paso 3: implementar los modelos**
 
 ```python
 class PermisoRol(models.Model):
@@ -394,19 +394,19 @@ class CambioPermisoRol(models.Model):
         return f'{self.rol} · {self.capacidad}: {self.anterior} → {self.nuevo}'
 ```
 
-- [ ] **Paso 4: generar y aplicar la migración**
+- [x] **Paso 4: generar y aplicar la migración**
 
 ```bash
 cd backend && python manage.py makemigrations maquinaria && python manage.py migrate
 ```
 Esperado: crea `permiso_rol` y `cambio_permiso_rol`.
 
-- [ ] **Paso 5: correr las pruebas**
+- [x] **Paso 5: correr las pruebas**
 
 Correr: `cd backend && python manage.py test maquinaria.tests_permisos_configurables -v 2`
 Esperado: PASS.
 
-- [ ] **Paso 6: commit**
+- [x] **Paso 6: commit**
 
 ```bash
 git add backend/apps/maquinaria/models.py backend/apps/maquinaria/migrations/ backend/apps/maquinaria/tests_permisos_configurables.py
@@ -420,7 +420,7 @@ git commit -m "Tablas: overrides de permisos y su bitácora append-only"
 **Archivos:**
 - Modificar: `backend/apps/maquinaria/permissions.py:255-280`
 
-- [ ] **Paso 1: pruebas que fallan**
+- [x] **Paso 1: pruebas que fallan**
 
 ```python
 class OverridesTest(TestCase):
@@ -464,12 +464,12 @@ class OverridesTest(TestCase):
         self.assertTrue(caps['usar_caja'])    # y lo de fábrica sigue trabajando
 ```
 
-- [ ] **Paso 2: correr y ver el fallo**
+- [x] **Paso 2: correr y ver el fallo**
 
 Correr: `cd backend && python manage.py test maquinaria.tests_permisos_configurables.OverridesTest -v 2`
 Esperado: FAIL — el primero, en `assertTrue(puede_de(cajero)['cotizar'])`.
 
-- [ ] **Paso 3: implementar**
+- [x] **Paso 3: implementar**
 
 En `permissions.py`, agregar el lector y cambiar `puede_de`:
 
@@ -517,18 +517,18 @@ def puede_de(user) -> dict:
 
 Nota para quien implemente: el bloque `if n == NIVEL_TECNICO: ... elif n == NIVEL_ADMIN and es_gestor(user)` que existía se va — esa cuenta ahora la hace `capacidades_fabrica(rol)`, y `rol_de()` ya distingue Cajero de Técnico y Gestor de Administrador por su grupo.
 
-- [ ] **Paso 4: correr TODAS las pruebas del archivo**
+- [x] **Paso 4: correr TODAS las pruebas del archivo**
 
 Correr: `cd backend && python manage.py test maquinaria.tests_permisos_configurables -v 2`
 Esperado: PASS, con las seis de la Tarea 1 intactas.
 
-- [ ] **Paso 5: correr la suite completa del backend**
+- [x] **Paso 5: correr la suite completa del backend**
 
 Correr: `cd backend && python manage.py test 2>&1 | tail -5`
 Esperado: OK. Aquí es donde se vería si alguna prueba vieja dependía de la forma
 anterior de `puede_de`.
 
-- [ ] **Paso 6: commit**
+- [x] **Paso 6: commit**
 
 ```bash
 git add backend/apps/maquinaria/permissions.py backend/apps/maquinaria/tests_permisos_configurables.py
@@ -542,7 +542,7 @@ git commit -m "puede_de resuelve en tres capas: nivel, fábrica y lo que configu
 **Archivos:**
 - Modificar: `backend/apps/maquinaria/latido.py:12-36`
 
-- [ ] **Paso 1: prueba que falla**
+- [x] **Paso 1: prueba que falla**
 
 ```python
 class SelloTest(TestCase):
@@ -563,12 +563,12 @@ class SelloTest(TestCase):
         self.assertGreater(self._marca(), antes)
 ```
 
-- [ ] **Paso 2: correr y ver el fallo**
+- [x] **Paso 2: correr y ver el fallo**
 
 Correr: `cd backend && python manage.py test maquinaria.tests_permisos_configurables.SelloTest -v 2`
 Esperado: FAIL, `AssertionError: unexpectedly None`.
 
-- [ ] **Paso 3: implementar**
+- [x] **Paso 3: implementar**
 
 En `latido.py`, agregar al diccionario `REGISTRO`:
 
@@ -576,12 +576,12 @@ En `latido.py`, agregar al diccionario `REGISTRO`:
     'maquinaria.PermisoRol': ('permisos',),
 ```
 
-- [ ] **Paso 4: correr las pruebas**
+- [x] **Paso 4: correr las pruebas**
 
 Correr: `cd backend && python manage.py test maquinaria.tests_permisos_configurables.SelloTest -v 2`
 Esperado: PASS.
 
-- [ ] **Paso 5: commit**
+- [x] **Paso 5: commit**
 
 ```bash
 git add backend/apps/maquinaria/latido.py backend/apps/maquinaria/tests_permisos_configurables.py
@@ -600,7 +600,7 @@ git commit -m "El latido avisa cuando los permisos cambian"
 - Modificar: `backend/apps/maquinaria/permissions.py` (agregar `PuedeConfigurarPermisos`)
 - Crear: `backend/apps/maquinaria/tests_permisos_api.py`
 
-- [ ] **Paso 1: prueba que falla**
+- [x] **Paso 1: prueba que falla**
 
 ```python
 """La API de permisos: quién la abre, qué devuelve y qué rechaza."""
@@ -657,12 +657,12 @@ class LeerPermisosTest(TestCase):
         self.assertEqual(api.get('/api/permisos/').status_code, 403)
 ```
 
-- [ ] **Paso 2: correr y ver el fallo**
+- [x] **Paso 2: correr y ver el fallo**
 
 Correr: `cd backend && python manage.py test maquinaria.tests_permisos_api.LeerPermisosTest -v 2`
 Esperado: FAIL con 404 — la ruta no existe.
 
-- [ ] **Paso 3: implementar**
+- [x] **Paso 3: implementar**
 
 En `permissions.py`, junto a las otras clases de capacidad:
 
@@ -741,12 +741,12 @@ En `urls.py`, después de `path('latido/', views.latido_panel),`:
 
 y arriba, `from . import views, views_permisos, views_usuarios`.
 
-- [ ] **Paso 4: correr las pruebas**
+- [x] **Paso 4: correr las pruebas**
 
 Correr: `cd backend && python manage.py test maquinaria.tests_permisos_api -v 2`
 Esperado: PASS (4).
 
-- [ ] **Paso 5: commit**
+- [x] **Paso 5: commit**
 
 ```bash
 git add backend/apps/maquinaria/views_permisos.py backend/apps/maquinaria/urls.py backend/apps/maquinaria/permissions.py backend/apps/maquinaria/tests_permisos_api.py
@@ -761,7 +761,7 @@ git commit -m "GET /api/permisos/: la matriz completa en una llamada"
 - Modificar: `backend/apps/maquinaria/views_permisos.py`
 - Modificar: `backend/apps/maquinaria/tests_permisos_api.py`
 
-- [ ] **Paso 1: pruebas que fallan**
+- [x] **Paso 1: pruebas que fallan**
 
 ```python
 class GuardarPermisosTest(TestCase):
@@ -836,12 +836,12 @@ class GuardarPermisosTest(TestCase):
         self.assertEqual(PermisoRol.objects.count(), 0)
 ```
 
-- [ ] **Paso 2: correr y ver el fallo**
+- [x] **Paso 2: correr y ver el fallo**
 
 Correr: `cd backend && python manage.py test maquinaria.tests_permisos_api.GuardarPermisosTest -v 2`
 Esperado: FAIL con 405 (la vista solo acepta GET).
 
-- [ ] **Paso 3: implementar**
+- [x] **Paso 3: implementar**
 
 En `views_permisos.py`, cambiar el decorador a `@api_view(['GET', 'POST'])` y
 agregar el guardado:
@@ -907,12 +907,12 @@ def permisos(request):
 El sello del latido no se toca a mano: las señales de la Tarea 5 lo mueven con
 cada `create`/`delete` de `PermisoRol`.
 
-- [ ] **Paso 4: correr las pruebas**
+- [x] **Paso 4: correr las pruebas**
 
 Correr: `cd backend && python manage.py test maquinaria.tests_permisos_api -v 2`
 Esperado: PASS (12).
 
-- [ ] **Paso 5: commit**
+- [x] **Paso 5: commit**
 
 ```bash
 git add backend/apps/maquinaria/views_permisos.py backend/apps/maquinaria/tests_permisos_api.py
@@ -926,7 +926,7 @@ git commit -m "POST /api/permisos/: el lote entero, firmado con el código"
 **Archivos:**
 - Modificar: `backend/apps/maquinaria/views_permisos.py`, `urls.py`, `tests_permisos_api.py`
 
-- [ ] **Paso 1: prueba que falla**
+- [x] **Paso 1: prueba que falla**
 
 ```python
 class BitacoraTest(TestCase):
@@ -956,12 +956,12 @@ class BitacoraTest(TestCase):
         self.assertEqual(api.get('/api/permisos/bitacora/').status_code, 403)
 ```
 
-- [ ] **Paso 2: correr y ver el fallo**
+- [x] **Paso 2: correr y ver el fallo**
 
 Correr: `cd backend && python manage.py test maquinaria.tests_permisos_api.BitacoraTest -v 2`
 Esperado: FAIL con 404.
 
-- [ ] **Paso 3: implementar**
+- [x] **Paso 3: implementar**
 
 En `views_permisos.py`:
 
@@ -997,12 +997,12 @@ En `urls.py`, después de `path('permisos/', views_permisos.permisos),`:
     path('permisos/bitacora/', views_permisos.bitacora),
 ```
 
-- [ ] **Paso 4: correr las pruebas**
+- [x] **Paso 4: correr las pruebas**
 
 Correr: `cd backend && python manage.py test maquinaria.tests_permisos_api -v 2`
 Esperado: PASS (14).
 
-- [ ] **Paso 5: commit**
+- [x] **Paso 5: commit**
 
 ```bash
 git add backend/apps/maquinaria/views_permisos.py backend/apps/maquinaria/urls.py backend/apps/maquinaria/tests_permisos_api.py
@@ -1023,7 +1023,7 @@ decorativo. Esta fase es la que convierte la matriz en algo real.
 - Crear: `backend/apps/maquinaria/tests_permisos_imponen.py`
 - Modificar: `backend/apps/maquinaria/permissions.py` (constante `SOLO_PANTALLA`)
 
-- [ ] **Paso 1: sacar el inventario real**
+- [x] **Paso 1: sacar el inventario real**
 
 Correr exactamente esto y guardar la salida:
 
@@ -1050,7 +1050,7 @@ for ruta, clase in sorted(por_nivel): print(f'{ruta:55} {clase}')
 " | tee /tmp/inventario-permisos.txt
 ```
 
-- [ ] **Paso 2: escribir la nota con el inventario**
+- [x] **Paso 2: escribir la nota con el inventario**
 
 Crear `docs/superpowers/notas/2026-08-22-inventario-permisos.md` con la salida
 anterior y, para **cada ruta gateada por nivel**, una de estas tres marcas:
@@ -1061,7 +1061,7 @@ anterior y, para **cada ruta gateada por nivel**, una de estas tres marcas:
 - `solo pantalla`: la capacidad no gatea endpoints, solo decide qué se ve en el
   panel (es el caso de `jornada_campo` y `ver_jornada`, que son escritorios).
 
-- [ ] **Paso 3: escribir la prueba que cierra el hueco a futuro**
+- [x] **Paso 3: escribir la prueba que cierra el hueco a futuro**
 
 ```python
 """Toda capacidad que la pantalla enciende tiene que mandar en algún endpoint.
@@ -1105,7 +1105,7 @@ class TodaCapacidadSeImponeTest(TestCase):
         self.assertEqual(SOLO_PANTALLA, frozenset({'jornada_campo', 'ver_jornada'}))
 ```
 
-- [ ] **Paso 4: declarar `SOLO_PANTALLA` en `permissions.py`**
+- [x] **Paso 4: declarar `SOLO_PANTALLA` en `permissions.py`**
 
 ```python
 #: Capacidades que NO gatean endpoints porque no describen una acción, sino un
@@ -1116,14 +1116,14 @@ class TodaCapacidadSeImponeTest(TestCase):
 SOLO_PANTALLA = frozenset({'jornada_campo', 'ver_jornada'})
 ```
 
-- [ ] **Paso 5: correr la prueba y anotar el resultado**
+- [x] **Paso 5: correr la prueba y anotar el resultado**
 
 Correr: `cd backend && python manage.py test maquinaria.tests_permisos_imponen -v 2`
 Esperado: **FALLA**, y la lista de huérfanas que imprime es el trabajo exacto de
 las Tareas 10 y 11. Cópiala a la nota del inventario. No la hagas pasar
 metiendo capacidades en `SOLO_PANTALLA`.
 
-- [ ] **Paso 6: commit**
+- [x] **Paso 6: commit**
 
 ```bash
 git add docs/superpowers/notas/2026-08-22-inventario-permisos.md backend/apps/maquinaria/tests_permisos_imponen.py backend/apps/maquinaria/permissions.py
@@ -1141,7 +1141,7 @@ que la pantalla dice la verdad.
 - Modificar: `backend/apps/cotizaciones/views.py` (las 7 rutas por nivel del inventario)
 - Modificar: `backend/apps/maquinaria/tests_permisos_imponen.py`
 
-- [ ] **Paso 1: prueba que falla**
+- [x] **Paso 1: prueba que falla**
 
 ```python
 from django.contrib.auth.models import Group, User
@@ -1183,14 +1183,14 @@ class LaPantallaNoMienteTest(TestCase):
         self.assertEqual(r.status_code, 403)
 ```
 
-- [ ] **Paso 2: correr y ver el fallo**
+- [x] **Paso 2: correr y ver el fallo**
 
 Correr: `cd backend && python manage.py test maquinaria.tests_permisos_imponen.LaPantallaNoMienteTest -v 2`
 Esperado: FAIL en `test_con_el_override_cotiza` — responde 403 aunque el
 override esté encendido, porque la vista exige nivel. **Ese fallo es el bug
 completo que esta fase existe para arreglar.**
 
-- [ ] **Paso 3: convertir los gates de cotizaciones**
+- [x] **Paso 3: convertir los gates de cotizaciones**
 
 En `backend/apps/cotizaciones/views.py`, cambiar `IsAdminGroupOrStaff` por
 `PuedeCotizar` en las rutas que el inventario marcó `→ cotizar`:
@@ -1210,12 +1210,12 @@ totales agregados), conserva también la exigencia de `ver_dinero` con
 `permission_classes([PuedeCotizar, PuedeVerDinero])` — DRF exige TODAS las
 clases de la lista.
 
-- [ ] **Paso 4: correr las pruebas**
+- [x] **Paso 4: correr las pruebas**
 
 Correr: `cd backend && python manage.py test maquinaria.tests_permisos_imponen cotizaciones -v 2`
 Esperado: PASS, incluidas las 47 pruebas de cotizaciones que ya existían.
 
-- [ ] **Paso 5: commit**
+- [x] **Paso 5: commit**
 
 ```bash
 git add backend/apps/cotizaciones/views.py backend/apps/maquinaria/tests_permisos_imponen.py
@@ -1232,17 +1232,17 @@ revierta sin arrastrar a las demás.
 
 Orden sugerido, de menos a más superficie tocada:
 
-- [ ] `usar_caja` y `corte_caja` → `backend/apps/refacciones/views.py`, `ventas/views.py`
-- [ ] `ver_clientes` y `editar_clientes` → `backend/apps/clientes/views.py`
-- [ ] `facturar` → `backend/apps/facturacion/views.py`
-- [ ] `reparar` y `gestionar_reparaciones` → `backend/apps/inventario/views.py`
-- [ ] `alta_inventario`, `operar_inventario`, `editar_catalogo` → `backend/apps/inventario/views.py`, `maquinaria/views.py`
-- [ ] `vender` → `backend/apps/ventas/views.py`
-- [ ] `rentar` → `backend/apps/renta/views.py`
+- [x] `usar_caja` y `corte_caja` → `backend/apps/refacciones/views.py`, `ventas/views.py`
+- [x] `ver_clientes` y `editar_clientes` → `backend/apps/clientes/views.py`
+- [x] `facturar` → `backend/apps/facturacion/views.py`
+- [x] `reparar` y `gestionar_reparaciones` → `backend/apps/inventario/views.py`
+- [x] `alta_inventario`, `operar_inventario`, `editar_catalogo` → `backend/apps/inventario/views.py`, `maquinaria/views.py`
+- [x] `vender` → `backend/apps/ventas/views.py`
+- [x] `rentar` → `backend/apps/renta/views.py`
 
 Para **cada** capacidad de la lista, en su propio ciclo:
 
-- [ ] **Paso 1:** agregar a `tests_permisos_imponen.py` una prueba con la misma
+- [x] **Paso 1:** agregar a `tests_permisos_imponen.py` una prueba con la misma
   forma que `LaPantallaNoMienteTest`, cambiando el endpoint y la capacidad. Por
   ejemplo, para `usar_caja`:
 
@@ -1265,15 +1265,15 @@ class CajaSeImponeTest(TestCase):
         self.assertNotEqual(r.status_code, 403)   # 400 por carrito vacío está bien
 ```
 
-- [ ] **Paso 2:** correrla y verla fallar con 403 pese al override.
-- [ ] **Paso 3:** cambiar la clase de permiso de esas rutas por la de capacidad
+- [x] **Paso 2:** correrla y verla fallar con 403 pese al override.
+- [x] **Paso 3:** cambiar la clase de permiso de esas rutas por la de capacidad
   (crear la subclase de `ExigeCapacidad` en `permissions.py` si esa capacidad
   todavía no tiene una, siguiendo el modelo de `PuedeCotizar`).
-- [ ] **Paso 4:** correr `python manage.py test` COMPLETO, no solo la app tocada.
+- [x] **Paso 4:** correr `python manage.py test` COMPLETO, no solo la app tocada.
   Convertir un gate puede romper pruebas viejas que asumían el nivel.
-- [ ] **Paso 5:** commit con el nombre de la capacidad.
+- [x] **Paso 5:** commit con el nombre de la capacidad.
 
-- [ ] **Cierre de la fase:** `cd backend && python manage.py test maquinaria.tests_permisos_imponen -v 2`
+- [x] **Cierre de la fase:** `cd backend && python manage.py test maquinaria.tests_permisos_imponen -v 2`
   Esperado: PASS, incluida `test_ninguna_capacidad_configurable_es_decorativa`.
 
 ---
@@ -1295,7 +1295,7 @@ vacía y ya trae los datos de la API en la consola.
 - Modificar: `frontend/src/routes/Dashboard.tsx` (5 puntos)
 - Crear: `frontend/src/routes/dashboard/permisos.tsx`
 
-- [ ] **Paso 1: tipo de la capacidad nueva**
+- [x] **Paso 1: tipo de la capacidad nueva**
 
 En `acceso.ts`, dentro de `type Capacidades`:
 
@@ -1304,7 +1304,7 @@ En `acceso.ts`, dentro de `type Capacidades`:
   configurar_permisos: boolean
 ```
 
-- [ ] **Paso 2: tema del latido**
+- [x] **Paso 2: tema del latido**
 
 En `realtime.ts:22-25`, agregar `'permisos'` a la unión `Tema`:
 
@@ -1316,7 +1316,7 @@ export type Tema =
   | 'permisos'
 ```
 
-- [ ] **Paso 3: la sección en el catálogo de secciones**
+- [x] **Paso 3: la sección en el catálogo de secciones**
 
 En `comun.tsx:208`, agregar `| 'permisos'` al tipo `Section`, y en
 `SECTION_META`:
@@ -1325,7 +1325,7 @@ En `comun.tsx:208`, agregar `| 'permisos'` al tipo `Section`, y en
   permisos: { title: 'Permisos', subtitle: 'Qué puede hacer cada puesto. Lo que cambies aquí aplica a todos los de ese rol.' },
 ```
 
-- [ ] **Paso 4: los cinco puntos de `Dashboard.tsx`**
+- [x] **Paso 4: los cinco puntos de `Dashboard.tsx`**
 
 1. Import perezoso, junto a los otros (~línea 51):
 ```ts
@@ -1348,7 +1348,7 @@ const PermisosAdmin = lazy(() => import('./dashboard/permisos'))
           {section === 'permisos' && <PermisosAdmin notify={notify} />}
 ```
 
-- [ ] **Paso 5: el perfil se recarga cuando los permisos cambian**
+- [x] **Paso 5: el perfil se recarga cuando los permisos cambian**
 
 En `Dashboard.tsx:432-437`, sacar la carga del perfil a un callback y
 suscribirla al tema. Es lo que hace que un cambio se sienta al momento:
@@ -1367,7 +1367,7 @@ suscribirla al tema. Es lo que hace que un cambio se sienta al momento:
   useRecurso(['permisos'], cargarPerfil, true)
 ```
 
-- [ ] **Paso 6: el archivo de la pantalla, con los datos ya cargados**
+- [x] **Paso 6: el archivo de la pantalla, con los datos ya cargados**
 
 ```tsx
 /**
@@ -1413,7 +1413,7 @@ export default function PermisosAdmin({ notify }: { notify: Notify }) {
 }
 ```
 
-- [ ] **Paso 7: verificar**
+- [x] **Paso 7: verificar**
 
 ```bash
 cd frontend && npm run build && npm run lint
@@ -1422,7 +1422,7 @@ Esperado: build sin errores de tipos, lint limpio. En el navegador, entrando
 como dueño, aparece "Permisos" en el menú y la sección lista los cuatro roles.
 Entrando como administrador, la sección **no** aparece.
 
-- [ ] **Paso 8: commit**
+- [x] **Paso 8: commit**
 
 ```bash
 git add frontend/src/lib/acceso.ts frontend/src/lib/realtime.ts frontend/src/routes/dashboard/comun.tsx frontend/src/routes/Dashboard.tsx frontend/src/routes/dashboard/permisos.tsx
@@ -1436,7 +1436,7 @@ git commit -m "La sección Permisos entra al panel, y el perfil se recarga con e
 **Archivos:**
 - Modificar: `frontend/src/routes/dashboard/permisos.tsx`
 
-- [ ] **Paso 1: el estado de los cambios pendientes**
+- [x] **Paso 1: el estado de los cambios pendientes**
 
 Reemplazar el cuerpo del componente por esto, que es el corazón de la pantalla:
 
@@ -1477,7 +1477,7 @@ export default function PermisosAdmin({ notify }: { notify: Notify }) {
 }
 ```
 
-- [ ] **Paso 2: la celda**
+- [x] **Paso 2: la celda**
 
 ```tsx
 function Celda({ encendido, movida, bloqueada, etiqueta, resaltada, onToggle }: {
@@ -1517,7 +1517,7 @@ teclado y semántica, y son 84 controles (21 capacidades configurables × 4
 roles). El alto de 44 px da el área de toque
 aunque el dibujo mida 30×17.
 
-- [ ] **Paso 3: la tabla, agrupada por área**
+- [x] **Paso 3: la tabla, agrupada por área**
 
 ```tsx
   const areas = [...new Set(foto.catalogo.map(c => c.area))]
@@ -1597,7 +1597,7 @@ se tiñe con `bg-gold/5` cuando `cruz?.cap === c.nombre`, y la celda cuando
 además `cruz?.rol === r.nombre`. La descripción (`c.descripcion`) se muestra bajo
 la etiqueta **solo** en la fila activa.
 
-- [ ] **Paso 4: verificar**
+- [x] **Paso 4: verificar**
 
 ```bash
 cd frontend && npm run build && npm run lint
@@ -1607,7 +1607,7 @@ columna se mueve al tocar, el punto dorado aparece al diferir de fábrica, el
 filtro "Solo lo que cambié" deja únicamente esas filas, y con Tab se recorre la
 matriz con el anillo dorado visible.
 
-- [ ] **Paso 5: commit**
+- [x] **Paso 5: commit**
 
 ```bash
 git add frontend/src/routes/dashboard/permisos.tsx
@@ -1621,7 +1621,7 @@ git commit -m "La matriz de permisos: cruz de lectura, contadores y el punto de 
 **Archivos:**
 - Modificar: `frontend/src/routes/dashboard/permisos.tsx`
 
-- [ ] **Paso 1: la barra y el guardado**
+- [x] **Paso 1: la barra y el guardado**
 
 ```tsx
   const [guardando, setGuardando] = useState(false)
@@ -1666,7 +1666,7 @@ git commit -m "La matriz de permisos: cruz de lectura, contadores y el punto de 
 Los cambios pendientes **no se pierden** si el guardado falla: `setPendientes({})`
 solo corre en el camino bueno.
 
-- [ ] **Paso 2: la barra en pantalla**
+- [x] **Paso 2: la barra en pantalla**
 
 ```tsx
   {cambios.length > 0 && (
@@ -1691,7 +1691,7 @@ solo corre en el camino bueno.
   )}
 ```
 
-- [ ] **Paso 3: verificar a mano los cinco caminos**
+- [x] **Paso 3: verificar a mano los cinco caminos**
 
 Como dueño, en el navegador:
 1. Mover un interruptor → aparece la barra con el resumen en palabras.
@@ -1707,7 +1707,7 @@ Como dueño, en el navegador:
 cd frontend && npm run build && npm run lint
 ```
 
-- [ ] **Paso 4: commit**
+- [x] **Paso 4: commit**
 
 ```bash
 git add frontend/src/routes/dashboard/permisos.tsx
@@ -1718,8 +1718,8 @@ git commit -m "Guardar permisos: el lote firmado con el código, y nada se pierd
 
 ## Cierre
 
-- [ ] `cd backend && python manage.py test` → OK completo
-- [ ] `cd frontend && npm run build && npm run lint` → limpio
-- [ ] Borrar de `MEMORY.md` la nota de pendiente
+- [x] `cd backend && python manage.py test` → OK completo (497 pruebas, 2026-08-22)
+- [x] `cd frontend && npm run build` → limpio. `npm run lint` arrastra 201 errores viejos de todo el repo (`react-refresh/only-export-components`), ninguno de los archivos de permisos.
+- [x] Borrar de `MEMORY.md` la nota de pendiente
   `remali-permisos-configurables.md`, o reescribirla con lo que quedó
-- [ ] Actualizar `docs/01-DOCUMENTACION.md` con la sección Permisos
+- [x] Actualizar `docs/01-DOCUMENTACION.md` con la sección Permisos (§6.2–6.4)

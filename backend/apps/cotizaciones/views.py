@@ -19,7 +19,8 @@ class CotizacionPagination(PageNumberPagination):
     max_page_size = 100
 
 from maquinaria.permissions import (
-    IsAdminGroupOrStaff, EsOperador, PuedeCotizar, PuedeVender, puede_de,
+    IsAdminGroupOrStaff, EsOperador, PuedeCotizar, PuedeVender, PuedeVerDinero,
+    puede_de,
 )
 from maquinaria.throttling import SolicitudPublicaThrottle, SubidaEvidenciaThrottle
 from maquinaria.ws_events import push_user_event
@@ -224,7 +225,11 @@ def solicitar_cancelacion(request, pk):
 
 
 @api_view(['POST'])
-@permission_classes([IsAdminGroupOrStaff])
+# `ver_dinero`, no `cotizar`: aceptar o rechazar una cotización ya lo exige
+# dentro del PATCH de estado, y aprobar la cancelación cierra la cotización
+# igual. Con `cotizar` esta ruta era la puerta de atrás para cerrar una sin
+# tener las cuentas del negocio.
+@permission_classes([PuedeVerDinero])
 def aprobar_cancelacion(request, pk):
     """Administración aprueba la cancelación que pidió el cliente: estado final
     'cancelada' + aviso a su campanita. La cotización deja de contar."""

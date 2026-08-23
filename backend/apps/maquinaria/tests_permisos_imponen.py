@@ -670,3 +670,42 @@ class BorrarDelCatalogoChicoSeImponeTest(TestCase):
 
     def test_el_dueno_si_borra(self):
         self.assertEqual(self.api_due.delete(f'/api/marcas/{self.marca.id}/').status_code, 204)
+
+
+class LasDosDudasDelInventarioTest(TestCase):
+    """Los dos `POR DECIDIR` que quedaban de la nota, ya resueltos por el dueño.
+
+    Uno era una incoherencia entre gemelas: fundir dos clientes desde adeudos
+    pedía nivel de técnico y desde el padrón, de administración. El otro era una
+    puerta de atrás: aprobar la cancelación de una cotización CIERRA la
+    cotización igual que aceptarla o rechazarla, que ya exigen `ver_dinero`.
+    """
+
+    def setUp(self):
+        self.tecnico = User.objects.create_user('tec14', 'tec14@x.com', 'pass12345')
+        self.tecnico.groups.add(Group.objects.get_or_create(name='Técnico')[0])
+        self.admin = User.objects.create_user('adm14', 'adm14@x.com', 'pass12345')
+        self.admin.groups.add(Group.objects.get_or_create(name='Administrador')[0])
+        self.gestor = User.objects.create_user('ges14', 'ges14@x.com', 'pass12345')
+        self.gestor.groups.add(Group.objects.get_or_create(name='Gestor')[0])
+        self.api_tec = APIClient(); self.api_tec.force_authenticate(self.tecnico)
+        self.api_adm = APIClient(); self.api_adm.force_authenticate(self.admin)
+        self.api_ges = APIClient(); self.api_ges.force_authenticate(self.gestor)
+
+    def test_fundir_clientes_es_de_administracion_por_los_dos_lados(self):
+        self.assertEqual(
+            self.api_tec.post('/api/rentas/adeudos/fusionar/', {}, format='json').status_code, 403)
+        self.assertEqual(
+            self.api_tec.post('/api/clientes/999/fusionar/', {}, format='json').status_code, 403)
+        self.assertNotEqual(
+            self.api_adm.post('/api/rentas/adeudos/fusionar/', {}, format='json').status_code, 403)
+
+    def test_aprobar_la_cancelacion_pide_ver_dinero(self):
+        """El Gestor opera el negocio sin ver sus cuentas, y por eso tampoco
+        cierra cotizaciones: es la misma regla del PATCH de estado."""
+        self.assertEqual(
+            self.api_ges.post('/api/cotizaciones/999/aprobar-cancelacion/', {},
+                              format='json').status_code, 403)
+        self.assertEqual(
+            self.api_adm.post('/api/cotizaciones/999/aprobar-cancelacion/', {},
+                              format='json').status_code, 404)

@@ -287,7 +287,11 @@ def _rentas_de_identidad(spec):
 
 
 @api_view(['POST'])
-@permission_classes([EsOperador])
+# Nivel de administración, igual que su gemela `/api/clientes/<pk>/fusionar/`:
+# las dos funden dos identidades en una y pedían cosas distintas sin razón. El
+# catálogo ya lo dice ("fundir dos clientes sigue siendo de administración"), así
+# que `editar_clientes` —que es de nivel 1— no alcanza para esto.
+@permission_classes([IsAdminGroupOrStaff])
 def fusionar_cliente_adeudos(request):
     """Funde dos 'clientes' en uno: reasigna TODAS las rentas del origen a la
     identidad del destino. Resuelve el caso de un mismo cliente tecleado de

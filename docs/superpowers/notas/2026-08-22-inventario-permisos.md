@@ -181,7 +181,7 @@ nada. Es el ejemplo perfecto del interruptor decorativo que la prueba busca.
 | `/api/rentas/<int:pk>/vinculo/` | `IsAdminGroupOrStaff` | `apps/renta/views.py:546` | **`→ editar_clientes`** · ver §5.2 |
 | `/api/rentas/<int:pk>/cancelar/` | `IsAdminGroupOrStaff` | `apps/renta/views.py:1258` | `nivel legítimo` — reversa de una operación cerrada, irreversible; no hay capacidad de "cancelar" y el catálogo pone a propósito al Gestor a poder cancelar sin `ver_dinero`. |
 | `/api/rentas/<int:pk>/evidencias/<int:evidencia_id>/` (DELETE) | `IsAdminGroupOrStaff` | `apps/renta/views.py:1387` | `nivel legítimo` — borrar evidencia es borrar la prueba de cómo salió la máquina: se queda arriba a propósito. |
-| `/api/rentas/adeudos/fusionar/` | `EsOperador` | `apps/renta/views.py:323` | **POR DECIDIR** — funde dos "clientes" reasignando TODAS sus rentas. Su gemela `/api/clientes/<pk>/fusionar/` pide nivel 2 y esta pide nivel 1: una de las dos está mal. El catálogo dice que "fundir dos clientes sigue siendo de administración", así que `editar_clientes` (nivel 1) NO sirve. O se sube esta a nivel 2 y se marcan las dos `nivel legítimo`, o se crea una capacidad `fusionar_clientes`. |
+| `/api/rentas/adeudos/fusionar/` | `IsAdminGroupOrStaff` | `apps/renta/views.py:323` | **RESUELTA** — subió a nivel 2, como su gemela. Las dos `nivel legítimo`. La duda era: — funde dos "clientes" reasignando TODAS sus rentas. Su gemela `/api/clientes/<pk>/fusionar/` pide nivel 2 y esta pide nivel 1: una de las dos está mal. El catálogo dice que "fundir dos clientes sigue siendo de administración", así que `editar_clientes` (nivel 1) NO sirve. O se sube esta a nivel 2 y se marcan las dos `nivel legítimo`, o se crea una capacidad `fusionar_clientes`. |
 | `/api/rentas/<int:pk>/entregar/` | ~~`EsOperador`~~ → `PuedeOperarJornada` | `apps/renta/views.py:1410` | **HECHO** — `operar_jornada`; ver §4 |
 | `/api/rentas/<int:pk>/devolver/` | ~~`EsOperador`~~ → `PuedeOperarJornada` | `apps/renta/views.py:1062` | **HECHO** — `operar_jornada`; ver §4 |
 | `/api/rentas/<int:pk>/evidencias/` (GET/POST) | ~~`EsOperador`~~ → `PuedeOperarJornada` | `apps/renta/views.py:1327` | **HECHO** — `operar_jornada`; ver §4 |
@@ -213,7 +213,7 @@ nada. Es el ejemplo perfecto del interruptor decorativo que la prueba busca.
 | `/api/cotizaciones/<int:pk>/convertir/` | `IsAdminGroupOrStaff` | `apps/cotizaciones/views.py:752` | **`→ vender`** — lo dice el docstring de `PuedeCotizar`: "cotizar NO es convertir a venta". |
 | `/api/cotizaciones/<int:pk>/vincular/` | `EsOperador` | `apps/cotizaciones/views.py:260` | **`→ editar_clientes`** · ver §5.2 |
 | `/api/cotizaciones/<int:pk>/vinculo/` | `EsOperador` | `apps/cotizaciones/views.py:301` | **`→ editar_clientes`** · ver §5.2 |
-| `/api/cotizaciones/<int:pk>/aprobar-cancelacion/` | `IsAdminGroupOrStaff` | `apps/cotizaciones/views.py:229` | **POR DECIDIR** — dos lecturas defendibles y opuestas: (a) `cotizar`, porque es trabajo de la sección; (b) `ver_dinero`, para igualar la regla que YA está escrita dentro del PATCH de estado (`views.py:537`: aceptar o rechazar exige `ver_dinero`). Si se elige (a), este endpoint se vuelve la puerta de atrás para cerrar una cotización sin `ver_dinero`. |
+| `/api/cotizaciones/<int:pk>/aprobar-cancelacion/` | `PuedeVerDinero` | `apps/cotizaciones/views.py:229` | **RESUELTA** — se fue con `ver_dinero` (opción b). La duda era: — dos lecturas defendibles y opuestas: (a) `cotizar`, porque es trabajo de la sección; (b) `ver_dinero`, para igualar la regla que YA está escrita dentro del PATCH de estado (`views.py:537`: aceptar o rechazar exige `ver_dinero`). Si se elige (a), este endpoint se vuelve la puerta de atrás para cerrar una cotización sin `ver_dinero`. |
 
 ### 3.6 Facturación (todas `IsAdminGroupOrStaff`)
 
@@ -320,6 +320,11 @@ El candado de borrar vive en `ProtectedDestroyMixin.destroy`
 (`views.py:236/242/248`) heredan de `generics.RetrieveUpdateDestroyAPIView` a
 secas: **cualquier administración borra una categoría, un tipo o una marca sin
 pasar por `borrar_catalogo`.** Arreglo: meterles el mixin.
+
+**RESUELTO (2026-08-22, Tarea 11).** Los tres llevan ya `ProtectedDestroyMixin`,
+y de paso su escritura pasó a `editar_catalogo`. Lo vigila
+`BorrarDelCatalogoChicoSeImponeTest`: administración edita una marca y NO la
+borra (403 `sin_permiso_borrar`); el dueño sí (204).
 
 ### 5.2 Los cuatro `vincular` / `vinculo` no se ponen de acuerdo
 
@@ -478,22 +483,48 @@ Las 12 que quedan son, todas, trabajo de la Tarea 11:
 -  'reparar', 'vender', 'ver_montos_operacion', 'ver_operacion']
 ```
 
+### Al terminar la Tarea 11: cero (2026-08-22)
+
+```
+huerfanas == []
+```
+
+Las 12 quedaron gateadas por su capacidad. Dónde aterrizó cada una, tal cual la
+tabla de arriba, con dos precisiones que salieron al convertirlas:
+
+- **`vender`** se llevó también `/api/cotizaciones/<pk>/convertir/`: convertir
+  una cotización ES vender (crea la venta y marca las unidades), y pedía nivel
+  de administración, así que el mostrador no podía cerrar lo que él mismo cotizó.
+- **`reparar`** se llevó `/api/reparaciones/<pk>/vinculo/`: la liga se le entrega
+  al cliente cuando se RECIBE la máquina, que es trabajo de taller.
+
+Para que la auditoría vea un gate que solo aplica a un método, la capacidad se
+declara en `permission_classes` de la clase y `get_permissions()` decide método
+por método (el patrón está en `EquipoListCreate` y `UnidadDetail`). Un gate que
+vive solo dentro de `get_permissions()` es invisible para la prueba, y un gate
+invisible es exactamente lo que esta nota existe para evitar.
+
+Suite completa el 2026-08-22 al cerrar: **497 pruebas, 0 fallos.**
+
 ---
 
 ## 7. Cómo se cierra
 
-Cuando las Tareas 10 y 11 terminen, `test_ninguna_capacidad_configurable_es_decorativa`
-pasa en verde y esta nota deja de ser una lista de pendientes para volverse el
-registro de por qué cada ruta quedó donde quedó. Lo único que NO se cierra solo
+**Cerrado el 2026-08-22.** `test_ninguna_capacidad_configurable_es_decorativa`
+pasa en verde: esta nota deja de ser una lista de pendientes y queda como el
+registro de por qué cada ruta acabó donde acabó. Lo único que NO se cierra solo
 son los `POR DECIDIR`: esos necesitan una respuesta del dueño antes de tocar
 código.
 
-**Estado de los `POR DECIDIR` (2026-08-22).** De los cinco quedan dos:
+**Estado de los `POR DECIDIR` (2026-08-22).** De los cinco no queda ninguno:
 
 | Duda | Estado |
 |---|---|
 | Las 4 rutas de Mi jornada (§4) | **RESUELTA** — capacidad nueva `operar_jornada` |
 | `/api/cupones/` y `/api/cupones/<pk>/` (§3.2, §5.3) | **RESUELTA** — capacidad nueva `emitir_cupones` |
 | `/api/cotizaciones/stats/` (§3.5) | **RESUELTA** — se filtra el campo, no la pantalla |
-| `/api/rentas/adeudos/fusionar/` (§3.3) | pendiente |
-| `/api/cotizaciones/<pk>/aprobar-cancelacion/` (§3.5) | pendiente |
+| `/api/rentas/adeudos/fusionar/` (§3.3) | **RESUELTA** — sube a nivel 2, igual que su gemela del padrón |
+| `/api/cotizaciones/<pk>/aprobar-cancelacion/` (§3.5) | **RESUELTA** — `ver_dinero`, la misma regla del PATCH de estado |
+
+Las cinco quedaron resueltas. Las dos últimas las contestó el dueño el
+2026-08-22 y las vigila `LasDosDudasDelInventarioTest`.
