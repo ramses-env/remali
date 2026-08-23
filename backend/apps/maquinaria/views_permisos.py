@@ -103,3 +103,30 @@ def permisos(request):
                 rol=rol, capacidad=cap, anterior=anterior, nuevo=permitido,
                 usuario=request.user, rol_usuario=quien)
     return Response(_foto())
+
+
+ETIQUETAS = {c.nombre: c.etiqueta for c in CATALOGO}
+
+
+@api_view(['GET'])
+@permission_classes([PuedeConfigurarPermisos])
+def bitacora(request):
+    """El rastro. Se lee; no se deshace desde aquí —deshacer es volver a mover
+    el interruptor, que a su vez deja su propio renglón."""
+    try:
+        # `max(1, ...)` porque un `?limite=-5` en la barra se convertiría en
+        # `filas[:-5]`: en vez de fallar, escondería los 5 renglones más viejos.
+        limite = max(1, min(int(request.query_params.get('limite', 50)), 200))
+    except (TypeError, ValueError):
+        limite = 50
+    filas = CambioPermisoRol.objects.select_related('usuario')[:limite]
+    return Response({'cambios': [{
+        'rol': f.rol,
+        'capacidad': f.capacidad,
+        'etiqueta': ETIQUETAS.get(f.capacidad, f.capacidad),
+        'anterior': f.anterior,
+        'nuevo': f.nuevo,
+        'quien': f.usuario.username if f.usuario else '',
+        'rol_quien': f.rol_usuario,
+        'cuando': f.creado_en,
+    } for f in filas]})

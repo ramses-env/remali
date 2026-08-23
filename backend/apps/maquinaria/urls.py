@@ -76,6 +76,7 @@ urlpatterns = [
     path('clientes-lookup/', views.clientes_lookup),
     path('latido/', views.latido_panel),
     path('permisos/', views_permisos.permisos),
+    path('permisos/bitacora/', views_permisos.bitacora),
     path('usuarios/', views_usuarios.usuarios),
     path('usuarios/roles/', views_usuarios.roles_disponibles),
     path('usuarios/<int:pk>/', views_usuarios.usuario_detalle),

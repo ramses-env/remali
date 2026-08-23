@@ -122,3 +122,30 @@ class GuardarPermisosTest(TestCase):
             {'rol': 'Cajero', 'capacidad': 'cotizar', 'permitido': True}]}, format='json')
         self.assertEqual(r.status_code, 403)
         self.assertEqual(PermisoRol.objects.count(), 0)
+
+
+class BitacoraTest(TestCase):
+
+    def setUp(self):
+        self.duena = _usuario('duena', sup=True)
+        definir_codigo(self.duena, '135790')
+        self.api = APIClient()
+        self.api.force_authenticate(self.duena)
+
+    def test_lista_los_cambios_del_mas_nuevo_al_mas_viejo(self):
+        self.api.post('/api/permisos/', {'codigo': '135790', 'cambios': [
+            {'rol': 'Cajero', 'capacidad': 'cotizar', 'permitido': True}]}, format='json')
+        self.api.post('/api/permisos/', {'codigo': '135790', 'cambios': [
+            {'rol': 'Técnico', 'capacidad': 'vender', 'permitido': True}]}, format='json')
+
+        r = self.api.get('/api/permisos/bitacora/')
+
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual([f['capacidad'] for f in r.data['cambios']], ['vender', 'cotizar'])
+        self.assertEqual(r.data['cambios'][0]['quien'], 'duena')
+        self.assertEqual(r.data['cambios'][0]['etiqueta'], 'Vender')
+
+    def test_un_gestor_no_la_lee(self):
+        api = APIClient()
+        api.force_authenticate(_usuario('gestor', 'Gestor'))
+        self.assertEqual(api.get('/api/permisos/bitacora/').status_code, 403)
