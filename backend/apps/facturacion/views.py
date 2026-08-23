@@ -174,6 +174,46 @@ def subir_factura(request, pk: int):
     )
 
 
+def _factura_visible(user, pk):
+    """La factura si este usuario puede verla; None si no.
+
+    Se devuelve 404 y no 403 cuando no le toca: un 403 confirmaría que esa
+    factura existe, y el id es un número consecutivo que cualquiera puede probar.
+    """
+    from maquinaria.permissions import nivel_de, NIVEL_ADMIN
+    from .models import Factura
+
+    f = (Factura.objects
+         .select_related('solicitud__venta', 'solicitud__renta')
+         .filter(pk=pk)
+         .first())
+    if f is None:
+        return None
+    if nivel_de(user) >= NIVEL_ADMIN:
+        return f
+    venta = f.solicitud.venta
+    renta = f.solicitud.renta
+    dueno = (venta.cliente_usuario_id if venta else None) or (renta.usuario_id if renta else None)
+    return f if (dueno and dueno == user.id) else None
+
+
+@api_view(['GET'])
+@permission_classes([permissions.IsAuthenticated])
+def descargar_xml(request, pk: int):
+    """Baja el CFDI tal como entró: el archivo que vale ante el SAT es este.
+
+    No se regenera desde las columnas ni se reformatea: cualquier byte distinto
+    invalida el sello del XML.
+    """
+    f = _factura_visible(request.user, pk)
+    if f is None:
+        return Response({'detalle': 'Factura no encontrada'}, status=404)
+    nombre = f'{f.serie}{f.folio}-{f.uuid[:8]}.xml' if (f.serie or f.folio) else f'{f.uuid}.xml'
+    resp = HttpResponse(f.xml, content_type='application/xml; charset=utf-8')
+    resp['Content-Disposition'] = f'attachment; filename="{nombre}"'
+    return resp
+
+
 @api_view(['GET'])
 @permission_classes([IsAdminGroupOrStaff])
 def exportar_csv(request):
