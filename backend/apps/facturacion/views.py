@@ -3,6 +3,7 @@ import csv
 from django.db.models import Q, Sum
 from django.http import HttpResponse
 from django.utils import timezone
+from rest_framework import permissions
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 
@@ -15,7 +16,9 @@ CAMPOS_EDITABLES = ['rfc', 'razon_social', 'codigo_postal', 'regimen_fiscal', 'u
 
 
 def _qs(params):
-    qs = SolicitudFactura.objects.all().select_related('cliente', 'venta', 'renta')
+    qs = (SolicitudFactura.objects.all()
+          .select_related('cliente', 'venta', 'renta')
+          .prefetch_related('facturas__subida_por'))
     estado = (params.get('estado') or '').strip().lower()
     if estado in ('pendiente', 'facturada', 'cancelada'):
         qs = qs.filter(estado=estado)
@@ -114,6 +117,61 @@ def reabrir_solicitud(request, pk: int):
     sol.fecha_timbrado = None
     sol.save()
     return Response(SolicitudFacturaSerializer(sol).data)
+
+
+@api_view(['POST'])
+@permission_classes([IsAdminGroupOrStaff])
+def subir_factura(request, pk: int):
+    """Recibe el XML timbrado en la app externa y lo liga a su solicitud.
+
+    Todo o nada: o queda la factura completa con la solicitud marcada, o no
+    queda nada. Una solicitud a medio marcar sería peor que no haber subido.
+    """
+    from django.db import transaction
+    from maquinaria.models import ConfiguracionSitio
+    from .cfdi import CFDIInvalido, leer_cfdi
+    from .models import Factura
+    from .serializers import FacturaSerializer
+    from .validacion import DescuadreCFDI, revisar_cfdi
+
+    try:
+        sol = SolicitudFactura.objects.get(pk=pk)
+    except SolicitudFactura.DoesNotExist:
+        return Response({'detalle': 'Solicitud no encontrada'}, status=404)
+
+    archivo = request.FILES.get('xml')
+    if not archivo:
+        return Response({'detalle': 'Adjunta el archivo XML del CFDI.'}, status=400)
+    if archivo.size > 2 * 1024 * 1024:
+        return Response({'detalle': 'Ese archivo es demasiado grande para ser un CFDI.'}, status=400)
+
+    texto = archivo.read().decode('utf-8', errors='replace')
+    try:
+        datos = leer_cfdi(texto)
+    except CFDIInvalido as e:
+        return Response({'detalle': str(e)}, status=400)
+
+    cfg = ConfiguracionSitio.objects.first()
+    try:
+        avisos = revisar_cfdi(datos, sol, rfc_negocio=(cfg.negocio_rfc if cfg else ''))
+    except DescuadreCFDI as e:
+        return Response({'detalle': str(e)}, status=400)
+
+    campos = {k: v for k, v in datos.items() if k not in ('conceptos', 'version')}
+    with transaction.atomic():
+        factura = Factura.objects.create(
+            solicitud=sol, xml=texto, subida_por=request.user, **campos
+        )
+        sol.estado = 'facturada'
+        sol.uuid = factura.uuid
+        sol.fecha_timbrado = timezone.now()
+        sol.save(update_fields=['estado', 'uuid', 'fecha_timbrado', 'actualizada'])
+
+    return Response(
+        {'detalle': 'Factura registrada', 'avisos': avisos,
+         'factura': FacturaSerializer(factura).data},
+        status=201,
+    )
 
 
 @api_view(['GET'])

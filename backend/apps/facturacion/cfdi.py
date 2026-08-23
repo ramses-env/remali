@@ -34,7 +34,10 @@ def leer_cfdi(texto):
     try:
         raiz = fromstring(texto.encode('utf-8'))
     except (ParseError, ValueError) as e:
-        raise CFDIInvalido('El archivo no es un XML que se pueda leer.') from e
+        raise CFDIInvalido(
+            'El archivo no es un XML que se pueda leer, así que no puede ser un '
+            'CFDI. ¿Subiste el PDF por error?'
+        ) from e
 
     if not raiz.tag.endswith('}Comprobante'):
         raise CFDIInvalido('El XML no es un CFDI: falta el nodo Comprobante.')
