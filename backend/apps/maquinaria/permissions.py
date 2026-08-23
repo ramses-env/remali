@@ -427,6 +427,13 @@ class PuedeVerDinero(ExigeCapacidad):
     message = 'No tienes acceso a las cuentas del negocio.'
 
 
+class PuedeConfigurarPermisos(ExigeCapacidad):
+    """La pantalla de permisos. Solo el Dueño: `configurar_permisos` es del
+    núcleo y su nivel mínimo es NIVEL_DUENO, así que ningún override la abre."""
+    capacidad = 'configurar_permisos'
+    message = 'Solo el dueño configura los permisos.'
+
+
 class PuedeUsarCaja(permissions.BasePermission):
     """La caja (POS de refacciones). No es un nivel: el cajero la usa aunque
     comparta número con el técnico, y el técnico de campo no, aunque lo comparta

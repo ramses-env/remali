@@ -1,6 +1,6 @@
 from django.urls import path
 
-from . import views, views_usuarios
+from . import views, views_permisos, views_usuarios
 
 urlpatterns = [
     # Equipos (catálogo)
@@ -75,6 +75,7 @@ urlpatterns = [
     # Búsqueda de cuentas de cliente (para vincular una renta a su panel)
     path('clientes-lookup/', views.clientes_lookup),
     path('latido/', views.latido_panel),
+    path('permisos/', views_permisos.permisos),
     path('usuarios/', views_usuarios.usuarios),
     path('usuarios/roles/', views_usuarios.roles_disponibles),
     path('usuarios/<int:pk>/', views_usuarios.usuario_detalle),
@@ -93,4 +94,5 @@ urlpatterns = [
 
     # Dashboard
     path('dashboard/metricas/', views.dashboard_metrics),
+    path('dashboard/conteos/', views.dashboard_conteos),
 ]
