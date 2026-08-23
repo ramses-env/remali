@@ -14,7 +14,12 @@ from reportlab.lib.units import mm
 from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.pdfgen import canvas
 
-from server.documentos import dibujar_logo, lector_imagen
+from server.documentos import fuentes, dibujar_logo, lector_imagen
+
+# La letra de la casa. Se resuelve al importar (una vez por proceso) y cae sola a
+# Helvetica si faltara un .ttf: un documento sin la tipografía de la marca sigue
+# siendo legible; uno que revienta al generarse, no.
+TEXTO, MEDIA, FUERTE, ITALICA = fuentes()
 
 GRIS = colors.HexColor('#6B7280')
 TINTA = colors.HexColor('#111827')
@@ -65,16 +70,16 @@ def _dibujar_datos_bancarios(c, cfg, ancho, alto, m, y, acento):
     if not banco:
         return y
 
-    lineas = _wrap(banco, 'Helvetica', 9, ancho - 2 * m)
+    lineas = _wrap(banco, TEXTO, 9, ancho - 2 * m)
     if y - (5 * mm + len(lineas) * 4.4 * mm) < m + 26 * mm:    # no encimar con el pie
         c.showPage()
         y = alto - m
 
     y -= 3 * mm
-    c.setFillColor(acento); c.setFont('Helvetica-Bold', 8)
+    c.setFillColor(acento); c.setFont(FUERTE, 8)
     c.drawString(m, y, 'DATOS BANCARIOS')
     y -= 5 * mm
-    c.setFillColor(TINTA); c.setFont('Helvetica', 9)
+    c.setFillColor(TINTA); c.setFont(TEXTO, 9)
     for ln in lineas:
         c.drawString(m, y, ln)
         y -= 4.4 * mm
@@ -102,17 +107,17 @@ def _dibujar_condiciones_fina(c, cfg, tipo, ancho, alto, m, y):
         cond = (fuente or '').strip()
         if not cond:
             continue
-        lineas = _wrap(cond, 'Helvetica', 8, ancho - 2 * m)
+        lineas = _wrap(cond, TEXTO, 8, ancho - 2 * m)
         alto_bloque = (len(lineas) + (1 if titulo else 0)) * 4 * mm
         if y - alto_bloque < m + 24 * mm:
             c.showPage()
             y = alto - m
         y -= 4 * mm
         if titulo:
-            c.setFillColor(GRIS); c.setFont('Helvetica-Bold', 8)
+            c.setFillColor(GRIS); c.setFont(FUERTE, 8)
             c.drawString(m, y, titulo)
             y -= 4 * mm
-        c.setFillColor(GRIS); c.setFont('Helvetica', 8)
+        c.setFillColor(GRIS); c.setFont(TEXTO, 8)
         for ln in lineas:
             c.drawString(m, y, ln)
             y -= 4 * mm
@@ -156,7 +161,7 @@ def _dibujar_fotos(c, cot, ancho, alto, m, y, acento):
     if y - (6 * mm + cell_h) < m + RESERVA_PIE:
         y = nueva_pagina()
     c.setFillColor(acento)
-    c.setFont('Helvetica-Bold', 8)
+    c.setFont(FUERTE, 8)
     c.drawString(m, y, 'FOTOS')
     y -= 6 * mm
 
@@ -199,14 +204,14 @@ def render_cotizacion_pdf(cot) -> bytes:
     dibujar_logo(c, m, ly, lg, respaldo=acento)
 
     c.setFillColor(acento)
-    c.setFont('Helvetica-Bold', 18)
+    c.setFont(FUERTE, 18)
     c.drawString(m + lg + 4 * mm, y, cfg.negocio_nombre or 'REMALI')
-    c.setFont('Helvetica-Bold', 15)
+    c.setFont(FUERTE, 15)
     c.drawRightString(ancho - m, y, 'COTIZACIÓN')
     y -= 6 * mm
 
     c.setFillColor(GRIS)
-    c.setFont('Helvetica', 8.5)
+    c.setFont(TEXTO, 8.5)
     contacto = '   ·   '.join(x for x in (
         f'Tel. {cfg.negocio_telefono}' if cfg.negocio_telefono else '',
         cfg.negocio_email, cfg.negocio_web,
@@ -220,11 +225,11 @@ def render_cotizacion_pdf(cot) -> bytes:
             c.drawString(m, y, str(dato))
             y -= 4.2 * mm
     if (cfg.negocio_representante or '').strip():
-        c.setFillColor(TINTA); c.setFont('Helvetica-Bold', 8.5)
+        c.setFillColor(TINTA); c.setFont(FUERTE, 8.5)
         c.drawString(m, y, cfg.negocio_representante.strip())
         y -= 4.2 * mm
     c.setFillColor(acento)
-    c.setFont('Helvetica-Bold', 11)
+    c.setFont(FUERTE, 11)
     c.drawRightString(ancho - m, alto - m - 6 * mm, cot.folio or '')
 
     y -= 3 * mm
@@ -235,7 +240,7 @@ def render_cotizacion_pdf(cot) -> bytes:
     # ── Cliente y datos ──
     col2 = ancho / 2 + 5 * mm
     y_ini = y
-    c.setFillColor(acento); c.setFont('Helvetica-Bold', 8)
+    c.setFillColor(acento); c.setFont(FUERTE, 8)
     c.drawString(m, y, 'CLIENTE')
     c.drawString(col2, y, 'DATOS')
     y -= 5 * mm
@@ -255,11 +260,11 @@ def render_cotizacion_pdf(cot) -> bytes:
         ('Precios con IVA incluido' if cot.tipo == 'venta'
          else ('Precios más IVA (16%)' if cot.aplica_iva else 'Precios sin IVA')),
     ]
-    c.setFont('Helvetica', 9)
+    c.setFont(TEXTO, 9)
     yi = y
     for linea in [x for x in izquierda if x]:
         c.setFillColor(TINTA)
-        c.drawString(m, yi, _recortar(c, linea, 'Helvetica', 9, ancho / 2 - m - 8 * mm))
+        c.drawString(m, yi, _recortar(c, linea, TEXTO, 9, ancho / 2 - m - 8 * mm))
         yi -= 4.3 * mm
     yd = y
     for linea in derecha:
@@ -270,7 +275,7 @@ def render_cotizacion_pdf(cot) -> bytes:
     del y_ini
 
     # ── Partidas ──
-    c.setFillColor(acento); c.setFont('Helvetica-Bold', 8)
+    c.setFillColor(acento); c.setFont(FUERTE, 8)
     c.drawString(m, y, 'CONCEPTOS')
     y -= 5 * mm
 
@@ -278,7 +283,7 @@ def render_cotizacion_pdf(cot) -> bytes:
     # ellas: un importe de 6 cifras mide ~18 mm y si no, se encima con la cantidad.
     x_desc, x_mod = m, m + 85 * mm
     x_cant, x_pu, x_imp = m + 122 * mm, m + 150 * mm, ancho - m
-    c.setFillColor(GRIS); c.setFont('Helvetica-Bold', 7.5)
+    c.setFillColor(GRIS); c.setFont(FUERTE, 7.5)
     c.drawString(x_desc, y, 'DESCRIPCIÓN')
     c.drawString(x_mod, y, 'MODALIDAD')
     c.drawRightString(x_cant, y, 'CANT.')
@@ -288,16 +293,16 @@ def render_cotizacion_pdf(cot) -> bytes:
     c.setStrokeColor(LINEA); c.line(m, y, ancho - m, y)
     y -= 5 * mm
 
-    c.setFont('Helvetica', 9)
+    c.setFont(TEXTO, 9)
     for it in cot.items.all():
         if y < 55 * mm:                      # no escribir encima de los totales
             c.showPage()
             y = alto - m
-            c.setFont('Helvetica', 9)
+            c.setFont(TEXTO, 9)
         c.setFillColor(TINTA)
-        c.drawString(x_desc, y, _recortar(c, it.descripcion, 'Helvetica', 9, 82 * mm))
+        c.drawString(x_desc, y, _recortar(c, it.descripcion, TEXTO, 9, 82 * mm))
         c.setFillColor(GRIS)
-        c.drawString(x_mod, y, _recortar(c, it.modalidad_label, 'Helvetica', 9, 30 * mm))
+        c.drawString(x_mod, y, _recortar(c, it.modalidad_label, TEXTO, 9, 30 * mm))
         c.setFillColor(TINTA)
         # En renta la cantidad se lee "máquinas×periodos" (2×4) para que el
         # importe (precio × máquinas × periodos) cuadre a la vista.
@@ -316,7 +321,7 @@ def render_cotizacion_pdf(cot) -> bytes:
     # ── Totales ──
     def total(label, valor, fuerte=False):
         nonlocal y
-        c.setFont('Helvetica-Bold' if fuerte else 'Helvetica', 11 if fuerte else 9)
+        c.setFont(FUERTE if fuerte else TEXTO, 11 if fuerte else 9)
         c.setFillColor(TINTA if fuerte else GRIS)
         c.drawRightString(ancho - m - 32 * mm, y, label)
         c.setFillColor(TINTA)
@@ -348,12 +353,12 @@ def render_cotizacion_pdf(cot) -> bytes:
     # ── Despedida ──
     cierre = (cfg.cotizacion_cierre or '').strip()
     if cierre:
-        lineas = _wrap(cierre, 'Helvetica-Oblique', 9, ancho - 2 * m)
+        lineas = _wrap(cierre, ITALICA, 9, ancho - 2 * m)
         if y - (len(lineas) * 4.6 * mm + 4 * mm) < m + 26 * mm:
             c.showPage()
             y = alto - m
         y -= 4 * mm
-        c.setFillColor(TINTA); c.setFont('Helvetica-Oblique', 9)
+        c.setFillColor(TINTA); c.setFont(ITALICA, 9)
         for ln in lineas:
             c.drawString(m, y, ln)
             y -= 4.6 * mm
@@ -362,7 +367,7 @@ def render_cotizacion_pdf(cot) -> bytes:
     y = _dibujar_condiciones_fina(c, cfg, cot.tipo, ancho, alto, m, y)
 
     # ── Pie ──
-    c.setFillColor(GRIS); c.setFont('Helvetica', 8)
+    c.setFillColor(GRIS); c.setFont(TEXTO, 8)
     pie = [
         'Esta cotización es informativa y no aparta el equipo; la disponibilidad se confirma al reservar.',
         f'Dudas: {cfg.negocio_telefono or cfg.whatsapp_principal or ""}'.strip(),

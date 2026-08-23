@@ -12,7 +12,12 @@ from reportlab.lib.units import mm
 from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.pdfgen import canvas
 
-from server.documentos import dibujar_logo
+from server.documentos import fuentes, dibujar_logo
+
+# La letra de la casa. Se resuelve al importar (una vez por proceso) y cae sola a
+# Helvetica si faltara un .ttf: un documento sin la tipografía de la marca sigue
+# siendo legible; uno que revienta al generarse, no.
+TEXTO, MEDIA, FUERTE, ITALICA = fuentes()
 
 TINTA = colors.HexColor('#111827')
 GRIS = colors.HexColor('#6B7280')
@@ -63,13 +68,13 @@ def _bloque(c, titulo, texto, ancho, alto, m, y):
     cuerpo = (texto or '').strip()
     if not cuerpo:
         return y
-    lineas = _wrap(cuerpo, 'Helvetica', 9.5, ancho - 2 * m)
+    lineas = _wrap(cuerpo, TEXTO, 9.5, ancho - 2 * m)
     if y - (6 * mm + len(lineas) * 4.6 * mm) < m + 24 * mm:
         c.showPage(); y = alto - m
-    c.setFillColor(ACENTO); c.setFont('Helvetica-Bold', 8)
+    c.setFillColor(ACENTO); c.setFont(FUERTE, 8)
     c.drawString(m, y, titulo)
     y -= 5 * mm
-    c.setFillColor(TINTA); c.setFont('Helvetica', 9.5)
+    c.setFillColor(TINTA); c.setFont(TEXTO, 9.5)
     for ln in lineas:
         c.drawString(m, y, ln)
         y -= 4.6 * mm
@@ -92,16 +97,16 @@ def render_orden_reparacion_pdf(orden) -> bytes:
     ly = y - 3.5 * mm
     dibujar_logo(c, m, ly, lg, respaldo=ACENTO)
 
-    c.setFillColor(ACENTO); c.setFont('Helvetica-Bold', 18)
+    c.setFillColor(ACENTO); c.setFont(FUERTE, 18)
     c.drawString(m + lg + 4 * mm, y, cfg.negocio_nombre or 'REMALI')
-    c.setFillColor(TINTA); c.setFont('Helvetica-Bold', 14)
+    c.setFillColor(TINTA); c.setFont(FUERTE, 14)
     c.drawRightString(ancho - m, y, 'ORDEN DE REPARACIÓN')
     y -= 6 * mm
-    c.setFillColor(ACENTO); c.setFont('Helvetica-Bold', 11)
+    c.setFillColor(ACENTO); c.setFont(FUERTE, 11)
     c.drawRightString(ancho - m, y, orden.folio or '')
 
     # Contacto del negocio (izquierda)
-    c.setFillColor(GRIS); c.setFont('Helvetica', 8.5)
+    c.setFillColor(GRIS); c.setFont(TEXTO, 8.5)
     contacto = '   ·   '.join(x for x in (
         f'Tel. {cfg.negocio_telefono}' if cfg.negocio_telefono else '',
         cfg.negocio_email, cfg.negocio_web,
@@ -111,7 +116,7 @@ def render_orden_reparacion_pdf(orden) -> bytes:
             c.drawString(m, y, str(dato))
             y -= 4.2 * mm
     # Estado (derecha, a la altura del contacto)
-    c.setFillColor(GRIS); c.setFont('Helvetica', 9)
+    c.setFillColor(GRIS); c.setFont(TEXTO, 9)
     c.drawRightString(ancho - m, y + 4.2 * mm, ESTADO_LABEL.get(orden.estado, orden.estado))
 
     y -= 2 * mm
@@ -120,7 +125,7 @@ def render_orden_reparacion_pdf(orden) -> bytes:
 
     # ── Cliente y datos ──
     col2 = ancho / 2 + 5 * mm
-    c.setFillColor(ACENTO); c.setFont('Helvetica-Bold', 8)
+    c.setFillColor(ACENTO); c.setFont(FUERTE, 8)
     c.drawString(m, y, 'CLIENTE')
     c.drawString(col2, y, 'EQUIPO')
     y -= 5 * mm
@@ -131,7 +136,7 @@ def render_orden_reparacion_pdf(orden) -> bytes:
         f'Recibido: {_fecha(orden.fecha_recibida)}',
         f'Entregado: {_fecha(orden.fecha_entrega)}' if orden.fecha_entrega else '',
     ]
-    c.setFont('Helvetica', 9)
+    c.setFont(TEXTO, 9)
     yi = y
     for ln in [x for x in izquierda if x]:
         c.setFillColor(TINTA); c.drawString(m, yi, str(ln)); yi -= 4.3 * mm
@@ -149,11 +154,11 @@ def render_orden_reparacion_pdf(orden) -> bytes:
     if items:
         if y - (10 * mm + len(items) * 5 * mm) < m + 40 * mm:
             c.showPage(); y = alto - m
-        c.setFillColor(ACENTO); c.setFont('Helvetica-Bold', 8)
+        c.setFillColor(ACENTO); c.setFont(FUERTE, 8)
         c.drawString(m, y, 'REFACCIONES Y MATERIALES')
         y -= 5 * mm
         x_cant, x_pu, x_imp = m + 118 * mm, m + 150 * mm, ancho - m
-        c.setFillColor(GRIS); c.setFont('Helvetica-Bold', 7.5)
+        c.setFillColor(GRIS); c.setFont(FUERTE, 7.5)
         c.drawString(m, y, 'DESCRIPCIÓN')
         c.drawRightString(x_cant, y, 'CANT.')
         c.drawRightString(x_pu, y, 'P. UNIT.')
@@ -161,14 +166,14 @@ def render_orden_reparacion_pdf(orden) -> bytes:
         y -= 2 * mm
         c.setStrokeColor(LINEA); c.line(m, y, ancho - m, y)
         y -= 5 * mm
-        c.setFont('Helvetica', 9)
+        c.setFont(TEXTO, 9)
         for it in items:
             if y < 45 * mm:
-                c.showPage(); y = alto - m; c.setFont('Helvetica', 9)
+                c.showPage(); y = alto - m; c.setFont(TEXTO, 9)
             c.setFillColor(TINTA)
             nombre = it.nombre or (it.refaccion.nombre if it.refaccion_id and it.refaccion else 'Refacción')
             # recorta el nombre para que no invada la columna de cantidad
-            while nombre and stringWidth(nombre, 'Helvetica', 9) > 98 * mm:
+            while nombre and stringWidth(nombre, TEXTO, 9) > 98 * mm:
                 nombre = nombre[:-2]
             c.drawString(m, y, nombre)
             c.drawRightString(x_cant, y, str(it.cantidad))
@@ -185,7 +190,7 @@ def render_orden_reparacion_pdf(orden) -> bytes:
 
     def _fila(label, valor, fuerte=False):
         nonlocal y
-        c.setFont('Helvetica-Bold' if fuerte else 'Helvetica', 12 if fuerte else 9)
+        c.setFont(FUERTE if fuerte else TEXTO, 12 if fuerte else 9)
         c.setFillColor(TINTA if fuerte else GRIS)
         c.drawRightString(ancho - m - 32 * mm, y, label)
         c.setFillColor(TINTA)
@@ -201,7 +206,7 @@ def render_orden_reparacion_pdf(orden) -> bytes:
     y = _bloque(c, 'NOTAS', orden.notas, ancho, alto, m, y - 2 * mm)
 
     # ── Pie ──
-    c.setFillColor(GRIS); c.setFont('Helvetica', 8)
+    c.setFillColor(GRIS); c.setFont(TEXTO, 8)
     pie = [
         'Este documento ampara el servicio realizado a su equipo.',
         f'Dudas: {cfg.negocio_telefono or cfg.whatsapp_principal or ""}'.strip(),

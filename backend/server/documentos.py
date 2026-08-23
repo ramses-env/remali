@@ -131,3 +131,85 @@ def lector_imagen(campo):
         return ImageReader(BytesIO(datos))
     except Exception:
         return None
+
+
+def fecha_larga(dt):
+    """Fecha de documento como la lee un cliente: "22 ago 2026, 6:04 p.m.".
+
+    El "22/08/2026 18:04" de antes es correcto y frío; en un ticket que ya se
+    lee de reojo, el mes en letra quita la duda entre día y mes. Se traduce con
+    el idioma del proyecto (es-mx) y en la hora local, no en UTC.
+    """
+    from django.utils import formats, timezone
+
+    if dt is None:
+        return ''
+    if timezone.is_aware(dt):
+        dt = timezone.localtime(dt)
+    # En minúsculas: el localizador escribe "Ago" y en el ticket el mes es un
+    # dato, no un título.
+    return formats.date_format(dt, 'd M Y, g:i a').lower()
+
+# ══════════════════════════════════════════════════════════════════════
+#  TIPOGRAFÍA
+# ══════════════════════════════════════════════════════════════════════
+# Los documentos salían en Helvetica —la que reportlab trae de fábrica— mientras
+# la pantalla, la tienda y el panel usan Plus Jakarta Sans. Un cliente que ve la
+# cotización en el navegador y luego abre el PDF veía dos empresas distintas.
+#
+# Los .ttf viven en el repo (server/assets/fuentes/) y no se piden por red: un
+# PDF se genera en el servidor, y una fuente que se descarga al momento de
+# imprimir es un documento que un día sale con otra letra, o no sale.
+
+#: Nombres registrados. Se usan como cualquier fuente de reportlab.
+TEXTO = 'Jakarta'
+MEDIA = 'Jakarta-Media'          # peso 600: etiquetas y encabezados chicos
+FUERTE = 'Jakarta-Fuerte'        # peso 700: títulos y totales
+ITALICA = 'Jakarta-Italica'
+
+_ARCHIVOS = {
+    TEXTO: 'PlusJakartaSans-Regular.ttf',
+    MEDIA: 'PlusJakartaSans-SemiBold.ttf',
+    FUERTE: 'PlusJakartaSans-Bold.ttf',
+    ITALICA: 'PlusJakartaSans-Italic.ttf',
+}
+
+#: A qué caen si falta un archivo. Un documento sin la letra de la casa sigue
+#: siendo legible; uno que revienta al generarse, no.
+_RESPALDO = {
+    TEXTO: 'Helvetica', MEDIA: 'Helvetica-Bold',
+    FUERTE: 'Helvetica-Bold', ITALICA: 'Helvetica-Oblique',
+}
+
+
+@lru_cache(maxsize=1)
+def registrar_fuentes() -> dict:
+    """Registra Plus Jakarta en reportlab. Devuelve {nombre lógico: fuente real}.
+
+    Se llama una vez por proceso (lru_cache). Si un archivo falta o está roto,
+    ESA fuente cae a su Helvetica equivalente y las demás siguen: nunca se
+    tumba la generación de un documento por un problema de tipografía.
+    """
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+
+    base = Path(settings.BASE_DIR) / 'server' / 'assets' / 'fuentes'
+    resueltas = {}
+    for nombre, archivo in _ARCHIVOS.items():
+        try:
+            pdfmetrics.registerFont(TTFont(nombre, str(base / archivo)))
+            resueltas[nombre] = nombre
+        except Exception:
+            resueltas[nombre] = _RESPALDO[nombre]
+    if resueltas[TEXTO] == TEXTO:
+        # Que negritas y cursivas funcionen también cuando algo pide la familia.
+        pdfmetrics.registerFontFamily(
+            TEXTO, normal=TEXTO, bold=resueltas[FUERTE], italic=resueltas[ITALICA],
+            boldItalic=resueltas[FUERTE])
+    return resueltas
+
+
+def fuentes():
+    """(texto, media, fuerte, itálica) listas para `setFont`, ya registradas."""
+    r = registrar_fuentes()
+    return r[TEXTO], r[MEDIA], r[FUERTE], r[ITALICA]

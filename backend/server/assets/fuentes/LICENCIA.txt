@@ -1,0 +1,9 @@
+Plus Jakarta Sans — SIL Open Font License 1.1
+https://github.com/tokotype/PlusJakartaSans
+
+Los .ttf de esta carpeta se descargaron de Google Fonts y viven en el repo a
+propósito: los PDF se generan en el servidor, y una fuente que se pide por red
+al momento de imprimir es un documento que un día sale con otra tipografía —o
+no sale—. Son ~250 KB en total.
+
+Estilos: Regular (400), SemiBold (600), Bold (700), Italic (400).
