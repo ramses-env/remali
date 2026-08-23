@@ -23,6 +23,7 @@ export type Tema =
   | 'equipos' | 'unidades' | 'catalogos' | 'cupones' | 'rentas' | 'ventas'
   | 'cotizaciones' | 'refacciones' | 'reparaciones' | 'facturacion'
   | 'empresas' | 'clientes' | 'notificaciones' | 'metricas' | 'config' | 'usuarios'
+  | 'permisos'
 
 /** Primer segmento de la ruta → tema. Lo que no aparezca aquí se ignora. */
 const RUTA_A_TEMA: Record<string, Tema> = {
@@ -66,6 +67,10 @@ const ARRASTRA: Record<Tema, Tema[]> = {
   metricas: ['metricas'],
   config: ['config'],
   usuarios: ['usuarios'],
+  // Mover un permiso cambia lo que CADA panel abierto puede hacer, así que
+  // arrastra al perfil (`usuarios`): los menús y los botones se reacomodan
+  // solos, sin cerrarle la sesión a nadie.
+  permisos: ['permisos', 'usuarios'],
 }
 
 export function expandTemas(temas: Tema[]): Tema[] {

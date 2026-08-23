@@ -56,6 +56,8 @@ export type Capacidades = {
   jornada_campo: boolean
   /** Mirar el tablero de campo sin poder tocarlo (supervisión de administración). */
   ver_jornada: boolean
+  /** La pantalla de permisos. Del núcleo: solo el dueño, y no se puede regalar. */
+  configurar_permisos: boolean
 }
 
 export type Yo = {
