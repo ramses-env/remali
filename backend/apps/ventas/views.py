@@ -3,6 +3,7 @@ import datetime as _dt
 import logging
 
 from django.db import transaction
+from django.db.models import Q, Count, Sum
 from django.http import HttpResponse
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
@@ -322,6 +323,34 @@ def listar_ventas(request):
     if fin:
         qs = qs.filter(fecha__lt=fin)
 
+    # La búsqueda vive en el SERVIDOR desde que la lista se pagina. Si se dejaba
+    # en el navegador, el buscador solo miraría la página visible y una venta de
+    # hace ocho meses simplemente no aparecería: peor que no tener buscador,
+    # porque el resultado vacío se lee como "no existe".
+    q = (request.query_params.get('q') or '').strip()
+    if q:
+        qs = qs.filter(
+            Q(folio__icontains=q) | Q(nombre_cliente__icontains=q)
+            | Q(cliente__nombre__icontains=q) | Q(inventario__codigo__icontains=q)
+            | Q(inventario__equipo__modelo__icontains=q)
+        ).distinct()
+
+    # Paginación. El tope de 200 de antes se cambió por "el año en curso", que
+    # ya no miente pero tampoco acota: un año movido son miles de filas, cada
+    # una con sus máquinas y sus solicitudes de factura precargadas.
+    total = qs.count()
+    try:
+        pagina = max(1, int(request.query_params.get('page') or 1))
+    except (TypeError, ValueError):
+        pagina = 1
+    try:
+        tam = min(200, max(1, int(request.query_params.get('page_size') or 50)))
+    except (TypeError, ValueError):
+        tam = 50
+    paginas = max(1, -(-total // tam))
+    pagina = min(pagina, paginas)
+    qs = qs[(pagina - 1) * tam: pagina * tam]
+
     data = []
     for v in qs:
         inv = v.inventario
@@ -372,7 +401,64 @@ def listar_ventas(request):
             'equipo': ((inv.equipo.modelo if inv and inv.equipo else None)
                        or (v.equipo.modelo if v.equipo_id else None)),
         })
-    return Response({'ventas': data, 'total': len(data)})
+    return Response({
+        'ventas': data,
+        # `total` ya no es "cuántas te mandé" sino cuántas hay en el periodo:
+        # con la lista paginada, lo primero no le sirve a nadie.
+        'total': total,
+        'pagina': pagina, 'paginas': paginas, 'page_size': tam,
+    })
+
+
+@api_view(['GET'])
+@permission_classes([PuedeVerOperacion])
+def ventas_stats(request):
+    """Los KPIs de la sección, calculados en la BD y no en el navegador.
+
+    Con la lista paginada el navegador ya no tiene todas las filas para sumar,
+    y sumar la página visible daría un "Monto total" que cambia al pasar de
+    página sin que nadie entienda por qué.
+
+    Dos cosas que aquí cambian respecto a lo que se mostraba antes:
+
+    1. **Las canceladas no cuentan como dinero.** El panel las venía sumando en
+       el monto y en el ticket promedio. Una venta cancelada no es ingreso: es
+       la misma regla que ya siguen la caja y el Resumen. Sí se cuentan en el
+       número de ventas del periodo, porque ahí sí ocurrieron.
+    2. **El dinero se OMITE si la cuenta no lo puede ver**, no se manda en cero.
+       Un cero es un dato, y el panel lo pintaría como "$0.00 vendido", que es
+       falso. Mismo criterio que los stats de cotizaciones.
+    """
+    from decimal import Decimal
+
+    from server.periodos import rango_periodo, anio_actual
+
+    base = Venta.objects.all()
+    if (request.query_params.get('maquinaria') or '') in ('1', 'true', 'True'):
+        base = base.filter(inventario__isnull=False)
+    ini, fin = rango_periodo(request.query_params)
+    if ini is None and fin is None:
+        ini, fin = rango_periodo({'anio': str(anio_actual())})
+    if ini:
+        base = base.filter(fecha__gte=ini)
+    if fin:
+        base = base.filter(fecha__lt=fin)
+
+    por_estado = dict(base.values_list('estado').annotate(n=Count('id')))
+    datos = {
+        'total': base.count(),
+        'activas': por_estado.get('activa', 0),
+        'apartadas': por_estado.get('apartada', 0),
+        'canceladas': por_estado.get('cancelada', 0),
+        'maquinaria': base.filter(inventario__isnull=False).count(),
+    }
+    if puede_de(request.user).get('ver_dinero'):
+        cuentan = base.exclude(estado='cancelada')
+        n = cuentan.count()
+        vendido = cuentan.aggregate(s=Sum('total'))['s'] or Decimal('0.00')
+        datos['total_vendido'] = str(vendido)
+        datos['ticket'] = str((vendido / n).quantize(Decimal('0.01'))) if n else '0.00'
+    return Response(datos)
 
 
 @api_view(['GET'])

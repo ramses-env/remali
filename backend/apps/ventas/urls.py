@@ -4,6 +4,7 @@ from . import caja_views
 
 urlpatterns = [
     path('ventas/lista/', views.listar_ventas, name='ventas-lista'),
+    path('ventas/stats/', views.ventas_stats),
     path('ventas/export/', views.exportar_ventas_csv, name='ventas-export'),
     path('ventas/mias/', views.ventas_mias, name='ventas-mias'),
     # Pedidos y apartados (ventas con anticipo)
