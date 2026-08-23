@@ -231,3 +231,45 @@ class ElCorteDeCajaSeImponeTest(TestCase):
         PermisoRol.objects.create(rol='Cajero', capacidad='corte_caja', permitido=False)
         self.assertEqual(
             self.api.post('/api/caja/sesiones/999/cerrar/', {}, format='json').status_code, 403)
+
+
+class LaFacturacionSeImponeTest(TestCase):
+    """`facturar`: la bandeja de por facturar, de punta a punta.
+
+    Las dos puertas de entrada a la bandeja no se ponían de acuerdo: mandar una
+    VENTA a facturar pedía nivel de administración y mandar una RENTA pedía nivel
+    de técnico, de modo que el técnico de campo llenaba la bandeja del contador
+    sin tener la sección. Ahora las dos —y las siete de la bandeja— piden la
+    misma capacidad.
+    """
+
+    def setUp(self):
+        self.admin = User.objects.create_user('adm3', 'adm3@x.com', 'pass12345')
+        self.admin.groups.add(Group.objects.get_or_create(name='Administrador')[0])
+        self.tecnico = User.objects.create_user('tec3', 'tec3@x.com', 'pass12345')
+        self.tecnico.groups.add(Group.objects.get_or_create(name='Técnico')[0])
+        self.api_adm = APIClient(); self.api_adm.force_authenticate(self.admin)
+        self.api_tec = APIClient(); self.api_tec.force_authenticate(self.tecnico)
+
+    def test_administracion_atiende_la_bandeja(self):
+        self.assertEqual(self.api_adm.get('/api/facturacion/solicitudes/').status_code, 200)
+        self.assertEqual(self.api_adm.get('/api/facturacion/resumen/').status_code, 200)
+
+    def test_apagarsela_a_administracion_cierra_la_bandeja(self):
+        PermisoRol.objects.create(rol='Administrador', capacidad='facturar', permitido=False)
+        self.assertEqual(self.api_adm.get('/api/facturacion/solicitudes/').status_code, 403)
+        self.assertEqual(self.api_adm.get('/api/facturacion/export/').status_code, 403)
+
+    def test_el_tecnico_ya_no_manda_rentas_a_facturar(self):
+        """Era la inconsistencia: la gemela de ventas siempre pidió nivel 2."""
+        self.assertEqual(
+            self.api_tec.post('/api/rentas/999/por-facturar/', {}, format='json').status_code, 403)
+        self.assertEqual(
+            self.api_tec.post('/api/ventas/999/por-facturar/', {}, format='json').status_code, 403)
+
+    def test_y_administracion_si_las_manda(self):
+        """Al admin lo para el registro que no existe (404): el permiso lo dejó pasar."""
+        self.assertEqual(
+            self.api_adm.post('/api/rentas/999/por-facturar/', {}, format='json').status_code, 404)
+        self.assertEqual(
+            self.api_adm.post('/api/ventas/999/por-facturar/', {}, format='json').status_code, 404)

@@ -7,7 +7,7 @@ from rest_framework import permissions
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 
-from maquinaria.permissions import IsAdminGroupOrStaff
+from maquinaria.permissions import PuedeFacturar
 from .models import SolicitudFactura
 from .serializers import SolicitudFacturaSerializer
 
@@ -29,14 +29,14 @@ def _qs(params):
 
 
 @api_view(['GET'])
-@permission_classes([IsAdminGroupOrStaff])
+@permission_classes([PuedeFacturar])
 def listar_solicitudes(request):
     data = SolicitudFacturaSerializer(_qs(request.query_params), many=True).data
     return Response(data)
 
 
 @api_view(['GET'])
-@permission_classes([IsAdminGroupOrStaff])
+@permission_classes([PuedeFacturar])
 def resumen(request):
     base = SolicitudFactura.objects.all()
     pend = base.filter(estado='pendiente')
@@ -50,7 +50,7 @@ def resumen(request):
 
 
 @api_view(['PATCH'])
-@permission_classes([IsAdminGroupOrStaff])
+@permission_classes([PuedeFacturar])
 def actualizar_solicitud(request, pk: int):
     """Completa/corrige los datos fiscales de una solicitud pendiente."""
     try:
@@ -73,7 +73,7 @@ def actualizar_solicitud(request, pk: int):
 
 
 @api_view(['POST'])
-@permission_classes([IsAdminGroupOrStaff])
+@permission_classes([PuedeFacturar])
 def reabrir_solicitud(request, pk: int):
     """Regresa una solicitud a pendiente (si se timbró por error)."""
     try:
@@ -93,7 +93,7 @@ def reabrir_solicitud(request, pk: int):
 
 
 @api_view(['POST'])
-@permission_classes([IsAdminGroupOrStaff])
+@permission_classes([PuedeFacturar])
 def subir_factura(request, pk: int):
     """Recibe el XML timbrado en la app externa y lo liga a su solicitud.
 
@@ -243,7 +243,7 @@ def facturas_mias(request):
 
 
 @api_view(['POST'])
-@permission_classes([IsAdminGroupOrStaff])
+@permission_classes([PuedeFacturar])
 def cancelar_factura(request, pk: int):
     """Registra que el CFDI se canceló ANTE EL SAT. REMALI no cancela nada allá.
 
@@ -285,7 +285,7 @@ def cancelar_factura(request, pk: int):
 
 
 @api_view(['POST'])
-@permission_classes([IsAdminGroupOrStaff])
+@permission_classes([PuedeFacturar])
 def reenviar_factura(request, pk: int):
     """Vuelve a mandar la factura por correo.
 
@@ -314,7 +314,7 @@ def reenviar_factura(request, pk: int):
 
 
 @api_view(['GET'])
-@permission_classes([IsAdminGroupOrStaff])
+@permission_classes([PuedeFacturar])
 def exportar_csv(request):
     """Exporta la bandeja (respeta filtros ?estado=&q=) para el PAC / contador."""
     resp = HttpResponse(content_type='text/csv; charset=utf-8')

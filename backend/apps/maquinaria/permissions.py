@@ -502,6 +502,17 @@ class PuedeCotizar(ExigeCapacidad):
     message = 'No puedes gestionar cotizaciones.'
 
 
+class PuedeFacturar(ExigeCapacidad):
+    """La bandeja de por facturar y lo que entra a ella.
+
+    Las dos puertas de la bandeja pedían cosas distintas sin razón: mandar una
+    VENTA a facturar era de administración y mandar una RENTA le bastaba al
+    técnico de campo, que ni siquiera tiene la sección donde ver el resultado.
+    """
+    capacidad = 'facturar'
+    message = 'No tienes acceso a la facturación.'
+
+
 class PuedeOperarJornada(ExigeCapacidad):
     """El ciclo de campo de una renta que ya existe: entregar, recoger, evidencias.
 

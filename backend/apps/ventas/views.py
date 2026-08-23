@@ -9,7 +9,8 @@ from rest_framework.response import Response
 from rest_framework import permissions
 
 from maquinaria.permissions import (
-    IsAdminGroupOrStaff, EsOperador, PuedeHacerCorteCaja, PuedeUsarCaja, puede_de,
+    IsAdminGroupOrStaff, EsOperador, PuedeFacturar, PuedeHacerCorteCaja,
+    PuedeUsarCaja, puede_de,
 )
 from .models import Venta, ItemVenta, SesionCaja, MovimientoCaja
 
@@ -951,7 +952,7 @@ def cancelar_venta(request, pk: int):
 
 
 @api_view(['POST'])
-@permission_classes([IsAdminGroupOrStaff])
+@permission_classes([PuedeFacturar])
 def mandar_por_facturar_venta(request, pk: int):
     """Manda una venta YA registrada a la bandeja "Por facturar".
 

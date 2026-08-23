@@ -16,7 +16,8 @@ from rest_framework import permissions
 from rest_framework.decorators import throttle_classes
 
 from maquinaria.permissions import (
-    IsAdminGroupOrStaff, EsOperador, PuedeOperarJornada, nivel_de, NIVEL_ADMIN,
+    IsAdminGroupOrStaff, EsOperador, PuedeFacturar, PuedeOperarJornada,
+    nivel_de, NIVEL_ADMIN,
 )
 from maquinaria.throttling import SubidaEvidenciaThrottle
 from . import evidencia as ev
@@ -372,7 +373,7 @@ def rentas_adeudos(request):
 
 
 @api_view(['POST'])
-@permission_classes([EsOperador])
+@permission_classes([PuedeFacturar])
 def mandar_por_facturar_renta(request, pk):
     """Manda una renta YA registrada a la bandeja "Por facturar".
 
