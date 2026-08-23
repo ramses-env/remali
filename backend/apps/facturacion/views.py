@@ -140,6 +140,17 @@ def subir_factura(request, pk: int):
         sol.fecha_timbrado = timezone.now()
         sol.save(update_fields=['estado', 'uuid', 'fecha_timbrado', 'actualizada'])
 
+    # El correo sale FUERA del atómico, ya con la factura confirmada en la base:
+    # el envío corre en otro hilo, y desde ahí una transacción sin commitear
+    # todavía no existe — el callback intentaría marcar una factura invisible.
+    # Y si el correo falla, la factura ya quedó: subirla no se deshace por eso.
+    from .envio import enviar_factura
+    try:
+        enviar_factura(factura)
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception('Falló el arranque del envío de la factura %s', factura.uuid)
+
     return Response(
         {'detalle': 'Factura registrada', 'avisos': avisos,
          'factura': FacturaSerializer(factura).data},
@@ -209,6 +220,28 @@ def descargar_pdf(request, pk: int):
     return resp
 
 
+@api_view(['GET'])
+@permission_classes([permissions.IsAuthenticated])
+def facturas_mias(request):
+    """Las facturas del cliente que las pide, para "Mis facturas".
+
+    Solo las de SUS ventas y rentas. El filtro va por la cuenta ligada a la
+    operación, no por el RFC: dos personas pueden facturar al mismo RFC de una
+    empresa y no por eso ven las compras la una de la otra.
+    """
+    from django.db.models import Q
+
+    from .models import Factura
+    from .serializers import FacturaSerializer
+
+    qs = (Factura.objects
+          .filter(Q(solicitud__venta__cliente_usuario=request.user)
+                  | Q(solicitud__renta__usuario=request.user))
+          .select_related('solicitud', 'solicitud__venta', 'solicitud__renta')
+          .order_by('-subida_en')[:200])
+    return Response({'facturas': FacturaSerializer(qs, many=True).data})
+
+
 @api_view(['POST'])
 @permission_classes([IsAdminGroupOrStaff])
 def cancelar_factura(request, pk: int):
@@ -248,6 +281,35 @@ def cancelar_factura(request, pk: int):
         sol.save(update_fields=['uuid', 'fecha_timbrado', 'estado', 'actualizada'])
 
     return Response({'detalle': 'Factura marcada como cancelada',
+                     'factura': FacturaSerializer(f).data})
+
+
+@api_view(['POST'])
+@permission_classes([IsAdminGroupOrStaff])
+def reenviar_factura(request, pk: int):
+    """Vuelve a mandar la factura por correo.
+
+    Es la salida para los dos casos que deja el envío automático: la que quedó
+    'pendiente' porque la solicitud no traía correo (se captura y se reenvía) y
+    la que quedó en 'fallo'. Se permite también sobre una ya enviada: que el
+    cliente diga "no me llegó" es más común que cualquier fallo técnico.
+    """
+    from .envio import enviar_factura
+    from .models import Factura
+    from .serializers import FacturaSerializer
+
+    f = Factura.objects.select_related('solicitud').filter(pk=pk).first()
+    if f is None:
+        return Response({'detalle': 'Factura no encontrada'}, status=404)
+    if not (f.solicitud.email or '').strip():
+        return Response(
+            {'detalle': 'Esta solicitud no tiene correo. Captúralo en los datos '
+                        'fiscales y vuelve a intentar el envío.'},
+            status=400,
+        )
+
+    enviar_factura(f)
+    return Response({'detalle': 'La factura va en camino a ' + f.solicitud.email,
                      'factura': FacturaSerializer(f).data})
 
 

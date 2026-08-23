@@ -6,11 +6,17 @@ from .models import Factura, SolicitudFactura
 class FacturaSerializer(serializers.ModelSerializer):
     """Sin el XML: pesa y no se usa para pintar. Se baja por su propia ruta."""
     subida_por_nombre = serializers.SerializerMethodField()
+    # De dónde salió. En el panel evita abrir la solicitud para saberlo, y en
+    # "Mis facturas" es lo único que le dice al cliente de qué es esta factura:
+    # un UUID no le dice nada a nadie.
+    folio_origen = serializers.SerializerMethodField()
+    concepto = serializers.SerializerMethodField()
 
     class Meta:
         model = Factura
         fields = [
             'id', 'uuid', 'serie', 'folio', 'estado',
+            'folio_origen', 'concepto',
             'rfc_receptor', 'nombre_receptor',
             'subtotal', 'iva', 'total', 'moneda',
             'fecha_emision', 'fecha_certificacion',
@@ -22,6 +28,12 @@ class FacturaSerializer(serializers.ModelSerializer):
     def get_subida_por_nombre(self, obj):
         u = obj.subida_por
         return (u.get_full_name() or u.username) if u else ''
+
+    def get_folio_origen(self, obj):
+        return obj.solicitud.folio_origen
+
+    def get_concepto(self, obj):
+        return obj.solicitud.concepto
 
 
 class SolicitudFacturaSerializer(serializers.ModelSerializer):

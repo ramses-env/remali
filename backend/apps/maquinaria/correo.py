@@ -55,39 +55,58 @@ def _enviar_api_brevo(asunto, cuerpo, destinatarios, adjuntos):
         return False
 
 
-def _enviar(asunto, cuerpo, destinatarios, adjuntos):
+def _enviar(asunto, cuerpo, destinatarios, adjuntos, al_terminar=None):
     import time
     t0 = time.monotonic()
+    ok = False
     try:
         if _enviar_api_brevo(asunto, cuerpo, destinatarios, adjuntos):
             log.info('Correo "%s" aceptado por Brevo API en %.1fs', asunto, time.monotonic() - t0)
+            ok = True
             return
         msg = EmailMessage(asunto, cuerpo, settings.DEFAULT_FROM_EMAIL, destinatarios)
         for nombre, contenido, tipo in adjuntos:
             msg.attach(nombre, contenido, tipo)
         msg.send(fail_silently=False)
         log.info('Correo "%s" aceptado por SMTP en %.1fs', asunto, time.monotonic() - t0)
+        ok = True
     except Exception:
         log.exception('No se pudo enviar el correo "%s" a %s', asunto, destinatarios)
     finally:
+        # El resultado se avisa ANTES de cerrar conexiones: el callback suele
+        # escribirlo en la base (por eso existe, para que un correo caído no
+        # viva solo en el log) y necesita la conexión de este hilo viva.
+        if al_terminar is not None:
+            try:
+                al_terminar(ok)
+            except Exception:
+                # Un callback roto no puede tumbar el hilo del correo: el correo
+                # ya salió (o ya falló) y eso no cambia por no poder anotarlo.
+                log.exception('El aviso de resultado del correo "%s" falló', asunto)
         # El hilo abre su propia conexión a la BD si el backend de correo la usa;
         # sin esto quedarían conexiones colgadas en MySQL.
         connections.close_all()
 
 
-def enviar_async(asunto, cuerpo, destinatarios, adjuntos=None):
+def enviar_async(asunto, cuerpo, destinatarios, adjuntos=None, al_terminar=None):
     """Encola el correo en un hilo. Devuelve False solo si no hay a quién mandarlo.
 
     `adjuntos` es una lista de (nombre, contenido_bytes, content_type).
 
     Ojo: True significa "se puso en camino", no "llegó". El resultado real del
-    envío queda en el log.
+    envío queda en el log... salvo que pases `al_terminar`.
+
+    `al_terminar(ok: bool)` se ejecuta DENTRO del hilo cuando el envío termina,
+    para quien necesita que un correo caído se note sin ir a leer logs (guardar
+    un estado, avisar en el panel). Corre con la conexión a la base todavía
+    abierta y sus excepciones se tragan: nada de lo que haga puede afectar al
+    correo, que a esas alturas ya salió o ya falló.
     """
     destinatarios = [d for d in (destinatarios or []) if d]
     if not destinatarios:
         return False
     threading.Thread(
-        target=_enviar, args=(asunto, cuerpo, destinatarios, list(adjuntos or [])),
+        target=_enviar, args=(asunto, cuerpo, destinatarios, list(adjuntos or []), al_terminar),
         daemon=True, name='correo-remali',
     ).start()
     return True
