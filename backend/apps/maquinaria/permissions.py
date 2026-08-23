@@ -256,6 +256,13 @@ NUCLEO = frozenset({
     'tener_codigo_propio', 'configurar_permisos',
 })
 
+#: Capacidades que NO gatean endpoints porque no describen una acción, sino un
+#: escritorio: qué pantalla ve alguien al entrar. Lo que se hace DESDE esos
+#: escritorios (entregar, recoger, subir fotos) sí se impone por su capacidad.
+#: Cualquier agregado aquí necesita su renglón de por qué; ver
+#: docs/superpowers/notas/2026-08-22-inventario-permisos.md
+SOLO_PANTALLA = frozenset({'jornada_campo', 'ver_jornada'})
+
 #: Los roles que la pantalla configura. El Dueño no está: lo puede todo, siempre,
 #: y una casilla suya solo sería una forma de encerrarse fuera de su sistema.
 ROLES_EDITABLES = (ROL_GESTOR, ROL_ADMIN, ROL_CAJERO, ROL_TECNICO)
