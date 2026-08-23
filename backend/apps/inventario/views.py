@@ -15,7 +15,8 @@ from maquinaria.throttling import TokenPublicoThrottle
 
 from maquinaria.models import Equipo
 from maquinaria.permissions import (
-    IsAdminGroupOrStaff, EsOperador, PuedeGestionarReparaciones, PuedeReparar,
+    IsAdminGroupOrStaff, EsOperador, PuedeDarAltaInventario,
+    PuedeGestionarReparaciones, PuedeOperarInventario, PuedeReparar,
 )
 from maquinaria.views import ProtectedDestroyMixin
 from .models import Inventario, OrdenReparacion, OrdenReparacionItem
@@ -47,11 +48,12 @@ class UnidadesPorEquipo(generics.ListCreateAPIView):
       y reportaba éxito aunque fallaran unidades.
     """
     serializer_class = InventarioSerializer
+    permission_classes = [PuedeDarAltaInventario]
 
     def get_permissions(self):
-        # Dar de alta equipo aumenta el patrimonio: administración.
-        # Consultarlo lo necesita el técnico todos los días.
-        return [IsAdminGroupOrStaff()] if self.request.method == 'POST' else [EsOperador()]
+        # Dar de alta aumenta lo que la casa dice tener. Consultarlo lo necesita
+        # el técnico todos los días, y apagarle el alta no lo puede dejar ciego.
+        return super().get_permissions() if self.request.method == 'POST' else [EsOperador()]
 
     def get_queryset(self):
         return Inventario.objects.filter(
@@ -89,7 +91,7 @@ class UnidadesPorEquipo(generics.ListCreateAPIView):
 
 
 @api_view(['GET'])
-@permission_classes([IsAdminGroupOrStaff])
+@permission_classes([PuedeDarAltaInventario])   # es el paso previo del alta
 def proximo_codigo_unidad(request, equipo_id: int):
     """Devuelve el código que se asignará a la próxima unidad de este equipo,
     para mostrarlo en la confirmación ANTES de dar de alta."""
@@ -129,11 +131,17 @@ class UnidadDetail(ProtectedDestroyMixin, generics.RetrieveUpdateDestroyAPIView)
     en_uso_label_plural = 'rentas o ventas'
     queryset = Inventario.objects.all().select_related('equipo').prefetch_related('rentas')
     serializer_class = InventarioSerializer
+    permission_classes = [PuedeOperarInventario]
 
     def get_permissions(self):
-        # El técnico consulta y actualiza el estado de una unidad (mandarla a
-        # taller, marcarla disponible). Darla de baja del inventario, no.
-        return [IsAdminGroupOrStaff()] if self.request.method == 'DELETE' else [EsOperador()]
+        # Mover la unidad (a taller, de vuelta a disponible) es trabajo de patio.
+        # Consultarla la necesita hasta quien cobra en el mostrador; darla de
+        # baja del inventario no lo hace nadie de este lado.
+        if self.request.method == 'DELETE':
+            return [IsAdminGroupOrStaff()]
+        if self.request.method in ('PUT', 'PATCH'):
+            return super().get_permissions()
+        return [EsOperador()]
 
     def perform_destroy(self, instance):
         from django.db.models import ProtectedError
@@ -165,7 +173,7 @@ def resumen_inventario(request, equipo_id: int):
 
 
 @api_view(['POST'])
-@permission_classes([EsOperador])
+@permission_classes([PuedeOperarInventario])
 def mantenimiento_unidad(request, pk: int):
     """Envía una unidad a mantenimiento o la libera de vuelta a disponible.
 

@@ -39,8 +39,8 @@ from .models import (
     Favorito,
 )
 from .permissions import (
-    IsAdminGroupOrStaff, EsOperador, PuedeConfigurarNegocio, PuedeEmitirCupones,
-    PuedeVerDinero, nivel_de, puede_de,
+    IsAdminGroupOrStaff, EsOperador, PuedeConfigurarNegocio, PuedeEditarCatalogo,
+    PuedeEmitirCupones, PuedeVerDinero, nivel_de, puede_de,
 )
 from .serializers import (
     EquipoSerializer, CategoriaSerializer, MarcaSerializer, TipoSerializer,
@@ -94,10 +94,15 @@ class EquipoListCreate(generics.ListCreateAPIView):
     filter_backends = [SearchFilter, OrderingFilter]
     search_fields = ['modelo', 'descripcion', 'categoria__nombre', 'marca__nombre', 'tipo__nombre']
     ordering_fields = ['precio_dia', 'fecha_creacion', 'modelo']
+    # La capacidad se declara aquí, y no solo dentro de `get_permissions`, para
+    # que la auditoría de capacidades la vea (ver `tests_permisos_imponen`):
+    # un gate escondido en el método es un gate que nadie sabe que existe.
+    permission_classes = [PuedeEditarCatalogo]
 
     def get_permissions(self):
+        # Leer el catálogo es la tienda pública. Escribirlo cambia el patrimonio.
         if self.request.method == 'POST':
-            return [IsAdminGroupOrStaff()]
+            return super().get_permissions()
         return [permissions.AllowAny()]
 
     def _filtro_multi(self, qs, param, id_field, nombre_field):
@@ -159,10 +164,13 @@ class EquipoRetrieveUpdateDestroy(ProtectedDestroyMixin, generics.RetrieveUpdate
                 .select_related('categoria', 'tipo', 'marca')
                 .prefetch_related('unidades', 'imagenes'))
     serializer_class = EquipoSerializer
+    permission_classes = [PuedeEditarCatalogo]
 
     def get_permissions(self):
+        # BORRAR no se queda aquí de adorno: `ProtectedDestroyMixin` lo vuelve a
+        # pesar contra `borrar_catalogo`, que es del dueño.
         if self.request.method in ('PUT', 'PATCH', 'DELETE'):
-            return [IsAdminGroupOrStaff()]
+            return super().get_permissions()
         return [permissions.AllowAny()]
 
     PRECIOS = ('precio_dia', 'precio_semana', 'precio_mes', 'precio_venta')
@@ -191,7 +199,7 @@ class EquipoRetrieveUpdateDestroy(ProtectedDestroyMixin, generics.RetrieveUpdate
 
 
 @api_view(['POST'])
-@permission_classes([IsAdminGroupOrStaff])
+@permission_classes([PuedeEditarCatalogo])
 @parser_classes([MultiPartParser, FormParser])
 def upload_product_images(request, pk: int):
     equipo = get_object_or_404(Equipo, id=pk)
@@ -210,11 +218,13 @@ def upload_product_images(request, pk: int):
 #  CATÁLOGOS (categorías / tipos / marcas)
 # ─────────────────────────────────────────────
 class _CatalogoListCreate(generics.ListCreateAPIView):
-    """Base para catálogos: lectura pública, escritura solo admin."""
+    """Base para catálogos: lectura pública, escritura por `editar_catalogo`."""
+
+    permission_classes = [PuedeEditarCatalogo]
 
     def get_permissions(self):
         if self.request.method == 'POST':
-            return [IsAdminGroupOrStaff()]
+            return super().get_permissions()
         return [permissions.AllowAny()]
 
 
@@ -233,22 +243,25 @@ class MarcaList(_CatalogoListCreate):
     serializer_class = MarcaSerializer
 
 
-class CategoriaDetail(generics.RetrieveUpdateDestroyAPIView):
+# Los tres catálogos chicos llevan `ProtectedDestroyMixin` por la misma razón
+# que equipos y unidades: BORRAR es del dueño (`borrar_catalogo`). Sin el mixin,
+# cualquier administración borraba una marca entera sin pasar por ese candado.
+class CategoriaDetail(ProtectedDestroyMixin, generics.RetrieveUpdateDestroyAPIView):
     queryset = Categoria.objects.all()
     serializer_class = CategoriaSerializer
-    permission_classes = [IsAdminGroupOrStaff]
+    permission_classes = [PuedeEditarCatalogo]
 
 
-class TipoDetail(generics.RetrieveUpdateDestroyAPIView):
+class TipoDetail(ProtectedDestroyMixin, generics.RetrieveUpdateDestroyAPIView):
     queryset = Tipo.objects.all()
     serializer_class = TipoSerializer
-    permission_classes = [IsAdminGroupOrStaff]
+    permission_classes = [PuedeEditarCatalogo]
 
 
-class MarcaDetail(generics.RetrieveUpdateDestroyAPIView):
+class MarcaDetail(ProtectedDestroyMixin, generics.RetrieveUpdateDestroyAPIView):
     queryset = Marca.objects.all()
     serializer_class = MarcaSerializer
-    permission_classes = [IsAdminGroupOrStaff]
+    permission_classes = [PuedeEditarCatalogo]
 
 
 # ─────────────────────────────────────────────

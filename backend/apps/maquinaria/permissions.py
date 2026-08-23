@@ -537,6 +537,43 @@ class PuedeReparar(ExigeCapacidad):
     message = 'No puedes trabajar órdenes de reparación.'
 
 
+class PuedeEditarCatalogo(ExigeCapacidad):
+    """Equipos, marcas, categorías, tipos, imágenes y precios de lista.
+
+    Es el patrimonio y el precio con el que se cotiza todo, así que arranca en
+    administración. Como casilla sirve para lo contrario de lo de siempre:
+    dejarle a alguien el negocio entero y congelarle los precios. BORRAR del
+    catálogo no vive aquí —es del dueño, por `borrar_catalogo`— porque es la
+    forma de encubrir una máquina que falta. La LECTURA tampoco: la tienda
+    pública se sirve del mismo catálogo y nadie la puede dejar en blanco.
+    """
+    capacidad = 'editar_catalogo'
+    message = 'No puedes editar el catálogo.'
+
+
+class PuedeDarAltaInventario(ExigeCapacidad):
+    """Meter unidades y refacciones NUEVAS al inventario.
+
+    Distinto de editar el catálogo (qué modelos existen y a cuánto) y de mover
+    unidades (dónde está lo que ya hay): esto AUMENTA lo que la casa dice tener.
+    Se separa para que el dueño pueda dejarle el almacén a alguien sin subirlo a
+    administración, que era la única forma de darle el alta.
+    """
+    capacidad = 'alta_inventario'
+    message = 'No puedes dar de alta unidades ni refacciones.'
+
+
+class PuedeOperarInventario(ExigeCapacidad):
+    """Mover de estado y ubicación las unidades que ya existen.
+
+    Es el trabajo de patio del técnico: mandar una máquina a taller y regresarla
+    a disponible. El cajero comparte su nivel y su ajuste de puesto ya la traía
+    apagada, pero como la ruta pedía NIVEL ese apagado se quedaba en la pantalla.
+    """
+    capacidad = 'operar_inventario'
+    message = 'No puedes mover unidades del inventario.'
+
+
 class PuedeGestionarReparaciones(ExigeCapacidad):
     """Llevar el taller: la sección Reparaciones completa.
 

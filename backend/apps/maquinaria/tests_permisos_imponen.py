@@ -346,3 +346,169 @@ class LaSeccionDeTallerSeImponeTest(TestCase):
         PermisoRol.objects.create(rol='Técnico', capacidad='gestionar_reparaciones',
                                   permitido=True)
         self.assertEqual(self.api_tec.get('/api/reparaciones/').status_code, 200)
+
+
+class ElAltaDeInventarioSeImponeTest(TestCase):
+    """`alta_inventario`: meter máquinas y refacciones nuevas al inventario.
+
+    Es la capacidad que aumenta el patrimonio de la casa, y pedía nivel: el
+    técnico no la tenía porque su nivel no alcanza, no porque alguien lo haya
+    decidido. Ahora es una casilla, y el dueño puede dársela al encargado de
+    almacén sin subirlo a administración.
+    """
+
+    def setUp(self):
+        self.admin = User.objects.create_user('adm6', 'adm6@x.com', 'pass12345')
+        self.admin.groups.add(Group.objects.get_or_create(name='Administrador')[0])
+        self.tecnico = User.objects.create_user('tec6', 'tec6@x.com', 'pass12345')
+        self.tecnico.groups.add(Group.objects.get_or_create(name='Técnico')[0])
+        self.api_adm = APIClient(); self.api_adm.force_authenticate(self.admin)
+        self.api_tec = APIClient(); self.api_tec.force_authenticate(self.tecnico)
+
+    def test_el_tecnico_no_da_de_alta(self):
+        self.assertEqual(
+            self.api_tec.post('/api/equipos/999/unidades/', {}, format='json').status_code, 403)
+        self.assertEqual(
+            self.api_tec.get('/api/equipos/999/unidades/proximo-codigo/').status_code, 403)
+        self.assertEqual(
+            self.api_tec.post('/api/refacciones/', {}, format='json').status_code, 403)
+
+    def test_pero_si_consulta_el_inventario(self):
+        """Apagar el alta no puede dejarlo sin ver lo que hay: lo consulta todos
+        los días para saber qué máquina agarra."""
+        self.assertNotEqual(self.api_tec.get('/api/refacciones/').status_code, 403)
+
+    def test_administracion_si_da_de_alta(self):
+        self.assertNotEqual(
+            self.api_adm.post('/api/refacciones/', {}, format='json').status_code, 403)
+        self.assertEqual(
+            self.api_adm.get('/api/equipos/999/unidades/proximo-codigo/').status_code, 404)
+
+    def test_el_override_se_la_enciende_al_tecnico(self):
+        PermisoRol.objects.create(rol='Técnico', capacidad='alta_inventario', permitido=True)
+        self.assertNotEqual(
+            self.api_tec.post('/api/refacciones/', {}, format='json').status_code, 403)
+        self.assertEqual(
+            self.api_tec.get('/api/equipos/999/unidades/proximo-codigo/').status_code, 404)
+
+
+class ElMovimientoDeUnidadesSeImponeTest(TestCase):
+    """`operar_inventario`: mover de estado y ubicación lo que ya existe.
+
+    El técnico manda una máquina a taller y la regresa a disponible; el cajero
+    —que trae el mismo nivel— no pisa el patio, y su ajuste de puesto ya la
+    traía apagada. Pedía nivel, así que ese apagado no llegaba a la API.
+    """
+
+    def setUp(self):
+        self.tecnico = User.objects.create_user('tec7', 'tec7@x.com', 'pass12345')
+        self.tecnico.groups.add(Group.objects.get_or_create(name='Técnico')[0])
+        self.cajero = User.objects.create_user('caj7', 'caj7@x.com', 'pass12345')
+        self.cajero.groups.add(Group.objects.get_or_create(name='Cajero')[0])
+        self.api_tec = APIClient(); self.api_tec.force_authenticate(self.tecnico)
+        self.api_caj = APIClient(); self.api_caj.force_authenticate(self.cajero)
+
+    def test_el_tecnico_mueve_unidades(self):
+        """Lo para la unidad que no existe (404): el permiso lo dejó pasar."""
+        self.assertEqual(
+            self.api_tec.patch('/api/unidades/999/', {'estado': 'disponible'},
+                               format='json').status_code, 404)
+        self.assertEqual(
+            self.api_tec.post('/api/unidades/999/mantenimiento/', {}, format='json').status_code, 404)
+
+    def test_el_cajero_no(self):
+        self.assertEqual(
+            self.api_caj.patch('/api/unidades/999/', {'estado': 'disponible'},
+                               format='json').status_code, 403)
+        self.assertEqual(
+            self.api_caj.post('/api/unidades/999/mantenimiento/', {}, format='json').status_code, 403)
+
+    def test_pero_el_cajero_sigue_consultando_la_unidad(self):
+        """Cobrar en el mostrador pide poder abrir la ficha de una máquina."""
+        self.assertEqual(self.api_caj.get('/api/unidades/999/').status_code, 404)
+
+
+class LaEdicionDelCatalogoSeImponeTest(TestCase):
+    """`editar_catalogo`: equipos, marcas y precios de lista.
+
+    Cambia el patrimonio y los precios con los que se cotiza, así que vive en
+    administración; pero es la casilla que el dueño quiere poder apagarle a un
+    administrador de confianza mediana sin quitarle el resto del negocio.
+    """
+
+    def setUp(self):
+        self.admin = User.objects.create_user('adm8', 'adm8@x.com', 'pass12345')
+        self.admin.groups.add(Group.objects.get_or_create(name='Administrador')[0])
+        self.tecnico = User.objects.create_user('tec8', 'tec8@x.com', 'pass12345')
+        self.tecnico.groups.add(Group.objects.get_or_create(name='Técnico')[0])
+        self.api_adm = APIClient(); self.api_adm.force_authenticate(self.admin)
+        self.api_tec = APIClient(); self.api_tec.force_authenticate(self.tecnico)
+
+    def test_el_tecnico_no_toca_el_catalogo(self):
+        self.assertEqual(
+            self.api_tec.post('/api/equipos/', {}, format='json').status_code, 403)
+        self.assertEqual(
+            self.api_tec.post('/api/marcas/', {'nombre': 'Honda'}, format='json').status_code, 403)
+        self.assertEqual(
+            self.api_tec.patch('/api/refacciones/999/', {'precio_venta': '1'},
+                               format='json').status_code, 403)
+
+    def test_administracion_si(self):
+        self.assertNotEqual(
+            self.api_adm.post('/api/equipos/', {}, format='json').status_code, 403)
+        self.assertEqual(
+            self.api_adm.post('/api/marcas/', {'nombre': 'Honda'}, format='json').status_code, 201)
+
+    def test_apagarsela_al_administrador_le_congela_los_precios(self):
+        """La razón de existir de la casilla: sigue vendiendo y rentando, pero
+        ya no cambia el precio de lista."""
+        PermisoRol.objects.create(rol='Administrador', capacidad='editar_catalogo',
+                                  permitido=False)
+        self.assertEqual(
+            self.api_adm.patch('/api/equipos/999/', {'precio_dia': '1'},
+                               format='json').status_code, 403)
+        self.assertEqual(
+            self.api_adm.post('/api/marcas/', {'nombre': 'Honda'}, format='json').status_code, 403)
+
+    def test_la_tienda_publica_sigue_leyendo_el_catalogo(self):
+        """El candado es de escritura: nadie deja sin catálogo a la tienda."""
+        publico = APIClient()
+        self.assertEqual(publico.get('/api/equipos/').status_code, 200)
+        self.assertEqual(publico.get('/api/marcas/').status_code, 200)
+
+
+class BorrarDelCatalogoChicoSeImponeTest(TestCase):
+    """El hueco §5.1 de la nota: categorías, tipos y marcas se borraban sin candado.
+
+    `borrar_catalogo` es del dueño y vive en `ProtectedDestroyMixin`, que solo
+    envolvía equipos, unidades y refacciones. Los tres catálogos chicos heredaban
+    de la vista pelona, así que cualquier administración borraba una marca entera
+    —y con ella la referencia de todo lo que la usaba— sin pasar por ahí.
+    """
+
+    def setUp(self):
+        from maquinaria.models import Categoria, Marca, Tipo
+        self.admin = User.objects.create_user('adm13', 'adm13@x.com', 'pass12345')
+        self.admin.groups.add(Group.objects.get_or_create(name='Administrador')[0])
+        self.dueno = User.objects.create_superuser('due13', 'due13@x.com', 'pass12345')
+        self.api_adm = APIClient(); self.api_adm.force_authenticate(self.admin)
+        self.api_due = APIClient(); self.api_due.force_authenticate(self.dueno)
+        self.marca = Marca.objects.create(nombre='Makita')
+        self.categoria = Categoria.objects.create(nombre='Cortadoras')
+        self.tipo = Tipo.objects.create(nombre='Disco')
+
+    def test_administracion_no_borra_un_catalogo(self):
+        for ruta in (f'/api/marcas/{self.marca.id}/',
+                     f'/api/categorias/{self.categoria.id}/',
+                     f'/api/tipos/{self.tipo.id}/'):
+            r = self.api_adm.delete(ruta)
+            self.assertEqual(r.status_code, 403, ruta)
+            self.assertEqual(r.data.get('codigo'), 'sin_permiso_borrar')
+
+    def test_pero_si_los_edita(self):
+        self.assertEqual(
+            self.api_adm.patch(f'/api/marcas/{self.marca.id}/', {'nombre': 'Makita MX'},
+                               format='json').status_code, 200)
+
+    def test_el_dueno_si_borra(self):
+        self.assertEqual(self.api_due.delete(f'/api/marcas/{self.marca.id}/').status_code, 204)

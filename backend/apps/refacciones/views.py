@@ -3,7 +3,9 @@ from rest_framework import generics
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 
-from maquinaria.permissions import EsOperador, IsAdminGroupOrStaff
+from maquinaria.permissions import (
+    EsOperador, IsAdminGroupOrStaff, PuedeDarAltaInventario, PuedeEditarCatalogo,
+)
 from maquinaria.views import ProtectedDestroyMixin
 from .models import Refaccion
 from .serializers import RefaccionSerializer
@@ -11,11 +13,12 @@ from .serializers import RefaccionSerializer
 
 class RefaccionListCreate(generics.ListCreateAPIView):
     serializer_class = RefaccionSerializer
+    permission_classes = [PuedeDarAltaInventario]
 
     def get_permissions(self):
         # Consultar refacciones lo necesita el técnico para consumirlas en una
-        # reparación. Dar de alta una refacción nueva es inventario: administración.
-        return [IsAdminGroupOrStaff()] if self.request.method == 'POST' else [EsOperador()]
+        # reparación. Dar de alta una refacción nueva es meter inventario.
+        return super().get_permissions() if self.request.method == 'POST' else [EsOperador()]
 
     def get_queryset(self):
         qs = Refaccion.objects.all()
@@ -33,11 +36,15 @@ class RefaccionListCreate(generics.ListCreateAPIView):
 class RefaccionDetail(ProtectedDestroyMixin, generics.RetrieveUpdateDestroyAPIView):
     queryset = Refaccion.objects.all()
     serializer_class = RefaccionSerializer
+    permission_classes = [PuedeEditarCatalogo]
 
     def get_permissions(self):
         # El técnico lee y consume (el consumo descuenta stock por la orden de
-        # reparación, no editando aquí). Cambiar precio/stock o borrar: admin.
-        return [EsOperador()] if self.request.method in ('GET', 'HEAD', 'OPTIONS') else [IsAdminGroupOrStaff()]
+        # reparación, no editando aquí). Cambiar precio o stock es tocar el
+        # catálogo; borrar lo vuelve a pesar `ProtectedDestroyMixin`.
+        if self.request.method in ('GET', 'HEAD', 'OPTIONS'):
+            return [EsOperador()]
+        return super().get_permissions()
     # Refacción usada en mantenimientos o vendida (ambos PROTECT): no se borra
     # para no romper el historial ni el descuento de stock ya registrado.
     en_uso_label = 'registro de uso (mantenimiento o venta)'
