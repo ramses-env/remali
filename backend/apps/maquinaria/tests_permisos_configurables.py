@@ -125,3 +125,47 @@ class TablasTest(TestCase):
         fila = CambioPermisoRol.objects.create(
             rol='Cajero', capacidad='cotizar', anterior=False, nuevo=True)
         self.assertEqual(str(fila), 'Cajero · cotizar: False → True')
+
+
+class OverridesTest(TestCase):
+
+    def test_enciende_una_capacidad_de_nivel_superior(self):
+        cajero = _usuario('cajero3', 'Cajero')
+        self.assertFalse(puede_de(cajero)['cotizar'])
+        PermisoRol.objects.create(rol='Cajero', capacidad='cotizar', permitido=True)
+        self.assertTrue(puede_de(cajero)['cotizar'])
+
+    def test_apaga_una_capacidad_propia(self):
+        cajero = _usuario('cajero4', 'Cajero')
+        PermisoRol.objects.create(rol='Cajero', capacidad='usar_caja', permitido=False)
+        self.assertFalse(puede_de(cajero)['usar_caja'])
+
+    def test_borrar_el_override_devuelve_la_fabrica(self):
+        cajero = _usuario('cajero5', 'Cajero')
+        fila = PermisoRol.objects.create(rol='Cajero', capacidad='cotizar', permitido=True)
+        fila.delete()
+        self.assertFalse(puede_de(cajero)['cotizar'])
+
+    def test_el_nucleo_se_ignora_aunque_alguien_meta_la_fila_a_mano(self):
+        """Defensa en profundidad: la API lo rechaza, y aun así no surte efecto."""
+        cajero = _usuario('cajero6', 'Cajero')
+        PermisoRol.objects.create(rol='Cajero', capacidad='gestionar_usuarios', permitido=True)
+        self.assertFalse(puede_de(cajero)['gestionar_usuarios'])
+
+    def test_el_dueno_no_recibe_overrides(self):
+        duena = _usuario('duena2', superusuario=True)
+        PermisoRol.objects.create(rol='Administrador', capacidad='ver_dinero', permitido=False)
+        self.assertTrue(puede_de(duena)['ver_dinero'])
+
+    def test_un_error_de_base_cae_a_fabrica_y_no_reparte(self):
+        from unittest.mock import patch
+        cajero = _usuario('cajero7', 'Cajero')
+        PermisoRol.objects.create(rol='Cajero', capacidad='cotizar', permitido=True)
+        # `permissions.overrides_de_rol` importa PermisoRol DENTRO de la función
+        # (models.py ya importa permissions, así que al revés sería circular).
+        # Por eso el parche va sobre la clase real, que es la que acaba usándose.
+        with patch('maquinaria.models.PermisoRol.objects.filter',
+                   side_effect=Exception('base caída')):
+            caps = puede_de(cajero)
+        self.assertFalse(caps['cotizar'])     # fail-closed: no se reparte de más
+        self.assertTrue(caps['usar_caja'])    # y lo de fábrica sigue trabajando

@@ -320,28 +320,44 @@ def catalogo_capacidades() -> list:
     return [{**c._asdict(), 'nucleo': c.nombre in NUCLEO} for c in CATALOGO]
 
 
+def overrides_de_rol(rol: str) -> dict:
+    """Lo que el dueño configuró para ese rol. El núcleo se filtra aquí también:
+    la API lo rechaza al guardar, y esto lo vuelve a rechazar al leer, por si
+    una fila llegó por otra vía (un respaldo viejo, el /admin/ de Django).
+
+    Fail-closed: si la consulta truena —base a medio migrar, por ejemplo—,
+    devuelve vacío y manda la fábrica. Un error no reparte permisos.
+    """
+    if rol not in ROLES_EDITABLES:
+        return {}
+    try:
+        from .models import PermisoRol
+        filas = PermisoRol.objects.filter(rol=rol).values_list('capacidad', 'permitido')
+        return {cap: bool(val) for cap, val in filas if cap not in NUCLEO}
+    except Exception:
+        return {}
+
+
 def puede_de(user) -> dict:
     """Capacidades del usuario, para que el panel oculte lo que no aplica.
 
+    Tres capas, y la última manda:
+        nivel (jerarquía) → ajuste por puesto (fábrica) → override del dueño.
+
     Es un espejo de lo que ya imponen las clases de permiso: informativo para la
     interfaz, nunca la única defensa.
-
-    El grueso sale del NIVEL (jerárquico, cascadea hacia arriba). Encima, los
-    puestos que COMPARTEN un nivel aplican su ajuste. Se distinguen por grupo, no
-    por número: cajero y técnico son ambos nivel 1, y administrador y gestor son
-    ambos nivel 2.
     """
     n = nivel_de(user)
-    caps = {c.nombre: (c.nivel_minimo is not None and n >= c.nivel_minimo)
-            for c in CATALOGO}
+    rol = rol_de(user)
+    if n == SIN_ACCESO:
+        caps = {c.nombre: False for c in CATALOGO}
+    else:
+        caps = capacidades_fabrica(rol) if rol in ROLES_EDITABLES else {
+            c.nombre: (c.nivel_minimo is not None and n >= c.nivel_minimo) for c in CATALOGO
+        }
+        caps.update(overrides_de_rol(rol))
     caps['nivel'] = n
-    caps['rol'] = rol_de(user)
-
-    if n == NIVEL_TECNICO:
-        puesto = ROL_CAJERO if es_cajero(user) else None
-        caps.update(AJUSTES_POR_PUESTO[puesto])
-    elif n == NIVEL_ADMIN and es_gestor(user):
-        caps.update(AJUSTES_POR_PUESTO[ROL_GESTOR])
+    caps['rol'] = rol
     return caps
 
 
