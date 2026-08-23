@@ -38,7 +38,10 @@ from .models import (
     ObraCliente, SelloTema, nombre_propio, espejar_obra_predeterminada,
     Favorito,
 )
-from .permissions import IsAdminGroupOrStaff, EsOperador, PuedeVerDinero, nivel_de, puede_de
+from .permissions import (
+    IsAdminGroupOrStaff, EsOperador, PuedeEmitirCupones, PuedeVerDinero,
+    nivel_de, puede_de,
+)
 from .serializers import (
     EquipoSerializer, CategoriaSerializer, MarcaSerializer, TipoSerializer,
     CuponSerializer, NotificacionSerializer, PerfilUsuarioSerializer,
@@ -388,21 +391,20 @@ def correo_aviso_reenviar(request, pk: int):
 #  CUPONES
 # ─────────────────────────────────────────────
 class CuponListCreate(generics.ListCreateAPIView):
+    # `emitir_cupones`, no un nivel: listar cupones exponía TODOS los códigos a
+    # cualquier cliente registrado (podía cosechar los genéricos reutilizables y
+    # aplicarlos sin habérsele emitido). El cliente valida su código puntual por
+    # `apply_coupon`, no necesita enumerar la lista. Va en `permission_classes` y
+    # no en `get_permissions()` para que la auditoría de capacidades la vea.
     queryset = Cupon.objects.all().order_by('id')
     serializer_class = CuponSerializer
-
-    def get_permissions(self):
-        # Solo administración: listar cupones exponía TODOS los códigos a cualquier
-        # cliente registrado (podía cosechar cupones genéricos reutilizables y
-        # aplicarlos sin habérsele emitido). El cliente valida su código puntual
-        # por `apply_coupon`, no necesita enumerar la lista.
-        return [IsAdminGroupOrStaff()]
+    permission_classes = [PuedeEmitirCupones]
 
 
 class CuponRetrieveUpdateDestroy(generics.RetrieveUpdateDestroyAPIView):
     queryset = Cupon.objects.all()
     serializer_class = CuponSerializer
-    permission_classes = [IsAdminGroupOrStaff]
+    permission_classes = [PuedeEmitirCupones]
 
 
 @api_view(['POST'])

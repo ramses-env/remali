@@ -158,7 +158,7 @@ nada. Es el ejemplo perfecto del interruptor decorativo que la prueba busca.
 | `/api/unidades/` | `EsOperador` | `apps/inventario/views.py:98` | `nivel legítimo` — lectura de la lista global de unidades; la necesita todo el panel (rentar, vender, reparar) y no hay una capacidad de "leer inventario". |
 | `/api/equipos/<int:equipo_id>/inventario-resumen/` | `EsOperador` | `apps/inventario/views.py:148` | `nivel legítimo` — conteo por estado, sin montos. |
 | `/api/refacciones/buscar/` | `EsOperador` | `apps/refacciones/views.py:47` | `nivel legítimo` — lookup por código de barras para el lector; lo usan la caja y el taller, y la acción que sigue sí lleva su capacidad. |
-| `/api/cupones/<int:pk>/` | `IsAdminGroupOrStaff` | `apps/maquinaria/views.py:405` | **POR DECIDIR** — no hay capacidad para cupones. Candidatas: `editar_catalogo` (son parte de la oferta) o `ver_dinero` (un cupón es un descuento y quien lo emite regala margen). Emitir cupones es una vía de fuga de dinero, así que quizá merece capacidad propia. |
+| `/api/cupones/<int:pk>/` | ~~`IsAdminGroupOrStaff`~~ → `PuedeEmitirCupones` | `apps/maquinaria/views.py:409` | **HECHO** — capacidad propia `emitir_cupones` (nivel administración). No es `editar_catalogo`: emitir un cupón no cambia el precio de lista, regala margen sobre el que ya está, y se apaga por separado. |
 
 ### 3.3 Rentas
 
@@ -350,7 +350,7 @@ y aun así llevan gate por nivel. Van con su marca:
 | `/api/categorias/` | POST `IsAdminGroupOrStaff` | `apps/maquinaria/views.py:215` | **`→ editar_catalogo`** |
 | `/api/tipos/` | POST `IsAdminGroupOrStaff` | `apps/maquinaria/views.py:215` | **`→ editar_catalogo`** |
 | `/api/marcas/` | POST `IsAdminGroupOrStaff` | `apps/maquinaria/views.py:215` | **`→ editar_catalogo`** |
-| `/api/cupones/` | `IsAdminGroupOrStaff` siempre | `apps/maquinaria/views.py:397` | **POR DECIDIR** — misma duda que `/api/cupones/<pk>/` (§3.2) |
+| `/api/cupones/` | ~~`IsAdminGroupOrStaff` siempre~~ → `PuedeEmitirCupones` | `apps/maquinaria/views.py:396` | **HECHO** — `emitir_cupones`; además bajó de `get_permissions()` a `permission_classes` para que la auditoría la vea (§5.3) |
 | `/api/equipos/<int:equipo_id>/unidades/` | POST `IsAdminGroupOrStaff`, resto `EsOperador` | `apps/inventario/views.py:49` | **`→ alta_inventario`** (POST); GET `nivel legítimo` |
 | `/api/unidades/<int:pk>/` | DELETE `IsAdminGroupOrStaff`, resto `EsOperador` | `apps/inventario/views.py:131` | **`→ operar_inventario`** (PUT/PATCH); DELETE ya pasa por `borrar_catalogo`; GET `nivel legítimo` |
 | `/api/refacciones/` | POST `IsAdminGroupOrStaff`, resto `EsOperador` | `apps/refacciones/views.py:15` | **`→ alta_inventario`** (POST); GET `nivel legítimo` (el taller y la caja las consultan) |

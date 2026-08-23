@@ -37,6 +37,8 @@ export type Capacidades = {
   /** Dar de alta equipo nuevo, distinto de mover el que ya existe. */
   alta_inventario: boolean
   operar_inventario: boolean
+  /** Crear y cambiar cupones: margen que se regala, aparte del catálogo. */
+  emitir_cupones: boolean
   /** Hacer el trabajo de taller: recibir y trabajar órdenes desde Mi jornada. */
   reparar: boolean
   /** Llevar el taller: la sección Reparaciones (historial, costos, entrega). */

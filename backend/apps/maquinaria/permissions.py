@@ -213,6 +213,13 @@ CATALOGO = (
     Capacidad('alta_inventario', 'Dar de alta unidades',
               'Meter máquinas nuevas al inventario.', NIVEL_ADMIN,
               'Catálogo e inventario'),
+    # Un cupón no es "editar el catálogo": es margen que se regala, y de los
+    # reutilizables basta uno para que se cosechen. Por eso se apaga aparte de
+    # tocar precios, aunque las dos vivan en el mismo bloque de la pantalla.
+    Capacidad('emitir_cupones', 'Emitir cupones',
+              'Crear y cambiar los cupones de descuento. Cada uno es margen que '
+              'se regala, así que se enciende aparte de editar el catálogo.', NIVEL_ADMIN,
+              'Catálogo e inventario'),
     Capacidad('operar_inventario', 'Mover unidades',
               'Cambiar de ubicación y estado las unidades que ya existen.', NIVEL_TECNICO,
               'Campo y taller'),
@@ -479,6 +486,14 @@ class PuedeOperarJornada(ExigeCapacidad):
     """
     capacidad = 'operar_jornada'
     message = 'No puedes operar las entregas y devoluciones de campo.'
+
+
+class PuedeEmitirCupones(ExigeCapacidad):
+    """Los cupones de descuento. Aparte de `editar_catalogo` porque emitir uno
+    no cambia el precio de lista: regala margen sobre el que ya está, y listar
+    los reutilizables es cosecharlos."""
+    capacidad = 'emitir_cupones'
+    message = 'No puedes emitir cupones.'
 
 
 class EsOperadorEditaAdmin(permissions.BasePermission):

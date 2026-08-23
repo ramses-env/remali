@@ -135,3 +135,27 @@ class LaJornadaSeImponeTest(TestCase):
         admin.groups.add(Group.objects.get_or_create(name='Administrador')[0])
         api = APIClient(); api.force_authenticate(admin)
         self.assertEqual(api.get('/api/rentas/tareas/').status_code, 200)
+
+
+class LosCuponesSeImponenTest(TestCase):
+    """`emitir_cupones`: un cupón es margen que se regala, y se apaga aparte."""
+
+    def setUp(self):
+        self.tecnico = User.objects.create_user('tec2', 'tec2@x.com', 'pass12345')
+        self.tecnico.groups.add(Group.objects.get_or_create(name='Técnico')[0])
+        self.admin = User.objects.create_user('adm2', 'adm2@x.com', 'pass12345')
+        self.admin.groups.add(Group.objects.get_or_create(name='Administrador')[0])
+        self.api_tec = APIClient(); self.api_tec.force_authenticate(self.tecnico)
+        self.api_adm = APIClient(); self.api_adm.force_authenticate(self.admin)
+
+    def test_el_tecnico_no_emite_cupones(self):
+        self.assertEqual(self.api_tec.get('/api/cupones/').status_code, 403)
+        self.assertEqual(self.api_tec.get('/api/cupones/999/').status_code, 403)
+
+    def test_administracion_si(self):
+        self.assertEqual(self.api_adm.get('/api/cupones/').status_code, 200)
+        self.assertEqual(self.api_adm.get('/api/cupones/999/').status_code, 404)
+
+    def test_apagarselo_a_administracion_lo_detiene(self):
+        PermisoRol.objects.create(rol='Administrador', capacidad='emitir_cupones', permitido=False)
+        self.assertEqual(self.api_adm.get('/api/cupones/').status_code, 403)
