@@ -74,33 +74,6 @@ def actualizar_solicitud(request, pk: int):
 
 @api_view(['POST'])
 @permission_classes([IsAdminGroupOrStaff])
-def marcar_facturada(request, pk: int):
-    """Marca la solicitud como facturada guardando el folio fiscal (UUID)."""
-    try:
-        sol = SolicitudFactura.objects.get(pk=pk)
-    except SolicitudFactura.DoesNotExist:
-        return Response({'detalle': 'Solicitud no encontrada'}, status=404)
-    if sol.estado != 'pendiente':
-        return Response(
-            {'detalle': f'Esta solicitud ya está {sol.get_estado_display().lower()}; '
-                        'no se puede volver a marcar como facturada.'},
-            status=409,
-        )
-    uuid = (request.data.get('uuid') or '').strip()
-    if not uuid:
-        return Response({'detalle': 'Captura el folio fiscal (UUID) del CFDI timbrado.'}, status=400)
-    sol.uuid = uuid
-    sol.estado = 'facturada'
-    sol.fecha_timbrado = timezone.now()
-    notas = request.data.get('notas')
-    if notas is not None:
-        sol.notas = notas
-    sol.save()
-    return Response(SolicitudFacturaSerializer(sol).data)
-
-
-@api_view(['POST'])
-@permission_classes([IsAdminGroupOrStaff])
 def reabrir_solicitud(request, pk: int):
     """Regresa una solicitud a pendiente (si se timbró por error)."""
     try:
