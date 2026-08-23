@@ -18,6 +18,7 @@ REGISTRO = {
     'maquinaria.Cupon': ('cupones',),
     'maquinaria.ConfiguracionSitio': ('config',),
     'maquinaria.PerfilUsuario': ('usuarios',),
+    'maquinaria.PermisoRol': ('permisos',),
     'maquinaria.Notificacion': ('notificaciones',),
     'inventario.Inventario': ('unidades', 'equipos'),
     'inventario.Mantenimiento': ('reparaciones', 'unidades'),

@@ -198,3 +198,21 @@ class NivelSigueSiendoElPisoTest(TestCase):
         """Gestor comparte nivel con Administrador: el nivel NO lo eleva, así que
         `ver_dinero` sigue apagado. Es el rol entero."""
         self.assertFalse(puede_de(_usuario('gestor_x', 'Gestor'))['ver_dinero'])
+
+
+class SelloTest(TestCase):
+
+    def _marca(self):
+        from maquinaria.models import SelloTema
+        fila = SelloTema.objects.filter(tema='permisos').first()
+        return fila.marca if fila else None
+
+    def test_guardar_un_override_mueve_el_sello(self):
+        PermisoRol.objects.create(rol='Cajero', capacidad='cotizar', permitido=True)
+        self.assertIsNotNone(self._marca())
+
+    def test_borrarlo_tambien(self):
+        fila = PermisoRol.objects.create(rol='Cajero', capacidad='vender', permitido=False)
+        antes = self._marca()
+        fila.delete()
+        self.assertGreater(self._marca(), antes)
