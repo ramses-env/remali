@@ -1513,7 +1513,8 @@ function Celda({ encendido, movida, bloqueada, etiqueta, resaltada, onToggle }: 
 ```
 
 El `<button role="switch">` no es capricho: un `<div onClick>` pierde foco,
-teclado y semántica, y son 76 controles. El alto de 44 px da el área de toque
+teclado y semántica, y son 84 controles (21 capacidades configurables × 4
+roles). El alto de 44 px da el área de toque
 aunque el dibujo mida 30×17.
 
 - [ ] **Paso 3: la tabla, agrupada por área**
@@ -1587,7 +1588,7 @@ Estructura, con el ancho de la columna de capacidades fijo y las de rol de 64 px
   </div>
 ```
 
-La descripción solo se pinta en la fila activa: 24 filas de dos renglones
+La descripción solo se pinta en la fila activa: 26 filas de dos renglones
 matarían la densidad, que es lo que hace útil a esta pantalla.
 
 Cada fila lleva `onMouseEnter={() => setCruz({ cap: c.nombre, rol: '' })}` y cada

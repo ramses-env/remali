@@ -19,7 +19,7 @@ class CotizacionPagination(PageNumberPagination):
     max_page_size = 100
 
 from maquinaria.permissions import (
-    IsAdminGroupOrStaff, EsOperador, PuedeCotizar, PuedeVerDinero, puede_de,
+    IsAdminGroupOrStaff, EsOperador, PuedeCotizar, puede_de,
 )
 from maquinaria.throttling import SolicitudPublicaThrottle, SubidaEvidenciaThrottle
 from maquinaria.ws_events import push_user_event
@@ -570,18 +570,20 @@ class CotizacionDetail(generics.RetrieveUpdateDestroyAPIView):
 
 
 @api_view(['GET'])
-@permission_classes([PuedeCotizar, PuedeVerDinero])
+@permission_classes([PuedeCotizar])
 def cotizacion_stats(request):
     """Conteos para los KPIs y las pestañas, calculados en la BD (no en el cliente).
 
     Con la lista paginada, el navegador ya no tiene todas las filas para contar;
     esto las cuenta de una sola pasada.
 
-    Dos candados, no uno. `cotizar` porque son los KPIs y las pestañas de esta
-    sección: quien la trabaja los necesita, y antes se pedían por NIVEL, así que
-    encender `cotizar` en la pantalla no alcanzaba para verlos. `ver_dinero`
-    porque `monto_aceptado` suma TODAS las cotizaciones aceptadas del periodo, y
-    eso ya no es la sección: son las cuentas del negocio. DRF exige las dos.
+    El candado es `cotizar` y nada más: son los KPIs y las pestañas de ESTA
+    sección, y quien la trabaja los necesita. Lo que sí es de las cuentas del
+    negocio es `monto_aceptado` —suma TODAS las aceptadas del periodo—, así que
+    ese campo se filtra por `ver_dinero`. Se OMITE, no se manda en cero: un cero
+    es un dato, y el panel lo pintaría como "$0.00 aceptado", que es falso. Pedir
+    las dos capacidades para ENTRAR dejaba al Gestor —que cotiza y no ve
+    dinero— sin pestañas y con el banner rojo de fallo.
     """
     from django.db.models import Count
     from server.periodos import rango_periodo
@@ -596,10 +598,7 @@ def cotizacion_stats(request):
     por_estado = dict(base.values_list('estado').annotate(n=Count('id')))
     vencidas = base.filter(estado__in=['borrador', 'enviada'], vence_el__lt=hoy).count()
     abiertas = max(0, por_estado.get('borrador', 0) + por_estado.get('enviada', 0) - vencidas)
-    # `total` es propiedad (suma de partidas), no columna: se itera solo el
-    # subconjunto de aceptadas (con prefetch), que es una fracción del total.
-    monto = sum((c.total for c in base.filter(estado='aceptada').prefetch_related('items')), Decimal('0.00'))
-    return Response({
+    datos = {
         'total': base.count(),
         'borrador': por_estado.get('borrador', 0),
         'enviada': por_estado.get('enviada', 0),
@@ -607,8 +606,15 @@ def cotizacion_stats(request):
         'rechazada': por_estado.get('rechazada', 0),
         'vencida': vencidas,
         'abiertas': abiertas,
-        'monto_aceptado': str(monto),
-    })
+    }
+    if puede_de(request.user).get('ver_dinero'):
+        # `total` es propiedad (suma de partidas), no columna: se itera solo el
+        # subconjunto de aceptadas (con prefetch), que es una fracción del total.
+        # Y solo se calcula para quien lo puede ver: sin `ver_dinero` ni se suma.
+        monto = sum((c.total for c in base.filter(estado='aceptada').prefetch_related('items')),
+                    Decimal('0.00'))
+        datos['monto_aceptado'] = str(monto)
+    return Response(datos)
 
 
 def _bloqueada_si_convertida(cot):

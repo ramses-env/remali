@@ -209,7 +209,7 @@ nada. Es el ejemplo perfecto del interruptor decorativo que la prueba busca.
 
 | Ruta | Gate hoy | archivo:línea | Marca |
 |---|---|---|---|
-| `/api/cotizaciones/stats/` | ~~`IsAdminGroupOrStaff`~~ → `PuedeCotizar` + `PuedeVerDinero` | `apps/cotizaciones/views.py:576` | **HECHO (Tarea 10)** — son los KPIs y las pestañas de la propia sección, pero devuelve `monto_aceptado` (la suma de TODAS las aceptadas del periodo), que es dinero agregado del negocio. Por la regla del Paso 3 se conservó `ver_dinero` junto a la capacidad. **Consecuencia a revisar con el dueño: el Gestor tiene `cotizar` por nivel pero `ver_dinero` apagado a propósito, así que pierde los KPIs y los conteos de las pestañas de Cotizaciones (`cotizaciones.tsx` pinta el banner rojo de fallo, `Dashboard.tsx:382` se traga el 403 y deja el globito en 0).** A cambio se cierra el hueco de hoy: con nivel 2 el Gestor ya veía `monto_aceptado`. La salida limpia, si el dueño la quiere, es dejar la ruta en `PuedeCotizar` y omitir `monto_aceptado` a quien no tenga `ver_dinero`. |
+| `/api/cotizaciones/stats/` | ~~`IsAdminGroupOrStaff`~~ → `PuedeCotizar` | `apps/cotizaciones/views.py:576` | **HECHO, y CORREGIDO (2026-08-22)** — la Tarea 10 la dejó en `PuedeCotizar` + `PuedeVerDinero`, y eso le quitaba al Gestor los KPIs y los conteos de sus pestañas (banner rojo en `cotizaciones.tsx`, globito en 0 en `Dashboard.tsx:382`) por un solo campo. El dueño eligió la salida limpia que ya venía escrita aquí: **la ruta pide SOLO `cotizar`, y a quien no tenga `ver_dinero` se le OMITE `monto_aceptado`** —omitido, no en cero: un cero es un dato y el panel pintaría "$0.00 aceptado", que es falso—. El campo ni se calcula para quien no lo puede ver. En el front, `CotStats.monto_aceptado` pasó a opcional y el KPI no se pinta si no vino. |
 | `/api/cotizaciones/<int:pk>/convertir/` | `IsAdminGroupOrStaff` | `apps/cotizaciones/views.py:752` | **`→ vender`** — lo dice el docstring de `PuedeCotizar`: "cotizar NO es convertir a venta". |
 | `/api/cotizaciones/<int:pk>/vincular/` | `EsOperador` | `apps/cotizaciones/views.py:260` | **`→ editar_clientes`** · ver §5.2 |
 | `/api/cotizaciones/<int:pk>/vinculo/` | `EsOperador` | `apps/cotizaciones/views.py:301` | **`→ editar_clientes`** · ver §5.2 |
@@ -418,9 +418,9 @@ Ran 2 tests in 0.003s
 FAILED (failures=1)
 ```
 
-Son **14 de las 17 configurables** (`CATALOGO` tiene 24; menos las 5 del `NUCLEO`
-y las 2 de `SOLO_PANTALLA` quedan 17). Las 3 que sí se imponen hoy son
-`ver_clientes`, `editar_clientes` y `ver_dinero`.
+Son **14 de las 17 configurables** que había ese día (`CATALOGO` tenía 24; menos
+las 5 del `NUCLEO` y las 2 de `SOLO_PANTALLA` quedaban 17). Las 3 que sí se
+imponían son `ver_clientes`, `editar_clientes` y `ver_dinero`.
 
 Dónde aterriza cada una, según las marcas de arriba:
 
@@ -458,6 +458,26 @@ había que hacer que sus clases de permiso heredaran de `ExigeCapacidad` (§1).
 Suite completa el 2026-08-22: **398 pruebas, 1 fallo** — este mismo, que es el
 marcador de lo que le queda a la Tarea 11.
 
+### Después de resolver los POR DECIDIR: siguen siendo 12
+
+Las tres decisiones del dueño (§4, §3.2 y §3.5) no bajaron la lista, y eso es
+correcto: **las dos capacidades nuevas nacieron ya gateadas.** `operar_jornada`
+llegó con sus cuatro rutas de campo y `emitir_cupones` con sus dos, así que el
+`CATALOGO` pasó de 24 a **26** (21 configurables, 19 auditables tras descontar
+`NUCLEO` y `SOLO_PANTALLA`) sin que la lista de huérfanas creciera. Es la forma
+que tiene esta prueba de decir "capacidad nueva sin interruptor decorativo".
+
+`/api/cotizaciones/stats/` soltó `PuedeVerDinero`, pero `ver_dinero` sigue
+impuesta en `/api/dashboard/metricas/`, así que tampoco entró a la lista.
+
+Las 12 que quedan son, todas, trabajo de la Tarea 11:
+
+```
+- ['alta_inventario', 'configurar_negocio', 'corte_caja', 'editar_catalogo',
+-  'facturar', 'gestionar_reparaciones', 'operar_inventario', 'rentar',
+-  'reparar', 'vender', 'ver_montos_operacion', 'ver_operacion']
+```
+
 ---
 
 ## 7. Cómo se cierra
@@ -467,3 +487,13 @@ pasa en verde y esta nota deja de ser una lista de pendientes para volverse el
 registro de por qué cada ruta quedó donde quedó. Lo único que NO se cierra solo
 son los `POR DECIDIR`: esos necesitan una respuesta del dueño antes de tocar
 código.
+
+**Estado de los `POR DECIDIR` (2026-08-22).** De los cinco quedan dos:
+
+| Duda | Estado |
+|---|---|
+| Las 4 rutas de Mi jornada (§4) | **RESUELTA** — capacidad nueva `operar_jornada` |
+| `/api/cupones/` y `/api/cupones/<pk>/` (§3.2, §5.3) | **RESUELTA** — capacidad nueva `emitir_cupones` |
+| `/api/cotizaciones/stats/` (§3.5) | **RESUELTA** — se filtra el campo, no la pantalla |
+| `/api/rentas/adeudos/fusionar/` (§3.3) | pendiente |
+| `/api/cotizaciones/<pk>/aprobar-cancelacion/` (§3.5) | pendiente |

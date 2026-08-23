@@ -75,18 +75,21 @@ class LaPantallaNoMienteTest(TestCase):
         self.assertEqual(r.status_code, 403)
 
     def test_los_kpis_de_la_seccion_tambien_obedecen_al_override(self):
-        """`/api/cotizaciones/stats/` es la sección, no un nivel. Pero devuelve
-        `monto_aceptado` —dinero AGREGADO del negocio—, así que además de
-        `cotizar` sigue pidiendo `ver_dinero`."""
+        """`/api/cotizaciones/stats/` es la sección, no un nivel: con `cotizar`
+        encendido se abre, con sus conteos y sus pestañas."""
         PermisoRol.objects.create(rol='Cajero', capacidad='cotizar', permitido=True)
-        PermisoRol.objects.create(rol='Cajero', capacidad='ver_dinero', permitido=True)
-        self.assertEqual(self.api.get('/api/cotizaciones/stats/').status_code, 200)
+        r = self.api.get('/api/cotizaciones/stats/')
+        self.assertEqual(r.status_code, 200)
+        self.assertIn('abiertas', r.data)
 
-    def test_los_kpis_no_se_abren_solo_con_cotizar(self):
-        """Cotizar no es ver las cuentas: `monto_aceptado` suma TODAS las
-        cotizaciones aceptadas del periodo."""
+    def test_pero_el_monto_agregado_sigue_pidiendo_ver_dinero(self):
+        """Se filtra el CAMPO, no la pantalla: `monto_aceptado` suma TODAS las
+        aceptadas del periodo, y eso ya son las cuentas del negocio. Va omitido,
+        no en cero, para que el panel no pinte un total falso."""
         PermisoRol.objects.create(rol='Cajero', capacidad='cotizar', permitido=True)
-        self.assertEqual(self.api.get('/api/cotizaciones/stats/').status_code, 403)
+        self.assertNotIn('monto_aceptado', self.api.get('/api/cotizaciones/stats/').data)
+        PermisoRol.objects.create(rol='Cajero', capacidad='ver_dinero', permitido=True)
+        self.assertIn('monto_aceptado', self.api.get('/api/cotizaciones/stats/').data)
 
 
 class LaJornadaSeImponeTest(TestCase):

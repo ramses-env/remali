@@ -55,9 +55,10 @@ mecanismo entero. Va al núcleo intocable.
    a nadie ni perderle lo que estaba capturando.
 5. **Los overrides viven en su propia tabla**, con una bitácora append-only
    gemela de `CambioPrecioLista`.
-6. **La pantalla es una matriz**: las 24 capacidades —las 23 de hoy más
-   `configurar_permisos`— por los 4 roles editables, todo a la vista. De ellas,
-   19 son configurables y 5 salen con candado.
+6. **La pantalla es una matriz**: las 26 capacidades —las 23 de entonces, más
+   `configurar_permisos`, más las dos que salieron de convertir los gates por
+   nivel (`operar_jornada` y `emitir_cupones`)— por los 4 roles editables, todo
+   a la vista. De ellas, 21 son configurables y 5 salen con candado.
 
 ## Cómo se resuelve un permiso
 
@@ -179,16 +180,16 @@ puntos de integración de siempre para que no se quede a medias.
 Matriz: capacidades en filas, los 4 roles en columnas. Lo que la hace usable:
 
 - **Cruz de lectura.** Al pasar o enfocar, se tiñen fila y columna al 5% del
-  dorado. En una rejilla de 96 celdas el error no es escoger mal: es encender el de la
+  dorado. En una rejilla de 104 celdas el error no es escoger mal: es encender el de la
   columna de junto.
-- **Contador vivo por rol** en la cabecera (`Cajero 10/24`), que se mueve
+- **Contador vivo por rol** en la cabecera (`Cajero 10/26`), que se mueve
   mientras se toca. Responde de un vistazo "¿al final qué le dejé?".
 - **Punto dorado** en lo que difiere de fábrica, más el filtro *Solo lo que
   cambié*. Distingue las decisiones del dueño de lo que vino puesto.
 - **Bloques por área del negocio** —Dinero y cuentas · Mostrador · Campo y
   taller · Llaves del negocio— y no por nivel técnico. Descanso para el ojo sin
   sacar nada de la pantalla.
-- **La descripción aparece en la fila activa**, no en las 24 a la vez: se
+- **La descripción aparece en la fila activa**, no en las 26 a la vez: se
   conserva la densidad y la explicación llega cuando hace falta.
 - **Nada se guarda solo.** La barra aparece cuando hay cambios, los nombra en
   palabras ("Cajero: cotizar y ver la operación") y el botón dice lo que viene:
@@ -215,7 +216,7 @@ el sello movido, re-pide `/auth/me/` y `ProveedorPermisos` re-pinta. Uno o dos
 segundos, sin cerrar sesión.
 
 **Sin caché en esta versión.** `puede_de()` sumaría una consulta por request a
-una tabla de máximo 76 filas (19 capacidades configurables × 4 roles) con índice
+una tabla de máximo 84 filas (21 capacidades configurables × 4 roles) con índice
 único. Cachear en memoria de proceso es
 justo lo que se rompe en silencio con dos workers —un empleado sigue operando
 con permisos viejos y nadie se entera—. Si el costo aparece medido, se cachea
