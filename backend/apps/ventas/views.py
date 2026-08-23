@@ -10,7 +10,7 @@ from rest_framework import permissions
 
 from maquinaria.permissions import (
     IsAdminGroupOrStaff, EsOperador, PuedeFacturar, PuedeHacerCorteCaja,
-    PuedeUsarCaja, puede_de,
+    PuedeUsarCaja, PuedeVender, puede_de,
 )
 from .models import Venta, ItemVenta, SesionCaja, MovimientoCaja
 
@@ -587,7 +587,7 @@ def _equipo_pendiente(venta):
 
 
 @api_view(['POST'])
-@permission_classes([EsOperador])
+@permission_classes([PuedeVender])
 def entregar_venta(request, pk: int):
     """Cierra un apartado: exige saldo 0; si es sobre pedido, asigna la unidad que
     ya llegó (`unidad_id`). Marca la unidad vendida y la venta 'activa'.
@@ -671,7 +671,7 @@ def entregar_venta(request, pk: int):
 
 
 @api_view(['POST'])
-@permission_classes([EsOperador])
+@permission_classes([PuedeVender])
 def actualizar_pedido_fase(request, pk: int):
     """Avanza el seguimiento de un SOBRE PEDIDO (confirmado → en_camino → en_sucursal)
     y avisa al cliente si tiene cuenta ligada. La entrega final se hace aparte."""
@@ -713,7 +713,7 @@ def actualizar_pedido_fase(request, pk: int):
 
 
 @api_view(['POST'])
-@permission_classes([EsOperador])
+@permission_classes([PuedeVender])
 def crear_pedido(request):
     """Aparta una máquina SOBRE PEDIDO (sin stock): crea una venta 'apartada' con
     anticipo y sin unidad; la unidad se asigna al entregar (cuando llega)."""

@@ -16,7 +16,7 @@ from maquinaria.throttling import TokenPublicoThrottle
 from maquinaria.models import Equipo
 from maquinaria.permissions import (
     IsAdminGroupOrStaff, EsOperador, PuedeDarAltaInventario,
-    PuedeGestionarReparaciones, PuedeOperarInventario, PuedeReparar,
+    PuedeGestionarReparaciones, PuedeOperarInventario, PuedeReparar, PuedeVender,
 )
 from maquinaria.views import ProtectedDestroyMixin
 from .models import Inventario, OrdenReparacion, OrdenReparacionItem
@@ -276,7 +276,7 @@ def _notif(tipo, titulo, mensaje, seccion, data=None):
 
 
 @api_view(['POST'])
-@permission_classes([EsOperador])   # el técnico también vende en campo
+@permission_classes([PuedeVender])
 def vender_unidad(request, pk: int):
     """Registra la venta de una unidad de maquinaria.
 

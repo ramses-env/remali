@@ -537,6 +537,18 @@ class PuedeReparar(ExigeCapacidad):
     message = 'No puedes trabajar órdenes de reparación.'
 
 
+class PuedeVender(ExigeCapacidad):
+    """Registrar la venta de una máquina: apartados, pedidos y entregas.
+
+    Viene apagada de fábrica para el técnico —la venta se levanta en el
+    mostrador o en administración—, y ese apagado vivía solo en la pantalla
+    porque las rutas pedían NIVEL. Cobrar refacciones en el mostrador es otra
+    cosa (`usar_caja`): esto mueve una máquina del patrimonio.
+    """
+    capacidad = 'vender'
+    message = 'No puedes registrar ventas.'
+
+
 class PuedeEditarCatalogo(ExigeCapacidad):
     """Equipos, marcas, categorías, tipos, imágenes y precios de lista.
 

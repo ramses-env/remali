@@ -19,7 +19,7 @@ class CotizacionPagination(PageNumberPagination):
     max_page_size = 100
 
 from maquinaria.permissions import (
-    IsAdminGroupOrStaff, EsOperador, PuedeCotizar, puede_de,
+    IsAdminGroupOrStaff, EsOperador, PuedeCotizar, PuedeVender, puede_de,
 )
 from maquinaria.throttling import SolicitudPublicaThrottle, SubidaEvidenciaThrottle
 from maquinaria.ws_events import push_user_event
@@ -759,7 +759,7 @@ def cotizacion_item_modalidad(request, pk: int, item_id: int):
 
 
 @api_view(['POST'])
-@permission_classes([IsAdminGroupOrStaff])
+@permission_classes([PuedeVender])   # convertir es VENDER, no cotizar
 def convertir_cotizacion(request, pk: int):
     """Convierte una cotización aceptada en una VENTA (arrastra cliente + partidas + IVA)."""
     from ventas.models import Venta

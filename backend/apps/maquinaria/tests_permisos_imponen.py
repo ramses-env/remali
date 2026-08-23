@@ -477,6 +477,53 @@ class LaEdicionDelCatalogoSeImponeTest(TestCase):
         self.assertEqual(publico.get('/api/marcas/').status_code, 200)
 
 
+class LaVentaSeImponeTest(TestCase):
+    """`vender`: registrar la venta de una máquina, de punta a punta.
+
+    Venía apagada de fábrica para el técnico —la venta se levanta en el
+    mostrador o en administración— y ese apagado se quedaba en la pantalla:
+    las rutas pedían NIVEL, así que desde el celular podía vender igual.
+    """
+
+    def setUp(self):
+        self.cajero = User.objects.create_user('caj9', 'caj9@x.com', 'pass12345')
+        self.cajero.groups.add(Group.objects.get_or_create(name='Cajero')[0])
+        self.tecnico = User.objects.create_user('tec9', 'tec9@x.com', 'pass12345')
+        self.tecnico.groups.add(Group.objects.get_or_create(name='Técnico')[0])
+        self.api_caj = APIClient(); self.api_caj.force_authenticate(self.cajero)
+        self.api_tec = APIClient(); self.api_tec.force_authenticate(self.tecnico)
+
+    def test_el_tecnico_no_vende(self):
+        self.assertEqual(
+            self.api_tec.post('/api/unidades/999/vender/', {}, format='json').status_code, 403)
+        self.assertEqual(
+            self.api_tec.post('/api/ventas/pedidos/crear/', {}, format='json').status_code, 403)
+        self.assertEqual(
+            self.api_tec.post('/api/ventas/999/entregar/', {}, format='json').status_code, 403)
+        self.assertEqual(
+            self.api_tec.post('/api/cotizaciones/999/convertir/', {}, format='json').status_code, 403)
+
+    def test_el_mostrador_si(self):
+        self.assertEqual(
+            self.api_caj.post('/api/unidades/999/vender/', {}, format='json').status_code, 404)
+        self.assertNotEqual(
+            self.api_caj.post('/api/ventas/pedidos/crear/', {}, format='json').status_code, 403)
+
+    def test_el_override_se_la_enciende_al_tecnico(self):
+        PermisoRol.objects.create(rol='Técnico', capacidad='vender', permitido=True)
+        self.assertEqual(
+            self.api_tec.post('/api/unidades/999/vender/', {}, format='json').status_code, 404)
+
+    def test_apagarsela_al_mostrador_no_le_quita_la_caja(self):
+        """Vender una MÁQUINA y cobrar refacciones en el mostrador son cosas
+        distintas: la segunda es `usar_caja`."""
+        PermisoRol.objects.create(rol='Cajero', capacidad='vender', permitido=False)
+        self.assertEqual(
+            self.api_caj.post('/api/unidades/999/vender/', {}, format='json').status_code, 403)
+        self.assertNotEqual(
+            self.api_caj.post('/api/ventas/mostrador/', {'items': []}, format='json').status_code, 403)
+
+
 class BorrarDelCatalogoChicoSeImponeTest(TestCase):
     """El hueco §5.1 de la nota: categorías, tipos y marcas se borraban sin candado.
 
