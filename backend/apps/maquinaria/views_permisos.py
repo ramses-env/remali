@@ -48,7 +48,58 @@ def _foto():
     }
 
 
-@api_view(['GET'])
+@api_view(['GET', 'POST'])
 @permission_classes([PuedeConfigurarPermisos])
 def permisos(request):
+    if request.method == 'GET':
+        return Response(_foto())
+
+    cambios = request.data.get('cambios') or []
+    if not isinstance(cambios, list):
+        return Response({'detalle': 'Formato inválido.', 'codigo_error': 'formato'}, status=400)
+
+    # Se valida TODO el lote antes de tocar la base: la barra prometió "3
+    # cambios", así que o entran los tres o no entra ninguno.
+    for c in cambios:
+        rol, cap = c.get('rol'), c.get('capacidad')
+        if rol not in ROLES_EDITABLES:
+            return Response({'detalle': f'El rol «{rol}» no se configura aquí.',
+                             'codigo_error': 'rol_invalido'}, status=400)
+        if cap not in CAPACIDADES:
+            return Response({'detalle': f'La capacidad «{cap}» no existe.',
+                             'codigo_error': 'capacidad_invalida'}, status=400)
+        if cap in NUCLEO:
+            return Response({'detalle': 'Esa capacidad no se reparte desde esta pantalla.',
+                             'codigo_error': 'nucleo_bloqueado'}, status=400)
+        if not isinstance(c.get('permitido'), bool):
+            return Response({'detalle': 'Cada cambio necesita permitido: true o false.',
+                             'codigo_error': 'formato'}, status=400)
+
+    from .seguridad import verificar_codigo
+    ok, detalle, status, codigo_error = verificar_codigo(request.user, request.data.get('codigo') or '')
+    if not ok:
+        return Response({'detalle': detalle, 'codigo_error': codigo_error}, status=status)
+
+    quien = rol_de(request.user)
+    with transaction.atomic():
+        for c in cambios:
+            rol, cap, permitido = c['rol'], c['capacidad'], c['permitido']
+            fabrica = capacidades_fabrica(rol)[cap]
+            fila = PermisoRol.objects.filter(rol=rol, capacidad=cap).first()
+            anterior = fila.permitido if fila else fabrica
+            if anterior == permitido:
+                continue                     # no cambió nada: ni bitácora ni sello
+            if permitido == fabrica:
+                # Volvió a su valor original: el override deja de existir. Así la
+                # tabla solo guarda decisiones vivas y el punto dorado de la
+                # pantalla es "¿existe la fila?".
+                if fila:
+                    fila.delete()
+            else:
+                PermisoRol.objects.update_or_create(
+                    rol=rol, capacidad=cap,
+                    defaults={'permitido': permitido, 'actualizado_por': request.user})
+            CambioPermisoRol.objects.create(
+                rol=rol, capacidad=cap, anterior=anterior, nuevo=permitido,
+                usuario=request.user, rol_usuario=quien)
     return Response(_foto())

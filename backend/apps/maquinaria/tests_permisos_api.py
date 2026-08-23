@@ -50,3 +50,75 @@ class LeerPermisosTest(TestCase):
         api = APIClient()
         api.force_authenticate(_usuario('admin', 'Administrador'))
         self.assertEqual(api.get('/api/permisos/').status_code, 403)
+
+
+class GuardarPermisosTest(TestCase):
+
+    def setUp(self):
+        self.duena = _usuario('duena', sup=True)
+        definir_codigo(self.duena, '135790')
+        self.api = APIClient()
+        self.api.force_authenticate(self.duena)
+
+    def _post(self, cambios, codigo='135790'):
+        return self.api.post('/api/permisos/',
+                             {'cambios': cambios, 'codigo': codigo}, format='json')
+
+    def test_guarda_el_lote_completo(self):
+        r = self._post([
+            {'rol': 'Cajero', 'capacidad': 'cotizar', 'permitido': True},
+            {'rol': 'Técnico', 'capacidad': 'vender', 'permitido': True},
+        ])
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(PermisoRol.objects.count(), 2)
+        self.assertTrue(r.data['efectivo']['Cajero']['cotizar'])
+
+    def test_volver_al_valor_de_fabrica_borra_la_fila(self):
+        PermisoRol.objects.create(rol='Cajero', capacidad='cotizar', permitido=True)
+        r = self._post([{'rol': 'Cajero', 'capacidad': 'cotizar', 'permitido': False}])
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(PermisoRol.objects.count(), 0)     # fábrica del Cajero: False
+
+    def test_escribe_la_bitacora_con_anterior_y_nuevo(self):
+        self._post([{'rol': 'Cajero', 'capacidad': 'cotizar', 'permitido': True}])
+        fila = CambioPermisoRol.objects.get()
+        self.assertEqual((fila.rol, fila.capacidad), ('Cajero', 'cotizar'))
+        self.assertFalse(fila.anterior)
+        self.assertTrue(fila.nuevo)
+        self.assertEqual(fila.usuario, self.duena)
+        self.assertEqual(fila.rol_usuario, 'Dueño')
+
+    def test_el_nucleo_se_rechaza_y_no_guarda_nada_del_lote(self):
+        r = self._post([
+            {'rol': 'Cajero', 'capacidad': 'cotizar', 'permitido': True},
+            {'rol': 'Cajero', 'capacidad': 'gestionar_usuarios', 'permitido': True},
+        ])
+        self.assertEqual(r.status_code, 400)
+        self.assertEqual(r.data['codigo_error'], 'nucleo_bloqueado')
+        self.assertEqual(PermisoRol.objects.count(), 0)     # ni el primero
+
+    def test_capacidad_o_rol_inventados(self):
+        self.assertEqual(self._post([{'rol': 'Cajero', 'capacidad': 'volar', 'permitido': True}]).status_code, 400)
+        self.assertEqual(self._post([{'rol': 'Pirata', 'capacidad': 'cotizar', 'permitido': True}]).status_code, 400)
+        self.assertEqual(PermisoRol.objects.count(), 0)
+
+    def test_codigo_invalido_no_cambia_nada(self):
+        r = self._post([{'rol': 'Cajero', 'capacidad': 'cotizar', 'permitido': True}], codigo='000000')
+        self.assertEqual(r.status_code, 403)
+        self.assertEqual(PermisoRol.objects.count(), 0)
+        self.assertEqual(CambioPermisoRol.objects.count(), 0)
+
+    def test_sin_cambios_no_escribe_bitacora(self):
+        r = self._post([])
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(CambioPermisoRol.objects.count(), 0)
+
+    def test_un_gestor_no_guarda_aunque_sepa_un_codigo_bueno(self):
+        """El candado es la capacidad, no el código: sin `configurar_permisos`
+        no entra ni con el NIP del dueño en la mano."""
+        api = APIClient()
+        api.force_authenticate(_usuario('gestor', 'Gestor'))
+        r = api.post('/api/permisos/', {'codigo': '135790', 'cambios': [
+            {'rol': 'Cajero', 'capacidad': 'cotizar', 'permitido': True}]}, format='json')
+        self.assertEqual(r.status_code, 403)
+        self.assertEqual(PermisoRol.objects.count(), 0)
