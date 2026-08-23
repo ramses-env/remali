@@ -561,6 +561,29 @@ class PuedeRentar(ExigeCapacidad):
     message = 'No puedes levantar rentas.'
 
 
+class PuedeVerOperacion(ExigeCapacidad):
+    """Las listas del negocio: ventas, rentas, adeudos y pedidos con sus montos.
+
+    Es la mitad que se separó de `ver_dinero` para que alguien trabaje la
+    operación sin ver las cuentas del negocio (hay que poder abrir una venta
+    para cancelarla). La separación estaba escrita en el catálogo y no en las
+    rutas.
+    """
+    capacidad = 'ver_operacion'
+    message = 'No puedes ver la operación comercial.'
+
+
+class PuedeVerMontosOperacion(ExigeCapacidad):
+    """Cobrar y comprobar lo que uno mismo atiende: abonos, comprobantes, tickets.
+
+    El técnico cobra en campo y el cajero en el mostrador. Es la casilla que se
+    apaga cuando alguien tiene que entregar sin manejar dinero, y no incluye las
+    listas del negocio (`ver_operacion`) ni las cuentas (`ver_dinero`).
+    """
+    capacidad = 'ver_montos_operacion'
+    message = 'No puedes ver ni mover los montos de esta operación.'
+
+
 class PuedeEditarCatalogo(ExigeCapacidad):
     """Equipos, marcas, categorías, tipos, imágenes y precios de lista.
 

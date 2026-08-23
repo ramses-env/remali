@@ -563,6 +563,78 @@ class LaRentaSeImponeTest(TestCase):
             self.api_caj.post('/api/rentas/crear/', {}, format='json').status_code, 403)
 
 
+class LaOperacionComercialSeImponeTest(TestCase):
+    """`ver_operacion`: las listas de ventas, rentas, adeudos y pedidos.
+
+    Es la mitad que se separó de `ver_dinero` para que alguien pueda trabajar la
+    operación sin ver las cuentas del negocio. La separación existía en el
+    catálogo y no en las rutas: pedían nivel, así que apagarle la operación a un
+    Gestor no le cerraba una sola lista.
+    """
+
+    def setUp(self):
+        self.admin = User.objects.create_user('adm11', 'adm11@x.com', 'pass12345')
+        self.admin.groups.add(Group.objects.get_or_create(name='Administrador')[0])
+        self.tecnico = User.objects.create_user('tec11', 'tec11@x.com', 'pass12345')
+        self.tecnico.groups.add(Group.objects.get_or_create(name='Técnico')[0])
+        self.api_adm = APIClient(); self.api_adm.force_authenticate(self.admin)
+        self.api_tec = APIClient(); self.api_tec.force_authenticate(self.tecnico)
+
+    LISTAS = ('/api/rentas/', '/api/rentas/adeudos/', '/api/rentas/alertas/',
+              '/api/ventas/lista/', '/api/ventas/pedidos/')
+
+    def test_administracion_ve_la_operacion(self):
+        for ruta in self.LISTAS:
+            self.assertEqual(self.api_adm.get(ruta).status_code, 200, ruta)
+
+    def test_el_tecnico_no_lee_el_negocio_completo(self):
+        """Lo suyo le llega por Mi jornada, que sigue abierta."""
+        for ruta in self.LISTAS:
+            self.assertEqual(self.api_tec.get(ruta).status_code, 403, ruta)
+        self.assertEqual(self.api_tec.get('/api/rentas/tareas/').status_code, 200)
+
+    def test_apagarsela_a_administracion_cierra_las_listas(self):
+        PermisoRol.objects.create(rol='Administrador', capacidad='ver_operacion',
+                                  permitido=False)
+        for ruta in self.LISTAS:
+            self.assertEqual(self.api_adm.get(ruta).status_code, 403, ruta)
+
+
+class LosMontosDeLoQueSeAtiendeSeImponenTest(TestCase):
+    """`ver_montos_operacion`: cobrar y comprobar lo que uno mismo atiende.
+
+    El técnico cobra en campo y el cajero en el mostrador: abonos, comprobantes
+    y tickets. Es la capacidad que el dueño apaga cuando quiere que alguien
+    entregue sin manejar dinero, y hasta ahora esa casilla no hacía nada.
+    """
+
+    def setUp(self):
+        self.tecnico = User.objects.create_user('tec12', 'tec12@x.com', 'pass12345')
+        self.tecnico.groups.add(Group.objects.get_or_create(name='Técnico')[0])
+        self.api = APIClient(); self.api.force_authenticate(self.tecnico)
+
+    RUTAS = ('/api/rentas/999/comprobante/', '/api/rentas/999/ticket/',
+             '/api/ventas/999/comprobante/', '/api/ventas/999/ticket/')
+
+    def test_el_tecnico_cobra_lo_que_atiende(self):
+        for ruta in self.RUTAS:
+            self.assertEqual(self.api.get(ruta).status_code, 404, ruta)
+        self.assertEqual(
+            self.api.post('/api/rentas/999/abonos/', {}, format='json').status_code, 404)
+        self.assertEqual(
+            self.api.post('/api/ventas/999/abono/', {}, format='json').status_code, 404)
+
+    def test_apagarsela_lo_deja_entregar_sin_manejar_dinero(self):
+        PermisoRol.objects.create(rol='Técnico', capacidad='ver_montos_operacion',
+                                  permitido=False)
+        for ruta in self.RUTAS:
+            self.assertEqual(self.api.get(ruta).status_code, 403, ruta)
+        self.assertEqual(
+            self.api.post('/api/rentas/999/abonos/', {}, format='json').status_code, 403)
+        self.assertEqual(
+            self.api.post('/api/ventas/999/abono/', {}, format='json').status_code, 403)
+
+
 class BorrarDelCatalogoChicoSeImponeTest(TestCase):
     """El hueco §5.1 de la nota: categorías, tipos y marcas se borraban sin candado.
 

@@ -9,8 +9,8 @@ from rest_framework.response import Response
 from rest_framework import permissions
 
 from maquinaria.permissions import (
-    IsAdminGroupOrStaff, EsOperador, PuedeFacturar, PuedeHacerCorteCaja,
-    PuedeUsarCaja, PuedeVender, puede_de,
+    IsAdminGroupOrStaff, EsOperador, PuedeFacturar, PuedeHacerCorteCaja, PuedeUsarCaja,
+    PuedeVender, PuedeVerMontosOperacion, PuedeVerOperacion, puede_de,
 )
 from .models import Venta, ItemVenta, SesionCaja, MovimientoCaja
 
@@ -294,7 +294,7 @@ def exportar_ventas_csv(request):
 
 
 @api_view(['GET'])
-@permission_classes([IsAdminGroupOrStaff])
+@permission_classes([PuedeVerOperacion])
 def listar_ventas(request):
     """Lista de ventas (incluye ventas de maquinaria con su unidad)."""
     qs = Venta.objects.all().select_related(
@@ -445,7 +445,7 @@ def _serialize_pedido(v):
 
 
 @api_view(['GET'])
-@permission_classes([EsOperador])
+@permission_classes([PuedeVerOperacion])
 def pedidos_adeudos(request):
     """La sección 'Pedidos y apartados', por sus dos lados.
 
@@ -521,7 +521,7 @@ def _abono_a_caja(user, *, monto, metodo, venta=None, renta=None, concepto=''):
 
 
 @api_view(['POST'])
-@permission_classes([EsOperador])
+@permission_classes([PuedeVerMontosOperacion])
 def registrar_abono_venta(request, pk: int):
     """Registra un abono a un apartado (baja el saldo). NO toca caja (consistente
     con renta y con la venta de maquinaria)."""
@@ -1056,7 +1056,7 @@ def _get_venta_full(pk):
 
 
 @api_view(['GET'])
-@permission_classes([EsOperador])
+@permission_classes([PuedeVerMontosOperacion])
 def comprobante_venta(request, pk: int):
     """Datos del ticket de venta en JSON (para el modal dentro del sistema)."""
     try:
@@ -1068,7 +1068,7 @@ def comprobante_venta(request, pk: int):
 
 
 @api_view(['GET'])
-@permission_classes([EsOperador])
+@permission_classes([PuedeVerMontosOperacion])
 def ticket_venta(request, pk: int):
     """Ticket de venta en PDF (descarga/impresión alterna)."""
     try:

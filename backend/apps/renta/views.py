@@ -17,7 +17,7 @@ from rest_framework.decorators import throttle_classes
 
 from maquinaria.permissions import (
     IsAdminGroupOrStaff, EsOperador, PuedeFacturar, PuedeOperarJornada,
-    PuedeRentar, nivel_de, NIVEL_ADMIN,
+    PuedeRentar, PuedeVerMontosOperacion, PuedeVerOperacion, nivel_de, NIVEL_ADMIN,
 )
 from maquinaria.throttling import SubidaEvidenciaThrottle
 from . import evidencia as ev
@@ -259,7 +259,7 @@ def exportar_adeudos_csv(request):
 
 
 @api_view(['GET'])
-@permission_classes([EsOperador])
+@permission_classes([PuedeVerOperacion])
 def listar_rentas(request):
     estado = request.query_params.get('estado') or 'activa'
     qs = Renta.objects.all().select_related(
@@ -338,7 +338,7 @@ def fusionar_cliente_adeudos(request):
 
 
 @api_view(['GET'])
-@permission_classes([EsOperador])
+@permission_classes([PuedeVerOperacion])
 def rentas_adeudos(request):
     """COBRANZA: toda renta (viva o terminada) que aún debe dinero.
 
@@ -410,7 +410,7 @@ def mandar_por_facturar_renta(request, pk):
 
 
 @api_view(['POST'])
-@permission_classes([EsOperador])
+@permission_classes([PuedeVerMontosOperacion])
 def registrar_abono(request, pk):
     """Registra un abono del cliente (muchos pagan después de la renta).
 
@@ -548,7 +548,7 @@ def vinculo_renta(request, token: str):
 
 
 @api_view(['GET'])
-@permission_classes([EsOperador])
+@permission_classes([PuedeVerOperacion])   # devuelve la renta completa, con montos
 def alertas_renta(request):
     hoy = timezone.localdate()
     qs = Renta.objects.filter(
@@ -1195,7 +1195,7 @@ def _get_renta_full(pk):
 
 
 @api_view(['GET'])
-@permission_classes([EsOperador])   # tiene que poder mostrar el comprobante
+@permission_classes([PuedeVerMontosOperacion])
 def comprobante_renta(request, pk: int):
     """Datos del comprobante de renta en JSON (para el modal dentro del sistema)."""
     try:
@@ -1207,7 +1207,7 @@ def comprobante_renta(request, pk: int):
 
 
 @api_view(['GET'])
-@permission_classes([EsOperador])
+@permission_classes([PuedeVerMontosOperacion])
 def ticket_renta(request, pk: int):
     """Comprobante de renta en PDF (descarga/impresión alterna).
 
