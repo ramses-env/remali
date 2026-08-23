@@ -28,6 +28,12 @@ export type Foto = {
   overrides: { rol: string; capacidad: string; permitido: boolean; por: string; cuando: string }[]
 }
 
+export type Movimiento = {
+  rol: string; capacidad: string; etiqueta: string
+  anterior: boolean | null; nuevo: boolean | null
+  quien: string; rol_quien: string; cuando: string
+}
+
 /** Clave de una celda: rol + capacidad. El separador es "·" porque ni los roles
  *  ni los nombres del catálogo lo usan; un guion sí aparece en las capacidades. */
 const clave = (rol: string, cap: string) => `${rol}·${cap}`
@@ -78,6 +84,66 @@ function Celda({ encendido, movida, bloqueada, etiqueta, resaltada, onToggle, on
   )
 }
 
+/** El rastro: quién movió qué, cuándo y de qué a qué.
+ *
+ * Se lee, no se deshace desde aquí: deshacer es volver a mover el interruptor,
+ * que a su vez deja su propio renglón. Y se pide solo al abrirlo, porque la
+ * pregunta "¿quién le encendió esto al cajero?" llega después del susto, no al
+ * entrar a la pantalla.
+ */
+function Rastro() {
+  const [abierto, setAbierto] = useState(false)
+  const [filas, setFilas] = useState<Movimiento[] | null>(null)
+  const [fallo, setFallo] = useState('')
+
+  useEffect(() => {
+    if (!abierto || filas) return
+    api.get<{ cambios: Movimiento[] }>('/permisos/bitacora/')
+      .then(r => setFilas(r.data.cambios || []))
+      .catch(e => setFallo(errorMsg(e, 'No se pudo traer el rastro.')))
+  }, [abierto, filas])
+
+  const cuando = (iso: string) => {
+    try { return new Date(iso).toLocaleString('es-MX', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) }
+    catch { return iso }
+  }
+  /** `null` en `anterior`/`nuevo` significa "venía de fábrica" / "se restableció". */
+  const estado = (v: boolean | null) => (v === null ? 'de fábrica' : v ? 'encendido' : 'apagado')
+
+  return (
+    <div className="rounded-xl border border-edge bg-surface">
+      <button onClick={() => setAbierto(a => !a)} aria-expanded={abierto}
+        className="w-full flex items-center justify-between gap-3 px-3.5 py-2.5 text-left">
+        <span className="text-[11.5px] font-semibold text-ink">Rastro de cambios</span>
+        <span className="text-[10px] text-mute">{abierto ? 'Ocultar' : 'Ver quién movió qué'}</span>
+      </button>
+      {abierto && (
+        <div className="border-t border-edge px-3.5 py-2.5">
+          {fallo && <p className="text-[11px] text-mute">{fallo}</p>}
+          {!fallo && !filas && <div className="h-10 rounded-lg bg-surface-2 animate-pulse" />}
+          {filas?.length === 0 && (
+            <p className="text-[11px] text-mute">Nadie ha movido un permiso todavía. Todo está como salió de fábrica.</p>
+          )}
+          {filas && filas.length > 0 && (
+            <ul className="space-y-1.5">
+              {filas.map((f, i) => (
+                <li key={i} className="text-[11px] text-mute leading-snug">
+                  <span className="text-ink font-medium">{f.etiqueta}</span>
+                  {' · '}{f.rol}{' · '}
+                  {estado(f.anterior)} → <span className="text-ink">{estado(f.nuevo)}</span>
+                  <span className="block text-[10px] tabular-nums">
+                    {f.quien}{f.rol_quien ? ` (${f.rol_quien})` : ''} · {cuando(f.cuando)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function PermisosAdmin({ notify }: { notify: Notify }) {
   const [foto, setFoto] = useState<Foto | null>(null)
   const [error, setError] = useState('')
@@ -88,6 +154,9 @@ export default function PermisosAdmin({ notify }: { notify: Notify }) {
    *  de cien celdas el error no es escoger mal, es encender el de junto. */
   const [cruz, setCruz] = useState<{ cap: string; rol: string } | null>(null)
   const [guardando, setGuardando] = useState(false)
+  /** Sube al guardar. Es la `key` del rastro: lo remonta para que no se quede
+   *  enseñando una lista sin el cambio que se acaba de firmar. */
+  const [version, setVersion] = useState(0)
 
   const cargar = useCallback(() => {
     api.get<Foto>('/permisos/')
@@ -156,6 +225,7 @@ export default function PermisosAdmin({ notify }: { notify: Notify }) {
       const r = await api.post<Foto>('/permisos/', { cambios, codigo })
       setFoto(r.data)
       setPendientes({})                  // solo en el camino bueno: si falla, no se pierde nada
+      setVersion(v => v + 1)
       notify('Permisos actualizados', 'ok')
     } catch (e) {
       notify(errorMsg(e), 'err')         // el tipo SIEMPRE se declara: el default sale verde
@@ -254,6 +324,8 @@ export default function PermisosAdmin({ notify }: { notify: Notify }) {
           })}
         </div>
       </div>
+
+      <Rastro key={version} />
 
       {cambios.length > 0 && (
         <div className="sticky bottom-4 mt-3 flex items-center justify-between gap-3 rounded-xl
