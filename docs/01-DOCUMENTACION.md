@@ -260,10 +260,84 @@ Base: todas las rutas cuelgan de `/api/`. Autenticación por `Authorization: Bea
 
 ## 6. Autorización
 
-- **Default global:** `AllowAny` (¡todo abierto salvo que la vista lo restrinja!). Ver auditoría §1.
-- **`IsAdminGroupOrStaff`** (`maquinaria/permissions.py`): `is_staff` **o** pertenecer al grupo `Administrador`.
-- Convención mixta: inventario/empresas usan admin; rentas/ventas usan `IsAuthenticated`; catálogo es lectura pública + escritura admin.
-- Comando `init_roles` (management command) crea el grupo/roles base.
+Todo vive en `backend/apps/maquinaria/permissions.py`. La autorización real está
+ahí, no en el frontend: el panel oculta lo que no aplica por cortesía, pero
+cualquiera puede llamar la API directamente.
+
+### 6.1 Niveles
+
+Tres niveles ordenados (`nivel_de`), donde cada uno incluye al anterior:
+
+| Nivel | Quién | Qué es |
+|---|---|---|
+| 3 | Dueño | superusuario. Lo puede todo, siempre. |
+| 2 | Administrador · **Gestor** | opera el negocio. El Gestor es administración DELEGADA: mismo nivel, ajustes propios. |
+| 1 | Técnico · **Cajero** | comparten número y hacen trabajos distintos: el campo y el mostrador. |
+| 0 | Sin acceso | tiene cuenta, no entra al panel (es un cliente de la tienda). |
+
+Los pares que comparten nivel se distinguen por su GRUPO, no por el número: qué
+puede cada uno dentro lo decide la capacidad, no la jerarquía.
+
+### 6.2 Capacidades
+
+El `CATALOGO` de `permissions.py` es la lista de lo que se puede hacer, con su
+etiqueta, su explicación y su área. Es DATOS, no un diccionario a mano: la
+pantalla de permisos se pinta sola a partir de él.
+
+Un permiso se resuelve en tres capas, y la última manda:
+
+```
+nivel (jerarquía)  →  ajuste por puesto (fábrica)  →  override guardado (el dueño)
+```
+
+- `AJUSTES_POR_PUESTO` son VALORES DE FÁBRICA (el cajero no renta, el técnico no
+  vende), no la ley.
+- Los overrides viven en la tabla `PermisoRol` y **solo se guarda lo que difiere
+  de fábrica**: volver algo a su valor original borra la fila.
+- **Fail-closed**: si esa consulta truena (base a medio migrar), se cae a fábrica
+  y se sigue trabajando. Un error nunca reparte permisos.
+
+Cómo se impone en las vistas: `permission_classes = [PuedeLoQueSea]`, con una
+subclase de `ExigeCapacidad`. La regla que hace que la pantalla no mienta es que
+**si la matriz deja encender X para un rol, todos los endpoints que ejecutan X
+tienen que pedir X**; los gates que quedan por nivel son los que protegen una
+sección entera o un acto irreversible sin una capacidad concreta detrás. Hay una
+prueba que lo vigila: `maquinaria/tests_permisos_imponen.py` recorre el catálogo
+y falla si una capacidad configurable no tiene ni un gate real detrás.
+
+El inventario ruta por ruta —con la razón de cada decisión— está en
+`docs/superpowers/notas/2026-08-22-inventario-permisos.md`.
+
+### 6.3 El núcleo intocable
+
+Cinco capacidades que la pantalla muestra con candado y ninguna configuración
+reparte: `gestionar_usuarios`, `editar_datos_bancarios`, `borrar_catalogo`,
+`tener_codigo_propio` y `configurar_permisos`. Dar de alta gente, cambiar la
+cuenta donde caen los pagos, borrar del catálogo y tener NIP propio son las
+llaves; repartirlas desde una pantalla vaciaría el mecanismo. Candado no es
+apagado: la celda muestra su estado real.
+
+### 6.4 La pantalla (Dashboard → Permisos)
+
+Sección gateada por `configurar_permisos`, o sea solo el dueño. Matriz de
+capacidades × los cuatro puestos editables, con cruz de lectura, contador vivo
+por puesto y punto dorado en lo que difiere de fábrica.
+
+- `GET /api/permisos/` — catálogo, roles, fábrica, efectivo y overrides.
+- `POST /api/permisos/` — recibe EL LOTE (`{cambios: [...], codigo}`) y lo aplica
+  en una transacción: o entran todos o ninguno. Exige el código de 6 dígitos,
+  rechaza con 400 cualquier intento sobre el núcleo, y escribe bitácora.
+- `GET /api/permisos/bitacora/` — el rastro (`CambioPermisoRol`, append-only:
+  quién, cuándo, de qué a qué).
+
+Al guardar se toca el sello `permisos` del latido, así que los paneles abiertos
+vuelven a preguntar qué pueden y se reacomodan solos en un par de segundos, sin
+cerrarle la sesión a nadie.
+
+El diseño completo, con lo que se decidió y lo que quedó fuera, está en
+`docs/superpowers/specs/2026-08-22-permisos-configurables-design.md`.
+
+- Comando `init_roles` (management command) crea los grupos/roles base.
 
 ---
 
