@@ -17,7 +17,7 @@ from rest_framework.decorators import throttle_classes
 
 from maquinaria.permissions import (
     IsAdminGroupOrStaff, EsOperador, PuedeFacturar, PuedeOperarJornada,
-    nivel_de, NIVEL_ADMIN,
+    PuedeRentar, nivel_de, NIVEL_ADMIN,
 )
 from maquinaria.throttling import SubidaEvidenciaThrottle
 from . import evidencia as ev
@@ -559,7 +559,7 @@ def alertas_renta(request):
 
 
 @api_view(['POST'])
-@permission_classes([EsOperador])   # el técnico cierra la renta al entregar
+@permission_classes([PuedeRentar])
 def crear_renta(request):
     """Levanta una renta.
 
@@ -836,7 +836,7 @@ def crear_renta(request):
 
 
 @api_view(['POST'])
-@permission_classes([EsOperador])
+@permission_classes([PuedeRentar])
 def renovar_renta(request, pk: int):
     """Renovar/revivar una renta: crea una NUEVA renta LIGADA (renta_origen) para
     la misma unidad y cliente, con la modalidad/duración del nuevo periodo.
@@ -1029,7 +1029,7 @@ def devolver_renta(request, pk: int):
 
 
 @api_view(['POST'])
-@permission_classes([EsOperador])
+@permission_classes([PuedeRentar])
 def resolver_deposito_renta(request, pk: int):
     """Liquidar el depósito aparte de la devolución, o AJUSTARLO después.
 
@@ -1101,7 +1101,7 @@ def cancelar_reserva_cliente(request, pk: int):
 
 
 @api_view(['POST'])
-@permission_classes([EsOperador])
+@permission_classes([PuedeRentar])
 def sustituir_unidad_renta(request, pk: int):
     """Cambia la máquina de una renta ACTIVA por otra de repuesto (avería).
 

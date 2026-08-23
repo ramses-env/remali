@@ -524,6 +524,45 @@ class LaVentaSeImponeTest(TestCase):
             self.api_caj.post('/api/ventas/mostrador/', {'items': []}, format='json').status_code, 403)
 
 
+class LaRentaSeImponeTest(TestCase):
+    """`rentar`: LEVANTAR la renta, que no es operarla.
+
+    El cajero no renta (su ajuste de puesto la trae apagada) y el técnico
+    tampoco: él entrega y recoge lo que otro levantó, y eso ya tiene su propia
+    capacidad (`operar_jornada`). Las dos venían apagadas en la pantalla y
+    encendidas en la API.
+    """
+
+    def setUp(self):
+        self.admin = User.objects.create_user('adm10', 'adm10@x.com', 'pass12345')
+        self.admin.groups.add(Group.objects.get_or_create(name='Administrador')[0])
+        self.cajero = User.objects.create_user('caj10', 'caj10@x.com', 'pass12345')
+        self.cajero.groups.add(Group.objects.get_or_create(name='Cajero')[0])
+        self.api_adm = APIClient(); self.api_adm.force_authenticate(self.admin)
+        self.api_caj = APIClient(); self.api_caj.force_authenticate(self.cajero)
+
+    def test_el_cajero_no_levanta_rentas(self):
+        self.assertEqual(
+            self.api_caj.post('/api/rentas/crear/', {}, format='json').status_code, 403)
+        self.assertEqual(
+            self.api_caj.post('/api/rentas/999/renovar/', {}, format='json').status_code, 403)
+        self.assertEqual(
+            self.api_caj.post('/api/rentas/999/sustituir-unidad/', {}, format='json').status_code, 403)
+        self.assertEqual(
+            self.api_caj.post('/api/rentas/999/deposito/', {}, format='json').status_code, 403)
+
+    def test_administracion_si(self):
+        self.assertNotEqual(
+            self.api_adm.post('/api/rentas/crear/', {}, format='json').status_code, 403)
+        self.assertNotEqual(
+            self.api_adm.post('/api/rentas/999/renovar/', {}, format='json').status_code, 403)
+
+    def test_el_override_se_la_enciende_al_cajero(self):
+        PermisoRol.objects.create(rol='Cajero', capacidad='rentar', permitido=True)
+        self.assertNotEqual(
+            self.api_caj.post('/api/rentas/crear/', {}, format='json').status_code, 403)
+
+
 class BorrarDelCatalogoChicoSeImponeTest(TestCase):
     """El hueco §5.1 de la nota: categorías, tipos y marcas se borraban sin candado.
 

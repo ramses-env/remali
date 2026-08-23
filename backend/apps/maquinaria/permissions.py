@@ -549,6 +549,18 @@ class PuedeVender(ExigeCapacidad):
     message = 'No puedes registrar ventas.'
 
 
+class PuedeRentar(ExigeCapacidad):
+    """LEVANTAR una renta: crearla, renovarla, sustituirle la unidad, resolver
+    el depósito.
+
+    Distinto de operarla (`operar_jornada`), que es entregar y recoger lo que
+    otro levantó. Ni el técnico ni el cajero rentan de fábrica, y las dos rutas
+    de campo estaban gateadas por nivel, así que los dos podían.
+    """
+    capacidad = 'rentar'
+    message = 'No puedes levantar rentas.'
+
+
 class PuedeEditarCatalogo(ExigeCapacidad):
     """Equipos, marcas, categorías, tipos, imágenes y precios de lista.
 
