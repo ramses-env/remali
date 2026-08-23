@@ -29,6 +29,10 @@ export type Capacidades = {
   /** Los montos de lo que uno mismo opera: quien entrega también cobra. */
   ver_montos_operacion: boolean
   vender: boolean; rentar: boolean; cotizar: boolean
+  /** Entregar, recoger y subir las fotos de una renta que ya existe.
+   *  Distinto de `rentar`, que es levantarla: el técnico opera lo que
+   *  otro levantó. */
+  operar_jornada: boolean
   facturar: boolean; editar_catalogo: boolean
   /** Dar de alta equipo nuevo, distinto de mover el que ya existe. */
   alta_inventario: boolean

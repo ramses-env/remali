@@ -87,3 +87,51 @@ class LaPantallaNoMienteTest(TestCase):
         cotizaciones aceptadas del periodo."""
         PermisoRol.objects.create(rol='Cajero', capacidad='cotizar', permitido=True)
         self.assertEqual(self.api.get('/api/cotizaciones/stats/').status_code, 403)
+
+
+class LaJornadaSeImponeTest(TestCase):
+    """`operar_jornada`: entregar, recoger y subir las fotos.
+
+    Es un trabajo distinto de LEVANTAR la renta (`rentar`, que el técnico tiene
+    apagada a propósito), y hasta ahora no tenía nombre: las cuatro rutas de
+    campo pedían solo nivel, así que el Cajero —que nunca sale al campo— leía el
+    tablero completo con sus adeudos.
+    """
+
+    def setUp(self):
+        self.cajero = User.objects.create_user('caja', 'caja@x.com', 'pass12345')
+        self.cajero.groups.add(Group.objects.get_or_create(name='Cajero')[0])
+        self.tecnico = User.objects.create_user('tec', 'tec@x.com', 'pass12345')
+        self.tecnico.groups.add(Group.objects.get_or_create(name='Técnico')[0])
+        self.api_cajero = APIClient(); self.api_cajero.force_authenticate(self.cajero)
+        self.api_tecnico = APIClient(); self.api_tecnico.force_authenticate(self.tecnico)
+
+    def test_el_cajero_no_lee_el_tablero_de_campo(self):
+        self.assertEqual(self.api_cajero.get('/api/rentas/tareas/').status_code, 403)
+
+    def test_el_tecnico_si_lo_lee(self):
+        self.assertEqual(self.api_tecnico.get('/api/rentas/tareas/').status_code, 200)
+
+    def test_el_override_se_lo_enciende_al_cajero(self):
+        PermisoRol.objects.create(rol='Cajero', capacidad='operar_jornada', permitido=True)
+        self.assertEqual(self.api_cajero.get('/api/rentas/tareas/').status_code, 200)
+
+    def test_entregar_recoger_y_evidencias_piden_la_capacidad(self):
+        """Al cajero lo para el permiso (403); al técnico lo para la renta que no
+        existe (404), que es la prueba de que la capacidad sí lo dejó pasar."""
+        for llamada in (
+            lambda api: api.post('/api/rentas/999/entregar/', {'entregado': True}, format='json'),
+            lambda api: api.post('/api/rentas/999/devolver/', {}, format='json'),
+            lambda api: api.get('/api/rentas/999/evidencias/'),
+            lambda api: api.post('/api/rentas/999/evidencias/', {'momento': 'entrega'}, format='json'),
+        ):
+            self.assertEqual(llamada(self.api_cajero).status_code, 403)
+            self.assertEqual(llamada(self.api_tecnico).status_code, 404)
+
+    def test_administracion_tambien_entrega_desde_rentas(self):
+        """`jornada_campo` no servía para gatear esto: no cascadea hacia arriba y
+        habría dejado al administrador sin poder entregar desde Rentas."""
+        admin = User.objects.create_user('adm', 'adm@x.com', 'pass12345')
+        admin.groups.add(Group.objects.get_or_create(name='Administrador')[0])
+        api = APIClient(); api.force_authenticate(admin)
+        self.assertEqual(api.get('/api/rentas/tareas/').status_code, 200)

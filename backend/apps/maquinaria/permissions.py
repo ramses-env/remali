@@ -193,6 +193,16 @@ CATALOGO = (
               'Mostrador'),
     Capacidad('rentar', 'Rentar', 'Levantar rentas y devoluciones.', NIVEL_TECNICO,
               'Campo y taller'),
+    # LEVANTAR una renta y TRABAJARLA son dos cosas distintas, y hasta ahora la
+    # segunda no tenía nombre. `rentar` viene apagada para el técnico a propósito
+    # (la renta se levanta en el mostrador o en administración) y `jornada_campo`
+    # no cascadea hacia arriba, así que las rutas de campo se quedaban gateadas
+    # por NIVEL: el cajero, que nunca sale, leía el tablero completo con adeudos.
+    Capacidad('operar_jornada', 'Operar la jornada de campo',
+              'Entregar, recoger y subir las fotos de una renta que ya existe. '
+              'Distinto de rentar, que es LEVANTARLA: el técnico opera lo que '
+              'otro levantó.', NIVEL_TECNICO,
+              'Campo y taller'),
     Capacidad('cotizar', 'Cotizar', 'Hacer presupuestos y mandarlos a autorizar.', NIVEL_ADMIN,
               'Mostrador'),
     Capacidad('facturar', 'Facturar', 'Atender la bandeja de por facturar.', NIVEL_ADMIN,
@@ -292,6 +302,7 @@ AJUSTES_POR_PUESTO = {
                  'tener_codigo_propio': False},
     # Mostrador: vende y cobra en la caja, no anda en campo.
     ROL_CAJERO: {'rentar': False, 'reparar': False, 'operar_inventario': False,
+                 'operar_jornada': False,
                  'usar_caja': True, 'corte_caja': True},
     # Técnico de campo: REPARA, ENTREGA, RECOGE y COBRA lo que él atiende.
     # No vende ni renta —eso se levanta en el mostrador o en administración—,
@@ -456,6 +467,18 @@ class PuedeCotizar(ExigeCapacidad):
     esos siguen pidiendo su propia capacidad (vender / ver_dinero / admin)."""
     capacidad = 'cotizar'
     message = 'No puedes gestionar cotizaciones.'
+
+
+class PuedeOperarJornada(ExigeCapacidad):
+    """El ciclo de campo de una renta que ya existe: entregar, recoger, evidencias.
+
+    No es un nivel: el técnico —que NO levanta rentas— es justo quien lo hace, y
+    el cajero, que comparte su número, no sale al campo. Tampoco es `rentar`
+    (levantar es otro trabajo) ni `jornada_campo` (es una pantalla y no cascadea,
+    así que administración se quedaría sin poder entregar desde Rentas).
+    """
+    capacidad = 'operar_jornada'
+    message = 'No puedes operar las entregas y devoluciones de campo.'
 
 
 class EsOperadorEditaAdmin(permissions.BasePermission):

@@ -182,10 +182,10 @@ nada. Es el ejemplo perfecto del interruptor decorativo que la prueba busca.
 | `/api/rentas/<int:pk>/cancelar/` | `IsAdminGroupOrStaff` | `apps/renta/views.py:1258` | `nivel legítimo` — reversa de una operación cerrada, irreversible; no hay capacidad de "cancelar" y el catálogo pone a propósito al Gestor a poder cancelar sin `ver_dinero`. |
 | `/api/rentas/<int:pk>/evidencias/<int:evidencia_id>/` (DELETE) | `IsAdminGroupOrStaff` | `apps/renta/views.py:1387` | `nivel legítimo` — borrar evidencia es borrar la prueba de cómo salió la máquina: se queda arriba a propósito. |
 | `/api/rentas/adeudos/fusionar/` | `EsOperador` | `apps/renta/views.py:323` | **POR DECIDIR** — funde dos "clientes" reasignando TODAS sus rentas. Su gemela `/api/clientes/<pk>/fusionar/` pide nivel 2 y esta pide nivel 1: una de las dos está mal. El catálogo dice que "fundir dos clientes sigue siendo de administración", así que `editar_clientes` (nivel 1) NO sirve. O se sube esta a nivel 2 y se marcan las dos `nivel legítimo`, o se crea una capacidad `fusionar_clientes`. |
-| `/api/rentas/<int:pk>/entregar/` | `EsOperador` | `apps/renta/views.py:1408` | **POR DECIDIR** · ver §4 (el hueco de Mi jornada) |
-| `/api/rentas/<int:pk>/devolver/` | `EsOperador` | `apps/renta/views.py:1061` | **POR DECIDIR** · ver §4 |
-| `/api/rentas/<int:pk>/evidencias/` (GET/POST) | `EsOperador` | `apps/renta/views.py:1325` | **POR DECIDIR** · ver §4 |
-| `/api/rentas/tareas/` | `EsOperador` | `apps/renta/views.py:1515` | **POR DECIDIR** · ver §4 |
+| `/api/rentas/<int:pk>/entregar/` | ~~`EsOperador`~~ → `PuedeOperarJornada` | `apps/renta/views.py:1410` | **HECHO** — `operar_jornada`; ver §4 |
+| `/api/rentas/<int:pk>/devolver/` | ~~`EsOperador`~~ → `PuedeOperarJornada` | `apps/renta/views.py:1062` | **HECHO** — `operar_jornada`; ver §4 |
+| `/api/rentas/<int:pk>/evidencias/` (GET/POST) | ~~`EsOperador`~~ → `PuedeOperarJornada` | `apps/renta/views.py:1327` | **HECHO** — `operar_jornada`; ver §4 |
+| `/api/rentas/tareas/` | ~~`EsOperador`~~ → `PuedeOperarJornada` | `apps/renta/views.py:1517` | **HECHO** — `operar_jornada`; ver §4 |
 
 ### 3.4 Ventas, pedidos y apartados
 
@@ -288,8 +288,23 @@ Salidas posibles, para que el dueño elija en la Tarea 11:
    con ella + `ver_jornada` para la lectura. Rompe la prueba
    `test_solo_pantalla_esta_justificada` tal como está escrita en el plan.
 
-**No se resuelve en esta tarea.** Está escrito para que se resuelva antes de
-convertir esas cuatro rutas.
+### RESUELTO (2026-08-22): capacidad nueva `operar_jornada`
+
+El dueño eligió la salida 1, con nombre propio. `operar_jornada` entra al
+`CATALOGO` en 'Campo y taller' con `nivel_minimo = NIVEL_TECNICO`, así que la
+tienen el técnico y administración hacia arriba —el admin sigue pudiendo
+entregar desde Rentas, que era lo que `jornada_campo` rompía— y en
+`AJUSTES_POR_PUESTO` el **Cajero la lleva apagada**: su lugar es el mostrador,
+no el campo. Con eso se cierra el hueco de `/api/rentas/tareas/`, que hoy le
+dejaba leer el tablero de campo completo, con adeudos.
+
+`rentar` se queda como está: LEVANTAR una renta y TRABAJARLA son dos trabajos, y
+el técnico solo hace el segundo. Las cuatro rutas pasaron a
+`PuedeOperarJornada` (`apps/maquinaria/permissions.py`), subclase de
+`ExigeCapacidad` con el mismo molde que `PuedeCotizar`.
+
+`jornada_campo` y `ver_jornada` se quedan en `SOLO_PANTALLA`: siguen decidiendo
+qué escritorio se ve, y lo que se HACE desde él ya tiene su capacidad.
 
 ---
 

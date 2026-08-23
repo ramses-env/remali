@@ -15,7 +15,9 @@ from rest_framework import permissions
 
 from rest_framework.decorators import throttle_classes
 
-from maquinaria.permissions import IsAdminGroupOrStaff, EsOperador, nivel_de, NIVEL_ADMIN
+from maquinaria.permissions import (
+    IsAdminGroupOrStaff, EsOperador, PuedeOperarJornada, nivel_de, NIVEL_ADMIN,
+)
 from maquinaria.throttling import SubidaEvidenciaThrottle
 from . import evidencia as ev
 from inventario.models import Inventario
@@ -986,7 +988,7 @@ def renovar_renta(request, pk: int):
 
 
 @api_view(['POST', 'PATCH'])
-@permission_classes([EsOperador])
+@permission_classes([PuedeOperarJornada])
 def devolver_renta(request, pk: int):
     try:
         r = Renta.objects.select_related('inventario', 'inventario__equipo', 'cliente', 'obra', 'usuario').get(pk=pk)
@@ -1231,7 +1233,7 @@ _MOMENTOS = {'entrega', 'devolucion'}
 
 
 @api_view(['GET', 'POST'])
-@permission_classes([EsOperador])
+@permission_classes([PuedeOperarJornada])
 @parser_classes([MultiPartParser, FormParser, JSONParser])
 @throttle_classes([SubidaEvidenciaThrottle])
 def evidencias_renta(request, pk: int):
@@ -1314,7 +1316,7 @@ def evidencia_renta_eliminar(request, pk: int, evidencia_id: int):
 #  EL DÍA DEL TÉCNICO: dónde está el equipo y qué hay en taller
 # ─────────────────────────────────────────────
 @api_view(['POST'])
-@permission_classes([EsOperador])
+@permission_classes([PuedeOperarJornada])
 def confirmar_entrega(request, pk: int):
     """El técnico marca que ya entregó el equipo (o corrige que aún no).
 
@@ -1421,7 +1423,7 @@ PRIORIDAD = {'vencida': 0, 'hoy': 1, 'reparar': 2, 'manana': 3, 'proxima': 4}
 
 
 @api_view(['GET'])
-@permission_classes([EsOperador])
+@permission_classes([PuedeOperarJornada])
 def mis_tareas(request):
     """Lo ÚNICO que el técnico tiene que hacer, ordenado por lo que urge.
 
