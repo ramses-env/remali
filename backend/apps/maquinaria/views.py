@@ -1202,6 +1202,52 @@ def _ingresos_del_negocio():
 
 
 @api_view(['GET'])
+@permission_classes([EsOperador])
+def dashboard_conteos(request):
+    """Solo los NÚMEROS del menú del panel: los globitos de cada sección.
+
+    Existe porque el panel bajaba las listas COMPLETAS —productos, unidades,
+    ventas, refacciones, órdenes, usuarios, cupones— nada más para escribir
+    "12" junto a un icono, y las volvía a bajar cada vez que el latido decía
+    que algo cambió. Eran ocho respuestas grandes por entrar al panel, sin
+    importar a qué sección entrabas. Aquí van los mismos números en una
+    respuesta chica; las listas ya solo las pide la sección que se abre.
+
+    Son conteos, no dinero: cualquiera con acceso al panel puede verlos.
+    """
+    from inventario.models import Inventario, OrdenReparacion
+    from refacciones.models import Refaccion
+    from renta.models import Renta
+    from ventas.models import Venta
+    from facturacion.models import SolicitudFactura
+
+    # Los adeudos NO se pueden contar en SQL: el saldo sale de restar los abonos
+    # (un JSON) al total, y eso vive en Python. Se recorre igual que la pantalla
+    # de cobranza, pero devolviendo un número en vez de la lista serializada.
+    con_saldo = sum(
+        1 for r in Renta.objects.exclude(estado='cancelada').iterator()
+        if r.saldo_pendiente() > 0
+    )
+
+    return Response({
+        'equipos': Equipo.objects.count(),
+        'unidades': Inventario.objects.count(),
+        'refacciones': Refaccion.objects.count(),
+        'catalogos': Categoria.objects.count() + Tipo.objects.count() + Marca.objects.count(),
+        'rentas_activas': Renta.objects.filter(estado='activa').count(),
+        'ventas': Venta.objects.count(),
+        'pedidos': Venta.objects.filter(estado='apartada').count(),
+        'ordenes_abiertas': OrdenReparacion.objects.exclude(estado='entregada').count(),
+        'facturas_pendientes': SolicitudFactura.objects.filter(estado='pendiente').count(),
+        'adeudos': con_saldo,
+        'cupones': Cupon.objects.count(),
+        # Mismo criterio que la lista de /usuarios/, que devuelve TODAS las
+        # cuentas: el globito cuenta las activas.
+        'usuarios_activos': get_user_model().objects.filter(is_active=True).count(),
+    })
+
+
+@api_view(['GET'])
 @permission_classes([PuedeVerDinero])
 def dashboard_metrics(request):
     """Las cifras del Resumen: qué entró hoy y qué entró cada mes.
