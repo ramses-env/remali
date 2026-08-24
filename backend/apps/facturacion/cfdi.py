@@ -60,6 +60,9 @@ def leer_cfdi(texto):
         {
             'descripcion': c.get('Descripcion', ''),
             'cantidad': _dec(c.get('Cantidad'), '1'),
+            # Claves del catálogo del SAT. Se imprimen en la representación:
+            # es lo que el contador del cliente busca para clasificar el gasto.
+            'clave_prod_serv': c.get('ClaveProdServ', ''),
             'clave_unidad': c.get('ClaveUnidad', ''),
             'valor_unitario': _dec(c.get('ValorUnitario')),
             'importe': _dec(c.get('Importe')),
@@ -79,6 +82,7 @@ def leer_cfdi(texto):
         'total': _dec(g('Total')),
         'moneda': g('Moneda', 'MXN'),
         'tipo_comprobante': g('TipoDeComprobante', ''),
+        'exportacion': g('Exportacion', ''),
         'metodo_pago': g('MetodoPago', ''),
         'forma_pago': g('FormaPago', ''),
         'lugar_expedicion': g('LugarExpedicion', ''),

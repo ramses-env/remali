@@ -57,7 +57,9 @@ FORMA_PAGO = {
     '01': 'Efectivo', '02': 'Cheque nominativo', '03': 'Transferencia',
     '04': 'Tarjeta de crédito', '28': 'Tarjeta de débito', '99': 'Por definir',
 }
-METODO_PAGO = {'PUE': 'Pago en una exhibición', 'PPD': 'Pago en parcialidades o diferido'}
+METODO_PAGO = {'PUE': 'Pago en una sola exhibición', 'PPD': 'Pago en parcialidades o diferido'}
+TIPO_COMPROBANTE = {'I': 'Ingreso', 'E': 'Egreso', 'T': 'Traslado', 'N': 'Nómina', 'P': 'Pago'}
+EXPORTACION = {'01': 'No aplica', '02': 'Definitiva', '03': 'Temporal', '04': 'Definitiva con clave distinta'}
 
 
 def _money(v):
@@ -154,18 +156,22 @@ def _qr_reader(texto):
         return None
 
 
-def _conceptos_del_xml(factura):
-    """Los conceptos, releídos del XML guardado.
+def _leer_xml(factura):
+    """Lo que solo vive en el XML: conceptos, claves del SAT y exportación.
 
-    Se releen en vez de guardarse en columnas porque el XML es la verdad y esto
+    Se relee en vez de guardarse en columnas porque el XML es la verdad y esto
     se genera una vez cada tanto: parsear 10 KB en el momento cuesta menos que
     mantener sincronizada una tabla que nadie más consulta.
+
+    Si el XML no se puede leer, el documento sale igual con lo que sí está en
+    las columnas: media factura es mejor que ninguna.
     """
     try:
         from .cfdi import leer_cfdi
-        return leer_cfdi(factura.xml).get('conceptos') or []
+        return leer_cfdi(factura.xml)
     except Exception:
-        return []
+        logger.warning('No se pudo releer el XML de la factura %s', factura.pk)
+        return {}
 
 
 def _unidades_de_remali(factura):
@@ -200,312 +206,351 @@ def _unidades_de_remali(factura):
         return []
 
 
+def _acento(cfg):
+    """El color de la factura: el que se capturó en Configuración, o el dorado.
+
+    Un hex mal escrito NO puede dejar a un cliente sin su factura, así que
+    cualquier cosa que reportlab no entienda cae al dorado de la casa.
+    """
+    valor = (getattr(cfg, 'factura_color', '') or '').strip()
+    if not valor:
+        return ORO
+    try:
+        return colors.HexColor(valor)
+    except Exception:
+        logger.warning('factura_color inválido (%r); se usa el dorado', valor)
+        return ORO
+
+
+def _chip(c, x, y, texto, ancho, acento, alto=6.2 * mm):
+    """Etiqueta de sección: rectángulo oscuro con el texto en blanco."""
+    c.setFillColor(TINTA)
+    c.roundRect(x, y, ancho, alto, 1.6 * mm, stroke=0, fill=1)
+    c.setFillColor(colors.white)
+    c.setFont(FUERTE, 7.5)
+    c.drawString(x + 3.5 * mm, y + 2 * mm, texto)
+
+
+def _tarjeta(c, x, y, ancho, alto):
+    c.setFillColor(colors.white)
+    c.setStrokeColor(LINEA)
+    c.roundRect(x, y, ancho, alto, 2 * mm, stroke=1, fill=1)
+
+
 def render_factura_pdf(factura) -> bytes:
     """Devuelve los bytes de la representación impresa de un CFDI."""
     from maquinaria.models import ConfiguracionSitio
 
     cfg = ConfiguracionSitio.get_solo()
+    acento = _acento(cfg)
     buf = BytesIO()
     c = canvas.Canvas(buf, pagesize=letter)
     ancho, alto = letter
-    m = 15 * mm
+    m = 14 * mm
     util = ancho - 2 * m
-    y = alto - m
+    datos_xml = _leer_xml(factura)
+    conceptos = datos_xml.get('conceptos') or []
+    unidades = _unidades_de_remali(factura)
 
-    # ── Encabezado ────────────────────────────────────────────────────────
-    # Una banda dorada delgada arriba de todo: es la firma visual del
-    # documento y lo primero que distingue esta factura de la de cualquiera.
-    c.setFillColor(ORO)
+    # ── Banda superior ────────────────────────────────────────────────────
+    c.setFillColor(acento)
     c.rect(0, alto - 4 * mm, ancho, 4 * mm, stroke=0, fill=1)
 
-    lg = 11 * mm
-    dibujar_logo(c, m, y - 3.5 * mm, lg, respaldo=TINTA)
+    y = alto - m - 4 * mm
 
+    # Logo + emisor a la izquierda, rótulo y folio a la derecha.
+    lg = 14 * mm
+    dibujar_logo(c, m, y - lg + 3 * mm, lg, respaldo=TINTA)
+    xi = m + lg + 4 * mm
     c.setFillColor(TINTA)
-    c.setFont(FUERTE, 17)
-    c.drawString(m + lg + 4 * mm, y, cfg.negocio_nombre or 'REMALI')
-
-    # "FACTURA" con las letras separadas: a ese tamaño el espaciado hace que
-    # se lea como un rótulo y no como una palabra más.
-    titulo, tam = 'F A C T U R A', 15
-    c.setFont(FUERTE, tam)
-    c.drawRightString(ancho - m, y, titulo)
-    c.setFillColor(GRIS)
-    c.setFont(TEXTO, 7.5)
-    c.drawRightString(ancho - m, y - 4.6 * mm, 'Comprobante Fiscal Digital por Internet · CFDI 4.0')
-
-    # El folio, donde se pidió: pegado al rótulo, en dorado y grande. Es el
-    # dato que se busca al abrir el papel, junto con el total.
-    serie_folio = f'{factura.serie or ""}{factura.folio or ""}'.strip()
-    if serie_folio:
-        c.setFillColor(ORO)
-        c.setFont(FUERTE, 20)
-        c.drawRightString(ancho - m, y - 12.5 * mm, serie_folio)
-    c.setFillColor(GRIS)
-    c.setFont(TEXTO, 7.5)
-    c.drawRightString(ancho - m, y - 17 * mm, f'Timbrada el {_fecha_corta(factura.fecha_certificacion)}')
-
-    # Datos fiscales del emisor, bajo el nombre.
-    y -= 6 * mm
-    c.setFillColor(GRIS)
+    c.setFont(FUERTE, 13)
+    c.drawString(xi, y - 1 * mm, (factura.nombre_emisor or cfg.negocio_nombre or 'REMALI').upper())
     c.setFont(TEXTO, 8)
-    izq = m + lg + 4 * mm
-    for dato in (
-        f'RFC {factura.rfc_emisor}' if factura.rfc_emisor else '',
-        f'Régimen fiscal {factura.regimen_emisor}' if factura.regimen_emisor else '',
-        cfg.negocio_direccion,
-        '   ·   '.join(x for x in (
-            f'Tel. {cfg.negocio_telefono}' if cfg.negocio_telefono else '', cfg.negocio_email,
-        ) if x),
-        f'Lugar de expedición {factura.lugar_expedicion}' if factura.lugar_expedicion else '',
+    c.setFillColor(GRIS)
+    yl = y - 6 * mm
+    for etiqueta, valor in (
+        ('RFC:', factura.rfc_emisor),
+        ('Régimen Fiscal:', factura.regimen_emisor),
+        ('', cfg.negocio_direccion),
+        ('Tel.', cfg.negocio_telefono),
     ):
-        if dato:
-            c.drawString(izq, y, _recortar(c, dato, TEXTO, 8, util * 0.58))
-            y -= 4 * mm
+        if not valor:
+            continue
+        txt = f'{etiqueta} {valor}'.strip()
+        c.drawString(xi, yl, _recortar(c, txt, TEXTO, 8, util * 0.46))
+        yl -= 4 * mm
 
-    y = min(y, alto - m - 22 * mm) - 3 * mm
-    c.setStrokeColor(TINTA)
-    c.setLineWidth(1)
-    c.line(m, y, ancho - m, y)
-    c.setLineWidth(0.5)
-    y -= 7 * mm
-
-    # ── Receptor y origen ────────────────────────────────────────────────
-    # Dos columnas que dicen cosas distintas a propósito: a la izquierda lo
-    # fiscal (a quién se le factura), a la derecha lo de REMALI (de qué venta
-    # salió). Separadas para que nadie confunda un dato interno con uno del SAT.
-    col2 = m + util * 0.56
-    y_ini = y
+    # Rótulo del documento.
     c.setFillColor(TINTA)
-    c.setFont(FUERTE, 7.5)
-    c.drawString(m, y, 'F A C T U R A R   A')
-    c.drawString(col2, y, 'O R I G E N   E N   R E M A L I')
-    y -= 5 * mm
-
-    c.setFillColor(TINTA)
-    c.setFont(FUERTE, 10.5)
-    c.drawString(m, y, _recortar(c, factura.nombre_receptor or '—', FUERTE, 10.5, util * 0.52))
-    y_recep = y - 4.6 * mm
+    c.setFont(FUERTE, 15)
+    c.drawRightString(ancho - m, y - 1 * mm, 'FACTURA ELECTRÓNICA')
     c.setFillColor(GRIS)
-    c.setFont(TEXTO, 8)
-    for dato in (
-        f'RFC {factura.rfc_receptor}' if factura.rfc_receptor else '',
-        f'C.P. {factura.cp_receptor}' if factura.cp_receptor else '',
-        f'Régimen fiscal {factura.regimen_receptor}' if factura.regimen_receptor else '',
-        f'Uso del CFDI {factura.uso_cfdi}' if factura.uso_cfdi else '',
+    c.setFont(TEXTO, 9)
+    c.drawRightString(ancho - m, y - 6.5 * mm, '(CFDI 4.0)')
+
+    # Insignia del folio: la caja oscura de la referencia.
+    caja_ancho, caja_alto = util * 0.34, 13 * mm
+    caja_x, caja_y = ancho - m - caja_ancho, y - 23 * mm
+    c.setFillColor(TINTA)
+    c.roundRect(caja_x, caja_y, caja_ancho, caja_alto, 2 * mm, stroke=0, fill=1)
+    c.setFillColor(colors.Color(1, 1, 1, alpha=0.65))
+    c.setFont(FUERTE, 6.5)
+    c.drawString(caja_x + 5 * mm, caja_y + caja_alto - 5 * mm, 'FOLIO')
+    c.setFillColor(colors.white)
+    c.setFont(FUERTE, 13)
+    serie_folio = f'{factura.serie or ""} {factura.folio or ""}'.strip() or '—'
+    c.drawString(caja_x + 5 * mm, caja_y + 2.6 * mm, serie_folio)
+
+    # ── Columna derecha de datos fiscales ────────────────────────────────
+    yd = caja_y - 6 * mm
+    for etiqueta, valor in (
+        ('UUID', factura.uuid),
+        ('FECHA Y HORA DE EMISIÓN', _fecha_corta(factura.fecha_emision)),
+        ('LUGAR DE EXPEDICIÓN', factura.lugar_expedicion),
+        ('TIPO DE COMPROBANTE', _clave(TIPO_COMPROBANTE, factura.tipo_comprobante)),
+        ('EXPORTACIÓN', _clave(EXPORTACION, datos_xml.get('exportacion'))),
     ):
-        if dato:
-            c.drawString(m, y_recep, dato)
-            y_recep -= 4 * mm
+        if not valor:
+            continue
+        c.setFillColor(acento)
+        c.setFont(FUERTE, 6.5)
+        c.drawString(caja_x, yd, etiqueta)
+        c.setFillColor(TINTA)
+        c.setFont(TEXTO if etiqueta != 'UUID' else 'Courier', 8 if etiqueta != 'UUID' else 7.5)
+        c.drawString(caja_x, yd - 4 * mm, _recortar(c, valor, TEXTO, 8, caja_ancho))
+        yd -= 9.5 * mm
 
-    y_orig = y
-    c.setFillColor(TINTA)
-    c.setFont(FUERTE, 10.5)
-    c.drawString(col2, y_orig, factura.solicitud.folio_origen)
-    y_orig -= 4.6 * mm
-    c.setFillColor(GRIS)
-    c.setFont(TEXTO, 8)
-    for dato in _unidades_de_remali(factura)[:4]:
-        c.drawString(col2, y_orig, _recortar(c, dato, TEXTO, 8, util * 0.42))
-        y_orig -= 4 * mm
+    # ── Tarjetas de emisor y receptor ────────────────────────────────────
+    ancho_izq = util * 0.60
+    y_tar = y - 30 * mm
+    for titulo, filas in (
+        ('EMISOR', (
+            (factura.nombre_emisor or cfg.negocio_nombre or '', True),
+            (f'RFC: {factura.rfc_emisor}' if factura.rfc_emisor else '', False),
+            (f'Régimen Fiscal: {factura.regimen_emisor}' if factura.regimen_emisor else '', False),
+        )),
+        ('RECEPTOR', (
+            (factura.nombre_receptor or '', True),
+            (f'RFC: {factura.rfc_receptor}' if factura.rfc_receptor else '', False),
+            (f'Régimen Fiscal: {factura.regimen_receptor}' if factura.regimen_receptor else '', False),
+            (f'Domicilio Fiscal: {factura.cp_receptor}' if factura.cp_receptor else '', False),
+            (f'Uso CFDI: {factura.uso_cfdi}' if factura.uso_cfdi else '', False),
+        )),
+    ):
+        visibles = [f for f in filas if f[0]]
+        alto_tar = 7 * mm + len(visibles) * 4.4 * mm
+        _tarjeta(c, m, y_tar - alto_tar, ancho_izq, alto_tar)
+        _chip(c, m, y_tar - 3.1 * mm, titulo, 26 * mm, acento)
+        yt2 = y_tar - 9 * mm
+        for texto, fuerte in visibles:
+            c.setFillColor(TINTA if fuerte else GRIS)
+            c.setFont(FUERTE if fuerte else TEXTO, 9 if fuerte else 8)
+            c.drawString(m + 4 * mm, yt2, _recortar(c, texto, TEXTO, 8.5, ancho_izq - 8 * mm))
+            yt2 -= 4.4 * mm
+        y_tar -= alto_tar + 8 * mm
 
-    y = min(y_recep, y_orig) - 3 * mm
-    c.setStrokeColor(LINEA)
-    c.line(m, y, ancho - m, y)
-    y -= 7 * mm
+    y = min(y_tar, yd) - 2 * mm
 
     # ── Conceptos ─────────────────────────────────────────────────────────
-    # Encabezado en negativo (banda de tinta con texto blanco): ancla la tabla
-    # y evita tener que dibujar rejilla, que ensucia.
-    fila_alto = 5.6 * mm
     c.setFillColor(TINTA)
-    c.rect(m, y - 1.5 * mm, util, 6.5 * mm, stroke=0, fill=1)
+    c.rect(m, y - 1.5 * mm, util, 7 * mm, stroke=0, fill=1)
     c.setFillColor(colors.white)
-    c.setFont(FUERTE, 7.5)
-    x_cant, x_desc = m + 3 * mm, m + 20 * mm
-    x_unit, x_imp = ancho - m - 52 * mm, ancho - m - 3 * mm
-    c.drawString(x_cant, y, 'CANT.')
-    c.drawString(x_desc, y, 'DESCRIPCIÓN')
-    c.drawRightString(x_unit + 26 * mm, y, 'P. UNITARIO')
-    c.drawRightString(x_imp, y, 'IMPORTE')
-    y -= 8.5 * mm
+    c.setFont(FUERTE, 6.8)
+    x_cant = m + 3 * mm
+    x_clave = m + 16 * mm
+    x_desc = m + 40 * mm
+    x_unit = ancho - m - 52 * mm
+    x_imp = ancho - m - 3 * mm
+    c.drawString(x_cant, y + 0.4 * mm, 'CANT.')
+    c.drawString(x_clave, y + 0.4 * mm, 'CLAVE SAT')
+    c.drawString(x_desc, y + 0.4 * mm, 'DESCRIPCIÓN')
+    c.drawRightString(x_unit + 26 * mm, y + 0.4 * mm, 'VALOR UNITARIO')
+    c.drawRightString(x_imp, y + 0.4 * mm, 'IMPORTE')
+    y -= 9 * mm
 
-    # La tabla ocupa una REGIÓN FIJA, no lo que le toque según cuántos renglones
-    # traiga. Con un solo concepto el documento quedaba apretado arriba y con
-    # media carta en blanco; con la región fija, una factura de un concepto y
-    # una de diez se leen igual de compuestas. Lo que no quepa se corta: el
-    # detalle completo vive en el XML, que es el documento de verdad.
-    PISO_TABLA = 122 * mm
-
-    conceptos = _conceptos_del_xml(factura)
-    unidades = _unidades_de_remali(factura)
+    PISO_TABLA = 108 * mm
     ancho_desc = x_unit - x_desc - 6 * mm
+    fila = 0
     for i, con in enumerate(conceptos):
-        if y < PISO_TABLA + fila_alto:
+        if y < PISO_TABLA + 12 * mm:
             break
-        if i % 2:            # cebra apenas perceptible, para seguir el renglón
-            c.setFillColor(PAPEL)
-            c.rect(m, y - 1.8 * mm, util, fila_alto, stroke=0, fill=1)
-        c.setFillColor(TINTA)
-        c.setFont(TEXTO, 9)
-        cant = con.get('cantidad') or 0
-        cant_txt = f'{cant:g}' if isinstance(cant, (int, float, Decimal)) else str(cant)
-        c.drawString(x_cant, y, cant_txt)
-        c.drawString(x_desc, y, _recortar(c, con.get('descripcion'), TEXTO, 9, ancho_desc))
-        c.drawRightString(x_unit + 26 * mm, y, _money(con.get('valor_unitario')))
-        c.drawRightString(x_imp, y, _money(con.get('importe')))
-        y -= fila_alto
-
-        # La unidad de REMALI cuelga del concepto, en dorado y más chica: se lee
-        # como anotación de la casa, no como contenido del CFDI.
-        if i < len(unidades):
-            c.setFillColor(ORO)
-            c.setFont(TEXTO, 7.5)
-            c.drawString(x_desc + 3 * mm, y + 0.8 * mm, f'↳ {unidades[i]}')
-            y -= 4.2 * mm
-
-    # Se sigue la cebra hasta el piso, sin texto: la tabla se lee como un
-    # contenedor y no como cuatro renglones flotando en la hoja.
-    fila = len(conceptos)
-    while y > PISO_TABLA + fila_alto:
+        alto_fila = 11 * mm
         if fila % 2:
             c.setFillColor(PAPEL)
-            c.rect(m, y - 1.8 * mm, util, fila_alto, stroke=0, fill=1)
-        y -= fila_alto
+            c.rect(m, y - alto_fila + 6 * mm, util, alto_fila, stroke=0, fill=1)
+        cant = con.get('cantidad') or 0
+        c.setFillColor(TINTA)
+        c.setFont(TEXTO, 8.5)
+        c.drawString(x_cant, y, f'{cant:g}' if isinstance(cant, (int, float, Decimal)) else str(cant))
+        # Clave del producto arriba y la de unidad abajo, como en la referencia:
+        # dos claves de catálogo en columnas propias aprietan la descripción.
+        c.setFont(FUERTE, 8)
+        c.drawString(x_clave, y, con.get('clave_prod_serv') or '—')
+        c.setFillColor(GRIS)
+        c.setFont(ITALICA, 6.8)
+        c.drawString(x_clave, y - 3.6 * mm, f"Unidad {con.get('clave_unidad') or '—'}")
+        c.setFillColor(TINTA)
+        c.setFont(FUERTE, 8.5)
+        c.drawString(x_desc, y, _recortar(c, con.get('descripcion'), FUERTE, 8.5, ancho_desc))
+        c.setFont(TEXTO, 9)
+        c.drawRightString(x_unit + 26 * mm, y, _money(con.get('valor_unitario')))
+        c.drawRightString(x_imp, y, _money(con.get('importe')))
+        # Lo de REMALI cuelga del concepto, en el acento: se lee como anotación
+        # de la casa y no como contenido del CFDI.
+        if i < len(unidades):
+            c.setFillColor(acento)
+            c.setFont(TEXTO, 7)
+            c.drawString(x_desc, y - 3.6 * mm, f'↳ {unidades[i]}')
+        y -= alto_fila
         fila += 1
 
-    y = PISO_TABLA
-    c.setStrokeColor(LINEA)
-    c.line(m, y, ancho - m, y)
-    y -= 8 * mm
+    while y > PISO_TABLA + 6 * mm:
+        if fila % 2:
+            c.setFillColor(PAPEL)
+            c.rect(m, y - 5 * mm, util, 11 * mm, stroke=0, fill=1)
+        y -= 11 * mm
+        fila += 1
 
-    # ── Importe con letra y totales ───────────────────────────────────────
-    # La cantidad con letra ocupa su propia caja a la izquierda, a la altura de
-    # los totales: es la lectura en palabras de la cifra que está enfrente.
-    ancho_letra = util * 0.55
-    alto_letra = 14 * mm
+    y = PISO_TABLA + 6 * mm
+
+    # ── Pago (izquierda) y totales (derecha) ─────────────────────────────
+    ancho_pago = util * 0.55
+    alto_pago = 20 * mm
+    _tarjeta(c, m, y - alto_pago, ancho_pago, alto_pago)
+    c.setFillColor(acento)
+    c.setFont(FUERTE, 6.5)
+    c.drawString(m + 4 * mm, y - 5 * mm, 'FORMA DE PAGO')
+    c.setFillColor(TINTA)
+    c.setFont(TEXTO, 8.5)
+    c.drawString(m + 4 * mm, y - 9 * mm, _clave(FORMA_PAGO, factura.forma_pago))
+    c.setFillColor(acento)
+    c.setFont(FUERTE, 6.5)
+    c.drawString(m + 4 * mm, y - 14 * mm, 'MÉTODO DE PAGO')
+    c.drawString(m + ancho_pago * 0.58, y - 14 * mm, 'MONEDA')
+    c.setFillColor(TINTA)
+    c.setFont(TEXTO, 8.5)
+    c.drawString(m + 4 * mm, y - 18 * mm, _clave(METODO_PAGO, factura.metodo_pago))
+    c.drawString(m + ancho_pago * 0.58, y - 18 * mm, factura.moneda or 'MXN')
+
+    x_lbl = m + ancho_pago + 8 * mm
+    x_val = ancho - m - 4 * mm
+    yt = y - 4 * mm
+    filas_tot = [('SUBTOTAL', factura.subtotal)]
+    if Decimal(str(factura.descuento or 0)) > 0:
+        filas_tot.append(('DESCUENTO', factura.descuento))
+    filas_tot.append(('IVA 16%', factura.iva))
+    for etiqueta, valor in filas_tot:
+        c.setFillColor(GRIS)
+        c.setFont(FUERTE, 7.5)
+        c.drawString(x_lbl, yt, etiqueta)
+        c.setFillColor(TINTA)
+        c.setFont(TEXTO, 9)
+        c.drawRightString(x_val, yt, _money(valor))
+        yt -= 5.5 * mm
+
+    # El TOTAL en barra de color: es lo que se busca al abrir el papel.
+    # El respiro NO es decorativo: sin él la barra se dibuja encima del último
+    # renglón y tapa el IVA. Ya pasó dos veces (al escribirlo y al rediseñarlo),
+    # por eso hay una prueba que lo cuida.
+    yt -= 4 * mm
+    barra_alto = 9.5 * mm
+    c.setFillColor(acento)
+    c.roundRect(x_lbl - 4 * mm, yt - 3 * mm, (x_val + 4 * mm) - (x_lbl - 4 * mm), barra_alto, 1.6 * mm, stroke=0, fill=1)
+    c.setFillColor(colors.white)
+    c.setFont(FUERTE, 9)
+    c.drawString(x_lbl, yt, 'TOTAL')
+    c.setFont(FUERTE, 12)
+    c.drawRightString(x_val, yt - 0.6 * mm, _money(factura.total))
+
+    y = min(y - alto_pago, yt - 5 * mm) - 5 * mm
+
+    # ── Total con letra, a todo lo ancho ─────────────────────────────────
     c.setFillColor(PAPEL)
     c.setStrokeColor(LINEA)
-    c.rect(m, y - alto_letra + 5 * mm, ancho_letra, alto_letra, stroke=1, fill=1)
-    c.setFillColor(GRIS)
-    c.setFont(FUERTE, 6.5)
-    c.drawString(m + 3 * mm, y + 1.5 * mm, 'I M P O R T E   C O N   L E T R A')
+    c.rect(m, y - 7 * mm, util, 9 * mm, stroke=1, fill=1)
+    c.setFillColor(acento)
+    c.setFont(FUERTE, 7.5)
+    c.drawString(m + 4 * mm, y - 4 * mm, 'TOTAL CON LETRA')
     c.setFillColor(TINTA)
     c.setFont(FUERTE, 8.5)
     letra = importe_con_letra(factura.total, factura.moneda or 'MXN')
-    renglones = _wrap(letra, FUERTE, 8.5, ancho_letra - 6 * mm)[:2]
-    yl = y - 3.5 * mm
-    for r in renglones:
-        c.drawString(m + 3 * mm, yl, r)
-        yl -= 4 * mm
+    c.drawString(m + 42 * mm, y - 4 * mm, _recortar(c, letra, FUERTE, 8.5, util - 46 * mm))
+    y -= 13 * mm
 
-    x_lbl, x_val = ancho - m - 52 * mm, ancho - m - 3 * mm
-    yt = y + 2 * mm
-    c.setFont(TEXTO, 9)
-    filas = [('Subtotal', factura.subtotal)]
-    if Decimal(str(factura.descuento or 0)) > 0:
-        filas.append(('Descuento', factura.descuento))
-    filas.append(('IVA trasladado', factura.iva))
-    for etiqueta, valor in filas:
-        c.setFillColor(GRIS)
-        c.drawString(x_lbl, yt, etiqueta)
-        c.setFillColor(TINTA)
-        c.drawRightString(x_val, yt, _money(valor))
-        yt -= 5 * mm
-
-    # El total en caja dorada: es la otra cifra que se busca al abrir el papel.
-    # El respiro de antes NO es decorativo: sin él la caja se dibuja encima del
-    # último renglón y tapa el IVA. Se vio en la primera prueba impresa.
-    yt -= 2.5 * mm
-    caja_alto = 9.5 * mm
-    c.setFillColor(ORO_SUAVE)
-    c.setStrokeColor(ORO)
-    c.rect(x_lbl - 3 * mm, yt - 2.5 * mm, (x_val + 3 * mm) - (x_lbl - 3 * mm), caja_alto, stroke=1, fill=1)
-    c.setFillColor(TINTA)
-    c.setFont(FUERTE, 8)
-    c.drawString(x_lbl, yt, f'TOTAL {factura.moneda or "MXN"}')
-    c.setFont(FUERTE, 12)
-    c.drawRightString(x_val, yt - 0.5 * mm, _money(factura.total))
-
-    y = min(y - alto_letra + 2 * mm, yt - 8 * mm)
-
-    # ── Pago ──────────────────────────────────────────────────────────────
-    c.setFillColor(GRIS)
-    c.setFont(TEXTO, 8)
-    pago = '        '.join(x for x in (
-        f'Forma de pago: {_clave(FORMA_PAGO, factura.forma_pago)}',
-        f'Método: {_clave(METODO_PAGO, factura.metodo_pago)}',
-        f'Tipo: {factura.tipo_comprobante or "—"}',
-    ) if x)
-    c.drawString(m, y, _recortar(c, pago, TEXTO, 8, util))
-    y -= 7 * mm
-
-    # ── Bloque de validación fiscal ───────────────────────────────────────
-    # Todo lo que el SAT pide para verificar, en un panel aparte y en mono: es
-    # dato de máquina, y separarlo evita que compita con lo que el cliente lee.
-    #
-    # Va anclado al PIE de la hoja y no a donde terminó el contenido. Con una
-    # factura de un solo concepto, seguir el flujo dejaba el documento apretado
-    # arriba y media carta en blanco abajo; anclado, la hoja se lee compuesta
-    # lleve un concepto o lleve diez.
-    panel_alto = 62 * mm
-    panel_y = m
-    if y - 6 * mm < panel_y + panel_alto:      # contenido largo: se cede el ancla
-        panel_alto = max(52 * mm, y - 6 * mm - m)
-        panel_y = m
+    # ── Bloque de validación fiscal ──────────────────────────────────────
+    panel_alto = y - m - 8 * mm
+    panel_y = m + 8 * mm
     c.setFillColor(PAPEL)
     c.setStrokeColor(LINEA)
     c.rect(m, panel_y, util, panel_alto, stroke=1, fill=1)
 
-    qr_lado = 30 * mm
+    qr_lado = min(30 * mm, panel_alto - 6 * mm)
     qr = _qr_reader(_liga_sat(factura))
     if qr is not None:
-        c.drawImage(qr, m + 4 * mm, panel_y + panel_alto - qr_lado - 4 * mm,
+        c.drawImage(qr, m + 4 * mm, panel_y + panel_alto - qr_lado - 3 * mm,
                     qr_lado, qr_lado, mask='auto')
 
-    xd = m + qr_lado + 10 * mm
-    ancho_dato = ancho - m - xd - 4 * mm
-    yd = panel_y + panel_alto - 6 * mm
+    xd = m + qr_lado + 9 * mm
+    ancho_cert = 46 * mm
+    ancho_dato = ancho - m - xd - ancho_cert - 8 * mm
+    yd2 = panel_y + panel_alto - 5 * mm
 
-    c.setFillColor(TINTA)
-    c.setFont(FUERTE, 6.5)
-    c.drawString(xd, yd, 'F O L I O   F I S C A L   ( U U I D )')
-    yd -= 4.2 * mm
-    c.setFont('Courier-Bold', 8.5)
-    c.drawString(xd, yd, factura.uuid or '—')
-    yd -= 5.5 * mm
-
-    def bloque(etiqueta, valor, tam=5.2, maximo=3):
-        nonlocal yd
+    def bloque(etiqueta, valor, maximo=3, tam=5.2):
+        nonlocal yd2
         if not valor:
             return
-        c.setFillColor(GRIS)
+        c.setFillColor(acento)
         c.setFont(FUERTE, 6)
-        c.drawString(xd, yd, etiqueta)
-        yd -= 3.2 * mm
+        c.drawString(xd, yd2, etiqueta)
+        yd2 -= 3.2 * mm
         c.setFillColor(TINTA)
         c.setFont('Courier', tam)
         for r in _wrap(valor, 'Courier', tam, ancho_dato)[:maximo]:
-            c.drawString(xd, yd, r)
-            yd -= 2.6 * mm
-        yd -= 1.4 * mm
+            c.drawString(xd, yd2, r)
+            yd2 -= 2.5 * mm
+        yd2 -= 1.6 * mm
 
-    bloque('CERTIFICADO DEL EMISOR / DEL SAT',
-           f'{factura.no_certificado_emisor or "—"}   ·   {factura.no_certificado_sat or "—"}',
-           tam=6, maximo=1)
     bloque('SELLO DIGITAL DEL CFDI', factura.sello_cfd)
-    bloque('SELLO DEL SAT', factura.sello_sat)
+    bloque('SELLO DIGITAL DEL SAT', factura.sello_sat)
     bloque('CADENA ORIGINAL DEL COMPLEMENTO DE CERTIFICACIÓN DIGITAL DEL SAT',
            factura.cadena_original, maximo=4)
 
+    # Certificados, a la derecha del panel.
+    xc = ancho - m - ancho_cert - 3 * mm
+    yc = panel_y + panel_alto - 5 * mm
+    for etiqueta, valor in (
+        ('CERTIFICADO EMISOR', factura.no_certificado_emisor),
+        ('CERTIFICADO SAT', factura.no_certificado_sat),
+        ('FECHA Y HORA DE CERTIFICACIÓN', _fecha_corta(factura.fecha_certificacion)),
+        ('PROVEEDOR DE CERTIFICACIÓN', factura.rfc_prov_certif),
+    ):
+        if not valor:
+            continue
+        c.setFillColor(acento)
+        c.setFont(FUERTE, 6)
+        c.drawString(xc, yc, etiqueta)
+        c.setFillColor(TINTA)
+        c.setFont(TEXTO, 7.5)
+        c.drawString(xc, yc - 3.4 * mm, _recortar(c, valor, TEXTO, 7.5, ancho_cert))
+        yc -= 8.6 * mm
+
     c.setFillColor(GRIS)
-    c.setFont(ITALICA, 7)
-    c.drawString(m + 4 * mm, panel_y + 3.5 * mm,
-                 'Este documento es una representación impresa de un CFDI')
+    c.setFont(ITALICA, 6.8)
+    c.drawRightString(ancho - m - 3 * mm, panel_y + 3 * mm,
+                      'Este documento es una representación impresa de un CFDI 4.0')
+
+    # ── Pie ───────────────────────────────────────────────────────────────
+    c.setFillColor(TINTA)
+    c.rect(0, 0, ancho, 7 * mm, stroke=0, fill=1)
+    c.setFillColor(colors.Color(1, 1, 1, alpha=0.85))
+    c.setFont(TEXTO, 7)
+    pie = '   ·   '.join(x for x in (cfg.negocio_web, cfg.negocio_email, cfg.negocio_telefono) if x)
+    if pie:
+        c.drawString(m, 2.5 * mm, pie)
+    if (cfg.negocio_footer or '').strip():
+        c.drawRightString(ancho - m, 2.5 * mm, cfg.negocio_footer.strip()[:70])
 
     # ── Cancelada ─────────────────────────────────────────────────────────
-    # Al final para que quede encima de todo: una factura cancelada que se ve
-    # normal es peor que no tener el papel.
     if factura.estado == 'cancelada':
         c.saveState()
         c.setFillColor(colors.Color(ROJO.red, ROJO.green, ROJO.blue, alpha=0.16))

@@ -87,6 +87,20 @@ class RepresentacionImpresaTest(TestCase):
         self.assertIn('$2,000.00', t)
         self.assertNotIn('$275.86', t)     # lo que habría salido de calcularlo
 
+    def test_el_iva_no_queda_debajo_de_la_barra_del_total(self):
+        """Se rompió dos veces: la barra del TOTAL se dibujaba encima del IVA.
+
+        No se puede comprobar el pixel desde aquí, pero sí que las tres cifras
+        estén IMPRESAS: si alguien vuelve a encimarlas, esta prueba obliga a
+        mirar el bloque antes de darlo por bueno.
+        """
+        f = _factura(subtotal=Decimal('1724.14'), iva=Decimal('275.86'), total=Decimal('2000.00'))
+        t = texto_del_pdf(render_factura_pdf(f))
+        self.assertIn('$275.86', t)
+        self.assertIn('$1,724.14', t)
+        self.assertIn('$2,000.00', t)
+        self.assertIn('IVA 16%', t)
+
     def test_lleva_el_folio_fiscal_y_la_leyenda_obligatoria(self):
         t = texto_del_pdf(render_factura_pdf(_factura()))
         self.assertIn(UUID_1, t)
@@ -99,8 +113,9 @@ class RepresentacionImpresaTest(TestCase):
         self.assertIn('30001000000400002495', t)   # certificado del SAT
 
     def test_el_folio_de_la_serie_va_en_el_encabezado(self):
+        """Serie y folio separados, como los imprime cualquier factura: 'A 123'."""
         t = texto_del_pdf(render_factura_pdf(_factura(serie='A', folio='123')))
-        self.assertIn('A123', t)
+        self.assertIn('A 123', t)
 
     def test_imprime_la_cantidad_con_letra(self):
         t = texto_del_pdf(render_factura_pdf(_factura()))
@@ -110,7 +125,8 @@ class RepresentacionImpresaTest(TestCase):
         """Nadie sabe qué es un PUE. La clave se queda, la palabra se agrega."""
         t = texto_del_pdf(render_factura_pdf(_factura()))
         self.assertIn('Transferencia', t)
-        self.assertIn('Pago en una exhibici', t)
+        self.assertIn('Pago en una sola exhibici', t)
+        self.assertIn('Ingreso', t)          # tipo de comprobante 'I'
 
     def test_una_cancelada_lo_grita(self):
         t = texto_del_pdf(render_factura_pdf(_factura(estado='cancelada')))

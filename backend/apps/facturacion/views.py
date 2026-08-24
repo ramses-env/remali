@@ -130,7 +130,11 @@ def subir_factura(request, pk: int):
     except DescuadreCFDI as e:
         return Response({'detalle': str(e)}, status=400)
 
-    campos = {k: v for k, v in datos.items() if k not in ('conceptos', 'version')}
+    # Lo que el lector saca pero la tabla NO guarda. `exportacion` y las claves
+    # del SAT se releen del XML al generar el PDF, que es el único que las usa:
+    # no vale una migración para un dato que solo se imprime.
+    SOLO_PARA_IMPRIMIR = ('conceptos', 'version', 'exportacion')
+    campos = {k: v for k, v in datos.items() if k not in SOLO_PARA_IMPRIMIR}
     with transaction.atomic():
         factura = Factura.objects.create(
             solicitud=sol, xml=texto, subida_por=request.user, **campos
