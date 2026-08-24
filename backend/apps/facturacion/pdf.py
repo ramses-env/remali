@@ -115,11 +115,25 @@ def _fecha_corta(iso):
 
 
 def _liga_sat(f):
-    """La liga que codifica el QR para verificar el CFDI en el portal del SAT."""
+    """La liga que codifica el QR para verificar el CFDI en el portal del SAT.
+
+    El `tt` va TAL CUAL, sin relleno de ceros. El formato con ceros a la
+    izquierda y seis decimales (`tt=0000001234.567800`) es el de CFDI 3.2 y
+    sigue circulando en ejemplos viejos; 3.3 y 4.0 usan el total a secas
+    (`tt=2010.01`). Ponerle el relleno del formato viejo a un CFDI 4.0 hace que
+    el verificador del SAT no case el comprobante, y eso solo se descubre
+    cuando el contador del cliente escanea el papel.
+
+    `fe` son los ÚLTIMOS ocho caracteres del sello del emisor, y puede traer
+    `/` y `=`: van sin escapar, que es como los espera el verificador.
+    """
     sello = (f.sello_cfd or '')[-8:]
+    # str() de un Decimal de 2 posiciones da '2000.00', que es la forma en que
+    # el CFDI escribe el total en el caso normal.
+    total = Decimal(str(f.total or 0))
     return (
         f'{VERIFICADOR_SAT}?id={f.uuid}&re={f.rfc_emisor}&rr={f.rfc_receptor}'
-        f'&tt={Decimal(str(f.total or 0)):.6f}&fe={sello}'
+        f'&tt={total}&fe={sello}'
     )
 
 

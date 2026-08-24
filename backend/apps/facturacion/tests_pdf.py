@@ -132,7 +132,10 @@ class RepresentacionImpresaTest(TestCase):
         self.assertIn(f'id={UUID_1}', liga)
         self.assertIn('re=REM010101AAA', liga)
         self.assertIn('rr=MEJJ800101ABC', liga)
-        self.assertIn('tt=2000.000000', liga)
+        # CFDI 4.0 manda el total a secas. El relleno de ceros
+        # ('tt=0000002000.000000') es de la 3.2 y el verificador no lo casa.
+        self.assertIn('tt=2000.00', liga)
+        self.assertNotIn('tt=0000', liga)
         # El SAT pide los ÚLTIMOS 8 caracteres del sello del CFDI, no los primeros.
         self.assertIn('fe=NTY3OA==', liga)
 
