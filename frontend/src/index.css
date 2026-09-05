@@ -899,3 +899,40 @@ input[type="number"]::-webkit-outer-spin-button {
   .error-entra { animation: none; }
   .banda-obra { animation: none; }
 }
+
+/* ── Botón de Google en modo oscuro ─────────────────────────────────────────
+ *
+ * El botón lo dibuja Google (así lo piden sus lineamientos) y viene con su
+ * propia hoja de estilos. El problema es que esa hoja puede llegar a medias:
+ * en un navegador con bloqueo de contenido —Brave, Firefox con protección
+ * fuerte— parte del CSS no se aplica y asoma el fondo BLANCO de base de su
+ * botón, con esquinas cuadradas, alrededor de la píldora oscura. En modo claro
+ * no se nota, porque blanco sobre blanco es invisible; en oscuro es un ladrillo
+ * blanco en medio de la pantalla.
+ *
+ * `div[role="button"]` es el gancho estable: los nombres de clase de Google
+ * están ofuscados y cambian, pero el rol ARIA no. Aquí solo se impone el
+ * FONDO, el borde y el ancho; el logotipo y el texto siguen siendo los suyos,
+ * que es lo que su marca exige. El color elegido es el mismo `surface-2` del
+ * botón de Apple que va justo debajo: los dos se leen como el mismo par.
+ */
+html.dark [data-google] div[role='button'] {
+  background-color: var(--c-surface-2) !important;
+  border: 1px solid var(--c-border) !important;
+  border-radius: 9999px !important;
+  color: var(--c-ink) !important;
+  /* Google fija el ancho en línea; sin esto un teléfono angosto lo desborda. */
+  width: 100% !important;
+  max-width: 100% !important;
+}
+
+html.dark [data-google] div[role='button'] span {
+  color: var(--c-ink) !important;
+}
+
+/* El envoltorio y las capas de estado no pueden pintar nada por su cuenta. */
+html.dark [data-google] > div,
+html.dark [data-google] > div > div {
+  background-color: transparent !important;
+  width: 100% !important;
+}

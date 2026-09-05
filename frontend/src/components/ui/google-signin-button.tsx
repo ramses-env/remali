@@ -62,6 +62,7 @@ export function GoogleSignInButton({
 
   useEffect(() => {
     let vivo = true
+    let observador: ResizeObserver | null = null
     cargarGIS()
       .then(() => {
         if (!vivo || !contenedor.current) return
@@ -79,18 +80,35 @@ export function GoogleSignInButton({
             }
           },
         })
-        contenedor.current.innerHTML = ''
-        google.accounts.id.renderButton(contenedor.current, {
-          theme: theme === 'dark' ? 'filled_black' : 'outline',
-          size: 'large',
-          shape: 'pill',
-          text: 'continue_with',
-          locale: 'es',
-          width: Math.min(400, contenedor.current.offsetWidth || 320),
-        })
+        const dibujar = () => {
+          const caja = contenedor.current
+          if (!vivo || !caja) return
+          // Google fija el ancho EN LÍNEA (`width:400px; max-width:400px`) y no
+          // lo vuelve a mirar. Medido antes de que el layout se asiente, en un
+          // teléfono salía 400 dentro de una columna de ~340: el botón se
+          // desbordaba de la tarjeta. `clientWidth` en el momento de dibujar, y
+          // 400 es solo el techo que admite Google.
+          const ancho = Math.min(400, Math.max(200, caja.clientWidth || 320))
+          caja.innerHTML = ''
+          google.accounts.id.renderButton(caja, {
+            theme: theme === 'dark' ? 'filled_black' : 'outline',
+            size: 'large',
+            shape: 'pill',
+            text: 'continue_with',
+            locale: 'es',
+            width: ancho,
+          })
+        }
+        dibujar()
+        // Girar el teléfono, o abrir el teclado, cambia el ancho disponible; sin
+        // esto el botón se queda con el de hace un momento.
+        if ('ResizeObserver' in window) {
+          observador = new ResizeObserver(() => dibujar())
+          observador.observe(contenedor.current)
+        }
       })
       .catch(() => vivo && setFallo(true))
-    return () => { vivo = false }
+    return () => { vivo = false; observador?.disconnect() }
     // Se vuelve a dibujar al cambiar de tema: el botón de Google no hereda CSS,
     // su color se fija al crearlo.
   }, [theme])
@@ -103,5 +121,8 @@ export function GoogleSignInButton({
     )
   }
 
-  return <div ref={contenedor} className="flex justify-center min-h-[44px]" />
+  // `data-google` es el gancho del CSS (ver index.css): en oscuro le imponemos
+  // el fondo del sistema en vez de confiar en que la hoja de estilos de Google
+  // llegue entera.
+  return <div ref={contenedor} data-google className="flex justify-center min-h-[44px]" />
 }
