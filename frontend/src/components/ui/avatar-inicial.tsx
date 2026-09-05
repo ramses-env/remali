@@ -53,7 +53,11 @@ function colorDe(semilla: string) {
 /** Hasta dos letras: "Juan Pérez" -> JP. Con una sola palabra o un correo, una. */
 export function iniciales(...partes: (string | undefined | null)[]) {
   const nombre = partes.map(p => (p || '').trim()).find(Boolean) || ''
-  if (!nombre) return 'C'
+  // Vacío, NO una letra de relleno. Antes devolvía 'C' y esa "C" morada era lo
+  // que veía el usuario en su propia sesión cuando el backend no contestaba y
+  // el perfil nunca llegaba: la inicial de un desconocido. Sin nombre no hay
+  // inicial que decir, y quien llama pinta una silueta.
+  if (!nombre) return ''
   // Si es un correo, solo cuenta lo de antes de la arroba: el dominio no dice
   // nada de la persona, y partiendo por puntos "juan@gmail.com" acababa dando
   // "JC", con la C de ".com".
@@ -61,6 +65,45 @@ export function iniciales(...partes: (string | undefined | null)[]) {
   const palabras = base.split(/[\s._-]+/).filter(Boolean)
   if (palabras.length >= 2) return (palabras[0][0] + palabras[1][0]).toUpperCase()
   return palabras[0].slice(0, 1).toUpperCase()
+}
+
+/** Silueta neutra: "todavía no sé quién eres".
+ *
+ * Se pinta cuando no hay ni nombre ni correo, que en la práctica es cuando la
+ * comunicación con el backend falló y el perfil nunca llegó. Va en SVG dentro
+ * del bundle y no como imagen: si esto aparece es porque la red al backend ya
+ * falló, y pedirle un archivo más sería pedirle otra respuesta al que no está
+ * respondiendo.
+ *
+ * Gris a propósito, fuera de la paleta de identidad: los colores de arriba
+ * dicen "esta persona", y aquí justamente no sabemos cuál es.
+ */
+function AvatarAnonimo({
+  tamano = 'md',
+  className,
+}: {
+  tamano?: keyof typeof TAMANOS
+  className?: string
+}) {
+  return (
+    <span
+      aria-hidden="true"
+      className={cn(
+        'relative grid shrink-0 place-items-center overflow-hidden rounded-full',
+        TAMANOS[tamano],
+        className,
+      )}
+    >
+      <svg viewBox="0 0 40 40" className="h-full w-full" role="presentation">
+        <circle cx="20" cy="20" r="20" fill="#adb2b8" />
+        <circle cx="20" cy="15.4" r="6.9" fill="#eceef0" />
+        <path
+          d="M20 23.8c-6.1 0-11.2 3.9-12.5 9.1A19.9 19.9 0 0 0 20 40c4.9 0 9.4-1.8 12.5-7.1-1.3-5.2-6.4-9.1-12.5-9.1Z"
+          fill="#eceef0"
+        />
+      </svg>
+    </span>
+  )
 }
 
 export function AvatarInicial({
@@ -75,6 +118,8 @@ export function AvatarInicial({
   className?: string
 }) {
   const texto = iniciales(nombre, correo)
+  if (!texto) return <AvatarAnonimo tamano={tamano} className={className} />
+
   // La semilla es el correo antes que el nombre: el nombre se puede editar y el
   // color cambiaría de golpe, y un color que salta deja de servir para reconocer.
   const fondo = colorDe((correo || nombre || '').trim().toLowerCase() || 'cliente')
