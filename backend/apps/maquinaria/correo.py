@@ -14,13 +14,13 @@ import logging
 import threading
 
 from django.conf import settings
-from django.core.mail import EmailMessage
+from django.core.mail import EmailMessage, EmailMultiAlternatives
 from django.db import connections
 
 log = logging.getLogger(__name__)
 
 
-def _enviar_api_brevo(asunto, cuerpo, destinatarios, adjuntos):
+def _enviar_api_brevo(asunto, cuerpo, destinatarios, adjuntos, html=None):
     """El mismo correo, por la API HTTP de Brevo: entra directo a su pipeline
     transaccional (más rápido y rastreable que el relay SMTP). Devuelve False
     si no hay BREVO_API_KEY o la API lo rechaza — el llamador cae al SMTP."""
@@ -37,6 +37,10 @@ def _enviar_api_brevo(asunto, cuerpo, destinatarios, adjuntos):
         'subject': asunto,
         'textContent': cuerpo,
     }
+    # El texto viaja SIEMPRE, aunque haya HTML: hay clientes que solo muestran
+    # texto, y un correo sin parte de texto puntúa peor en los filtros de spam.
+    if html:
+        payload['htmlContent'] = html
     if adjuntos:
         payload['attachment'] = [
             {'name': n, 'content': base64.b64encode(c).decode()} for n, c, _t in adjuntos
@@ -55,58 +59,49 @@ def _enviar_api_brevo(asunto, cuerpo, destinatarios, adjuntos):
         return False
 
 
-def _enviar(asunto, cuerpo, destinatarios, adjuntos, al_terminar=None):
+def _enviar(asunto, cuerpo, destinatarios, adjuntos, html=None):
     import time
     t0 = time.monotonic()
-    ok = False
     try:
-        if _enviar_api_brevo(asunto, cuerpo, destinatarios, adjuntos):
+        if _enviar_api_brevo(asunto, cuerpo, destinatarios, adjuntos, html):
             log.info('Correo "%s" aceptado por Brevo API en %.1fs', asunto, time.monotonic() - t0)
-            ok = True
             return
-        msg = EmailMessage(asunto, cuerpo, settings.DEFAULT_FROM_EMAIL, destinatarios)
+        # Con HTML va un correo multiparte: el texto es el cuerpo y el HTML la
+        # alternativa. Quien no pueda pintar HTML sigue leyendo el mensaje.
+        if html:
+            msg = EmailMultiAlternatives(asunto, cuerpo, settings.DEFAULT_FROM_EMAIL, destinatarios)
+            msg.attach_alternative(html, 'text/html')
+        else:
+            msg = EmailMessage(asunto, cuerpo, settings.DEFAULT_FROM_EMAIL, destinatarios)
         for nombre, contenido, tipo in adjuntos:
             msg.attach(nombre, contenido, tipo)
         msg.send(fail_silently=False)
         log.info('Correo "%s" aceptado por SMTP en %.1fs', asunto, time.monotonic() - t0)
-        ok = True
     except Exception:
         log.exception('No se pudo enviar el correo "%s" a %s', asunto, destinatarios)
     finally:
-        # El resultado se avisa ANTES de cerrar conexiones: el callback suele
-        # escribirlo en la base (por eso existe, para que un correo caído no
-        # viva solo en el log) y necesita la conexión de este hilo viva.
-        if al_terminar is not None:
-            try:
-                al_terminar(ok)
-            except Exception:
-                # Un callback roto no puede tumbar el hilo del correo: el correo
-                # ya salió (o ya falló) y eso no cambia por no poder anotarlo.
-                log.exception('El aviso de resultado del correo "%s" falló', asunto)
         # El hilo abre su propia conexión a la BD si el backend de correo la usa;
         # sin esto quedarían conexiones colgadas en MySQL.
         connections.close_all()
 
 
-def enviar_async(asunto, cuerpo, destinatarios, adjuntos=None, al_terminar=None):
+def enviar_async(asunto, cuerpo, destinatarios, adjuntos=None, html=None):
     """Encola el correo en un hilo. Devuelve False solo si no hay a quién mandarlo.
 
     `adjuntos` es una lista de (nombre, contenido_bytes, content_type).
 
-    Ojo: True significa "se puso en camino", no "llegó". El resultado real del
-    envío queda en el log... salvo que pases `al_terminar`.
+    `html` es OPCIONAL y nunca sustituye a `cuerpo`: van los dos. El texto es lo
+    que ve quien tiene el HTML desactivado —más gente de la que parece— y su
+    ausencia además penaliza en los filtros de spam.
 
-    `al_terminar(ok: bool)` se ejecuta DENTRO del hilo cuando el envío termina,
-    para quien necesita que un correo caído se note sin ir a leer logs (guardar
-    un estado, avisar en el panel). Corre con la conexión a la base todavía
-    abierta y sus excepciones se tragan: nada de lo que haga puede afectar al
-    correo, que a esas alturas ya salió o ya falló.
+    Ojo: True significa "se puso en camino", no "llegó". El resultado real del
+    envío queda en el log.
     """
     destinatarios = [d for d in (destinatarios or []) if d]
     if not destinatarios:
         return False
     threading.Thread(
-        target=_enviar, args=(asunto, cuerpo, destinatarios, list(adjuntos or []), al_terminar),
+        target=_enviar, args=(asunto, cuerpo, destinatarios, list(adjuntos or []), html),
         daemon=True, name='correo-remali',
     ).start()
     return True

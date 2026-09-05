@@ -1,5 +1,7 @@
 """Datos estructurados del comprobante de venta (fuente única para modal y PDF)."""
 
+from server.documentos import fecha_larga
+
 
 def datos_comprobante_venta(v) -> dict:
     meta = []
@@ -16,7 +18,8 @@ def datos_comprobante_venta(v) -> dict:
         for ci in v.cotizacion.items.all():
             items.append({
                 'nombre': ci.descripcion,
-                'detalle': f'{ci.cantidad} x ${ci.precio_unitario}',
+                'cantidad': f'{ci.cantidad}',
+                'unitario': f'{ci.precio_unitario}',
                 'importe': f'{ci.subtotal}',
             })
         meta.append({'label': 'Cotizacion', 'value': v.cotizacion.folio})
@@ -29,14 +32,19 @@ def datos_comprobante_venta(v) -> dict:
                 or (renglon.equipo.modelo if renglon.equipo_id else 'Maquinaria')
             items.append({
                 'nombre': f'{eq} ({inv.codigo})' if inv else f'{eq} (por llegar)',
-                'detalle': (f'S/N {inv.numero_serie}' if inv and inv.numero_serie else '1 pza'),
+                # El detalle es la segunda línea del concepto: el número de serie
+                # es lo que el cliente necesita para reclamar garantía.
+                'detalle': (f'S/N {inv.numero_serie}' if inv and inv.numero_serie else ''),
+                'cantidad': '1',
+                'unitario': f'{renglon.precio}',
                 'importe': f'{renglon.precio}',
             })
     for it in v.items.all():
         nombre = it.refaccion.nombre if it.refaccion else 'Producto'
         items.append({
             'nombre': nombre,
-            'detalle': f'{it.cantidad} x ${it.precio_unitario}',
+            'cantidad': f'{it.cantidad}',
+            'unitario': f'{it.precio_unitario}',
             'importe': f'{it.subtotal}',
         })
 
@@ -46,11 +54,11 @@ def datos_comprobante_venta(v) -> dict:
         totales = [
             {'label': 'Subtotal', 'value': f'{v.subtotal}'},
             {'label': 'IVA (16%)', 'value': f'{v.iva}'},
-            {'label': 'TOTAL', 'value': f'{v.total}', 'fuerte': True},
+            {'label': 'Total', 'value': f'{v.total}', 'fuerte': True},
         ]
     else:
         totales = [
-            {'label': 'TOTAL', 'value': f'{v.total}', 'fuerte': True},
+            {'label': 'Total', 'value': f'{v.total}', 'fuerte': True},
         ]
 
     if getattr(v, 'pagos', None):
@@ -67,7 +75,7 @@ def datos_comprobante_venta(v) -> dict:
         'tipo': 'venta',
         'titulo': 'Ticket de Venta',
         'folio': f'V-{v.id}',
-        'fecha': v.fecha.strftime('%d/%m/%Y %H:%M'),
+        'fecha': fecha_larga(v.fecha),
         'meta': meta,
         'items': items,
         'totales': totales,

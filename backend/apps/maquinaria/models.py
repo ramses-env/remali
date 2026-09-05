@@ -9,12 +9,15 @@ from django.core.exceptions import ValidationError
 from django.core.files.storage import default_storage
 from django.core.validators import FileExtensionValidator
 from django.db import models
+
+from server.porpeticion import olvidar, por_peticion
 from django.db.models import Q
 from django.utils import timezone
 
 from .permissions import (
     ROL_ADMIN, ROL_CAJERO, ROL_GESTOR, ROL_TECNICO,
 )
+from server.rastro import tragado
 
 
 def select_ficha_storage():
@@ -198,7 +201,7 @@ def avatar_por_rol(usuario, *, override_inicial='', absoluta=False, request=None
             if base and base.startswith('http'):
                 return base.rstrip('/') + url
         except Exception:
-            pass
+            tragado()
     return url
 
 
@@ -215,13 +218,26 @@ class PerfilUsuario(models.Model):
     empresa = models.CharField(max_length=180, blank=True, default='')
     obra_direccion = models.CharField(max_length=255, blank=True, default='')
     obra_responsable = models.CharField(max_length=180, blank=True, default='')
-    email_token = models.CharField(max_length=64, blank=True, default='', editable=False)
-    # Cuándo se emitió el token de arriba. La liga del correo abre sesión sola, así
-    # que no puede valer para siempre: un correo viejo reenviado sería una llave a
-    # la cuenta. Con esta fecha, la vista de verificación la caduca (48 h).
-    email_token_creado = models.DateTimeField(null=True, blank=True, editable=False)
+    # ── Código de verificación del correo (OTP) ──
+    # 6 dígitos que el usuario teclea al registrarse. Reemplazó a la liga: un
+    # código no lo puede "abrir" solo un escáner de correo (SafeLinks, antivirus),
+    # que era lo que quemaba el token antes de que el usuario lo viera.
+    #
+    # Va HASHEADO, igual que `codigo_seguridad`: un respaldo de la base o un log
+    # no puede entregar códigos vivos. Y `email_otp_intentos` /
+    # `email_otp_bloqueado_hasta` son lo que lo hace seguro siendo tan corto —
+    # seis dígitos son un millón de combinaciones, y sin freno se barren.
+    email_otp = models.CharField(max_length=128, blank=True, default='', editable=False)
+    email_otp_creado = models.DateTimeField(null=True, blank=True, editable=False)
+    email_otp_intentos = models.PositiveSmallIntegerField(default=0)
+    email_otp_bloqueado_hasta = models.DateTimeField(null=True, blank=True)
     email_verificado = models.BooleanField(default=False)
     email_verificado_en = models.DateTimeField(null=True, blank=True)
+    # Candado de "una sola vez" del correo de bienvenida, igual que `recompensado`
+    # lo es del cupón: el perfil se guarda muchas veces y la verificación se
+    # puede volver a marcar (entrar con Google, restablecer la contraseña), así
+    # que sin bandera el cliente recibiría la bienvenida cada vez.
+    bienvenida_enviada = models.BooleanField(default=False, editable=False)
     recompensado = models.BooleanField(default=False)
     fiscal_razon_social = models.CharField(max_length=200, blank=True, default='')
     fiscal_rfc = models.CharField(max_length=20, blank=True, default='')
@@ -297,7 +313,7 @@ class PerfilUsuario(models.Model):
             try:
                 return self.avatar.url
             except Exception:
-                pass
+                tragado()
         return self.avatar_por_defecto_url
 
 
@@ -710,6 +726,11 @@ class ImagenProducto(models.Model):
         return f"{self.equipo.modelo} #{self.id}"
 
 
+#: Cuánto dura el 5% de bienvenida. Tres meses: suficiente para que el cliente
+#: llegue a su siguiente obra sin que el descuento se vuelva parte del precio.
+VIGENCIA_BIENVENIDA_MESES = 3
+
+
 class Cupon(models.Model):
     codigo = models.CharField(max_length=50, unique=True)
     descuento = models.DecimalField(
@@ -733,6 +754,10 @@ class Cupon(models.Model):
     # para no confundir "ya lo gastó el cliente" con "el admin lo apagó".
     usado = models.BooleanField(default=False)
     usado_en = models.DateTimeField(null=True, blank=True)
+    # Hasta cuándo sirve. Vacío = no vence (los genéricos del admin, que él
+    # apaga a mano con `activo`). El de bienvenida SÍ trae fecha: un descuento
+    # abierto para siempre deja de ser un motivo para volver.
+    expira = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         db_table = 'cupones'
@@ -746,6 +771,10 @@ class Cupon(models.Model):
     def personal(self):
         """De un solo uso y atado a un cliente (vs. los genéricos reusables)."""
         return self.usuario_id is not None
+
+    @property
+    def vencido(self):
+        return bool(self.expira and self.expira <= timezone.now())
 
     def marcar_usado(self):
         """Consume el cupón personal (idempotente). No toca los genéricos."""
@@ -771,12 +800,18 @@ class Cupon(models.Model):
             return cupon
         import secrets
         from decimal import Decimal
+        # Alfabeto SIN I, O, 0 ni 1: este código lo teclea el cliente mirando su
+        # pantalla, y esas cuatro se confunden entre sí en cualquier tipografía.
+        # Antes era hexadecimal (`token_hex`), que trae 0 y 1 de fábrica.
+        ALFABETO = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
         for _ in range(8):
-            codigo = f'MI5-{secrets.token_hex(3).upper()}'
+            codigo = 'BIENV-' + ''.join(secrets.choice(ALFABETO) for _ in range(5))
             if not cls.objects.filter(codigo=codigo).exists():
+                from server.periodos import mas_meses
                 return cls.objects.create(
                     codigo=codigo, descuento=Decimal('0.05'), activo=True,
                     motivo='perfil', usuario=usuario,
+                    expira=mas_meses(timezone.now(), VIGENCIA_BIENVENIDA_MESES),
                 )
         return None
 
@@ -870,6 +905,57 @@ class CambioPrecioLista(models.Model):
         return f'{self.equipo_id} · {self.campo}: {self.anterior} → {self.nuevo}'
 
 
+class Rol(models.Model):
+    """Un puesto del panel: su nombre visible y su identidad interna.
+
+    Las dos cosas van SEPARADAS a propósito. El código pregunta por puestos
+    concretos —al Gestor le pide el NIP del dueño, al Cajero le apaga rentar de
+    fábrica— y si esas preguntas dependieran del nombre visible, renombrar
+    "Cajero" a "Mostrador" apagaría esas reglas en silencio, que es la peor
+    forma de romper permisos: sin error y sin aviso.
+
+    Por eso manda `clave`, que nace con el rol y no se toca nunca; `nombre` es
+    solo lo que se lee en pantalla y en el selector de usuarios. Los overrides
+    (`PermisoRol.rol`) guardan la CLAVE, así que renombrar no mueve un permiso.
+
+    El GRUPO de Django sigue siendo el que liga a la gente con su puesto: aquí
+    no se duplica esa relación, se le pone nombre y nivel.
+    """
+    #: Los cuatro de fábrica. `protegido` los cubre: se renombran, no se borran.
+    CLAVES_FABRICA = ('administrador', 'gestor', 'cajero', 'tecnico')
+
+    clave = models.SlugField(max_length=40, unique=True)
+    nombre = models.CharField(max_length=60, unique=True)
+    #: Piso desde el que arranca. Un rol creado desde la pantalla nace en 1
+    #: (entra al panel) y con TODAS las capacidades apagadas: lo que pueda hacer
+    #: se enciende a mano, que es justo lo que la pantalla existe para hacer.
+    nivel = models.PositiveSmallIntegerField(default=1)
+    protegido = models.BooleanField(default=False)
+    creado_por = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+                                   null=True, blank=True, related_name='roles_creados')
+    creado_en = models.DateTimeField(auto_now_add=True)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'rol'
+        ordering = ['-nivel', 'nombre']
+        verbose_name = 'Rol'
+        verbose_name_plural = 'Roles'
+
+    def __str__(self):
+        return self.nombre
+
+    @property
+    def grupo(self):
+        """El grupo de Django que lleva su nombre. Es la liga con la gente."""
+        from django.contrib.auth.models import Group
+        return Group.objects.filter(name=self.nombre).first()
+
+    def cuantos_la_tienen(self) -> int:
+        g = self.grupo
+        return g.user_set.count() if g else 0
+
+
 class PermisoRol(models.Model):
     """Una capacidad que el dueño movió respecto de fábrica, para un rol.
 
@@ -877,11 +963,13 @@ class PermisoRol(models.Model):
     borra. Así "¿qué toqué yo?" es una consulta y no un diff, y el punto dorado
     de la pantalla es literalmente "¿existe la fila?".
 
-    `rol` y `capacidad` van como texto y no como llave foránea porque el catálogo
-    vive en el código, que es donde están la etiqueta y la explicación. Se validan
-    contra `permissions.CATALOGO` al guardar desde la API.
+    `rol` guarda la CLAVE del puesto (`Rol.clave`), no su nombre visible: así
+    renombrarlo no mueve un solo permiso. `capacidad` va como texto y no como
+    llave foránea porque el catálogo vive en el código, que es donde están la
+    etiqueta y la explicación; se valida contra `permissions.CATALOGO` al
+    guardar desde la API.
     """
-    rol = models.CharField(max_length=30)
+    rol = models.CharField(max_length=40)
     capacidad = models.CharField(max_length=40)
     permitido = models.BooleanField()
     actualizado_por = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
@@ -904,9 +992,14 @@ class CambioPermisoRol(models.Model):
 
     Gemela de `CambioPrecioLista`, y por la misma razón: repartir permisos es
     trabajo legítimo del dueño, no se bloquea; se hace VISIBLE.
+
+    También registra el ciclo de vida del puesto —crearlo, renombrarlo,
+    borrarlo—: esas tres mueven quién puede qué tanto como encender una casilla.
+    Van con `capacidad` vacía y su explicación en `detalle`.
     """
-    rol = models.CharField(max_length=30)
-    capacidad = models.CharField(max_length=40)
+    rol = models.CharField(max_length=40)
+    capacidad = models.CharField(max_length=40, blank=True, default='')
+    detalle = models.CharField(max_length=200, blank=True, default='')
     anterior = models.BooleanField(null=True, blank=True)   # null = venía de fábrica
     nuevo = models.BooleanField(null=True, blank=True)      # null = se restableció
     usuario = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
@@ -958,6 +1051,7 @@ class ConfiguracionSitio(models.Model):
     ticket_mostrar_web = models.BooleanField(default=False)
     ticket_codigo_barras = models.BooleanField(default=True)
     ticket_leyenda = models.TextField(blank=True, default='')           # aviso al pie (devoluciones, garantía)
+
     dias_entrega_pedido = models.PositiveIntegerField(default=0)
     # Descuento (%) que se ofrece al pagar de CONTADO en efectivo al vender una
     # máquina. Es política de la empresa: se aplica sin código de autorización.
@@ -965,6 +1059,26 @@ class ConfiguracionSitio(models.Model):
     # Anticipo MÍNIMO (%) para apartar/pedir una máquina. Un anticipo menor
     # requiere el código de autorización (codigo_ajuste).
     anticipo_minimo_pct = models.PositiveSmallIntegerField(default=60)
+    # Cuánto tiene que llevar abonado el cliente para que la máquina se pueda
+    # RECOGER. Antes era el 100%: la renta no se cerraba con un peso vivo. Eso
+    # dejaba al técnico parado en la obra con un cliente que traía casi todo, y
+    # la máquina sin recoger. Ahora el piso es un porcentaje del total (recargo
+    # e IVA incluidos, que es lo que el cliente realmente debe) y el resto se va
+    # al carril de cobranza como cualquier otro adeudo. Por debajo del piso hace
+    # falta el código de autorización (mismo trato que el anticipo de apartados).
+    renta_liquidacion_minima_pct = models.PositiveSmallIntegerField(default=75)
+
+    # ── Barra de aviso de la tienda ──
+    # El listón de arriba del sitio: temporada, promoción, un cambio de horario.
+    # Nace apagado. `aviso_hasta` es lo que evita el problema clásico de estas
+    # barras: la que anuncia "Descuentos de Semana Santa" en septiembre porque
+    # nadie se acordó de apagarla. Con fecha, se apaga sola.
+    aviso_activo = models.BooleanField(default=False)
+    aviso_texto = models.CharField(max_length=160, blank=True, default='')
+    # Opcional: si se llena, la barra entera lleva a algún lado.
+    aviso_liga = models.CharField(max_length=300, blank=True, default='')
+    aviso_liga_texto = models.CharField(max_length=40, blank=True, default='')
+    aviso_hasta = models.DateField(null=True, blank=True)
     # ── Qué puede cobrarse desde la CAJA (mostrador) ──
     # La caja nació como POS de refacciones. Estos interruptores la amplían a
     # maquinaria y rentas cuando el negocio quiera; nacen apagados para que nada
@@ -993,12 +1107,29 @@ class ConfiguracionSitio(models.Model):
 
     @classmethod
     def get_solo(cls):
+        """La única configuración que existe, una sola consulta por petición.
+
+        Cacheado por petición porque esto se lee desde propiedades del catálogo
+        (`Equipo.entrega_estimada_dias`): en una lista de equipos sobre pedido
+        salía un `get_or_create` POR EQUIPO. Y `get_or_create` no es una lectura
+        cualquiera —puede escribir—, así que era lo peor que podía repetirse.
+
+        Por petición y no en el proceso: si un worker guardara la config, los
+        demás seguirían sirviendo la vieja. Ver server/porpeticion.py.
+        """
+        return por_peticion('config_sitio', cls._leer_solo)
+
+    @classmethod
+    def _leer_solo(cls):
         obj, _ = cls.objects.get_or_create(pk=1)
         return obj
 
     def save(self, *args, **kwargs):
         self.pk = 1
         super().save(*args, **kwargs)
+        # Quien guarda la config suele releerla en la misma petición (el PATCH
+        # responde con los datos nuevos): sin esto le contestaríamos los viejos.
+        olvidar('config_sitio')
 
     def __str__(self):
         return self.negocio_nombre or 'Configuración del sitio'

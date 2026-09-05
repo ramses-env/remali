@@ -7,6 +7,7 @@ a su latido de respaldo.
 import functools
 
 from asgiref.sync import async_to_sync
+from server.rastro import tragado
 
 
 def omitir_en_restauracion(fn):
@@ -42,7 +43,7 @@ def push_user_event(user_id: int | None, data: dict):
             'data': data,
         })
     except Exception:
-        pass
+        tragado()
 
 
 def push_panel_event(*topics: str):
@@ -59,4 +60,4 @@ def push_panel_event(*topics: str):
             'data': {'topics': temas},
         })
     except Exception:
-        pass
+        tragado()

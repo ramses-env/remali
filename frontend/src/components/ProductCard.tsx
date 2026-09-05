@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom'
 import { useCart, esVenta, tipoCotizacion } from '../store/cart'
+import { useEsDelNegocio } from '../store/profile'
 import { usePriceUnit } from '../store/priceUnit'
 import { useToast } from '../store/toast'
 import { useFavoritos } from '../store/favoritos'
@@ -34,6 +35,7 @@ const tagStyle: Record<Tag['tone'], string> = {
 
 export default function ProductCard({ id, title, price, priceOriginal, image, subtitle, meta, linkTo, tags = [], modo, agotado = false, estado, entregaDias }: Props) {
   const { state, dispatch } = useCart()
+  const delNegocio = useEsDelNegocio()
   // Si el tipo choca, el reducer NO agrega (abre el modal global): no avisar "añadido".
   const chocaTipo = () => { const t = tipoCotizacion(state.items); return !!t && t !== (esVenta(cartUnit) ? 'venta' : 'renta') }
   const { notify } = useToast()
@@ -84,7 +86,7 @@ export default function ProductCard({ id, title, price, priceOriginal, image, su
           type="button"
           data-onboarding="tarjeta-favorito"
           aria-label={fav ? 'Quitar de favoritos' : 'Guardar en favoritos'}
-          onClick={() => { const m = toggle(id); notify(m ? 'Guardado en favoritos' : 'Quitado de favoritos', m ? 'heart' : 'heart-off') }}
+          onClick={() => { const m = toggle(id); notify(m ? 'Guardado en favoritos' : 'Quitado de favoritos', m ? 'ok' : 'neutro', m ? 'corazon' : 'corazon-vacio') }}
           className={`absolute top-2.5 right-2.5 z-20 w-9 h-9 rounded-full grid place-items-center backdrop-blur-sm transition-colors active:scale-90 ${fav ? 'bg-white text-red-500 shadow-sm' : 'bg-black/40 text-white hover:bg-black/60'}`}
         >
           <svg className="w-[18px] h-[18px]" fill={fav ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.8"><path strokeLinecap="round" strokeLinejoin="round" d="M11.995 20.5s-7-4.5-7-10.5a4 4 0 017-2.5 4 4 0 017 2.5c0 6-7 10.5-7 10.5z" /></svg>
@@ -144,18 +146,22 @@ export default function ProductCard({ id, title, price, priceOriginal, image, su
           <p className="mt-2 text-[11px] font-semibold text-[#c026ff]">Entrega estimada ~{entregaDias} días</p>
         ) : null}
 
-        {/* Acciones SIEMPRE visibles: "Ver ficha" lleva al detalle; "+ Cotizar" agrega. */}
+        {/* "Ver ficha" siempre; cotizar solo para quien puede hacerlo.
+            Una cuenta del equipo no arma cotizaciones de cliente (el backend lo
+            rechaza), así que ofrecerle el botón solo sirve para que llene el
+            carrito y se estrelle al enviar. Consultar el catálogo sí es suyo:
+            necesita ver precios y fichas para atender a alguien. */}
         <div className="mt-3 pt-3 border-t border-edge flex gap-2">
-          <Link to={ficha} className="flex-1 py-2 rounded-full border border-edge text-ink text-xs font-semibold text-center hover:bg-surface-2 hover:border-gold/40 transition-colors">
+          <Link to={ficha} className={`${delNegocio ? 'w-full' : 'flex-1'} py-2 rounded-full border border-edge text-ink text-xs font-semibold text-center hover:bg-surface-2 hover:border-gold/40 transition-colors`}>
             Ver ficha
           </Link>
-          {gris ? (
+          {!delNegocio && (gris ? (
             <span className="flex-1 py-2 rounded-full bg-surface-2 text-mute text-xs font-bold text-center">Agotado</span>
           ) : (
             <button onClick={agregar} className="flex-1 py-2 rounded-full bg-gold text-black text-xs font-bold hover:opacity-90 transition-colors active:scale-[0.98]">
               {sobrePedido ? 'Cotizar pedido' : '+ Cotizar'}
             </button>
-          )}
+          ))}
         </div>
       </div>
     </div>

@@ -15,6 +15,7 @@ viven en otra tabla y el panel nunca la consulta.
 from django.db import transaction
 from django.utils import timezone
 from rest_framework.decorators import api_view, permission_classes, throttle_classes
+from maquinaria.permissions import NoEsDelNegocio
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
@@ -30,6 +31,7 @@ from .models_borrador import (
     PaqueteAutorizacion,
     nuevo_token,
 )
+from server.rastro import tragado
 
 
 def _error(mensaje, codigo, status=400):
@@ -149,7 +151,7 @@ def _reemplazar_items(borrador, items):
 
 
 @api_view(['GET', 'POST'])
-@permission_classes([AllowAny])          # el invitado también arma borradores
+@permission_classes([NoEsDelNegocio])          # el invitado también arma borradores
 @throttle_classes([BorradorThrottle])
 def borradores(request):
     """GET: lo que el cliente tiene en su taller. POST: guarda uno nuevo."""
@@ -190,7 +192,7 @@ def borradores(request):
 
 
 @api_view(['GET', 'PATCH', 'DELETE'])
-@permission_classes([AllowAny])
+@permission_classes([NoEsDelNegocio])
 def borrador_detalle(request, pk: int):
     b = _mi_borrador(request, pk)
     if not b:
@@ -227,7 +229,7 @@ def borrador_detalle(request, pk: int):
 
 
 @api_view(['POST'])
-@permission_classes([AllowAny])
+@permission_classes([NoEsDelNegocio])
 def borrador_duplicar(request, pk: int):
     """Una versión nueva a partir de una anterior.
 
@@ -256,7 +258,7 @@ def borrador_duplicar(request, pk: int):
 
 
 @api_view(['POST'])
-@permission_classes([AllowAny])
+@permission_classes([NoEsDelNegocio])
 @throttle_classes([SolicitudPublicaThrottle])
 def borrador_enviar(request, pk: int):
     """Directo a REMALI, sin pasar por el jefe. Aquí nace la cotización."""
@@ -284,7 +286,7 @@ def borrador_enviar(request, pk: int):
 # ──────────────── Paquete de autorización (cliente) ────────────────
 
 @api_view(['POST'])
-@permission_classes([AllowAny])
+@permission_classes([NoEsDelNegocio])
 @throttle_classes([SolicitudPublicaThrottle])
 def autorizaciones(request):
     """Manda uno o varios borradores a autorizar bajo UNA liga.
@@ -336,7 +338,7 @@ def autorizaciones(request):
 
 
 @api_view(['DELETE'])
-@permission_classes([AllowAny])
+@permission_classes([NoEsDelNegocio])
 def autorizacion_retirar(request, pk: int):
     """El cliente se arrepiente antes de que el jefe conteste."""
     p = _mios(PaqueteAutorizacion, request).filter(pk=pk).first()
@@ -383,7 +385,7 @@ def _avisar_a_remali(cotizaciones, *, firmante):
             data={'cotizacion_id': cotizaciones[0].id, 'folio': cotizaciones[0].folio, 'telefono': tel},
         )
     except Exception:
-        pass
+        tragado()
     try:
         from maquinaria.correo import enviar_async
         destinatarios = list(CorreoAviso.objects.filter(verificado=True).values_list('email', flat=True))
@@ -392,7 +394,7 @@ def _avisar_a_remali(cotizaciones, *, firmante):
                          f'{quien} ({tel}) · {folios} · Total ${total}.\n'
                          f'Ya aparece en el panel para atenderse.\n', destinatarios)
     except Exception:
-        pass
+        tragado()
 
 
 def _avisar_al_cliente(paquete, autorizadas, rechazadas, cambios=()):
@@ -415,11 +417,11 @@ def _avisar_al_cliente(paquete, autorizadas, rechazadas, cambios=()):
                                     mensaje=mensaje, seccion='cotizaciones',
                                     ref=f'paquete-{paquete.id}')
     except Exception:
-        pass
+        tragado()
 
 
 @api_view(['GET', 'POST'])
-@permission_classes([AllowAny])          # el jefe no tiene cuenta, y no se le va a pedir
+@permission_classes([NoEsDelNegocio])          # el jefe no tiene cuenta, y no se le va a pedir
 @throttle_classes([AutorizacionThrottle])
 def autorizacion(request, token):
     """La liga de quien autoriza: ve lo que le mandaron y lo resuelve."""

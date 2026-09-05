@@ -14,6 +14,7 @@ from maquinaria.permissions import (
     PuedeVender, PuedeVerMontosOperacion, PuedeVerOperacion, puede_de,
 )
 from .models import Venta, ItemVenta, SesionCaja, MovimientoCaja
+from server.rastro import tragado
 
 logger = logging.getLogger(__name__)
 
@@ -47,17 +48,30 @@ def _maquinas_de(venta):
 def _campos_cliente(datos):
     """Los campos de cliente para construir un documento, resueltos en un solo
     lugar (apps/clientes/resolucion.py). Si viene `cliente_id` se usa; si no, se
-    crea uno con lo capturado. Nunca se une por teléfono sin confirmación."""
-    from clientes.resolucion import resolver_cliente
+    crea uno con lo capturado. Nunca se une por teléfono sin confirmación.
+
+    Y si esa ficha ya tiene cuenta de la tienda, la compra cae SOLA en "Mis
+    compras" del cliente. Antes se quedaba solo en su ficha: el cliente veía su
+    panel vacío después de haber comprado en el mostrador, y ligarla era un paso
+    manual que nadie recordaba hacer.
+    """
+    from clientes.resolucion import resolver_cliente, cuenta_de
     cli, contacto = resolver_cliente(
         cliente_id=datos.get('cliente_id') or None,
         contacto_id=datos.get('contacto_id') or None,
         nombre=datos.get('nombre_cliente') or '',
         telefono=datos.get('telefono_cliente') or '',
     )
-    return {'cliente': cli, 'contacto': contacto}
+    campos = {'cliente': cli, 'contacto': contacto}
+    # No se pisa lo que venga en la petición: concretar una cotización ya trae
+    # su cuenta, y la liga de vinculación también.
+    if not datos.get('cliente_usuario_id'):
+        u = cuenta_de(cli, contacto)
+        if u:
+            campos['cliente_usuario'] = u
+    return campos
 @api_view(['POST'])
-@permission_classes([PuedeUsarCaja])   # la caja: cajero, gerente y administración; no el técnico de campo
+@permission_classes([PuedeUsarCaja])   # la caja es del MOSTRADOR: ni administración ni el dueño la traen
 def venta_mostrador(request):
     """Venta de mostrador de refacciones al público.
 
@@ -351,56 +365,7 @@ def listar_ventas(request):
     pagina = min(pagina, paginas)
     qs = qs[(pagina - 1) * tam: pagina * tam]
 
-    data = []
-    for v in qs:
-        inv = v.inventario
-        data.append({
-            'id': v.id,
-            'folio': v.folio,
-            'nombre_cliente': v.nombre_cliente,
-            'telefono_cliente': v.telefono_cliente,
-            'cliente': v.cliente.nombre if v.cliente_id else None,
-            'estado': v.estado,
-            'subtotal': str(v.subtotal),
-            'iva': str(v.iva),
-            'total': str(v.total),
-            'pagado': str(v.pagado()),
-            'saldo': str(v.saldo_pendiente()),
-            # Los abonos con su fecha: el Resumen los necesita para contar el
-            # ingreso el día que entró el dinero, no el día que se levantó la venta.
-            'pagos': v.pagos or [],
-            'sobre_pedido': v.sobre_pedido,
-            'fecha_estimada_entrega': v.fecha_estimada_entrega,
-            'entregada_en': v.entregada_en,
-            'metodo_pago': v.metodo_pago,
-            'fecha': v.fecha,
-            'vendedor': getattr(v.usuario, 'username', None),
-            # Rastro si el precio se ajustó a mano al vender (de lista X → Y + motivo).
-            'nota_ajuste': v.nota_ajuste or None,
-            # Cuenta de cliente ligada (por la liga de vinculación), si la hay.
-            'cuenta': ((v.cliente_usuario.get_full_name() or v.cliente_usuario.username)
-                       if v.cliente_usuario_id else None),
-            'factura_estado': next((s.estado for s in v.solicitudes_factura.all() if s.estado != 'cancelada'), None),
-            # Sin unidad amarrada (venta desde cotización): que la columna diga
-            # de qué equipo(s) fue y de qué folio nació, no un guion.
-            'origen': (
-                {'folio': v.cotizacion.folio,
-                 'resumen': ', '.join(i.descripcion for i in v.cotizacion.items.all()[:2])}
-                if (not inv and v.cotizacion_id and v.cotizacion) else None
-            ),
-            # Cada máquina de la venta, con su serie y su precio. `unidad` (la
-            # primera) se conserva para lo que todavía la lee.
-            'maquinas': _maquinas_de(v),
-            'unidad': None if not inv else {
-                'id': inv.id,
-                'codigo': inv.codigo,
-                'numero_serie': inv.numero_serie,
-                'equipo': inv.equipo.modelo if inv.equipo else None,
-            },
-            # Equipo pedido cuando aún no hay unidad (apartado sobre pedido).
-            'equipo': ((inv.equipo.modelo if inv and inv.equipo else None)
-                       or (v.equipo.modelo if v.equipo_id else None)),
-        })
+    data = [_serialize_venta(v) for v in qs]
     return Response({
         'ventas': data,
         # `total` ya no es "cuántas te mandé" sino cuántas hay en el periodo:
@@ -408,6 +373,90 @@ def listar_ventas(request):
         'total': total,
         'pagina': pagina, 'paginas': paginas, 'page_size': tam,
     })
+
+
+def _serialize_venta(v):
+    """El renglón de una venta como lo lee el panel.
+
+    Vive aparte porque lo usan DOS vistas —la lista y el detalle por id— y si
+    cada una arma su diccionario, el día que se agregue un campo se agrega en
+    una sola y la hoja de detalle empieza a mentir por omisión.
+    """
+    inv = v.inventario
+    return {
+        'id': v.id,
+        'folio': v.folio,
+        'nombre_cliente': v.nombre_cliente,
+        'telefono_cliente': v.telefono_cliente,
+        'cliente': v.cliente.nombre if v.cliente_id else None,
+        'estado': v.estado,
+        'subtotal': str(v.subtotal),
+        'iva': str(v.iva),
+        'total': str(v.total),
+        'pagado': str(v.pagado()),
+        'saldo': str(v.saldo_pendiente()),
+        # Los abonos con su fecha: el Resumen los necesita para contar el
+        # ingreso el día que entró el dinero, no el día que se levantó la venta.
+        'pagos': v.pagos or [],
+        'garantias': _garantias_de(v),
+        'maquinas_canceladas': _maquinas_canceladas_de(v),
+        # El respaldo del proveedor, para reclamarle a él si la máquina falla.
+        'garantia_proveedor': ({'meses': v.garantia_proveedor_meses,
+                                'nota': v.garantia_proveedor_nota}
+                               if v.garantia_proveedor_meses else None),
+        'sobre_pedido': v.sobre_pedido,
+        'fecha_estimada_entrega': v.fecha_estimada_entrega,
+        'entregada_en': v.entregada_en,
+        'metodo_pago': v.metodo_pago,
+        'fecha': v.fecha,
+        'vendedor': getattr(v.usuario, 'username', None),
+        # Rastro si el precio se ajustó a mano al vender (de lista X → Y + motivo).
+        'nota_ajuste': v.nota_ajuste or None,
+        # Cuenta de cliente ligada (por la liga de vinculación), si la hay.
+        'cuenta': ((v.cliente_usuario.get_full_name() or v.cliente_usuario.username)
+                   if v.cliente_usuario_id else None),
+        'factura_estado': next((s.estado for s in v.solicitudes_factura.all() if s.estado != 'cancelada'), None),
+        # Sin unidad amarrada (venta desde cotización): que la columna diga
+        # de qué equipo(s) fue y de qué folio nació, no un guion.
+        'origen': (
+            {'folio': v.cotizacion.folio,
+             'resumen': ', '.join(i.descripcion for i in v.cotizacion.items.all()[:2])}
+            if (not inv and v.cotizacion_id and v.cotizacion) else None
+        ),
+        # Cada máquina de la venta, con su serie y su precio. `unidad` (la
+        # primera) se conserva para lo que todavía la lee.
+        'maquinas': _maquinas_de(v),
+        'unidad': None if not inv else {
+            'id': inv.id,
+            'codigo': inv.codigo,
+            'numero_serie': inv.numero_serie,
+            'equipo': inv.equipo.modelo if inv.equipo else None,
+        },
+        # Equipo pedido cuando aún no hay unidad (apartado sobre pedido).
+        'equipo': ((inv.equipo.modelo if inv and inv.equipo else None)
+                   or (v.equipo.modelo if v.equipo_id else None)),
+    }
+
+
+@api_view(['GET'])
+@permission_classes([PuedeVerOperacion])
+def venta_detalle(request, pk):
+    """UNA venta por id, con la misma forma que trae la lista.
+
+    Existe porque la hoja de detalle del panel vive en su propia dirección
+    (`/dashboard/ventas/<id>`) y tiene que poder cargarse sola: pegada en la
+    barra, recargada, o llegando de un enlace. Sacarla de la lista no sirve —
+    la lista viene paginada y acotada al periodo, y la venta que te mandaron a
+    ver bien puede ser del año pasado.
+    """
+    v = (Venta.objects
+         .select_related('inventario', 'inventario__equipo', 'equipo', 'usuario',
+                         'cliente_usuario', 'cliente', 'cotizacion')
+         .prefetch_related('solicitudes_factura', 'maquinas__inventario__equipo', 'maquinas__equipo')
+         .filter(pk=pk).first())
+    if not v:
+        return Response({'detalle': 'No encontramos esa venta.'}, status=404)
+    return Response({'venta': _serialize_venta(v)})
 
 
 @api_view(['GET'])
@@ -461,13 +510,68 @@ def ventas_stats(request):
     return Response(datos)
 
 
+def _maquinas_canceladas_de(venta):
+    """Los renglones de máquina que se DIERON DE BAJA de esta venta.
+
+    `_maquinas_de` solo devuelve las vivas, y con razón: el ticket y "mis
+    compras" no deben listar una máquina que el cliente no se llevó. Pero el
+    efecto lateral era que el renglón cancelado desaparecía entero, con su
+    rastro dentro: quién lo canceló, cuándo y por qué se guardaban y no había
+    forma de leerlos sin entrar a la base.
+
+    Va SOLO en el detalle del panel, que es donde se audita una venta. Vacío
+    para el 99% de las ventas, que no cancelan nada.
+    """
+    filas = []
+    for r in venta.maquinas.select_related('inventario', 'inventario__equipo', 'equipo',
+                                           'cancelada_por').all():
+        if r.viva:
+            continue
+        inv = r.inventario
+        quien = r.cancelada_por
+        filas.append({
+            'id': r.id,
+            'codigo': inv.codigo if inv else None,
+            'equipo': ((inv.equipo.modelo if inv and inv.equipo else None)
+                       or (r.equipo.modelo if r.equipo_id else None)),
+            'precio': str(r.precio),
+            'cancelada_en': r.cancelada_en,
+            'cancelada_por': (quien.get_full_name() or quien.get_username()) if quien else None,
+            'motivo': r.cancelada_motivo or '',
+        })
+    return filas
+
+
+def _garantias_de(venta):
+    """Las garantías de esta venta, para enseñarlas donde se preguntan.
+
+    Existían y se emitían solas, pero no salían en ninguna respuesta: ni el
+    panel ni el cliente podían ver si la máquina que compró sigue amparada. La
+    pregunta llega con la máquina en la mano y hasta hoy se contestaba de
+    memoria.
+    """
+    from django.utils import timezone
+    hoy = timezone.localdate()
+    return [{
+        'id': g.id,
+        'descripcion': g.descripcion,
+        'vence': g.vence,
+        'meses': g.meses,
+        'vigente': g.vigente,
+        'anulada': g.anulada_en is not None,
+        'anulada_motivo': g.anulada_motivo,
+        # Negativo = venció hace tantos días. El signo es el dato.
+        'dias_restantes': (g.vence - hoy).days,
+    } for g in venta.garantias.all().order_by('-vence')]
+
+
 @api_view(['GET'])
 @permission_classes([permissions.IsAuthenticated])
 def ventas_mias(request):
     """Compras del cliente en sesión (ligadas por la liga de vinculación)."""
     qs = (Venta.objects.filter(cliente_usuario=request.user)
           .select_related('inventario', 'inventario__equipo', 'equipo', 'cotizacion')
-          .prefetch_related('maquinas__inventario__equipo', 'maquinas__equipo')
+          .prefetch_related('maquinas__inventario__equipo', 'maquinas__equipo', 'garantias')
           .order_by('-fecha')[:100])
     data = []
     for v in qs:
@@ -487,6 +591,8 @@ def ventas_mias(request):
             'estado': v.estado, 'metodo_pago': v.metodo_pago, 'concepto': concepto,
             # Si compró varias máquinas, que las vea todas con su número de serie.
             'maquinas': _maquinas_de(v),
+            # Su garantía, sin tener que llamar a preguntar.
+            'garantias': _garantias_de(v),
         })
     return Response({'compras': data})
 
@@ -506,6 +612,11 @@ def _serialize_pedido(v):
                    if v.cliente_usuario_id else None),
         'estado': v.estado,
         'sobre_pedido': v.sobre_pedido,
+        # A quién se le reclama si la máquina llega mal. Es el dato que se busca
+        # cuando ya pasó, y hasta ahora no se guardaba en ningún lado.
+        'garantia_proveedor': ({'meses': v.garantia_proveedor_meses,
+                                'nota': v.garantia_proveedor_nota}
+                               if v.garantia_proveedor_meses else None),
         'total': str(v.total),
         'pagado': str(v.pagado()),
         'saldo': str(v.saldo_pendiente()),
@@ -783,7 +894,7 @@ def entregar_venta(request, pk: int):
                     seccion='mis-compras', usuario=v.cliente_usuario, data={'venta_id': v.id},
                 )
         except Exception:
-            pass
+            tragado()
     return Response({'detalle': 'Entregado', 'pedido': _serialize_pedido(v)})
 
 
@@ -825,7 +936,7 @@ def actualizar_pedido_fase(request, pk: int):
                 usuario=v.cliente_usuario, data={'venta_id': v.id, 'fase': fase},
             )
     except Exception:
-        pass
+        tragado()
     return Response({'detalle': 'Seguimiento actualizado', 'pedido': _serialize_pedido(v)})
 
 
@@ -893,6 +1004,13 @@ def crear_pedido(request):
         dias = equipo.dias_entrega_pedido or ConfiguracionSitio.get_solo().dias_entrega_pedido or 0
         fee = (timezone.localdate() + _dt.timedelta(days=dias)) if dias else None
 
+    # Meses de garantía del proveedor: opcional, y con tope para que un dedazo
+    # ("120" por "12") no invente diez años de respaldo.
+    try:
+        _meses_proveedor = max(0, min(int(datos.get('garantia_proveedor_meses') or 0), 120))
+    except (TypeError, ValueError):
+        _meses_proveedor = 0
+
     v = Venta(
         usuario=request.user if request.user.is_authenticated else None,
         # Cuenta del cliente (opcional): si se liga, el cliente ve su pedido y su
@@ -910,6 +1028,13 @@ def crear_pedido(request):
         metodo_pago=metodo,
         anticipo_nota=anticipo_nota,
         fecha_estimada_entrega=fee,
+        # El respaldo del PROVEEDOR: por si la máquina que nos surtió sale
+        # defectuosa y hay que reclamarle a él. No es la garantía del cliente
+        # —esa la emite REMALI sola al vender, en `clientes.Garantia`—, y por
+        # eso se captura aparte: son dos relaciones distintas con dos plazos
+        # distintos. Los campos existían desde hacía tiempo y nadie los llenaba.
+        garantia_proveedor_meses=_meses_proveedor,
+        garantia_proveedor_nota=(datos.get('garantia_proveedor_nota') or '').strip()[:200],
         cotizacion=cot,
     )
     try:
@@ -925,7 +1050,7 @@ def crear_pedido(request):
             try:
                 cot.cupon.marcar_usado()
             except Exception:
-                pass
+                tragado()
     except ValueError as e:
         return Response({'detalle': str(e)}, status=400)
     try:
@@ -936,7 +1061,7 @@ def crear_pedido(request):
             seccion='pedidos', data={'venta_id': v.id, 'equipo_id': equipo.id},
         )
     except Exception:
-        pass
+        tragado()
     return Response({'detalle': 'Pedido registrado', 'pedido': _serialize_pedido(v)}, status=201)
 
 
@@ -987,7 +1112,7 @@ def quitar_maquina_venta(request, pk: int, linea_id: int):
             seccion='ventas', ref=f'quita-{v.id}-{renglon.id}', data={'venta_id': v.id},
         )
     except Exception:
-        pass
+        tragado()
 
     return Response({
         'detalle': 'Máquina retirada de la venta',
@@ -1061,9 +1186,9 @@ def cancelar_venta(request, pk: int):
                     data={'venta_id': v.id, 'accion_cliente': 'cancelacion', 'motivo': motivo or ''},
                 )
             except Exception:
-                pass
+                tragado()
     except Exception:
-        pass
+        tragado()
 
     return Response({'detalle': 'Venta cancelada', 'venta': {'id': v.id, 'estado': v.estado}})
 

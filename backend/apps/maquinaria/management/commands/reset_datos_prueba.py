@@ -35,6 +35,7 @@ class Command(BaseCommand):
     def handle(self, *args, **opts):
         # Import diferido: los modelos se resuelven al ejecutar, no al cargar.
         from cotizaciones.models import Cotizacion, CotizacionItem, CotizacionFoto
+        from cotizaciones.models_borrador import BorradorCliente, BorradorItem, PaqueteAutorizacion
         from ventas.models import Venta, Caja, SesionCaja, MovimientoCaja
         from renta.models import Renta, EvidenciaRenta
         from facturacion.models import SolicitudFactura
@@ -43,7 +44,9 @@ class Command(BaseCommand):
         )
         from refacciones.models import Refaccion
         from clientes.models import Cliente, Contacto, Obra
-        from maquinaria.models import Equipo, Categoria, Marca, Tipo, ImagenProducto, Notificacion, ObraCliente
+        from maquinaria.models import (
+            Equipo, Categoria, Marca, Tipo, ImagenProducto, Notificacion, ObraCliente, Cupon,
+        )
 
         # ══════════════════════════════════════════════════════════════════
         # Orden TOPOLÓGICO de borrado seguro (evita ProtectedError):
@@ -61,6 +64,14 @@ class Command(BaseCommand):
             ('Evidencias de renta', EvidenciaRenta),
             ('Notificaciones', Notificacion),
             ('Fotos de cotización', CotizacionFoto),
+            # Los borradores del cliente y los paquetes que le manda a su jefe
+            # van ANTES que las cuentas. Su dueño es "una cuenta O un espacio de
+            # invitado, nunca los dos" y eso lo impone un CheckConstraint: si la
+            # cuenta se borra primero, la fila se queda sin ninguno de los dos y
+            # MySQL tumba el borrado entero con `paquete_un_solo_dueno`.
+            ('Partidas de borrador', BorradorItem),
+            ('Borradores del cliente', BorradorCliente),
+            ('Paquetes de autorización', PaqueteAutorizacion),
             ('Partidas de cotización', CotizacionItem),
             ('Cotizaciones', Cotizacion),
             ('Rentas', Renta),
@@ -76,6 +87,9 @@ class Command(BaseCommand):
             ('Unidades de inventario', Inventario),
             ('Refacciones', Refaccion),
             ('Imágenes de producto', ImagenProducto),
+            # Los cupones son dato de negocio, no configuración: un código de
+            # descuento vivo cambia los totales de la siguiente prueba.
+            ('Cupones', Cupon),
             # ── Entidades padre / catálogos (van al final) ──
             ('Equipos (catálogo)', Equipo),
         ]

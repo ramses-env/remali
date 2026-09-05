@@ -128,14 +128,19 @@ class GoogleLoginThrottle(AnonRateThrottle):
 
 
 class CuponThrottle(AnonRateThrottle):
-    """Freno a validar/aplicar cupón, por cuenta: sin tope, una sesión podría
-    probar códigos de cupón a fuerza bruta."""
+    """Freno a validar/aplicar cupón: por cuenta si hay sesión, por IP si no.
+
+    El invitado SÍ llega aquí: `apply_coupon` es AllowAny porque la tienda deja
+    armar una cotización sin cuenta, y el campo de cupón del armador es público.
+    Devolver None para el anónimo —como hacía antes, confiando en un permiso que
+    no existe— dejaba el endpoint sin tope para justamente quien no tiene nada
+    que perder probando códigos en serie."""
     scope = 'cupon'
 
     def get_cache_key(self, request, view):
         if request.user and request.user.is_authenticated:
             return self.cache_format % {'scope': self.scope, 'ident': request.user.pk}
-        return None   # sin sesión no llega aquí; lo frena el permiso
+        return super().get_cache_key(request, view)   # por IP
 
 
 class TokenPublicoThrottle(AnonRateThrottle):

@@ -9,4 +9,4 @@
  * La barra de vida usa la keyframe `toast-avance` (index.css); su duración se
  * toma de esta constante para que vaciarse y desaparecer estén siempre en sync.
  */
-export const DURACION_ALERTA_MS = 5000
+export const DURACION_ALERTA_MS = 4000

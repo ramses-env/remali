@@ -59,7 +59,7 @@ export default function DialogoHost() {
             onChange={e => setTexto(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') { actual.resolver(texto); cerrar() } }}
             placeholder={actual.placeholder}
-            className="mt-4 w-full h-[44px] px-3.5 rounded-xl border border-edge bg-app text-sm text-ink placeholder-mute focus:outline-none focus:border-gold/60 transition-colors" />
+            className="campo mt-4" />
         )}
 
         {actual.tipo === 'elegir' && (

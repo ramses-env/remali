@@ -1,3 +1,5 @@
+import hashlib
+import logging
 from datetime import timedelta
 from secrets import token_urlsafe
 
@@ -8,7 +10,7 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from django.core.validators import validate_email
 from django.db import transaction
 from django.db.models.deletion import ProtectedError
-from django.db.models import Q
+from django.db.models import Case, IntegerField, Q, Value, When
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -39,8 +41,9 @@ from .models import (
     Favorito,
 )
 from .permissions import (
-    IsAdminGroupOrStaff, EsOperador, PuedeConfigurarNegocio, PuedeEditarCatalogo,
-    PuedeEmitirCupones, PuedeVerDinero, nivel_de, puede_de,
+    IsAdminGroupOrStaff, EsOperador, NoEsDelNegocio, PuedeConfigurarNegocio,
+    PuedeEditarCatalogo, PuedeEmitirCupones, PuedeTenerCodigoPropio,
+    PuedeVerDinero, nivel_de, puede_de,
 )
 from .serializers import (
     EquipoSerializer, CategoriaSerializer, MarcaSerializer, TipoSerializer,
@@ -49,6 +52,10 @@ from .serializers import (
     ConfiguracionSitioSerializer, CorreoAvisoSerializer, ObraClienteSerializer,
     FavoritoSerializer,
 )
+from server.rastro import tragado
+from .cupones import cupon_personal, cupon_valido_para
+
+logger = logging.getLogger(__name__)
 
 
 class ProtectedDestroyMixin:
@@ -158,6 +165,47 @@ class EquipoListCreate(generics.ListCreateAPIView):
         return qs
 
 
+class EquipoRelacionados(generics.ListAPIView):
+    """Los equipos que se parecen a este: misma categoría primero, y si no
+    alcanzan, se rellena con el resto del catálogo.
+
+    Existe para no mandarle el catálogo COMPLETO al navegador cada vez que
+    alguien abre una ficha. La tienda pedía `/equipos/` entero —sin paginar, con
+    sus imágenes y su veintena de campos calculados por equipo— para quedarse con
+    cuatro tarjetas y tirar el resto. Aquí el recorte lo hace la base de datos,
+    que es quien puede hacerlo con un LIMIT.
+    """
+    serializer_class = EquipoSerializer
+    permission_classes = [permissions.AllowAny]
+    pagination_class = None
+
+    LIMITE_MAX = 12
+
+    def get_queryset(self):
+        equipo = get_object_or_404(Equipo, pk=self.kwargs['pk'])
+        try:
+            limite = int(self.request.query_params.get('limit') or 4)
+        except ValueError:
+            limite = 4
+        limite = max(1, min(limite, self.LIMITE_MAX))
+
+        base = (Equipo.objects
+                .select_related('categoria', 'tipo', 'marca')
+                .prefetch_related('unidades', 'imagenes')
+                .exclude(pk=equipo.pk))
+
+        # Misma categoría primero. `Case/When` en vez de dos consultas: así el
+        # LIMIT lo aplica el motor sobre el conjunto ya ordenado y no hay que
+        # traer el sobrante para descartarlo aquí.
+        mismos = Case(
+            When(categoria_id=equipo.categoria_id, then=Value(0)),
+            default=Value(1),
+            output_field=IntegerField(),
+        ) if equipo.categoria_id else Value(1, output_field=IntegerField())
+
+        return base.annotate(_afinidad=mismos).order_by('_afinidad', '-fecha_creacion', 'id')[:limite]
+
+
 class EquipoRetrieveUpdateDestroy(ProtectedDestroyMixin, generics.RetrieveUpdateDestroyAPIView):
     en_uso_label_plural = 'unidades o movimientos'
     queryset = (Equipo.objects
@@ -210,7 +258,7 @@ def upload_product_images(request, pk: int):
         try:
             created.append(request.build_absolute_uri(imagen.imagen.url))
         except Exception:
-            pass
+            tragado()
     return Response({'equipo': equipo.id, 'imagenes': created})
 
 
@@ -299,6 +347,14 @@ def configuracion_publica(request):
         'ticket_leyenda': cfg.ticket_leyenda,
         'descuento_contado_pct': cfg.descuento_contado_pct,
         'anticipo_minimo_pct': cfg.anticipo_minimo_pct,
+        'renta_liquidacion_minima_pct': cfg.renta_liquidacion_minima_pct,
+        # El listón de arriba de la tienda, YA RESUELTO: llega el objeto o llega
+        # None. La decisión de si está vivo se toma aquí y no en el navegador
+        # porque depende de una fecha, y la del visitante puede estar en otro
+        # huso, mal puesta, o ser la de ayer. Un aviso vencido que sigue
+        # saliendo porque el reloj de un teléfono va atrasado es justo el tipo
+        # de error que nadie reporta y todos ven.
+        'aviso': _aviso_publico(cfg),
         # El código de autorización ahora es PERSONAL por operador (cada quien el
         # suyo). Las acciones sensibles SIEMPRE lo piden; el panel usa este flag
         # para pedirlo, y `tiene_codigo_seguridad` (de /me) para saber si el
@@ -319,7 +375,10 @@ def validar_codigo_ajuste(request):
 
 
 @api_view(['POST'])
-@permission_classes([IsAdminGroupOrStaff])   # solo el nivel de autoridad tiene NIP
+# El GESTOR no tiene NIP de fábrica: para él la autorización es el del DUEÑO, y
+# si pudiera ponerse el suyo se autorizaría solo. Se pregunta por CAPACIDAD y no
+# por nombre de puesto, así que el reparto de la pantalla de Permisos manda.
+@permission_classes([PuedeTenerCodigoPropio])
 def definir_codigo_seguridad(request):
     """Fija o cambia el código de seguridad del PROPIO usuario. Pide su
     contraseña de la cuenta para confirmar identidad (no basta la sesión).
@@ -327,17 +386,6 @@ def definir_codigo_seguridad(request):
     Solo Administrador/Gerente: el PIN autoriza acciones sensibles y esas las
     aprueba un superior, no un operador. Un cajero/asesor/técnico no tiene PIN."""
     from .seguridad import formato_valido, definir_codigo
-    from .permissions import puede_de
-    # El GESTOR no tiene NIP. Para él la autorización es el NIP del DUEÑO; si
-    # pudiera ponerse el suyo se autorizaría solo y el mecanismo quedaría vacío.
-    # Se pregunta por CAPACIDAD y no por nombre de rol, para que el día que exista
-    # la pantalla de permisos configurables esto se respete solo.
-    if not puede_de(request.user).get('tener_codigo_propio'):
-        return Response({
-            'detalle': 'Tu rol no usa código propio: las acciones que lo requieren '
-                       'las autoriza el dueño con el suyo.',
-            'codigo': 'gestor_sin_codigo',
-        }, status=403)
     d = request.data or {}
     password = d.get('password') or ''
     codigo = str(d.get('codigo') or '').strip()
@@ -355,6 +403,29 @@ class ConfiguracionDetail(generics.RetrieveUpdateAPIView):
 
     def get_object(self):
         return ConfiguracionSitio.get_solo()
+
+
+def _aviso_publico(cfg):
+    """El aviso de la tienda si está vivo, o None.
+
+    Vivo = encendido, con texto, y sin fecha o con fecha que no ha pasado.
+    `aviso_hasta` es INCLUSIVO: una promoción "hasta el 30" se ve el 30 entero.
+    """
+    if not cfg.aviso_activo or not (cfg.aviso_texto or '').strip():
+        return None
+    if cfg.aviso_hasta and cfg.aviso_hasta < timezone.localdate():
+        return None
+    liga = (cfg.aviso_liga or '').strip()
+    return {
+        'texto': cfg.aviso_texto.strip(),
+        'liga': liga,
+        'liga_texto': (cfg.aviso_liga_texto or '').strip() or ('Ver más' if liga else ''),
+        # Huella del CONTENIDO. El navegador la usa para recordar cuál aviso
+        # cerró el visitante: si mañana cambia el texto, la huella cambia y la
+        # barra vuelve a salir. Sin esto, quien cerró el aviso de agosto no
+        # vería nunca el de diciembre.
+        'id': hashlib.sha1(f'{cfg.aviso_texto}|{liga}'.encode()).hexdigest()[:12],
+    }
 
 
 @api_view(['GET'])
@@ -424,29 +495,13 @@ class CuponRetrieveUpdateDestroy(generics.RetrieveUpdateDestroyAPIView):
 @permission_classes([permissions.AllowAny])
 @throttle_classes([CuponThrottle])
 def apply_coupon(request):
-    """Valida un cupón (código textual) y devuelve el descuento a aplicar.
-
-    Seguridad:
-      - Si no existe o está inactivo / usado → 400 genérico (no revela cuál).
-      - Si es "personal" (bienvenida), solo sirve para SU dueño.
-      - Nunca marcar como usado aquí; el consumo real pasa cuando la cotización
-        / pedido acepta el cupón en su transacción correspondiente.
-    """
+    """Valida un cupón y devuelve su descuento, para enseñarlo antes de enviar."""
     from decimal import Decimal as _Dec
-    codigo = ((request.data or {}).get('code') or (request.data or {}).get('codigo') or '').strip()
-    if not codigo:
-        return Response({'detail': 'Código requerido.'}, status=400)
-    try:
-        cupon = Cupon.objects.get(codigo=codigo, activo=True)
-    except Cupon.DoesNotExist:
-        return Response({'detail': 'Cupón inválido.', 'discount': 0}, status=400)
-    if cupon.personal and cupon.usado:
-        return Response({'detail': 'Cupón inválido.', 'discount': 0}, status=400)
-    if cupon.personal and cupon.usuario_id is not None:
-        if not getattr(request.user, 'is_authenticated', False):
-            return Response({'detail': 'Inicia sesión para usar este cupón.'}, status=401)
-        if cupon.usuario_id != request.user.id:
-            return Response({'detail': 'Cupón inválido.', 'discount': 0}, status=400)
+    codigo = ((request.data or {}).get('code') or (request.data or {}).get('codigo') or '')
+    cupon, motivo = cupon_valido_para(codigo, request.user)
+    if cupon is None:
+        estado = 401 if 'Inicia sesión' in (motivo or '') else 400
+        return Response({'detail': motivo, 'discount': 0}, status=estado)
     return Response({
         'discount': float(cupon.descuento or _Dec('0')),
         'codigo': cupon.codigo,
@@ -506,6 +561,9 @@ def refrescar_token(request):
     return resp
 
 @api_view(['POST'])
+# Igual que registro: entrar con una sesión vieja colgando no puede depender de
+# que ese token siga sirviendo. Es justo cuando NO sirve que la gente viene aquí.
+@authentication_classes([])
 @permission_classes([permissions.AllowAny])
 @throttle_classes([LoginThrottle])
 def login(request):
@@ -615,6 +673,11 @@ def me(request):
         # ¿Este operador ya tiene su código de seguridad? El panel lo usa para
         # nudge ("define tu código") y para saber si puede autorizar acciones.
         'tiene_codigo_seguridad': bool(perfil.codigo_seguridad),
+        # El 5% de bienvenida viaja AQUÍ y no solo en /auth/perfil/ para que el
+        # armador de la cotización pueda ofrecerlo de un toque sin pedir otra
+        # vuelta a la red. Un cupón que el cliente tiene que ir a buscar a otra
+        # pantalla y teclear de memoria es un cupón que no se usa.
+        'cupon': cupon_personal(u),
         'onboarding': {
             'completado': perfil.onboarding_completado,
             'pasos_completados': perfil.onboarding_pasos_completados or [],
@@ -636,50 +699,50 @@ class PerfilDetail(generics.RetrieveUpdateAPIView):
 
 # La liga del correo no solo verifica: deja la sesión abierta. Eso la vuelve una
 # llave de la cuenta, y una llave que no caduca acaba olvidada en un buzón viejo.
-VERIFICACION_VIGENCIA = timedelta(hours=48)
+def _nuevo_codigo_verificacion(perfil):
+    """Emite un código nuevo y devuelve el claro para el correo.
 
-
-def _nuevo_token_verificacion(perfil):
-    """Emite (y sella con la hora) un token de verificación nuevo.
-
-    Vive aquí y no copiado en registro/reenviar porque el sello de tiempo es lo
-    que hace caducar la liga: un sitio que lo olvide emite una llave eterna.
+    Vive aquí y no copiado en registro/reenviar porque emitir es también
+    invalidar el anterior: un sitio que lo olvide deja dos códigos vivos.
     """
-    perfil.email_token = token_urlsafe(24)
-    perfil.email_token_creado = timezone.now()
-    return perfil.email_token
+    from .otp import emitir
+    return emitir(perfil)
 
 
-def _enviar_correo_verificacion(user, token):
-    """Envía el correo con la liga para confirmar la cuenta.
+def _enviar_codigo_verificacion(user, codigo):
+    """Manda el código de 6 dígitos para confirmar la cuenta.
 
-    Se dispara al registrarse y al pedir un reenvío. La liga apunta al FRONTEND
-    (no al backend): esa página confirma con un POST y entra sola con la sesión
-    que devuelve el backend. Va al front por dos razones — la pantalla de texto
-    pelón del backend no era presentable, y un GET lo abren solos los escáneres
-    de correo (SafeLinks, antivirus), que quemaban el token antes que el usuario.
-    Si el usuario no tiene correo o token, no hace nada.
+    Ya no va una liga. Una liga la abren solos los escáneres de correo
+    (SafeLinks, antivirus corporativos) y quemaban el token antes que el
+    usuario — este archivo ya había tenido que dejar de usar GET por eso. Un
+    código no se puede "hacer clic" por accidente.
+
+    El código va también en el ASUNTO: muchos clientes enseñan el asunto en la
+    notificación, así que se puede leer sin abrir nada.
+
+    Va en TEXTO PLANO. Se probó en HTML y caía fuera de Recibidos mientras el
+    texto llegaba a la bandeja principal: sin SPF ni DKIM en el dominio, Gmail
+    perdona uno y castiga el otro. El texto vive en `plantillas_correo`.
     """
-    if not user or not (getattr(user, 'email', None) or '').strip() or not token:
+    if not user or not (getattr(user, 'email', None) or '').strip() or not codigo:
         return
-    from django.conf import settings
     from .correo import enviar_async
+    from .otp import VIGENCIA
+    from .plantillas_correo import correo_codigo
 
-    url = f'{settings.FRONTEND_URL.rstrip("/")}/verificar/{token}'
-    horas = int(VERIFICACION_VIGENCIA.total_seconds() // 3600)
+    minutos = int(VIGENCIA.total_seconds() // 60)
     nombre = user.get_full_name() or user.username
-    cuerpo = (
-        f'Hola {nombre}:\n\n'
-        f'Gracias por crear tu cuenta en REMALI. Para activarla, confirma que este '
-        f'correo es tuyo abriendo la siguiente liga:\n\n{url}\n\n'
-        f'La liga te deja dentro de tu cuenta y vence en {horas} horas. Si vence, '
-        f'puedes pedir una nueva desde la pantalla de inicio de sesión.\n\n'
-        f'Si no creaste esta cuenta, puedes ignorar este mensaje.\n\n— REMALI'
-    )
-    enviar_async('Verifica tu correo · REMALI', cuerpo, [user.email])
+    asunto, texto = correo_codigo(nombre, codigo, minutos)
+    enviar_async(asunto, texto, [user.email])
 
 
 @api_view(['POST'])
+# Sin autenticación, por la MISMA razón que solicitar_restablecer: quien viene a
+# crear una cuenta suele traer un access viejo en el navegador (se registró antes,
+# probó algo, se le venció la sesión). DRF valida ese token ANTES de mirar el
+# AllowAny, contesta 401, y esta vista nunca corre — la cuenta no se crea y el
+# usuario ve un botón que "no hace nada".
+@authentication_classes([])
 @permission_classes([permissions.AllowAny])
 @throttle_classes([RegistroThrottle])
 def registro(request):
@@ -734,7 +797,7 @@ def registro(request):
         user.groups.add(grupo)
         perfil, _ = PerfilUsuario.objects.get_or_create(usuario=user)
         perfil.telefono = (d.get('telefono') or '').strip()
-        token = _nuevo_token_verificacion(perfil)
+        codigo = _nuevo_codigo_verificacion(perfil)
         perfil.save()
         espejar_obra_predeterminada(user)
         # La cuenta entra al padrón como CONTACTO SIN CLIENTE, y REMALI recibe
@@ -742,11 +805,13 @@ def registro(request):
         from clientes.resolucion import registrar_cuenta_nueva
         registrar_cuenta_nueva(user)
 
-    _enviar_correo_verificacion(user, token)
-    # NO devolvemos el email_token: es el token de verificación de correo. Si
-    # viaja en la respuesta, cualquiera podría "verificar" el correo sin tener
-    # acceso al buzón (anula la verificación). Sólo debe llegar por correo.
-    return Response({'ok': True, 'username': user.username}, status=201)
+    _enviar_codigo_verificacion(user, codigo)
+    # NO devolvemos el código: si viaja en la respuesta, cualquiera podría
+    # "verificar" el correo sin tener acceso al buzón, que es exactamente lo que
+    # la verificación existe para probar. Solo llega por correo.
+    # El correo SÍ vuelve: la pantalla del código lo necesita para pedir la
+    # comprobación (el código solo no identifica a nadie) y para enseñarlo.
+    return Response({'ok': True, 'username': user.username, 'email': user.email}, status=201)
 
 
 @api_view(['POST'])
@@ -848,7 +913,7 @@ def cambiar_password(request):
         from rest_framework_simplejwt.token_blacklist.models import OutstandingToken
         OutstandingToken.objects.filter(user=user).delete()
     except Exception:
-        pass
+        tragado()
     return Response({'ok': True})
 
 
@@ -868,15 +933,15 @@ def logout(request):
             try:
                 RefreshToken(refresh).blacklist()
             except Exception:
-                pass
+                tragado()
         ots = list(OutstandingToken.objects.filter(user=user, blacklistedtoken__isnull=True))
         for ot in ots:
             try:
                 BlacklistedToken.objects.get_or_create(token=ot)
             except Exception:
-                pass
+                tragado()
     except Exception:
-        pass
+        tragado()
     return _clear_refresh_cookie(Response({'ok': True}))
 
 @api_view(['POST'])
@@ -993,10 +1058,66 @@ def restablecer_password(request):
     # dejaría fuera después de haber hecho todo bien, sin salida visible.
     perfil, _ = PerfilUsuario.objects.get_or_create(usuario=user)
     if not perfil.email_verificado:
+        from .otp import CAMPOS
         perfil.email_verificado = True
         perfil.email_verificado_en = timezone.now()
-        perfil.email_token = ''
-        perfil.save(update_fields=['email_verificado', 'email_verificado_en', 'email_token'])
+        # Un código de verificación vivo ya no hace falta y no debe quedarse
+        # esperando: el buzón acaba de probarse por otra vía.
+        perfil.email_otp = ''
+        perfil.email_otp_creado = None
+        perfil.email_otp_intentos = 0
+        perfil.email_otp_bloqueado_hasta = None
+        perfil.save(update_fields=CAMPOS + ['email_verificado', 'email_verificado_en'])
+    # La contraseña cambió: cierra TODAS las sesiones vivas de la cuenta (otros
+    # dispositivos/pestañas) invalidando sus refresh tokens. La sesión del
+    # navegador actual ya la cierra el frontend al terminar el restablecimiento.
+    _cerrar_sesiones_de(user)
+    return Response({'ok': True})
+
+
+@api_view(['POST'])
+@authentication_classes([])       # ver nota en solicitar_restablecer
+@permission_classes([permissions.AllowAny])
+@throttle_classes([RestablecerUsoThrottle])
+def restablecer_password(request):
+    from django.contrib.auth.password_validation import validate_password
+
+    User = get_user_model()
+    uidb64 = request.data.get('uid') or ''
+    token = request.data.get('token') or ''
+    password = request.data.get('password') or ''
+    if len(password) < 8:
+        return Response({'detail': 'La contraseña debe tener al menos 8 caracteres.'}, status=400)
+    try:
+        uid = force_str(urlsafe_base64_decode(uidb64))
+        user = User.objects.get(pk=uid)
+    except Exception:
+        return Response({'detail': 'El enlace no es válido o ya venció.'}, status=400)
+    if not default_token_generator.check_token(user, token):
+        return Response({'detail': 'El enlace no es válido o ya venció.'}, status=400)
+    # Las MISMAS reglas que cambiar la contraseña desde el panel: sin esto, por
+    # correo se podía dejar una clave ("12345678") que el panel sí rechaza.
+    try:
+        validate_password(password, user=user)
+    except DjangoValidationError as e:
+        return Response({'detail': '; '.join(e.messages) if e.messages else 'Contraseña no válida.'}, status=400)
+    user.set_password(password)
+    user.save(update_fields=['password'])
+    # Restablecer la contraseña PRUEBA que el buzón es suyo: el enlace solo llegó
+    # ahí. Así que el correo queda confirmado — si no, el candado del login lo
+    # dejaría fuera después de haber hecho todo bien, sin salida visible.
+    perfil, _ = PerfilUsuario.objects.get_or_create(usuario=user)
+    if not perfil.email_verificado:
+        from .otp import CAMPOS
+        perfil.email_verificado = True
+        perfil.email_verificado_en = timezone.now()
+        # Un código de verificación vivo ya no hace falta y no debe quedarse
+        # esperando: el buzón acaba de probarse por otra vía.
+        perfil.email_otp = ''
+        perfil.email_otp_creado = None
+        perfil.email_otp_intentos = 0
+        perfil.email_otp_bloqueado_hasta = None
+        perfil.save(update_fields=CAMPOS + ['email_verificado', 'email_verificado_en'])
     # La contraseña cambió: cierra TODAS las sesiones vivas de la cuenta (otros
     # dispositivos/pestañas) invalidando sus refresh tokens. La sesión del
     # navegador actual ya la cierra el frontend al terminar el restablecimiento.
@@ -1027,41 +1148,44 @@ def verificar_correo_usuario(request, token: str):
 @permission_classes([permissions.AllowAny])   # vencido en el navegador tumbaría
 @throttle_classes([RestablecerUsoThrottle])   # esta vista pública con un 401
 def verificar_correo(request):
-    """Confirma el correo y, de una vez, deja la sesión abierta.
+    """Confirma el correo con el CÓDIGO y, de una vez, deja la sesión abierta.
 
-    La liga del correo ya demuestra dos cosas: que el buzón es suyo y que quien la
-    abre tiene acceso a él. Pedirle además la contraseña justo después no protege
-    nada y sí pierde a gente en el camino, así que aquí se emite el mismo par de
-    JWT que el login (access en el body, refresh en cookie httpOnly).
+    Body: `{correo, codigo}`. Los dos hacen falta: el código son seis dígitos y
+    no identifica a nadie por sí solo —un mismo código valdría para cualquier
+    cuenta y se podría barrer a ciegas—. Con el correo, el freno de intentos es
+    POR CUENTA, que es lo que lo vuelve inútil de adivinar.
 
-    Por eso mismo el token es de un solo uso y caduca: mientras vive, es la llave
-    de la cuenta.
+    Abrir la sesión aquí es deliberado, igual que cuando esto era una liga:
+    tener el código prueba que el buzón es suyo, y pedirle además la contraseña
+    justo después no protege nada y sí pierde gente en el camino.
     """
-    token = (request.data.get('token') or '').strip()
-    # Un token vacío haría match con TODOS los perfiles sin verificar (default='').
-    if not token:
-        return Response({'detail': 'Liga inválida.', 'codigo': 'invalido'}, status=404)
-    perfil = PerfilUsuario.objects.filter(email_token=token).select_related('usuario').first()
-    if not perfil:
-        # Ya usado, inexistente o inventado: la misma respuesta para los tres. El
-        # front ofrece pedir una liga nueva, que resuelve el caso real.
-        return Response({'detail': 'Esta liga ya no sirve.', 'codigo': 'invalido'}, status=404)
+    from .otp import comprobar
 
-    # Sin sello de tiempo (tokens de antes de que la liga abriera sesión) se trata
-    # como vencido: no vamos a dejar entrar con una llave de origen desconocido.
-    creado = perfil.email_token_creado
-    if not creado or timezone.now() - creado > VERIFICACION_VIGENCIA:
-        return Response({'detail': 'Esta liga venció.', 'codigo': 'vencido'}, status=400)
+    correo = (request.data.get('correo') or request.data.get('email') or '').strip().lower()
+    codigo = (request.data.get('codigo') or '').strip()
+    if not correo or not codigo:
+        return Response({'detail': 'Falta el correo o el código.', 'codigo': 'incompleto'}, status=400)
 
-    user = perfil.usuario
+    User = get_user_model()
+    user = User.objects.filter(email__iexact=correo).first()
+    if not user:
+        # La MISMA respuesta que un código incorrecto, a propósito: distinguirlas
+        # convertiría esto en un detector de qué correos están registrados.
+        return Response({'detail': 'Código incorrecto.', 'codigo': 'incorrecto'}, status=400)
+
+    perfil, _ = PerfilUsuario.objects.get_or_create(usuario=user)
+
+    if perfil.email_verificado:
+        # Ya estaba: no es un error, y repetirlo no debe gastar intentos.
+        return Response({'detail': 'Este correo ya estaba confirmado.', 'codigo': 'ya_verificado'}, status=400)
+
+    ok, detalle, estado, cod = comprobar(perfil, codigo)
+    if not ok:
+        return Response({'detail': detalle, 'codigo': cod}, status=estado)
+
     perfil.email_verificado = True
     perfil.email_verificado_en = timezone.now()
-    perfil.email_token = ''  # de un solo uso: se invalida al verificar
-    perfil.email_token_creado = None
-    # BUG previo: no se guardaba, así que el correo nunca quedaba verificado.
-    perfil.save(update_fields=[
-        'email_verificado', 'email_verificado_en', 'email_token', 'email_token_creado',
-    ])
+    perfil.save(update_fields=['email_verificado', 'email_verificado_en'])
 
     # El correo queda confirmado igual (es cierto y le sirve), pero la sesión no
     # se abre: una cuenta desactivada no entra por ninguna puerta.
@@ -1081,13 +1205,12 @@ def verificar_correo(request):
 @permission_classes([permissions.IsAuthenticated])
 def reenviar_verificacion(request):
     perfil, _ = PerfilUsuario.objects.get_or_create(usuario=request.user)
-    _nuevo_token_verificacion(perfil)
+    from .otp import CAMPOS
+    codigo = _nuevo_codigo_verificacion(perfil)
     perfil.email_verificado = False
     perfil.email_verificado_en = None
-    perfil.save(update_fields=[
-        'email_token', 'email_token_creado', 'email_verificado', 'email_verificado_en',
-    ])
-    _enviar_correo_verificacion(request.user, perfil.email_token)
+    perfil.save(update_fields=CAMPOS + ['email_verificado', 'email_verificado_en'])
+    _enviar_codigo_verificacion(request.user, codigo)
     return Response({'ok': True})
 
 
@@ -1100,18 +1223,21 @@ def reenviar_verificacion_publica(request):
     user = User.objects.filter(email__iexact=email).first()
     if user:
         perfil, _ = PerfilUsuario.objects.get_or_create(usuario=user)
-        _nuevo_token_verificacion(perfil)
+        from .otp import CAMPOS
+        codigo = _nuevo_codigo_verificacion(perfil)
         perfil.email_verificado = False
         perfil.email_verificado_en = None
-        perfil.save(update_fields=[
-            'email_token', 'email_token_creado', 'email_verificado', 'email_verificado_en',
-        ])
-        _enviar_correo_verificacion(user, perfil.email_token)
+        perfil.save(update_fields=CAMPOS + ['email_verificado', 'email_verificado_en'])
+        _enviar_codigo_verificacion(user, codigo)
+    # Se contesta OK aunque el correo no exista: decir "esa cuenta no existe"
+    # convierte este endpoint en un detector de quién está registrado.
     return Response({'ok': True})
 
 
 class ObrasClienteList(generics.ListCreateAPIView):
-    permission_classes = [permissions.IsAuthenticated]
+    # Las obras guardadas son el taller personal de un CLIENTE (su dirección, su
+    # responsable, su teléfono), no una libreta del mostrador. Ver `NoEsDelNegocio`.
+    permission_classes = [permissions.IsAuthenticated, NoEsDelNegocio]
     serializer_class = ObraClienteSerializer
 
     def get_queryset(self):
@@ -1132,22 +1258,50 @@ class ObraClienteDetail(generics.RetrieveUpdateDestroyAPIView):
 @api_view(['GET'])
 @permission_classes([IsAdminGroupOrStaff])
 def clientes_lookup(request):
+    """Buscar una CUENTA de la tienda para vincularle una renta o cotización.
+
+    Dos cosas que estaban rotas y no se veían:
+
+    1. EL CONTRATO. Devolvía una lista pelona y las cuatro pantallas que la
+       consumen leen `data.clientes`. En un array eso es `undefined`, así que
+       `lista` salía vacía SIEMPRE y el panel contestaba "Aún no hay cuentas de
+       cliente registradas" con el sistema lleno de cuentas. Un bug que se
+       disfraza de estado vacío es de los peores: no hay error que buscar.
+
+    2. FALTABA EL `id`. El front manda `usuario_id: Number(sel[0])` y aquí solo
+       salían username, email y nombre. Aunque la lista hubiera cargado, la
+       vinculación habría fallado.
+
+    Y se busca también por TELÉFONO, que es como se pregunta en el mostrador
+    ("¿a qué número?"). Los dígitos se comparan pelados: nadie teclea el mismo
+    formato dos veces.
+    """
     User = get_user_model()
     q = (request.query_params.get('q') or '').strip()
-    qs = User.objects.filter(groups__name='Cliente')
+    qs = User.objects.filter(groups__name='Cliente').select_related('perfil')
     if q:
-        qs = qs.filter(
+        filtro = (
             Q(username__icontains=q) |
             Q(email__icontains=q) |
             Q(first_name__icontains=q) |
-            Q(last_name__icontains=q)
+            Q(last_name__icontains=q) |
+            Q(perfil__empresa__icontains=q)
         )
-    qs = qs.order_by('first_name', 'last_name', 'username')[:20]
-    return Response([{
+        digitos = ''.join(c for c in q if c.isdigit())
+        if digitos:
+            filtro |= Q(perfil__telefono__contains=digitos)
+        qs = qs.filter(filtro)
+    # `distinct` porque el filtro cruza `groups` y el perfil: sin él, una cuenta
+    # en dos grupos sale repetida en la lista de resultados.
+    qs = qs.distinct().order_by('first_name', 'last_name', 'username')[:20]
+    return Response({'clientes': [{
+        'id': u.id,
         'username': u.username,
         'email': u.email,
         'nombre': (u.get_full_name() or u.username).strip(),
-    } for u in qs])
+        'telefono': getattr(getattr(u, 'perfil', None), 'telefono', ''),
+        'empresa': getattr(getattr(u, 'perfil', None), 'empresa', ''),
+    } for u in qs]})
 
 
 @api_view(['GET'])
@@ -1176,6 +1330,9 @@ def _cubetas_de_meses(hoy, cuantas=6):
 MESES_CORTOS = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun',
                 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
 
+#: Cuántos días trae la serie diaria del Resumen (y contra cuántos se compara).
+DIAS_SERIE = 30
+
 
 def _ingresos_del_negocio():
     """Lo que de VERDAD entró, por día, de ventas y de rentas.
@@ -1199,6 +1356,121 @@ def _ingresos_del_negocio():
     pagos_venta = Venta.objects.exclude(estado='cancelada').values_list('pagos', flat=True)
     pagos_renta = Renta.objects.exclude(estado='cancelada').values_list('pagos', flat=True)
     return cobrado_por_dia(pagos_venta), cobrado_por_dia(pagos_renta)
+
+
+#: Cuántos modelos entran al ranking del Resumen. Seis: es lo que cabe sin
+#: scroll junto a la dona, y a partir del séptimo las barras son todas iguales.
+TOP_EQUIPOS = 6
+
+#: Cómo se llama el dinero que no viene de una máquina. La caja del mostrador
+#: vende refacciones sin unidad ni equipo: sin este renglón ese dinero
+#: desaparecía del ranking y los porcentajes no cuadraban con el total.
+SIN_MAQUINA = 'Refacciones y mostrador'
+
+
+def _ingresos_por_equipo(desde, hasta):
+    """Lo COBRADO en el tramo, agrupado por modelo de máquina.
+
+    Misma regla que el resto del Resumen: un ingreso es un pago recibido, en la
+    fecha en que se recibió (ver `server.cobranza`). Lo que cambia aquí es el
+    agrupador: en vez de por día, por la máquina que lo produjo.
+
+    Renta y venta se guardan por separado a propósito. Un modelo que produce
+    $80,000 rentándose no es el mismo negocio que uno que produce $80,000
+    vendiéndose una vez —el primero lo vuelve a hacer el mes que entra—, y esa
+    mezcla es la mitad de la respuesta a "¿qué me conviene comprar?".
+    """
+    from decimal import Decimal
+    from ventas.models import Venta
+    from renta.models import Renta
+    from server.cobranza import fecha_de_pago, monto_de_pago
+
+    acumulado = {}
+
+    def sumar(modelo, columna, monto):
+        fila = acumulado.setdefault(modelo, {'ventas': Decimal('0'), 'rentas': Decimal('0')})
+        fila[columna] += monto
+
+    def cobrado(pagos):
+        for pago in (pagos or []):
+            dia = fecha_de_pago(pago)
+            if dia is None or not (desde <= dia <= hasta):
+                continue
+            monto = monto_de_pago(pago)
+            if monto > 0:
+                yield monto
+
+    ventas = Venta.objects.exclude(estado='cancelada').select_related(
+        'inventario__equipo', 'equipo')
+    for v in ventas:
+        # Tres orígenes posibles, en orden: la unidad vendida, el equipo pedido
+        # (apartado sin unidad todavía) o nada —eso es mostrador—.
+        equipo = (v.inventario.equipo if v.inventario_id and v.inventario.equipo_id else None) or (
+            v.equipo if v.equipo_id else None)
+        modelo = equipo.modelo if equipo else SIN_MAQUINA
+        for monto in cobrado(v.pagos):
+            sumar(modelo, 'ventas', monto)
+
+    rentas = Renta.objects.exclude(estado='cancelada').select_related('inventario__equipo')
+    for r in rentas:
+        equipo = r.inventario.equipo if r.inventario_id and r.inventario.equipo_id else None
+        modelo = equipo.modelo if equipo else SIN_MAQUINA
+        for monto in cobrado(r.pagos):
+            sumar(modelo, 'rentas', monto)
+
+    filas = [
+        {'modelo': modelo, 'ventas': float(d['ventas']), 'rentas': float(d['rentas']),
+         'total': float(d['ventas'] + d['rentas'])}
+        for modelo, d in acumulado.items()
+    ]
+    filas.sort(key=lambda f: (-f['total'], f['modelo']))
+    return filas[:TOP_EQUIPOS]
+
+
+def _ocupacion_por_dia(desde, hasta):
+    """Cuántas unidades estuvieron RENTADAS cada día, y de cuántas.
+
+    Una renta ocupa su máquina todos los días entre que sale y que vuelve, así
+    que se cuenta por RANGO y no por la fecha en que se levantó: contar altas
+    diría "un día ocupada" de una renta de tres semanas.
+
+    El día de cierre es la devolución REAL si ya volvió; si no, la fecha de fin
+    pactada. Una renta vencida que nadie ha recogido sigue ocupando la máquina
+    hasta hoy —está en la obra del cliente, no en la bodega—, así que se cuenta.
+
+    La flota de cada día son las unidades dadas de alta hasta ese día. No se
+    descuentan las vendidas: no guardamos CUÁNDO se vendió cada unidad, y
+    descontarlas con la fecha de hoy reescribiría el pasado (un mes al 40% de
+    ocupación se vería al 90% solo porque después se vendieron máquinas).
+    """
+    from inventario.models import Inventario
+    from renta.models import Renta
+
+    dias = [desde + timedelta(days=i) for i in range((hasta - desde).days + 1)]
+    rentadas = {d: 0 for d in dias}
+
+    tramos = Renta.objects.exclude(estado='cancelada').values_list(
+        'fecha_inicio', 'fecha_fin', 'fecha_devolucion_real', 'estado')
+    for inicio, fin, devuelta, estado in tramos:
+        if not inicio:
+            continue
+        cierre = devuelta or fin or hasta
+        # Vencida y sin recoger: la fecha pactada ya pasó pero la máquina no ha
+        # vuelto. Cerrar en la fecha pactada la "liberaría" sola en la gráfica y
+        # enseñaría flota disponible que en realidad está en una obra.
+        if devuelta is None and estado == 'activa' and cierre < hasta:
+            cierre = hasta
+        for d in dias:
+            if inicio <= d <= cierre:
+                rentadas[d] += 1
+
+    altas = [timezone.localtime(f).date() if timezone.is_aware(f) else f.date()
+             for f in Inventario.objects.values_list('fecha_creacion', flat=True)]
+    return [
+        {'fecha': d.isoformat(), 'rentadas': rentadas[d],
+         'flota': sum(1 for alta in altas if alta <= d)}
+        for d in dias
+    ]
 
 
 @api_view(['GET'])
@@ -1241,9 +1513,11 @@ def dashboard_conteos(request):
         'facturas_pendientes': SolicitudFactura.objects.filter(estado='pendiente').count(),
         'adeudos': con_saldo,
         'cupones': Cupon.objects.count(),
-        # Mismo criterio que la lista de /usuarios/, que devuelve TODAS las
-        # cuentas: el globito cuenta las activas.
-        'usuarios_activos': get_user_model().objects.filter(is_active=True).count(),
+        # El globito del menú vive sobre EQUIPO, así que cuenta cuentas de
+        # trabajo activas y no todas las del sistema: con los clientes adentro
+        # decía "302" y prometía una lista de 302 que la sección no enseña.
+        'equipo_activos': get_user_model().objects.filter(is_active=True).exclude(
+            groups__name='Cliente', is_staff=False, is_superuser=False).distinct().count(),
     })
 
 
@@ -1273,6 +1547,25 @@ def dashboard_metrics(request):
         r = suma(por_dia_renta, del_mes(anio, mes))
         por_mes.append({'label': MESES_CORTOS[mes - 1], 'ventas': v, 'rentas': r, 'total': v + r})
 
+    # Serie DIARIA de los últimos 30 días, separando renta de venta: son los dos
+    # motores del negocio y no se comportan igual —la renta gotea, la venta llega
+    # de golpe—, así que sumarlas en una sola línea esconde justo lo que hay que
+    # ver. Los días sin un peso van explícitos en CERO: un hueco en la serie se
+    # dibujaría como si el día no existiera.
+    dias = []
+    inicio = hoy - timedelta(days=DIAS_SERIE - 1)
+    for i in range(DIAS_SERIE):
+        d = inicio + timedelta(days=i)
+        v = float(por_dia_venta.get(d, Decimal('0')))
+        r = float(por_dia_renta.get(d, Decimal('0')))
+        dias.append({'fecha': d.isoformat(), 'ventas': v, 'rentas': r, 'total': v + r})
+
+    # El MISMO tramo, corrido 30 días atrás. Sin esto el total del periodo es un
+    # número suelto: nadie sabe si $180,000 en un mes es bueno o es una caída.
+    ini_previo = inicio - timedelta(days=DIAS_SERIE)
+    en_previo = lambda d: ini_previo <= d < inicio  # noqa: E731
+    previo = suma(por_dia_venta, en_previo) + suma(por_dia_renta, en_previo)
+
     return Response({
         'products': Equipo.objects.count(),
         'orders': 0,
@@ -1280,12 +1573,27 @@ def dashboard_metrics(request):
         'ingresos_hoy': suma(por_dia_venta, es_hoy) + suma(por_dia_renta, es_hoy),
         'ingresos_mes': por_mes[-1] and {k: por_mes[-1][k] for k in ('ventas', 'rentas', 'total')},
         'ingresos_por_mes': por_mes,
+        'ingresos_por_dia': dias,
+        'ingresos_periodo_previo': previo,
+        'dias_serie': DIAS_SERIE,
+        # Las dos preguntas que el Resumen no sabía contestar: QUÉ produce el
+        # dinero y CUÁNTA máquina está trabajando. Se calculan sobre el mismo
+        # tramo de 30 días que la serie diaria, para que todo el bloque hable
+        # del mismo periodo.
+        'top_equipos': _ingresos_por_equipo(inicio, hoy),
+        'ocupacion_por_dia': _ocupacion_por_dia(inicio, hoy),
     })
 
 
 
 def _sync_alertas_vencimiento():
-    """Genera notificaciones de rentas vencidas / por vencer (idempotente vía ref)."""
+    """Genera notificaciones de rentas vencidas / por vencer (idempotente vía ref).
+
+    Es un efecto secundario de LEER las notificaciones, así que va aislado: una
+    renta con datos raros no puede tumbar el buzón entero. Antes sí podía —una
+    referencia a un campo inexistente dejó `/api/notificaciones/` en 500 y la
+    campana vacía para todos, sin que se viera un solo aviso en pantalla.
+    """
     try:
         from renta.models import Renta  # import diferido para evitar import circular
     except Exception:
@@ -1293,50 +1601,99 @@ def _sync_alertas_vencimiento():
     hoy = timezone.localdate()
     activas = Renta.objects.filter(estado='activa').select_related('inventario', 'inventario__equipo')
     for r in activas:
-        equipo = r.inventario.equipo.modelo if r.inventario and r.inventario.equipo else 'Equipo'
-        cliente = r.cliente_nombre
-        dias = (r.fecha_fin - hoy).days
-        if dias < 0:
-            crear_notificacion(
-                tipo='alerta',
-                titulo=f'Renta vencida: {cliente} · {equipo}',
-                mensaje=f'{abs(dias)} día(s) de retraso. Folio {r.folio}.',
-                seccion='rentas',
-                ref=f'vencida-{r.id}',
-            )
-        elif dias <= 3:
-            crear_notificacion(
-                tipo='alerta',
-                titulo=f'Renta por vencer: {cliente} · {equipo}',
-                mensaje=f'Faltan {dias} día(s). Folio {r.folio}.',
-                seccion='rentas',
-                ref=f'porvencer-{r.id}',
-            )
+        try:
+            # Sin fecha de fin no hay vencimiento que calcular.
+            if not r.fecha_fin:
+                continue
+            inv = r.inventario
+            equipo = inv.equipo.modelo if inv and inv.equipo else 'Equipo'
+            # La renta no tiene folio: se identifica por el código de la unidad,
+            # igual que en el resto de los avisos de rentas.
+            unidad = inv.codigo if inv else f'renta #{r.id}'
+            cliente = r.cliente_nombre
+            dias = (r.fecha_fin - hoy).days
+            datos = {'renta_id': r.id, 'inventario_id': inv.id if inv else None}
+            if dias < 0:
+                crear_notificacion(
+                    tipo='alerta',
+                    titulo=f'Renta vencida: {cliente} · {equipo}',
+                    mensaje=f'{abs(dias)} día(s) de retraso. Unidad {unidad}.',
+                    seccion='rentas',
+                    ref=f'vencida-{r.id}',
+                    data=datos,
+                )
+            elif dias <= 3:
+                crear_notificacion(
+                    tipo='alerta',
+                    titulo=f'Renta por vencer: {cliente} · {equipo}',
+                    mensaje=f'Faltan {dias} día(s). Unidad {unidad}.',
+                    seccion='rentas',
+                    ref=f'porvencer-{r.id}',
+                    data=datos,
+                )
+        except Exception:
+            logger.exception('No se pudo generar la alerta de vencimiento de la renta %s', r.id)
 
 
-def _tipos_broadcast_por_rol(user):
-    """Filtrado de tipos de notificación BROADCAST visibles según el rol.
+# Qué capacidad hace falta para que un aviso BROADCAST sea tuyo.
+#
+# La regla es una sola y se lee de corrido: **si no puedes abrir la pantalla, no
+# te llega su aviso.** Es el espejo del mapa `REQUIERE` del panel (Dashboard.tsx),
+# que decide qué secciones aparecen en el menú. Tenerlo de los dos lados evita la
+# incoherencia que había: al técnico no le sale "Adeudos" en el menú y sin embargo
+# le llegaba "Se recogió con saldo: $2,000" con el nombre y el teléfono del
+# cliente. Un aviso que apunta a una pantalla que no puedes abrir no es solo
+# ruido: es una filtración con forma de campanita.
+#
+# Una sección sin entrada aquí se considera de TODO EL EQUIPO (avisos de
+# operación general). Lo sensible se declara; lo demás pasa.
+CAPACIDAD_POR_SECCION = {
+    'adeudos': 'ver_operacion',
+    'ventas': 'ver_operacion',
+    'pedidos': 'ver_operacion',
+    'rentas': 'ver_operacion',
+    # La misma capacidad que abre la sección: quien puede trabajar el padrón
+    # recibe sus avisos ("Cuenta nueva: Fulana, vincúlala con un cliente"), y
+    # quien no, no. El técnico ya no la tiene (ver `AJUSTES_POR_PUESTO`), y el
+    # mostrador sí — que es justo quien vincula cuentas con el cliente enfrente.
+    'clientes': 'ver_clientes',
+    'cotizaciones': 'cotizar',
+    'facturacion': 'facturar',
+    'reparaciones': 'gestionar_reparaciones',
+    'configuracion': 'configurar_negocio',
+}
 
-    La BD guarda `tipo` ∈ {renta, venta, alerta, inventario, sistema}.
-    Por cada nivel de acceso, el subconjunto que le corresponde:
-      - Cliente (nivel 0): NO ve broadcasts (solo personales).
-      - Técnico (nivel 1 mínimo): renta, inventario, alerta, sistema.
-      - Cajero (nivel 1): venta, inventario, alerta, sistema, facturación.
-      - Admin/Dueño (nivel ≥2): TODO.
+
+def _secciones_broadcast_visibles(user):
+    """Las secciones cuyos avistos generales le tocan a este usuario."""
+    from maquinaria.permissions import puede_de
+    puede = puede_de(user)
+    return {sec for sec, cap in CAPACIDAD_POR_SECCION.items() if puede.get(cap)}
+
+
+def _filtro_broadcast(user):
+    """Qué avisos BROADCAST puede ver este usuario.
+
+    Antes esta función prometía el filtrado en su docstring y luego devolvía
+    `Q(usuario__isnull=True)` para todo el staff — la misma línea que la rama del
+    admin. El filtro estaba documentado y no escrito, así que el técnico veía el
+    buzón completo: ventas, facturación, cobranza y montos.
     """
     from maquinaria.permissions import nivel_de, NIVEL_ADMIN
+
     n = nivel_de(user)
-    # Gerente ya es NIVEL_ADMIN (ver nivel_de), así que este umbral cubre
-    # Admin, Gerente y Dueño: todos ven todos los broadcasts.
+    # Gerente ya es NIVEL_ADMIN (ver nivel_de): Admin, Gerente y Dueño ven todo.
     if n >= NIVEL_ADMIN:
         return Q(usuario__isnull=True)
     if n <= 0:
-        # cliente / sin acceso: sin broadcasts
+        # Cliente o sin acceso: ningún aviso interno.
         return Q(pk__in=[])
-    # Staff nivel 1 (operador / técnico / cajero / asesor): todos los tipos
-    # excepto los puramente administrativos. Por ahora dejamos pasar todos
-    # los tipos estándar; si alguno es sensible se restringe abajo.
-    return Q(usuario__isnull=True)
+
+    # Staff de nivel 1 (técnico, cajero, asesor): los avisos de las secciones
+    # que sí puede abrir, más los que no apuntan a ninguna sección concreta
+    # (avisos de sistema y operación general).
+    restringidas = set(CAPACIDAD_POR_SECCION) - _secciones_broadcast_visibles(user)
+    return Q(usuario__isnull=True) & ~Q(seccion__in=restringidas)
 
 
 def _notificaciones_usuario_qs(user):
@@ -1344,11 +1701,12 @@ def _notificaciones_usuario_qs(user):
 
     Reglas:
       - Las notificaciones PERSONALES (usuario=user) siempre llegan, sin excepción.
-      - Las broadcasts (usuario__isnull=True) se filtran por rol vía
-        _tipos_broadcast_por_rol. Un cliente no ve eventos internos.
+      - Las broadcasts (usuario__isnull=True) se filtran por CAPACIDAD vía
+        `_filtro_broadcast`: si no puedes abrir la pantalla, no te llega su
+        aviso. Un cliente no ve ningún evento interno.
     """
     q_personal = Q(usuario=user)
-    q_broadcast = _tipos_broadcast_por_rol(user)
+    q_broadcast = _filtro_broadcast(user)
     return Notificacion.objects.filter(q_personal | q_broadcast).order_by('-creada', '-id')
 
 
@@ -1358,7 +1716,12 @@ class NotificacionesList(generics.ListAPIView):
     serializer_class = NotificacionSerializer
 
     def get_queryset(self):
-        _sync_alertas_vencimiento()
+        # Generar alertas es de mejor esfuerzo: si falla, se leen igual las que
+        # ya existen. Leer el buzón no puede depender de escribir en él.
+        try:
+            _sync_alertas_vencimiento()
+        except Exception:
+            logger.exception('Falló la sincronización de alertas de vencimiento')
         return _notificaciones_usuario_qs(self.request.user)[:200]
 
     def list(self, request, *args, **kwargs):
@@ -1405,10 +1768,15 @@ def marcar_todas_leidas(request):
 @api_view(['POST'])
 @permission_classes([EsOperador])
 def limpiar_notificaciones(request):
-    """Vacía el panel del usuario logueado: borra sus notificaciones broadcast
-    VISIBLES (según su rol) y NO toca las personales de nadie (ni las suyas,
-    que las gestiona por la ruta /mias/limpiar/)."""
-    qs_broadcasts_visibles = _tipos_broadcast_por_rol(request.user)
+    """Vacía el panel del usuario logueado: borra las notificaciones broadcast
+    que ÉL puede ver y NO toca las personales de nadie (ni las suyas, que se
+    gestionan por /mias/limpiar/).
+
+    Ojo con lo que esto es: un broadcast es COMPARTIDO, así que borrarlo se lo
+    borra a todo el equipo. Que el filtro sea el correcto importa por eso — con
+    el anterior, que dejaba pasar todo, un técnico vaciaba también los avisos de
+    cobranza y facturación que nunca debió ver."""
+    qs_broadcasts_visibles = _filtro_broadcast(request.user)
     Notificacion.objects.filter(qs_broadcasts_visibles).delete()
     no_leidas = _notificaciones_usuario_qs(request.user).filter(leida=False).count()
     return Response({'ok': True, 'no_leidas': no_leidas})

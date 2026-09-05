@@ -14,10 +14,34 @@ Si al crear resulta que el teléfono ya existía, no se funde: se marca
 vez de esconderse.
 """
 from .models import Cliente, Contacto
+from server.rastro import tragado
 
 
 def _digitos(valor) -> str:
     return ''.join(c for c in (valor or '') if c.isdigit())[:10]
+
+
+def cuenta_de(cliente, contacto=None):
+    """La cuenta de la tienda de este cliente, si alguien de su ficha tiene una.
+
+    Existe porque el mostrador dejaba el documento a medias: `resolver_cliente`
+    devolvía la FICHA y ahí paraba, así que una renta capturada a mano para
+    alguien que sí tiene cuenta quedaba en su ficha pero NO en "Tus rentas" —
+    había que acordarse de vincularla después, y nadie se acuerda. El cliente
+    entraba a su panel y no veía la máquina que tenía en la obra.
+
+    Se prefiere el contacto que atendió la operación; si ese no tiene cuenta, la
+    del contacto principal. Unir aquí no rompe la regla de "nunca por teléfono":
+    quien atiende YA confirmó de quién se trata al elegirlo en el buscador, y
+    esta cuenta cuelga de esa misma ficha.
+    """
+    if contacto is not None and getattr(contacto, 'usuario_id', None):
+        return contacto.usuario
+    if cliente is None:
+        return None
+    con = (cliente.contactos.filter(usuario__isnull=False)
+           .order_by('-principal', 'id').select_related('usuario').first())
+    return con.usuario if con else None
 
 
 def resolver_cliente(*, cliente_id=None, contacto_id=None, nombre='', telefono='', tipo=None):
@@ -99,16 +123,22 @@ def garantias_vigentes(cliente) -> list:
 
 
 def registrar_cuenta_nueva(user):
-    """Alguien se registró en la tienda: nace su Contacto SIN cliente y REMALI
-    se entera.
+    """Alguien se registró en la tienda: nace su ficha en el padrón, ya ligada.
 
-    No se crea un `Cliente`: eso ensuciaría el padrón que el dueño cura a mano,
-    y todavía no se sabe de quién es esa cuenta —puede ser gente de una
-    constructora que ya está en el sistema—. Vincularla es una decisión suya, y
-    el aviso es lo que se la pone enfrente.
+    ANTES el contacto nacía SIN `Cliente`, a la espera de que alguien decidiera
+    a qué ficha pertenecía. El razonamiento era que crear fichas solas ensucia
+    un padrón curado a mano — y es cierto—, pero el precio resultó peor: cada
+    cuenta se quedaba en un limbo que decía "sin vincular", sin historial y sin
+    poder recibir una renta, hasta que alguien se acordara de resolverla. El
+    padrón quedaba limpio y vacío mientras la operación pasaba por fuera.
 
-    Si coincide el teléfono con alguien del padrón, se dice en el aviso como
-    PISTA. Nunca se aplica sola: el teléfono dejó de ser llave.
+    Quien abre una cuenta ES un cliente. Que la ficha nazca no impide curarla:
+    si el teléfono ya era de otro, la ficha sale marcada `requiere_revision` y
+    aparece en la bandeja para FUNDIRSE —que es la herramienta correcta para un
+    duplicado y ya existe—, en vez de no existir.
+
+    Lo que NO se hace, y sigue siendo la regla de la casa: unir por teléfono sin
+    que una persona lo confirme. La coincidencia se señala, nunca se aplica.
     """
     from maquinaria.models import crear_notificacion
 
@@ -116,25 +146,32 @@ def registrar_cuenta_nueva(user):
     telefono = _digitos(getattr(perfil, 'telefono', ''))
     nombre = (user.get_full_name() or '').strip() or user.get_username()
 
+    pista = Cliente.buscar_por_telefono(telefono).first() if telefono else None
+
+    cli = Cliente(tipo=Cliente.FISICA, nombre=nombre, telefono=telefono, email=(user.email or ''))
+    if pista:
+        cli.requiere_revision = True
+        cli.revision_motivo = (f'Abrió cuenta en la tienda y su teléfono {telefono} '
+                               f'ya es de "{pista.nombre}". Si es la misma persona, fusiona las fichas.')
+    cli.save()
+
     contacto = Contacto.objects.create(
-        cliente=None, nombre=nombre, telefono=telefono, email=user.email, usuario=user,
+        cliente=cli, nombre=nombre, telefono=telefono, email=user.email, usuario=user, principal=True,
     )
 
-    pista = Cliente.buscar_por_telefono(telefono).first() if telefono else None
-    mensaje = f'{user.email or nombre} se registró en la tienda.'
+    mensaje = f'{user.email or nombre} se registró en la tienda y ya tiene su ficha.'
     if pista:
-        mensaje += f' Ese teléfono ya es de "{pista.nombre}" — revisa si es la misma persona.'
-    else:
-        mensaje += ' Vincúlala con un cliente del padrón o déjala aparte.'
+        mensaje += f' Ojo: ese teléfono ya es de "{pista.nombre}" — si es la misma persona, funde las fichas.'
 
     try:
         crear_notificacion(
             'sistema', f'Cuenta nueva: {nombre}', mensaje,
             seccion='clientes', ref=f'cuenta-{user.id}',
             data={'contacto_id': contacto.id, 'usuario_id': user.id,
+                  'cliente_id': cli.id,
                   'cliente_sugerido': pista.id if pista else None},
         )
     except Exception:
         # Un aviso que falla no debe impedir que alguien se registre.
-        pass
+        tragado()
     return contacto

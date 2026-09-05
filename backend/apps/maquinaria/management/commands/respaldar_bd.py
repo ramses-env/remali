@@ -32,6 +32,7 @@ from django.conf import settings
 from django.core.management import call_command
 from django.core.management.base import BaseCommand, CommandError
 from django.utils import timezone
+from server.rastro import tragado
 
 # Lo único que NO se respalda: sesiones abiertas, el log del admin de Django y el
 # latido del panel. Son efímeros y no valen nada al restaurar.
@@ -100,7 +101,7 @@ class Command(BaseCommand):
                 seccion='configuracion', ref=f'respaldo-{marca}',
             )
         except Exception:
-            pass
+            tragado()
 
     # ── piezas ────────────────────────────────────────────────────────────
 
@@ -161,4 +162,4 @@ class Command(BaseCommand):
                 seccion='configuracion',
             )
         except Exception:
-            pass
+            tragado()

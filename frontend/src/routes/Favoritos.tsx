@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import { Link } from 'react-router-dom'
-import api from '../lib/api'
+import { useDatos } from '../lib/datos'
 import Migas from '../components/Migas'
 import ProductCard from '../components/ProductCard'
 import { useFavoritos } from '../store/favoritos'
@@ -43,17 +43,11 @@ const toNumber = (v: unknown): number | null => {
 export default function Favoritos() {
   const { ids, count } = useFavoritos()
   const { unit } = usePriceUnit()
-  const [equipos, setEquipos] = useState<Equipo[]>([])
-  const [cargando, setCargando] = useState(true)
-
-  useEffect(() => {
-    let vivo = true
-    api.get<Equipo[]>('/equipos/')
-      .then(r => { if (vivo) setEquipos(r.data || []) })
-      .catch(() => {})
-      .finally(() => { if (vivo) setCargando(false) })
-    return () => { vivo = false }
-  }, [])
+  /* Comparte la caché del catálogo con /equipos: quien llega aquí desde la
+     tienda casi siempre trae la lista ya cargada, y entonces esta pantalla se
+     pinta sin una sola petición. Sigue siendo el catálogo completo porque los
+     ids viven en localStorage y el filtrado es local. */
+  const { datos: equipos = [], cargando } = useDatos<Equipo[]>('/equipos/')
 
   // Mismo criterio de precio/modo que el catálogo, reusando la card de siempre.
   const cards = useMemo(() => {

@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { gsap } from 'gsap'
 import { ScrollTrigger } from 'gsap/ScrollTrigger'
 import ProductCard from '../components/ProductCard'
-import api from '../lib/api'
+import { useDatos } from '../lib/datos'
 import Migas from '../components/Migas'
 import resolveMediaUrl from '../lib/resolveMediaUrl'
 import PriceUnitToggle from '../components/PriceUnitToggle'
@@ -59,7 +59,6 @@ export default function EquiposList() {
   const gridRef = useRef<HTMLDivElement | null>(null)
   const firstCardRef = useRef<HTMLDivElement | null>(null)
 
-  const [items, setItems] = useState<Equipo[]>([])
   const { unit } = usePriceUnit()
   const [sortKey, setSortKey] = useState<'price-asc' | 'price-desc' | 'title' | 'recientes'>('recientes')
   const [page, setPage] = useState<number>(0)
@@ -69,8 +68,6 @@ export default function EquiposList() {
   const [inputValue, setInputValue] = useState('')
   const [showSuggestions, setShowSuggestions] = useState(false)
   const [activeSuggestion, setActiveSuggestion] = useState<number>(-1)
-  const [loading, setLoading] = useState(true)
-  const [loadError, setLoadError] = useState(false)
   const [uso, setUso] = useState<'' | 'venta' | 'renta'>('')
 
   // Popover de descarga: el cliente elige qué incluir en el PDF.
@@ -103,8 +100,11 @@ export default function EquiposList() {
     return () => ctx.revert()
   }, [])
 
-  useEffect(() => {
-    setLoading(true)
+  /* La URL del catálogo con los filtros puestos. Se calcula en un memo y no
+     dentro del efecto porque ES la llave de la caché: dos visitas con los mismos
+     filtros son la misma llave, y por eso volver atrás desde una ficha ya no
+     vuelve a pedir nada — pinta lo de antes y refresca por debajo. */
+  const urlCatalogo = useMemo(() => {
     const params: Record<string, string> = {}
     const categories = filters['category']?.filter(Boolean) || []
     if (categories.length) params['category'] = categories.join(',')
@@ -123,13 +123,20 @@ export default function EquiposList() {
     }
     if (uso) params['uso'] = uso
     const qs = Object.entries(params).map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&')
-    setLoadError(false)
-    api.get<Equipo[]>(`/equipos/?${qs}${search}`)
-      .then(r => setItems(Array.isArray(r.data) ? r.data : []))
-      // Sin datos-mock: mostrar productos falsos a un cliente real es engañoso.
-      .catch(() => { setItems([]); setLoadError(true) })
-      .finally(() => setLoading(false))
+    return `/equipos/?${qs}${search}`
   }, [filters, query, uso])
+
+  // Sin datos-mock: mostrar productos falsos a un cliente real es engañoso; si
+  // esto falla y no hay nada cacheado, la rejilla enseña el estado de error.
+  const { datos: catalogo, cargando, refrescando, error } = useDatos<Equipo[]>(urlCatalogo)
+  const loading = cargando
+  const loadError = Boolean(error) && !catalogo
+
+  /* Derivado, no copiado a estado: el catálogo ya vive en la caché y tenerlo
+     además en un `useState` sincronizado por efecto son dos copias del mismo
+     dato que pueden discrepar durante un render, más un render de más en cada
+     llegada. */
+  const items = useMemo(() => (Array.isArray(catalogo) ? catalogo : []), [catalogo])
 
   useEffect(() => {
     const w = window.innerWidth
@@ -418,7 +425,7 @@ export default function EquiposList() {
                 } else if (e.key === 'Escape') setShowSuggestions(false)
               }}
               placeholder="Buscar equipo..."
-              className="w-full bg-surface-2 border border-edge rounded-full pl-10 pr-10 py-2.5 text-sm text-ink placeholder-mute focus:outline-none focus:border-gold/50 focus:bg-surface-2 transition-all"
+              className="campo pl-11 pr-11"
             />
             {inputValue && (
               <button
@@ -492,7 +499,7 @@ export default function EquiposList() {
               <select
                 value={sortKey}
                 onChange={e => setSortKey(e.target.value as typeof sortKey)}
-                className="appearance-none pl-4 pr-9 py-2.5 rounded-full border border-edge bg-surface-2 text-mute hover:text-ink text-xs font-semibold focus:outline-none focus:border-gold/50 transition-colors cursor-pointer"
+                className="campo campo-sm w-auto appearance-none pr-9 text-xs font-semibold text-mute hover:text-ink"
                 aria-label="Ordenar"
               >
                 <option value="recientes" className="bg-surface">Más recientes</option>
@@ -616,7 +623,10 @@ export default function EquiposList() {
 
         {/* Grid de equipos */}
         <div className="flex-1 min-w-0">
-          <div ref={gridRef} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5 min-h-[50vh] content-start items-start">
+          {/* Una lista que se recarga NO se borra: se atenúa. Cambiar un filtro
+              con resultados ya en pantalla los deja visibles y apagados hasta
+              que llegan los nuevos, en vez de vaciar la rejilla y rearmarla. */}
+          <div ref={gridRef} className={`grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5 min-h-[50vh] content-start items-start transition-opacity duration-200 ${refrescando ? 'opacity-60' : 'opacity-100'}`}>
 
             {/* Skeletons */}
             {loading && Array.from({ length: 6 }).map((_, i) => (

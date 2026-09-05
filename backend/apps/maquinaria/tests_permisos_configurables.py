@@ -9,7 +9,7 @@ from django.test import TestCase
 
 from maquinaria.permissions import puede_de
 from maquinaria.permissions import (
-    CATALOGO, NUCLEO, ROLES_EDITABLES, capacidades_fabrica, catalogo_capacidades,
+    CATALOGO, NUCLEO, capacidades_fabrica, catalogo_capacidades, roles_editables,
 )
 
 
@@ -82,25 +82,26 @@ class CatalogoTest(TestCase):
         for cap in CATALOGO:
             self.assertTrue(cap.area, f'{cap.nombre} sin área')
 
-    def test_existe_configurar_permisos_y_es_del_nucleo(self):
+    def test_existe_configurar_permisos_y_ya_se_reparte(self):
+        """Era la capacidad con candado más grande —quien la tiene se puede
+        conceder todo lo demás— y el dueño decidió repartirla igual."""
         nombres = {c.nombre for c in CATALOGO}
         self.assertIn('configurar_permisos', nombres)
-        self.assertIn('configurar_permisos', NUCLEO)
+        self.assertNotIn('configurar_permisos', NUCLEO)
 
-    def test_el_nucleo_son_cinco(self):
-        self.assertEqual(NUCLEO, frozenset({
-            'gestionar_usuarios', 'editar_datos_bancarios', 'borrar_catalogo',
-            'tener_codigo_propio', 'configurar_permisos',
-        }))
+    def test_ya_no_queda_nada_bajo_candado(self):
+        self.assertEqual(NUCLEO, frozenset())
 
     def test_roles_editables_no_incluyen_al_dueno(self):
-        self.assertEqual(ROLES_EDITABLES,
-                         ('Gestor', 'Administrador', 'Cajero', 'Técnico'))
+        """Y van por CLAVE, no por nombre: es lo que deja renombrar un puesto sin
+        que se le caigan los permisos."""
+        self.assertEqual(set(roles_editables()),
+                         {'administrador', 'gestor', 'cajero', 'tecnico'})
 
     def test_fabrica_por_rol_coincide_con_puede_de(self):
-        """`capacidades_fabrica('Cajero')` dice lo mismo que un cajero real."""
+        """`capacidades_fabrica('cajero')` dice lo mismo que un cajero real."""
         caps_usuario = puede_de(_usuario('cajero2', 'Cajero'))
-        caps_rol = capacidades_fabrica('Cajero')
+        caps_rol = capacidades_fabrica('cajero')
         for cap in CATALOGO:
             self.assertEqual(caps_rol[cap.nombre], caps_usuario[cap.nombre], cap.nombre)
 
@@ -117,14 +118,14 @@ class TablasTest(TestCase):
 
     def test_un_rol_no_repite_capacidad(self):
         from django.db import IntegrityError
-        PermisoRol.objects.create(rol='Cajero', capacidad='cotizar', permitido=True)
+        PermisoRol.objects.create(rol='cajero', capacidad='cotizar', permitido=True)
         with self.assertRaises(IntegrityError):
-            PermisoRol.objects.create(rol='Cajero', capacidad='cotizar', permitido=False)
+            PermisoRol.objects.create(rol='cajero', capacidad='cotizar', permitido=False)
 
     def test_la_bitacora_guarda_de_que_a_que(self):
         fila = CambioPermisoRol.objects.create(
-            rol='Cajero', capacidad='cotizar', anterior=False, nuevo=True)
-        self.assertEqual(str(fila), 'Cajero · cotizar: False → True')
+            rol='cajero', capacidad='cotizar', anterior=False, nuevo=True)
+        self.assertEqual(str(fila), 'cajero · cotizar: False → True')
 
 
 class OverridesTest(TestCase):
@@ -132,35 +133,36 @@ class OverridesTest(TestCase):
     def test_enciende_una_capacidad_de_nivel_superior(self):
         cajero = _usuario('cajero3', 'Cajero')
         self.assertFalse(puede_de(cajero)['cotizar'])
-        PermisoRol.objects.create(rol='Cajero', capacidad='cotizar', permitido=True)
+        PermisoRol.objects.create(rol='cajero', capacidad='cotizar', permitido=True)
         self.assertTrue(puede_de(cajero)['cotizar'])
 
     def test_apaga_una_capacidad_propia(self):
         cajero = _usuario('cajero4', 'Cajero')
-        PermisoRol.objects.create(rol='Cajero', capacidad='usar_caja', permitido=False)
+        PermisoRol.objects.create(rol='cajero', capacidad='usar_caja', permitido=False)
         self.assertFalse(puede_de(cajero)['usar_caja'])
 
     def test_borrar_el_override_devuelve_la_fabrica(self):
         cajero = _usuario('cajero5', 'Cajero')
-        fila = PermisoRol.objects.create(rol='Cajero', capacidad='cotizar', permitido=True)
+        fila = PermisoRol.objects.create(rol='cajero', capacidad='cotizar', permitido=True)
         fila.delete()
         self.assertFalse(puede_de(cajero)['cotizar'])
 
-    def test_el_nucleo_se_ignora_aunque_alguien_meta_la_fila_a_mano(self):
-        """Defensa en profundidad: la API lo rechaza, y aun así no surte efecto."""
+    def test_lo_que_antes_era_nucleo_ahora_si_surte_efecto(self):
+        """Gestionar usuarios estaba bajo candado y ni con la fila puesta a mano
+        se encendía. Ahora el dueño se la puede dar a quien quiera."""
         cajero = _usuario('cajero6', 'Cajero')
-        PermisoRol.objects.create(rol='Cajero', capacidad='gestionar_usuarios', permitido=True)
-        self.assertFalse(puede_de(cajero)['gestionar_usuarios'])
+        PermisoRol.objects.create(rol='cajero', capacidad='gestionar_usuarios', permitido=True)
+        self.assertTrue(puede_de(cajero)['gestionar_usuarios'])
 
     def test_el_dueno_no_recibe_overrides(self):
         duena = _usuario('duena2', superusuario=True)
-        PermisoRol.objects.create(rol='Administrador', capacidad='ver_dinero', permitido=False)
+        PermisoRol.objects.create(rol='administrador', capacidad='ver_dinero', permitido=False)
         self.assertTrue(puede_de(duena)['ver_dinero'])
 
     def test_un_error_de_base_cae_a_fabrica_y_no_reparte(self):
         from unittest.mock import patch
         cajero = _usuario('cajero7', 'Cajero')
-        PermisoRol.objects.create(rol='Cajero', capacidad='cotizar', permitido=True)
+        PermisoRol.objects.create(rol='cajero', capacidad='cotizar', permitido=True)
         # `permissions.overrides_de_rol` importa PermisoRol DENTRO de la función
         # (models.py ya importa permissions, así que al revés sería circular).
         # Por eso el parche va sobre la clase real, que es la que acaba usándose.
@@ -208,11 +210,11 @@ class SelloTest(TestCase):
         return fila.marca if fila else None
 
     def test_guardar_un_override_mueve_el_sello(self):
-        PermisoRol.objects.create(rol='Cajero', capacidad='cotizar', permitido=True)
+        PermisoRol.objects.create(rol='cajero', capacidad='cotizar', permitido=True)
         self.assertIsNotNone(self._marca())
 
     def test_borrarlo_tambien(self):
-        fila = PermisoRol.objects.create(rol='Cajero', capacidad='vender', permitido=False)
+        fila = PermisoRol.objects.create(rol='cajero', capacidad='vender', permitido=False)
         antes = self._marca()
         fila.delete()
         self.assertGreater(self._marca(), antes)

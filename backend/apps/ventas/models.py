@@ -506,6 +506,21 @@ class Venta(models.Model):
         # Saca la venta de la bandeja "Por facturar" (no se factura algo cancelado).
         self.solicitudes_factura.filter(estado='pendiente').update(estado='cancelada')
 
+        # Y ANULA SUS GARANTÍAS. La venta emite garantía sola al crearse, pero
+        # nadie la apagaba al cancelarla: la máquina volvía al patio y su
+        # garantía seguía viva y contándose como vigente. Meses después alguien
+        # llega con esa máquina —comprada de segunda mano, o revendida por
+        # nosotros— y el mostrador le dice que sí procede.
+        #
+        # Se anula, no se borra: el rastro de que existió es lo que explica una
+        # discusión posterior, y el motivo dice de dónde salió.
+        from django.utils import timezone
+        self.garantias.filter(anulada_en__isnull=True).update(
+            anulada_en=timezone.now(),
+            anulada_motivo=(f'Se canceló la venta #{self.id}'
+                            + (f': {motivo}' if motivo else '.')),
+        )
+
     # ─────────────────────────────────────────────
     #  TICKET 80mm
     # ─────────────────────────────────────────────

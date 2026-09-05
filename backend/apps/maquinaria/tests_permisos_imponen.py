@@ -8,9 +8,9 @@ from django.test import TestCase
 from django.urls import get_resolver
 from rest_framework.test import APIClient
 
-from maquinaria.models import PermisoRol
+from maquinaria.models import Marca, PermisoRol
 from maquinaria.permissions import (
-    CATALOGO, NUCLEO, SOLO_PANTALLA, ExigeCapacidad,
+    CATALOGO, IMPUESTAS_EN_EL_CUERPO, NUCLEO, SOLO_PANTALLA, ExigeCapacidad, puede_de,
 )
 
 
@@ -31,10 +31,28 @@ class TodaCapacidadSeImponeTest(TestCase):
 
     def test_ninguna_capacidad_configurable_es_decorativa(self):
         configurables = {c.nombre for c in CATALOGO} - NUCLEO - SOLO_PANTALLA
-        huerfanas = sorted(configurables - _capacidades_impuestas())
+        impuestas = _capacidades_impuestas() | set(IMPUESTAS_EN_EL_CUERPO)
+        huerfanas = sorted(configurables - impuestas)
         self.assertEqual(huerfanas, [], (
             'Estas capacidades se pueden encender en la pantalla y ningún endpoint '
-            'las exige: o se gatean, o se declaran en SOLO_PANTALLA con su razón.'))
+            'las exige: o se gatean, o se declaran en SOLO_PANTALLA o en '
+            'IMPUESTAS_EN_EL_CUERPO con su razón.'))
+
+    def test_ya_no_hay_capacidades_bajo_candado(self):
+        """El dueño abrió las cinco (ago-2026): él decide a quién se las da.
+
+        La prueba no está para bendecir la decisión, sino para que quede visible
+        en el código: si mañana alguien vuelve a meter una al núcleo, tiene que
+        pasar por aquí y explicarlo.
+        """
+        self.assertEqual(NUCLEO, frozenset())
+
+    def test_lo_que_manda_fuera_de_una_ruta_esta_justificado(self):
+        """Dos capacidades no se imponen en `permission_classes` y aun así
+        mandan: una vive en un mixin de borrado y la otra filtra CAMPOS, no
+        rutas. Se enumeran para que la lista de arriba no se vuelva un colador."""
+        self.assertEqual(set(IMPUESTAS_EN_EL_CUERPO),
+                         {'borrar_catalogo', 'editar_datos_bancarios'})
 
     def test_solo_pantalla_esta_justificada(self):
         """Que nadie use SOLO_PANTALLA como basurero: solo capacidades que
@@ -61,13 +79,13 @@ class LaPantallaNoMienteTest(TestCase):
         self.assertEqual(self._crear().status_code, 403)
 
     def test_con_el_override_cotiza(self):
-        PermisoRol.objects.create(rol='Cajero', capacidad='cotizar', permitido=True)
+        PermisoRol.objects.create(rol='cajero', capacidad='cotizar', permitido=True)
         self.assertEqual(self._crear().status_code, 201)
 
     def test_y_apagarselo_al_administrador_lo_detiene(self):
         admin = User.objects.create_user('admin', 'a@x.com', 'pass12345')
         admin.groups.add(Group.objects.get_or_create(name='Administrador')[0])
-        PermisoRol.objects.create(rol='Administrador', capacidad='cotizar', permitido=False)
+        PermisoRol.objects.create(rol='administrador', capacidad='cotizar', permitido=False)
         api = APIClient(); api.force_authenticate(admin)
         r = api.post('/api/cotizaciones/', {
             'tipo': 'venta', 'cliente_nombre': 'X', 'cliente_telefono': '7441772370',
@@ -77,7 +95,7 @@ class LaPantallaNoMienteTest(TestCase):
     def test_los_kpis_de_la_seccion_tambien_obedecen_al_override(self):
         """`/api/cotizaciones/stats/` es la sección, no un nivel: con `cotizar`
         encendido se abre, con sus conteos y sus pestañas."""
-        PermisoRol.objects.create(rol='Cajero', capacidad='cotizar', permitido=True)
+        PermisoRol.objects.create(rol='cajero', capacidad='cotizar', permitido=True)
         r = self.api.get('/api/cotizaciones/stats/')
         self.assertEqual(r.status_code, 200)
         self.assertIn('abiertas', r.data)
@@ -86,9 +104,9 @@ class LaPantallaNoMienteTest(TestCase):
         """Se filtra el CAMPO, no la pantalla: `monto_aceptado` suma TODAS las
         aceptadas del periodo, y eso ya son las cuentas del negocio. Va omitido,
         no en cero, para que el panel no pinte un total falso."""
-        PermisoRol.objects.create(rol='Cajero', capacidad='cotizar', permitido=True)
+        PermisoRol.objects.create(rol='cajero', capacidad='cotizar', permitido=True)
         self.assertNotIn('monto_aceptado', self.api.get('/api/cotizaciones/stats/').data)
-        PermisoRol.objects.create(rol='Cajero', capacidad='ver_dinero', permitido=True)
+        PermisoRol.objects.create(rol='cajero', capacidad='ver_dinero', permitido=True)
         self.assertIn('monto_aceptado', self.api.get('/api/cotizaciones/stats/').data)
 
 
@@ -116,7 +134,7 @@ class LaJornadaSeImponeTest(TestCase):
         self.assertEqual(self.api_tecnico.get('/api/rentas/tareas/').status_code, 200)
 
     def test_el_override_se_lo_enciende_al_cajero(self):
-        PermisoRol.objects.create(rol='Cajero', capacidad='operar_jornada', permitido=True)
+        PermisoRol.objects.create(rol='cajero', capacidad='operar_jornada', permitido=True)
         self.assertEqual(self.api_cajero.get('/api/rentas/tareas/').status_code, 200)
 
     def test_entregar_recoger_y_evidencias_piden_la_capacidad(self):
@@ -160,7 +178,7 @@ class LosCuponesSeImponenTest(TestCase):
         self.assertEqual(self.api_adm.get('/api/cupones/999/').status_code, 404)
 
     def test_apagarselo_a_administracion_lo_detiene(self):
-        PermisoRol.objects.create(rol='Administrador', capacidad='emitir_cupones', permitido=False)
+        PermisoRol.objects.create(rol='administrador', capacidad='emitir_cupones', permitido=False)
         self.assertEqual(self.api_adm.get('/api/cupones/').status_code, 403)
 
 
@@ -193,7 +211,7 @@ class LaConfiguracionDelNegocioSeImponeTest(TestCase):
         self.assertEqual(self.api_admin.get('/api/config/').status_code, 403)
 
     def test_el_override_se_lo_enciende(self):
-        PermisoRol.objects.create(rol='Administrador', capacidad='configurar_negocio',
+        PermisoRol.objects.create(rol='administrador', capacidad='configurar_negocio',
                                   permitido=True)
         self.assertEqual(self.api_admin.get('/api/config/').status_code, 200)
 
@@ -218,7 +236,7 @@ class ElCorteDeCajaSeImponeTest(TestCase):
     def test_apagarle_el_corte_no_le_quita_el_mostrador(self):
         """La prueba de que las dos capacidades ya no son la misma: sin corte
         sigue cobrando, y eso es justo el reparto que la matriz promete."""
-        PermisoRol.objects.create(rol='Cajero', capacidad='corte_caja', permitido=False)
+        PermisoRol.objects.create(rol='cajero', capacidad='corte_caja', permitido=False)
         self.assertEqual(self.api.get('/api/ventas/corte/').status_code, 403)
         r = self.api.post('/api/ventas/mostrador/', {'items': []}, format='json')
         self.assertNotEqual(r.status_code, 403)
@@ -228,7 +246,7 @@ class ElCorteDeCajaSeImponeTest(TestCase):
         lo para el permiso antes de tocar la base."""
         self.assertEqual(
             self.api.post('/api/caja/sesiones/999/cerrar/', {}, format='json').status_code, 404)
-        PermisoRol.objects.create(rol='Cajero', capacidad='corte_caja', permitido=False)
+        PermisoRol.objects.create(rol='cajero', capacidad='corte_caja', permitido=False)
         self.assertEqual(
             self.api.post('/api/caja/sesiones/999/cerrar/', {}, format='json').status_code, 403)
 
@@ -256,7 +274,7 @@ class LaFacturacionSeImponeTest(TestCase):
         self.assertEqual(self.api_adm.get('/api/facturacion/resumen/').status_code, 200)
 
     def test_apagarsela_a_administracion_cierra_la_bandeja(self):
-        PermisoRol.objects.create(rol='Administrador', capacidad='facturar', permitido=False)
+        PermisoRol.objects.create(rol='administrador', capacidad='facturar', permitido=False)
         self.assertEqual(self.api_adm.get('/api/facturacion/solicitudes/').status_code, 403)
         self.assertEqual(self.api_adm.get('/api/facturacion/export/').status_code, 403)
 
@@ -311,7 +329,7 @@ class ElTrabajoDeTallerSeImponeTest(TestCase):
             self.api_tec.post('/api/reparaciones/', {}, format='json').status_code, 403)
 
     def test_apagarsela_al_tecnico_lo_saca_del_taller(self):
-        PermisoRol.objects.create(rol='Técnico', capacidad='reparar', permitido=False)
+        PermisoRol.objects.create(rol='tecnico', capacidad='reparar', permitido=False)
         self.assertEqual(self.api_tec.get('/api/reparaciones/999/').status_code, 403)
         self.assertEqual(self.api_tec.post('/api/reparaciones/', {}, format='json').status_code, 403)
 
@@ -343,7 +361,7 @@ class LaSeccionDeTallerSeImponeTest(TestCase):
         self.assertEqual(self.api_adm.delete('/api/reparaciones/999/').status_code, 404)
 
     def test_el_override_se_la_enciende_al_tecnico(self):
-        PermisoRol.objects.create(rol='Técnico', capacidad='gestionar_reparaciones',
+        PermisoRol.objects.create(rol='tecnico', capacidad='gestionar_reparaciones',
                                   permitido=True)
         self.assertEqual(self.api_tec.get('/api/reparaciones/').status_code, 200)
 
@@ -385,7 +403,7 @@ class ElAltaDeInventarioSeImponeTest(TestCase):
             self.api_adm.get('/api/equipos/999/unidades/proximo-codigo/').status_code, 404)
 
     def test_el_override_se_la_enciende_al_tecnico(self):
-        PermisoRol.objects.create(rol='Técnico', capacidad='alta_inventario', permitido=True)
+        PermisoRol.objects.create(rol='tecnico', capacidad='alta_inventario', permitido=True)
         self.assertNotEqual(
             self.api_tec.post('/api/refacciones/', {}, format='json').status_code, 403)
         self.assertEqual(
@@ -462,7 +480,7 @@ class LaEdicionDelCatalogoSeImponeTest(TestCase):
     def test_apagarsela_al_administrador_le_congela_los_precios(self):
         """La razón de existir de la casilla: sigue vendiendo y rentando, pero
         ya no cambia el precio de lista."""
-        PermisoRol.objects.create(rol='Administrador', capacidad='editar_catalogo',
+        PermisoRol.objects.create(rol='administrador', capacidad='editar_catalogo',
                                   permitido=False)
         self.assertEqual(
             self.api_adm.patch('/api/equipos/999/', {'precio_dia': '1'},
@@ -510,14 +528,14 @@ class LaVentaSeImponeTest(TestCase):
             self.api_caj.post('/api/ventas/pedidos/crear/', {}, format='json').status_code, 403)
 
     def test_el_override_se_la_enciende_al_tecnico(self):
-        PermisoRol.objects.create(rol='Técnico', capacidad='vender', permitido=True)
+        PermisoRol.objects.create(rol='tecnico', capacidad='vender', permitido=True)
         self.assertEqual(
             self.api_tec.post('/api/unidades/999/vender/', {}, format='json').status_code, 404)
 
     def test_apagarsela_al_mostrador_no_le_quita_la_caja(self):
         """Vender una MÁQUINA y cobrar refacciones en el mostrador son cosas
         distintas: la segunda es `usar_caja`."""
-        PermisoRol.objects.create(rol='Cajero', capacidad='vender', permitido=False)
+        PermisoRol.objects.create(rol='cajero', capacidad='vender', permitido=False)
         self.assertEqual(
             self.api_caj.post('/api/unidades/999/vender/', {}, format='json').status_code, 403)
         self.assertNotEqual(
@@ -558,7 +576,7 @@ class LaRentaSeImponeTest(TestCase):
             self.api_adm.post('/api/rentas/999/renovar/', {}, format='json').status_code, 403)
 
     def test_el_override_se_la_enciende_al_cajero(self):
-        PermisoRol.objects.create(rol='Cajero', capacidad='rentar', permitido=True)
+        PermisoRol.objects.create(rol='cajero', capacidad='rentar', permitido=True)
         self.assertNotEqual(
             self.api_caj.post('/api/rentas/crear/', {}, format='json').status_code, 403)
 
@@ -594,7 +612,7 @@ class LaOperacionComercialSeImponeTest(TestCase):
         self.assertEqual(self.api_tec.get('/api/rentas/tareas/').status_code, 200)
 
     def test_apagarsela_a_administracion_cierra_las_listas(self):
-        PermisoRol.objects.create(rol='Administrador', capacidad='ver_operacion',
+        PermisoRol.objects.create(rol='administrador', capacidad='ver_operacion',
                                   permitido=False)
         for ruta in self.LISTAS:
             self.assertEqual(self.api_adm.get(ruta).status_code, 403, ruta)
@@ -625,7 +643,7 @@ class LosMontosDeLoQueSeAtiendeSeImponenTest(TestCase):
             self.api.post('/api/ventas/999/abono/', {}, format='json').status_code, 404)
 
     def test_apagarsela_lo_deja_entregar_sin_manejar_dinero(self):
-        PermisoRol.objects.create(rol='Técnico', capacidad='ver_montos_operacion',
+        PermisoRol.objects.create(rol='tecnico', capacidad='ver_montos_operacion',
                                   permitido=False)
         for ruta in self.RUTAS:
             self.assertEqual(self.api.get(ruta).status_code, 403, ruta)
@@ -709,3 +727,76 @@ class LasDosDudasDelInventarioTest(TestCase):
         self.assertEqual(
             self.api_adm.post('/api/cotizaciones/999/aprobar-cancelacion/', {},
                               format='json').status_code, 404)
+
+
+class LasLlavesDelNegocioSeRepartenTest(TestCase):
+    """Las cinco que estaban bajo candado, ahora repartibles de punta a punta.
+
+    El dueño lo pidió así (ago-2026): él decide a quién le da cada una. Lo que
+    estas pruebas cuidan es que el interruptor no sea decorativo en ninguno de
+    los dos sentidos —encenderlo abre la puerta de verdad, apagarlo la cierra— y
+    que al DUEÑO no se le pueda cerrar ninguna, porque encerrarlo fuera de su
+    propio sistema no sería configurarlo: sería romperlo.
+    """
+
+    def setUp(self):
+        self.duena = User.objects.create_superuser('duena_llaves', 'dl@x.com', 'pass12345')
+        self.admin = User.objects.create_user('adm_llaves', 'al@x.com', 'pass12345')
+        self.admin.groups.add(Group.objects.get_or_create(name='Administrador')[0])
+        self.api_due = APIClient(); self.api_due.force_authenticate(self.duena)
+        self.api_adm = APIClient(); self.api_adm.force_authenticate(self.admin)
+
+    def test_gestionar_usuarios_de_fabrica_es_solo_del_dueno(self):
+        self.assertEqual(self.api_due.get('/api/usuarios/').status_code, 200)
+        self.assertEqual(self.api_adm.get('/api/usuarios/').status_code, 403)
+
+    def test_y_el_dueno_se_la_puede_dar_a_administracion(self):
+        PermisoRol.objects.create(rol='administrador', capacidad='gestionar_usuarios',
+                                  permitido=True)
+        self.assertEqual(self.api_adm.get('/api/usuarios/').status_code, 200)
+
+    def test_configurar_permisos_tambien_se_reparte(self):
+        """La llave que reparte las demás. Es la más delicada de todas y por eso
+        se prueba explícitamente: quien la reciba puede concederse el resto."""
+        self.assertEqual(self.api_adm.get('/api/permisos/').status_code, 403)
+        PermisoRol.objects.create(rol='administrador', capacidad='configurar_permisos',
+                                  permitido=True)
+        self.assertEqual(self.api_adm.get('/api/permisos/').status_code, 200)
+
+    def test_al_dueno_no_se_le_puede_cerrar_ninguna(self):
+        """Aunque alguien apague las cinco para todos los puestos: el dueño no
+        tiene puesto, así que los overrides no lo tocan."""
+        for cap in ('gestionar_usuarios', 'configurar_permisos', 'borrar_catalogo',
+                    'tener_codigo_propio', 'editar_datos_bancarios'):
+            for rol in ('administrador', 'gestor', 'cajero', 'tecnico'):
+                PermisoRol.objects.create(rol=rol, capacidad=cap, permitido=False)
+
+        caps = puede_de(self.duena)
+        self.assertTrue(caps['gestionar_usuarios'])
+        self.assertTrue(caps['configurar_permisos'])
+        self.assertEqual(self.api_due.get('/api/usuarios/').status_code, 200)
+        self.assertEqual(self.api_due.get('/api/permisos/').status_code, 200)
+
+    def test_apagarsela_a_administracion_le_cierra_la_puerta(self):
+        PermisoRol.objects.create(rol='administrador', capacidad='borrar_catalogo',
+                                  permitido=True)
+        marca = Marca.objects.create(nombre='Makita')
+        self.assertEqual(self.api_adm.delete(f'/api/marcas/{marca.id}/').status_code, 204)
+
+        otra = Marca.objects.create(nombre='Bosch')
+        PermisoRol.objects.filter(rol='administrador', capacidad='borrar_catalogo').update(permitido=False)
+        self.assertEqual(self.api_adm.delete(f'/api/marcas/{otra.id}/').status_code, 403)
+
+    def test_el_nip_propio_tambien_se_reparte(self):
+        """Al Gestor no se le da de fábrica —sus excepciones las autoriza el
+        dueño con el de él—, pero ya es una casilla y no una ley."""
+        gestor = User.objects.create_user('ges_llaves', 'gl@x.com', 'pass12345')
+        gestor.groups.add(Group.objects.get_or_create(name='Gestor')[0])
+        api = APIClient(); api.force_authenticate(gestor)
+        cuerpo = {'password': 'pass12345', 'codigo': '111111'}
+
+        self.assertEqual(api.post('/api/auth/codigo-seguridad/', cuerpo, format='json').status_code, 403)
+
+        PermisoRol.objects.create(rol='gestor', capacidad='tener_codigo_propio', permitido=True)
+        self.assertNotEqual(
+            api.post('/api/auth/codigo-seguridad/', cuerpo, format='json').status_code, 403)

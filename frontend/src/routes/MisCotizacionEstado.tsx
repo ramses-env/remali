@@ -4,10 +4,11 @@ import { useLatido } from '../lib/latido'
 import { Link, useParams } from 'react-router-dom'
 import api from '../lib/api'
 import Migas from '../components/Migas'
-import { formatMoney } from '../lib/utils'
+import { formatMoney, ligaAbsoluta } from '../lib/utils'
 import { useConfigPublica } from '../lib/configPublica'
 import { waLink } from '../lib/whatsapp'
 import resolveMediaUrl from '../lib/resolveMediaUrl'
+import { anotarFallo } from '../lib/fallo'
 
 type Cot = {
   id: number
@@ -17,7 +18,9 @@ type Cot = {
   renta_id?: number | null; venta_id?: number | null; entregada_en?: string | null
   /** Quien la firmó del lado del cliente, si pasó por su autorizador. */
   autorizada_por?: string | null
-  items: { descripcion: string; cantidad: number }[]
+  /** `unidades_libres` viene en vivo del servidor: `null` si la partida no
+   *  cuelga de un equipo del catálogo, 0 si están todas rentadas. */
+  items: { descripcion: string; cantidad: number; unidades_libres?: number | null }[]
   carrito?: { id: number; title: string; qty: number; duracion?: number; unit?: string; image?: string }[]
 }
 
@@ -66,7 +69,7 @@ export default function MisCotizacionEstado() {
         for (const e of r.data || []) { const im = e.imagen || (e.imagenes || [])[0]; if (im) m[e.id] = im }
         setFotos(m)
       })
-      .catch(() => {})
+      .catch(anotarFallo)
   }, [])
 
   if (cargando) return <div className="bg-app min-h-screen grid place-items-center"><div className="w-8 h-8 rounded-full border-2 border-gold border-t-transparent animate-spin" /></div>
@@ -133,7 +136,9 @@ export default function MisCotizacionEstado() {
 
   async function copiar() {
     if (!cot?.pdf) return
-    try { await navigator.clipboard.writeText(cot.pdf); setCopiada(true); setTimeout(() => setCopiada(false), 2000) } catch { /* portapapeles bloqueado */ }
+    // Con el ORIGEN pegado: lo que se copia se manda por WhatsApp, y ahí una
+    // ruta suelta ("/api/cotizaciones/…") no es un link, es texto.
+    try { await navigator.clipboard.writeText(ligaAbsoluta(cot.pdf)); setCopiada(true); setTimeout(() => setCopiada(false), 2000) } catch { /* portapapeles bloqueado */ }
   }
 
   return (
@@ -227,9 +232,22 @@ export default function MisCotizacionEstado() {
                 </div>
               )
             }) || cot.items.map((it, i) => (
-              <div key={i} className="px-6 sm:px-8 py-4 border-b border-edge/60 flex items-center justify-between gap-4">
-                <p className="text-[14.5px] font-semibold line-clamp-1">{it.descripcion}</p>
-                <span className="text-[13.5px] text-mute shrink-0">× {it.cantidad}</span>
+              <div key={i} className="px-6 sm:px-8 py-4 border-b border-edge/60">
+                <div className="flex items-center justify-between gap-4">
+                  <p className="text-[14.5px] font-semibold line-clamp-1">{it.descripcion}</p>
+                  <span className="text-[13.5px] text-mute shrink-0">× {it.cantidad}</span>
+                </div>
+                {/* Sin unidades libres: se dice AQUÍ, en la partida, no en un
+                    aviso general arriba. La cotización puede traer tres equipos
+                    y solo uno estar agotado; un letrero global haría dudar de
+                    los tres. El cliente no pierde nada —su cotización sigue en
+                    pie— y le llega aviso en cuanto se libere una. */}
+                {it.unidades_libres === 0 && (
+                  <p className="mt-2 inline-flex items-start gap-2 text-[12.5px] leading-snug rounded-lg border border-[color-mix(in_oklab,var(--c-taller)_34%,transparent)] bg-[color-mix(in_oklab,var(--c-taller)_10%,transparent)] px-3 py-2 text-taller-ink">
+                    <svg className="w-4 h-4 shrink-0 mt-[1px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg>
+                    <span><b>Sin unidades ahora mismo</b> — están todas en obra. Te avisamos en cuanto se libere una.</span>
+                  </p>
+                )}
               </div>
             ))}
             {cot.vence_el && <p className="px-6 sm:px-8 py-4 text-[12.5px] text-mute">Precios vigentes hasta el {cot.vence_el}.</p>}
@@ -275,7 +293,7 @@ export default function MisCotizacionEstado() {
                     <>
                       <p className="text-[15px] font-extrabold">Cuéntanos el motivo (opcional)</p>
                       <textarea value={motivoCancel} onChange={e => setMotivoCancel(e.target.value)} rows={2} placeholder="Ej. El proyecto se pospuso"
-                        className="mt-3 w-full bg-surface-2 border border-edge rounded-xl px-4 py-3 text-sm text-ink placeholder-mute focus:outline-none focus:border-red-400/60 transition-colors resize-none" />
+                        className="campo campo-area mt-3 focus:border-red-400/60" />
                       <div className="mt-3 grid grid-cols-2 gap-2">
                         <button onClick={() => { setCancelando(false); setMotivoCancel('') }}
                           className="h-[42px] rounded-xl border border-edge text-ink text-[13.5px] font-semibold hover:bg-surface-2 transition-colors">Mejor no</button>

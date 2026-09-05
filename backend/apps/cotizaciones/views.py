@@ -19,14 +19,16 @@ class CotizacionPagination(PageNumberPagination):
     max_page_size = 100
 
 from maquinaria.permissions import (
-    IsAdminGroupOrStaff, EsOperador, PuedeCotizar, PuedeVender, PuedeVerDinero,
-    puede_de,
+    IsAdminGroupOrStaff, EsOperador, NoEsDelNegocio, PuedeCotizar, PuedeVender,
+    PuedeVerDinero, puede_de,
 )
+from maquinaria.cupones import cupon_valido_para
 from maquinaria.throttling import SolicitudPublicaThrottle, SubidaEvidenciaThrottle
 from maquinaria.ws_events import push_user_event
 from . import precios
 from .models import Cotizacion, CotizacionItem, CotizacionFoto
 from .serializers import CotizacionSerializer, CotizacionFotoSerializer
+from server.rastro import tragado
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +77,10 @@ def _enviar_acuse_cliente(cot):
 
 
 @api_view(['POST'])
-@permission_classes([AllowAny])  # público: la tienda envía la solicitud del cliente
+# Público para invitados y clientes, CERRADO para el equipo: una cotización
+# pedida por el cajero desde la tienda entra al mismo buzón que la de un cliente
+# real y después nadie las distingue. Ver `NoEsDelNegocio`.
+@permission_classes([NoEsDelNegocio])
 @throttle_classes([SolicitudPublicaThrottle])  # cada solicitud manda correos: sin techo es spam
 def crear_cotizacion_publica(request):
     """Recibe la solicitud que el cliente manda DIRECTO a REMALI, sin su jefe.
@@ -116,6 +121,12 @@ def crear_cotizacion_publica(request):
     if not partidas:
         return Response({'detalle': 'No pudimos identificar los equipos de tu solicitud.'}, status=400)
 
+    # El cupón que el cliente tecleó en el armador. Si no sirve NO se tumba la
+    # solicitud: se manda sin descuento y se le dice por qué. Perder una
+    # cotización de $40,000 por un código mal escrito sería absurdo, y el
+    # descuento se lo puede aplicar el vendedor a mano cuando la revise.
+    cupon, motivo_cupon = cupon_valido_para((d.get('codigo_cupon') or ''), request.user)
+
     obra = d.get('obra') or {}
     with transaction.atomic():
         cot = Cotizacion.objects.create(
@@ -128,6 +139,8 @@ def crear_cotizacion_publica(request):
             cliente_telefono=(cliente.get('telefono') or '').strip(),
             cliente_email=(cliente.get('email') or '').strip().lower(),
             aplica_iva=bool(d.get('requiere_factura')),
+            # `total` ya resta `descuento_cupon`: basta con dejar el enlace.
+            cupon=cupon,
             datos_solicitud={
                 'empresa': (cliente.get('empresa') or '').strip(),
                 'obra': {
@@ -147,6 +160,13 @@ def crear_cotizacion_publica(request):
                                           equipo=eq_ref, modalidad=partida['modalidad'])
         cot.recalcular_tipo()   # venta, renta o mixta según lo que armó el cliente
 
+        # El cupón personal se quema AQUÍ y no al cobrar: es de un solo uso y ya
+        # quedó enlazado a esta cotización, así que mandar tres solicitudes con
+        # el mismo código sería tener el 5% tres veces. Si la cotización se
+        # cancela, el vendedor puede reactivar el cupón desde el panel.
+        if cupon is not None and cupon.personal and not cupon.usado:
+            type(cupon).objects.filter(pk=cupon.pk).update(usado=True)
+
     tel = cot.cliente_telefono or '—'
     # 1) Notificación en el panel.
     try:
@@ -159,7 +179,7 @@ def crear_cotizacion_publica(request):
             data={'cotizacion_id': cot.id, 'folio': cot.folio, 'telefono': tel},
         )
     except Exception:
-        pass
+        tragado()
 
     # 2) Aviso INMEDIATO por correo a los respaldos (para que contacten al cliente
     #    manualmente si el principal no responde). Simple: sin cron ni temporizador.
@@ -183,8 +203,19 @@ def crear_cotizacion_publica(request):
     _enviar_acuse_cliente(cot)
 
     # Liga pública (PDF con token): el cliente la puede copiar y compartir.
-    liga = request.build_absolute_uri(f'/api/cotizaciones/publica/{cot.token_publico}/pdf/') if getattr(cot, 'token_publico', None) else None
-    return Response({'detalle': 'Solicitud recibida', 'folio': cot.folio, 'id': cot.id, 'liga': liga}, status=201)
+    # RELATIVA, como el resto de las ligas que consume la SPA (ver `pdf` en
+    # `cotizaciones/mias/`): detrás del proxy de Vite, `build_absolute_uri`
+    # resuelve al host interno y devolvía `http://localhost:8000/…`, que el
+    # cliente no puede abrir desde ningún lado. El front le pega su propio
+    # origen al copiarla, que es el mismo host que sirve /api.
+    liga = f'/api/cotizaciones/publica/{cot.token_publico}/pdf/' if getattr(cot, 'token_publico', None) else None
+    # Si el cupón no entró, el cliente se entera AQUÍ y no cuando le llegue la
+    # cotización sin su descuento y tenga que hablar por teléfono a reclamarlo.
+    return Response({
+        'detalle': 'Solicitud recibida', 'folio': cot.folio, 'id': cot.id, 'liga': liga,
+        'cupon_aplicado': cupon.codigo if cupon else None,
+        'cupon_error': motivo_cupon if (d.get('codigo_cupon') and cupon is None) else None,
+    }, status=201)
 
 
 @api_view(['POST'])
@@ -220,7 +251,7 @@ def solicitar_cancelacion(request, pk):
             data={'cotizacion_id': cot.id, 'folio': cot.folio},
         )
     except Exception:
-        pass
+        tragado()
     return Response({'detalle': 'Tu cotización quedó cancelada.'})
 
 
@@ -255,7 +286,7 @@ def aprobar_cancelacion(request, pk):
                 seccion='cotizaciones', ref=f'cancelacion-ok-{cot.id}',
             )
         except Exception:
-            pass
+            tragado()
     return Response({'detalle': 'Cancelación aprobada.'})
 
 
@@ -270,15 +301,20 @@ def vincular_cuenta_cotizacion(request, pk):
     cot = Cotizacion.objects.filter(pk=pk).first()
     if not cot:
         return Response({'detalle': 'Cotización no encontrada'}, status=404)
+    # Se vincula UNA vez: cambiar de cuenta le quita la cotización del panel a
+    # quien la estaba viendo (y quizá a punto de aceptar) sin que se entere.
+    # Para cuentas duplicadas, el camino es fundir las fichas en Clientes.
+    if cot.usuario_id:
+        return Response({'detalle': 'Esta cotización ya está vinculada a una cuenta y no se puede cambiar. '
+                                    'Si el cliente tiene cuentas duplicadas, fusiona sus fichas en Clientes.'},
+                        status=409)
     uid = request.data.get('usuario_id')
     if uid and not cot.items.exists():
         return Response({'detalle': 'La cotización está vacía: agrega partidas antes de vincularla.'}, status=400)
     if uid and not cot.folio:
         return Response({'detalle': 'Márcala como enviada primero: el folio nace ahí.'}, status=400)
     if not uid:
-        cot.usuario = None
-        cot.save(update_fields=['usuario'])
-        return Response({'cuenta': None})
+        return Response({'detalle': 'Falta la cuenta a vincular.'}, status=400)
     from django.contrib.auth import get_user_model
     u = get_user_model().objects.filter(pk=uid, is_active=True, groups__name='Cliente').first()
     if not u:
@@ -465,7 +501,7 @@ class CotizacionListCreate(generics.ListCreateAPIView):
     pagination_class = CotizacionPagination
 
     def get_queryset(self):
-        qs = Cotizacion.objects.all().select_related('cliente', 'usuario', 'atendida_por', 'cupon').prefetch_related('items', 'fotos', 'conversiones')
+        qs = Cotizacion.objects.all().select_related('cliente', 'usuario', 'atendida_por', 'cupon').prefetch_related('items', 'fotos', 'conversiones', 'rentas_convertidas')
         p = self.request.query_params
         estado = (p.get('estado') or '').strip().lower()
         if estado == 'vencida':
@@ -510,7 +546,7 @@ class CotizacionDetail(generics.RetrieveUpdateDestroyAPIView):
             )
 
     serializer_class = CotizacionSerializer
-    queryset = Cotizacion.objects.all().select_related('cliente', 'usuario', 'atendida_por', 'cupon').prefetch_related('items', 'fotos', 'conversiones')
+    queryset = Cotizacion.objects.all().select_related('cliente', 'usuario', 'atendida_por', 'cupon').prefetch_related('items', 'fotos', 'conversiones', 'rentas_convertidas')
 
     def get_permissions(self):
         # Ver y trabajar la cotización: cualquiera que cotice (el asesor incluido).
@@ -820,6 +856,17 @@ def convertir_cotizacion(request, pk: int):
     from inventario.models import Inventario as _Inv
     unidades = []
     requeridas_por_equipo = {}
+    # El descuento del cupón NO se puede quedar en la hoja de la cotización: si
+    # el cliente vio $9,500 y la venta se levanta en $10,000, el cupón fue un
+    # adorno. Se aplica como FACTOR sobre cada renglón y no restando
+    # `descuento_cupon` del total, por dos razones: los renglones siguen
+    # cuadrando al centavo con el total (no hay que repartir una resta entre
+    # máquinas), y en una cotización mixta la parte de renta conserva su mismo
+    # 5% cuando se concrete aparte, en vez de comerse aquí el descuento entero.
+    fac_cupon = Decimal('1')
+    if cot.cupon_id and cot.cupon and cot.cupon.activo:
+        fac_cupon = Decimal('1') - Decimal(str(cot.cupon.descuento))
+
     precio_por_equipo = {}
     for item in partidas_venta:
         if item.equipo_id:
@@ -827,7 +874,7 @@ def convertir_cotizacion(request, pk: int):
             # Precio de CADA máquina de ese equipo (IVA incluido, como toda venta).
             # Sale de la partida, no de dividir el total: sin divisiones no hay
             # centavos perdidos.
-            precio_por_equipo[item.equipo_id] = item.precio_unitario
+            precio_por_equipo[item.equipo_id] = (Decimal(item.precio_unitario) * fac_cupon).quantize(Decimal('0.01'))
     elegidas_por_equipo = {}
     unidades_vistas = set()
     for uid in (request.data.get('unidad_ids') or []):
@@ -884,7 +931,7 @@ def convertir_cotizacion(request, pk: int):
             cliente_id=cot.cliente_id,
             # Sin unidades (o con ellas), el importe de la cotización es el que
             # manda: los renglones de abajo reparten ese mismo dinero por máquina.
-            precio_maquina=(Decimal('0.00') if unidades else cot.subtotal_venta),
+            precio_maquina=(Decimal('0.00') if unidades else (Decimal(cot.subtotal_venta) * fac_cupon).quantize(Decimal('0.01'))),
             metodo_pago=metodo,
             pagos=pagos,
             cotizacion=cot,                    # IVA: lo fuerza el modelo Venta (toda venta con IVA)
@@ -894,7 +941,7 @@ def convertir_cotizacion(request, pk: int):
         # demás salían del patio sin venta que las respaldara; cancelar no las
         # devolvía nunca.
         from ventas.models import VentaMaquina
-        restante = Decimal(cot.subtotal_venta)
+        restante = (Decimal(cot.subtotal_venta) * fac_cupon).quantize(Decimal('0.01'))
         for i, u in enumerate(unidades):
             precio = precio_por_equipo.get(u.equipo_id)
             if precio is None or i == len(unidades) - 1:
@@ -906,6 +953,12 @@ def convertir_cotizacion(request, pk: int):
             try:
                 VentaMaquina.objects.create(venta=venta, inventario=u, precio=precio)
             except ValueError as e:
+                # Salir con `return` desde DENTRO de un atomic() no revierte
+                # nada: el bloque termina sin excepción y COMMITEA lo ya escrito.
+                # Así quedó una venta en $0 con su renglón vivo y la máquina
+                # todavía en el patio. `set_rollback` es la puerta de Django para
+                # abortar sin dejar que la excepción suba.
+                transaction.set_rollback(True)
                 return Response({'detalle': str(e)}, status=400)
 
     cot.refresh_from_db()

@@ -5,23 +5,71 @@ import { leerEspacio } from './espacio'
 import { empiezaPeticion, terminaPeticion } from './cargando'
 import { avisar } from './avisos'
 
-/* Peticiones que NO deben encender el indicador global de carga. Un indicador
-   que se enciende sin que el usuario haya pedido nada enseña a ignorarlo, y
-   entonces ya no sirve cuando de verdad hace falta.
-   Una llamada suelta puede excluirse pasando `{ fondo: true }` en su config.
+/* `fondo` es una opción NUESTRA, no de axios: marca la petición para que no
+   encienda el indicador global. Se declara aquí para que el resto del código la
+   pase como un campo normal (`{ fondo: true }`) en vez de castear a `never` en
+   cada llamada, que es como estaba y escondía errores de tipos de verdad. */
+declare module 'axios' {
+  interface AxiosRequestConfig {
+    fondo?: boolean
+  }
+}
 
-   - /notificaciones/            el panel lo sondea cada 5 s.
-   - /rentas/tareas/             no se sondea, pero lo recarga el bus de tiempo
-                                 real tras cada mutación y la pantalla "Mi jornada"
-                                 ya muestra su propio estado de carga. Taparla
-                                 además con un overlay a pantalla completa
-                                 después de cada acción del técnico estorba. */
+/* ¿Qué enciende el indicador global (el overlay que tapa la pantalla)?
+
+   La regla está INVERTIDA respecto a como estaba: antes lo encendía todo salvo
+   una lista de excepciones, y la lista se quedó corta. El panel se fue marcando
+   a mano con `fondo: true` —módulo por módulo, porque cambiar de sección dispara
+   entre dos y seis peticiones y la pantalla parpadeaba en cada cambio— pero la
+   TIENDA nunca se marcó: abrir /equipos dispara entre cuatro y siete peticiones
+   (catálogo, marcas, categorías, tipos, perfil…) y el overlay las tapaba todas.
+
+   Un indicador que se enciende sin que el usuario haya pedido nada enseña a
+   ignorarlo, y entonces ya no sirve cuando de verdad hace falta.
+
+   Ahora el overlay sale SOLO por algo que el usuario disparó a propósito:
+
+   - Mutaciones (POST/PUT/PATCH/DELETE): guardar, timbrar, cobrar. Aquí tapar la
+     pantalla sí comunica algo —"no toques nada, esto se está escribiendo"— y
+     además evita el doble clic.
+   - Descargas (`responseType: 'blob'`): generar un PDF, exportar. El usuario
+     picó un botón y espera un archivo.
+
+   Un GET normal —traer datos para pintar una pantalla— NUNCA lo enciende. Cada
+   pantalla enseña su propio esqueleto mientras llega lo suyo, que es lo que
+   deja ver la forma de la página en vez de un velo negro encima.
+
+   Se puede forzar cualquiera de las dos formas por llamada:
+     { fondo: true }    nunca enciende el overlay (una mutación de fondo)
+     { fondo: false }   lo enciende aunque sea un GET
+*/
 const SIN_INDICADOR = ['/notificaciones/', '/rentas/tareas/']
 
 function esDeFondo(config: any) {
-  if (config?.fondo) return true
+  // La llamada manda: `fondo` explícito gana sobre cualquier heurística.
+  if (config?.fondo !== undefined) return Boolean(config.fondo)
   const url: string = config?.url || ''
-  return SIN_INDICADOR.some(s => url.includes(s))
+  if (SIN_INDICADOR.some(s => url.includes(s))) return true
+  // Mutación: la disparó el usuario y conviene bloquear mientras se escribe.
+  if ((config?.method || 'get').toLowerCase() !== 'get') return false
+  // Descarga de archivo: también la disparó el usuario.
+  return config?.responseType !== 'blob'
+}
+
+/* Si una petición merece un AVISO cuando falla es otra pregunta, y por eso vive
+   en su propia función. Antes la contestaba `esDeFondo`, pero al invertir la
+   regla del overlay las dos se separaron: que un GET del catálogo no tape la
+   pantalla mientras carga no significa que pueda quedarse MUDO si el servidor
+   está caído —eso deja al cliente viendo una pantalla vacía sin saber por qué—.
+
+   Aquí la regla sigue siendo la de siempre: avisa todo, salvo los sondeos
+   automáticos (que van solos, cada pocos segundos, y avisarlos sería una
+   cascada de toasts por un bache de red) y lo que la llamada silencie a mano
+   con `fondo: true`. */
+function avisaFallos(config: any) {
+  if (config?.fondo === true) return false
+  const url: string = config?.url || ''
+  return !SIN_INDICADOR.some(s => url.includes(s))
 }
 
 /** Normaliza VITE_API_URL a una base usable ('/api', ':8000' → localhost, etc.).
@@ -63,19 +111,38 @@ function refrescarAccess(): Promise<string | null> {
   return refrescando
 }
 
-/* Rutas del flujo de contraseña OLVIDADA (las públicas; ojo: `/auth/password/`
-   a secas es el cambio con sesión y ese SÍ necesita el token). No deben llevar
-   el token: quien viene a restablecer suele traer una sesión vieja en el
-   navegador (la olvidó pero seguía logueado), y un access vencido en el header
-   hace que el backend conteste 401 antes de mirar la vista. Tampoco deben
-   disparar el refresco ni el redirect a /login, o el usuario nunca llega a ver
-   el formulario del enlace que le llegó por correo. */
-const RUTAS_OLVIDE = ['/auth/password/olvide/', '/auth/password/restablecer/']
-const esRutaOlvide = (url?: string) => RUTAS_OLVIDE.some(r => (url || '').includes(r))
+/* Rutas PÚBLICAS de entrada: crear cuenta, entrar, y el flujo de contraseña
+   olvidada (ojo: `/auth/password/` a secas es el cambio CON sesión y ese sí
+   necesita el token).
+
+   Ninguna debe llevar el token. Quien viene aquí casi siempre trae una sesión
+   vieja colgando en el navegador —se le venció, la olvidó, probó algo— y un
+   access muerto en el header hace que el backend conteste 401 ANTES de mirar la
+   vista, aunque la vista sea pública.
+
+   Y tampoco deben disparar el refresco ni el redirect a /login. Ese redirect es
+   lo que hacía que "Crear cuenta" pareciera un botón muerto: el 401 se comía la
+   petición, borraba el token y te mandaba a /login — que comparte marco visual
+   con /registro, así que ni se notaba que te habían movido de página. */
+const RUTAS_PUBLICAS = [
+  '/auth/registro/',
+  '/auth/login',
+  '/auth/password/olvide/',
+  '/auth/password/restablecer/',
+]
+const esRutaPublica = (url?: string) => RUTAS_PUBLICAS.some(r => (url || '').includes(r))
+
+/* Pantallas donde el usuario está ENTRANDO o creando cuenta. Un 401 aquí no
+   debe moverlo de sitio: no hay nada protegido que defender y sí una captura a
+   medias que perder. Se comparan con la ruta del navegador, no con la URL de la
+   petición: lo que importa es dónde está el usuario, no a quién le preguntamos. */
+const PANTALLAS_DE_ACCESO = ['/login', '/registro', '/recuperar', '/restablecer', '/verificar']
+const enPantallaDeAcceso = () =>
+  PANTALLAS_DE_ACCESO.some(r => window.location.pathname.startsWith(r))
 
 api.interceptors.request.use(config => {
   const token = leerToken()
-  if (token && !esRutaOlvide(config.url)) config.headers.Authorization = `Bearer ${token}`
+  if (token && !esRutaPublica(config.url)) config.headers.Authorization = `Bearer ${token}`
   /* El cliente SIN cuenta se identifica con su espacio de borradores. Va en un
      encabezado y no en la URL a propósito: un secreto en la barra de
      direcciones se filtra por historial, logs y Referer. Se manda también con
@@ -115,8 +182,7 @@ api.interceptors.response.use(
     const url: string = original.url || ''
     const hadToken = Boolean(leerToken())
     // El propio flujo de auth no debe disparar refresco ni redirect (evita bucles).
-    const isAuthCall = url.includes('/auth/login') || url.includes('/auth/refresh')
-      || esRutaOlvide(url)
+    const isAuthCall = url.includes('/auth/refresh') || esRutaPublica(url)
 
     if (status === 401 && hadToken && !isAuthCall) {
       // 1er 401: el access seguramente venció → renovar en silencio y REINTENTAR.
@@ -130,8 +196,21 @@ api.interceptors.response.use(
       }
       // No se pudo renovar (o el reintento volvió a 401): la sesión terminó.
       borrarToken()
-      const path = window.location.pathname
-      if (!path.startsWith('/login')) {
+      /* El token muerto se borra SIEMPRE, pero mandar al usuario a /login solo
+         tiene sentido si estaba en una pantalla que necesita sesión.
+
+         En las pantallas de acceso NO se le toca la página. Ahí el redirect
+         hacía daño de verdad: quien está creando una cuenta con una sesión
+         vieja colgando en el navegador —se le venció, la borraron, cambió de
+         cuenta— veía cómo `window.location.href` recargaba entera la página a
+         media captura y le borraba lo que había escrito. Desde su lado, el
+         botón "Crear cuenta" simplemente no hacía nada.
+
+         Y es un redirect que además sobra: estas pantallas ya saben tratar una
+         sesión muerta —`useRedirigirSiHaySesion` hace `logout()` y enseña el
+         formulario—. El interceptor se le adelantaba a martillazos. */
+      if (!enPantallaDeAcceso()) {
+        const path = window.location.pathname
         window.location.href = `/login?next=${encodeURIComponent(path)}&expired=1`
       }
       return Promise.reject(error)
@@ -141,7 +220,7 @@ api.interceptors.response.use(
     // servidor. Los 400 son de cada formulario; los 403 NO van aquí — el panel
     // sondea módulos que cada rol no ve (técnico → métricas, usuarios...) y
     // avisarlos inundaba la pantalla con "necesitas permisos" (visto en campo).
-    if (!esDeFondo(original) && status !== 401) {
+    if (avisaFallos(original) && status !== 401) {
       if (!error?.response) {
         avisar('Sin conexión con REMALI. Revisa tu internet e inténtalo de nuevo.')
       } else if (status >= 500) {

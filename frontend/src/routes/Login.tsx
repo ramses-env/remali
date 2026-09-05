@@ -1,11 +1,10 @@
-import { useState } from 'react'
-import { Link, useLocation } from 'react-router-dom'
+import { useEffect, useRef, useState } from 'react'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import * as z from 'zod'
 import { Eye, EyeOff, Loader2 } from 'lucide-react'
 
-import api from '../lib/api'
 import { useIrTrasEntrar } from '../lib/sesion'
 import { useAuth } from '../store/auth'
 import { AuthCabecera, AuthItem } from '@/components/ui/auth-split-screen'
@@ -41,18 +40,21 @@ export default function Login() {
   const linkInvalido = correoQ === 'invalido'
 
   const [error, setError] = useState<string | undefined>(undefined)
+
+  /* Mismo caso que en Registro: el aviso nace arriba y el botón está abajo, así
+     que en un teléfono el mensaje aparecía fuera de la pantalla y la pantalla
+     parecía no responder. Se lleva el foco al aviso para que se vea y para que
+     el lector de pantalla lo anuncie. */
+  const avisoRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!error) return
+    avisoRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    avisoRef.current?.focus({ preventScroll: true })
+  }, [error])
   const [pendiente, setPendiente] = useState<string | null>(
     params.get('confirmar') === '1' && correoQ.includes('@') ? correoQ : null,
   )
-  const [reenviado, setReenviado] = useState(false)
-
-  async function reenviarConfirmacion() {
-    const escrito = (document.querySelector('input[name="usuario"]') as HTMLInputElement | null)?.value || ''
-    const email = (pendiente || '').includes('@') ? (pendiente as string) : escrito
-    if (!email.includes('@')) { setError('Escribe tu correo en el campo de arriba y vuelve a tocar Reenviar.'); return }
-    try { await api.post('/auth/reenviar-verificacion-publica/', { email: email.trim().toLowerCase() }) } catch { /* respuesta neutra */ }
-    setReenviado(true)
-  }
+  const nav = useNavigate()
   const [verPass, setVerPass] = useState(false)
 
   // El redirect "si ya hay sesión" lo hace el layout: es la misma regla para
@@ -144,10 +146,14 @@ export default function Login() {
         <AuthItem>
           <div className="px-4 py-3 rounded-xl bg-gold-soft border border-gold/30 text-sm text-ink">
             <p className="font-bold mb-0.5">Confirma tu correo para entrar.</p>
-            <p>Te enviamos un link{pendiente ? <> a <b>{pendiente}</b></> : null}. Revisa también Spam o Promociones.</p>
-            <button type="button" onClick={reenviarConfirmacion} disabled={reenviado}
-              className="mt-2 text-sm font-bold text-gold-ink hover:opacity-80 disabled:opacity-60 transition-opacity">
-              {reenviado ? 'Correo reenviado ✓' : 'Reenviar correo'}
+            <p>Te mandamos un código de 6 dígitos{pendiente ? <> a <b>{pendiente}</b></> : null}. Revisa también Spam o Promociones.</p>
+            {/* Se le lleva a la pantalla del código en vez de reenviar desde aquí:
+                si el correo sigue en su bandeja, el código de ese correo TODAVÍA
+                sirve, y reenviar sin preguntar lo invalidaría. Allá puede
+                escribirlo o pedir otro, que es la decisión suya. */}
+            <button type="button" onClick={() => nav(`/verificar?correo=${encodeURIComponent(pendiente || '')}`)}
+              className="mt-2 text-sm font-bold text-gold-ink transition-[transform,opacity] duration-150 hover:opacity-80 active:scale-[0.98]">
+              Escribir mi código
             </button>
           </div>
         </AuthItem>
@@ -163,7 +169,12 @@ export default function Login() {
 
       {error && (
         <AuthItem>
-          <div className="px-4 py-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-600 dark:text-red-400 text-sm">
+          <div
+            ref={avisoRef}
+            role="alert"
+            tabIndex={-1}
+            className="px-4 py-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-600 dark:text-red-400 text-sm outline-none focus-visible:ring-2 focus-visible:ring-red-500/40"
+          >
             {error}
           </div>
         </AuthItem>
@@ -184,7 +195,6 @@ export default function Login() {
                     <Input
                       placeholder="tu@correo.com"
                       autoComplete="username"
-                      className="h-11 rounded-xl bg-surface-2 border-edge text-ink placeholder:text-mute focus-visible:ring-gold/30"
                       disabled={enviando}
                       {...field}
                     />
@@ -207,7 +217,7 @@ export default function Login() {
                       <Input
                         type={verPass ? 'text' : 'password'}
                         autoComplete="current-password"
-                        className="h-11 rounded-xl bg-surface-2 border-edge pr-12 text-ink placeholder:text-mute focus-visible:ring-gold/30"
+                        className="pr-12"
                         disabled={enviando}
                         {...field}
                       />

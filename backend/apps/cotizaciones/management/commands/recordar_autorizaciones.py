@@ -14,6 +14,7 @@ from django.core.management.base import BaseCommand
 from django.utils import timezone
 
 from cotizaciones.models_borrador import DIAS_RECORDATORIO, PaqueteAutorizacion
+from server.rastro import tragado
 
 
 class Command(BaseCommand):
@@ -61,7 +62,7 @@ class Command(BaseCommand):
                                                 mensaje=cuerpo, seccion='cotizaciones',
                                                 ref=f'paquete-recordatorio-{p.id}')
                 except Exception:
-                    pass
+                    tragado()
 
             # Y por correo, que es lo único que le llega al invitado sin cuenta.
             correo = (contacto.get('email') or '').strip()
@@ -70,7 +71,7 @@ class Command(BaseCommand):
                     from maquinaria.correo import enviar_async
                     enviar_async(f'Tu cotización sigue esperando autorización', cuerpo, [correo])
                 except Exception:
-                    pass
+                    tragado()
 
             p.recordatorio_en = timezone.now()
             p.save(update_fields=['recordatorio_en'])

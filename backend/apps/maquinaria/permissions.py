@@ -37,6 +37,8 @@ from typing import NamedTuple, Optional
 
 from rest_framework import permissions
 
+from server.porpeticion import por_peticion
+
 # Tres roles con nombre, más el Dueño (superusuario), que no es un grupo.
 # 'Gerente' y 'Asesor' se retiraron: Gerente era idéntico a Administrador y
 # Asesor no lo usaba nadie. Si vuelve a hacer falta un puesto intermedio se
@@ -53,6 +55,23 @@ ROL_TECNICO = 'Técnico'
 # se quede fuera si la migración no corrió todavía.
 ROL_TECNICO_ANTERIOR = 'Almacén'
 
+# Identidad INTERNA de cada puesto de fábrica. Es lo que manda en el código y en
+# la base; los nombres de arriba son solo con lo que nacen en pantalla, y el
+# dueño los puede cambiar. Preguntar por la clave —y no por el nombre— es lo que
+# permite renombrar "Cajero" a "Mostrador" sin apagarle en silencio las reglas
+# que lo distinguen del técnico. Ver el modelo `Rol`.
+CLAVE_ADMIN = 'administrador'
+CLAVE_GESTOR = 'gestor'
+CLAVE_CAJERO = 'cajero'
+CLAVE_TECNICO = 'tecnico'
+CLAVES_FABRICA = (CLAVE_ADMIN, CLAVE_GESTOR, CLAVE_CAJERO, CLAVE_TECNICO)
+
+#: Con qué nombre nace cada puesto, y desde qué nivel arranca.
+NOMBRE_FABRICA = {
+    CLAVE_ADMIN: ROL_ADMIN, CLAVE_GESTOR: ROL_GESTOR,
+    CLAVE_CAJERO: ROL_CAJERO, CLAVE_TECNICO: ROL_TECNICO,
+}
+
 SIN_ACCESO = 0
 NIVEL_TECNICO = 1
 NIVEL_ADMIN = 2
@@ -64,6 +83,91 @@ ETIQUETA_NIVEL = {
     NIVEL_ADMIN: 'Administrador',
     NIVEL_DUENO: 'Dueño',
 }
+
+
+NIVEL_FABRICA = {
+    CLAVE_ADMIN: NIVEL_ADMIN, CLAVE_GESTOR: NIVEL_ADMIN,
+    CLAVE_CAJERO: NIVEL_TECNICO, CLAVE_TECNICO: NIVEL_TECNICO,
+}
+
+def _mapa_de_fabrica() -> dict:
+    """Los cuatro puestos con su nombre original, sin tocar la base.
+
+    Es el respaldo de cuando la tabla `rol` todavía no existe (migración a medio
+    correr) o la consulta truena. Autoriza exactamente lo mismo que antes de que
+    esta tabla existiera: un error de base no reparte ni quita permisos.
+    """
+    mapa = {NOMBRE_FABRICA[c]: {'clave': c, 'nivel': NIVEL_FABRICA[c],
+                                'nombre': NOMBRE_FABRICA[c], 'protegido': True}
+            for c in CLAVES_FABRICA}
+    mapa[ROL_TECNICO_ANTERIOR] = dict(mapa[ROL_TECNICO], nombre=ROL_TECNICO_ANTERIOR)
+    return mapa
+
+
+def mapa_roles() -> dict:
+    """{nombre del grupo: {clave, nivel, nombre, protegido}}.
+
+    Cacheado LO QUE DURA UNA PETICIÓN, no en memoria del proceso. La diferencia
+    importa: guardarlo en el módulo haría que el worker que renombra un puesto
+    tire su copia y los DEMÁS se queden con el nombre viejo —gente que de pronto
+    no entra según qué proceso le tocó—, y un permiso que depende del worker no
+    es un permiso. Por petición no pasa: el renombre surte efecto en la
+    siguiente, en cualquier worker, y no hay nada que invalidar.
+
+    Lo que se ahorra es real: esto se llamaba 4 veces en cualquier endpoint y 22
+    en `/usuarios/` (una por cuenta de la lista), cada una con su consulta.
+    """
+    return por_peticion('mapa_roles', _leer_mapa_roles)
+
+
+def _leer_mapa_roles() -> dict:
+    try:
+        from .models import Rol
+        mapa = {r.nombre: {'clave': r.clave, 'nivel': r.nivel, 'nombre': r.nombre,
+                           'protegido': r.protegido} for r in Rol.objects.all()}
+    except Exception:
+        mapa = {}
+    if not mapa:
+        return _mapa_de_fabrica()
+    # El grupo viejo sigue valiendo lo que valga hoy el puesto de técnico, aunque
+    # lo hayan renombrado: la cuenta que quedó en 'Almacén' no se cae del panel.
+    tecnico = next((v for v in mapa.values() if v['clave'] == CLAVE_TECNICO), None)
+    if tecnico and ROL_TECNICO_ANTERIOR not in mapa:
+        mapa[ROL_TECNICO_ANTERIOR] = dict(tecnico, nombre=ROL_TECNICO_ANTERIOR)
+    return mapa
+
+
+def roles_editables() -> tuple:
+    """Las claves de los puestos que la pantalla reparte, de mayor a menor nivel.
+
+    El Dueño no está: lo puede todo, siempre, y una casilla suya solo sería una
+    forma de encerrarse fuera de su propio sistema.
+    """
+    vistos = {}
+    for datos in mapa_roles().values():
+        vistos.setdefault(datos['clave'], datos)
+    return tuple(k for k, v in sorted(
+        vistos.items(), key=lambda kv: (-kv[1]['nivel'], kv[1]['nombre'])))
+
+
+def clave_de_grupo(nombre: str) -> str:
+    """La identidad interna del puesto que se llama así, o ''.
+
+    Es el traductor para todo lo que recibe un NOMBRE de fuera —un formulario,
+    un selector, una fila vieja— y necesita preguntar por el puesto de verdad.
+    Comparar el nombre contra una constante deja de funcionar en cuanto alguien
+    renombra el puesto, y falla en silencio.
+    """
+    datos = mapa_roles().get((nombre or '').strip())
+    return datos['clave'] if datos else ''
+
+
+def nombre_de_rol(clave: str) -> str:
+    """El nombre visible de un puesto. Si no está en la base, el de fábrica."""
+    for datos in mapa_roles().values():
+        if datos['clave'] == clave:
+            return datos['nombre']
+    return NOMBRE_FABRICA.get(clave, clave)
 
 
 def _grupos(user) -> set:
@@ -86,15 +190,32 @@ def nivel_de(user) -> int:
         return NIVEL_DUENO
     if user.is_staff:
         return NIVEL_ADMIN
-    grupos = _grupos(user)
-    if ROL_ADMIN in grupos or ROL_GESTOR in grupos:
-        return NIVEL_ADMIN
-    # Cajero y Técnico comparten el nivel para entrar al panel; qué puede hacer
-    # cada uno dentro lo decide puede_de, no el número.
-    if (ROL_CAJERO in grupos
-            or ROL_TECNICO in grupos or ROL_TECNICO_ANTERIOR in grupos):
-        return NIVEL_TECNICO
-    return SIN_ACCESO
+    # El nivel sale del puesto, y el puesto de la tabla: así un rol creado por el
+    # dueño entra al panel sin que nadie toque este archivo. Con varios grupos
+    # manda el más alto, como siempre.
+    mapa = mapa_roles()
+    niveles = [mapa[g]['nivel'] for g in _grupos(user) if g in mapa]
+    return max(niveles) if niveles else SIN_ACCESO
+
+
+def _puesto_de(user):
+    """El puesto que manda cuando alguien trae varios grupos: el de más nivel, y
+    a igualdad de nivel el que va primero en el orden de fábrica."""
+    mapa = mapa_roles()
+    suyos = [mapa[g] for g in _grupos(user) if g in mapa]
+    if not suyos:
+        return None
+    orden = {c: i for i, c in enumerate(CLAVES_FABRICA)}
+    return sorted(suyos, key=lambda d: (-d['nivel'], orden.get(d['clave'], 99), d['nombre']))[0]
+
+
+def clave_de(user) -> str:
+    """La identidad INTERNA del puesto. Es con la que se guardan los permisos y
+    con la que el código pregunta; el nombre visible cambia, esto no."""
+    if not user or not user.is_authenticated or not user.is_active or user.is_superuser:
+        return ''
+    puesto = _puesto_de(user)
+    return puesto['clave'] if puesto else ''
 
 
 def rol_de(user) -> str:
@@ -104,12 +225,11 @@ def rol_de(user) -> str:
         return ETIQUETA_NIVEL[SIN_ACCESO]
     if user.is_superuser:
         return ETIQUETA_NIVEL[NIVEL_DUENO]
-    grupos = _grupos(user)
-    for rol in (ROL_ADMIN, ROL_GESTOR, ROL_CAJERO, ROL_TECNICO):
-        if rol in grupos:
-            return rol
-    if ROL_TECNICO_ANTERIOR in grupos:
-        return ROL_TECNICO
+    puesto = _puesto_de(user)
+    if puesto:
+        # El grupo viejo 'Almacén' se enseña con el nombre que tenga hoy su
+        # puesto: quien lo tiene ES el técnico, aunque su grupo se llame distinto.
+        return nombre_de_rol(puesto['clave'])
     # is_staff sin grupo con nombre: administración "de fábrica".
     return ETIQUETA_NIVEL[nivel_de(user)]
 
@@ -121,13 +241,13 @@ def es_gestor(user) -> bool:
     diferencia importa: al Gestor las acciones delicadas le piden el NIP del
     DUEÑO, no el suyo.
     """
-    return nivel_de(user) == NIVEL_ADMIN and ROL_GESTOR in _grupos(user)
+    return nivel_de(user) == NIVEL_ADMIN and clave_de(user) == CLAVE_GESTOR
 
 
 def es_cajero(user) -> bool:
     """Cajero puro: en el grupo 'Cajero' y sin un nivel más alto que lo eleve. Se
     distingue del técnico por el grupo, porque comparten el número."""
-    return nivel_de(user) == NIVEL_TECNICO and ROL_CAJERO in _grupos(user)
+    return nivel_de(user) == NIVEL_TECNICO and clave_de(user) == CLAVE_CAJERO
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -237,10 +357,20 @@ CATALOGO = (
               'La sección Reparaciones: historial, costos y entrega al cliente. '
               'Distinto de reparar, que es hacer el trabajo.', NIVEL_ADMIN,
               'Campo y taller'),
+    # La caja es del MOSTRADOR, no de la jerarquía: `nivel_minimo=None` para que
+    # NO cascadee hacia arriba. Lo pidió el dueño y además es lo que hace que el
+    # arqueo signifique algo: el corte responde "¿lo que hay en el cajón es lo
+    # que debería haber?" para el turno de quien lo abrió, y eso se deshace en
+    # cuanto media oficina puede cobrar en el mismo cajón. Se reparte por PUESTO
+    # (ver `AJUSTES_POR_PUESTO`); si mañana hace falta que alguien más cobre, el
+    # dueño se la enciende a ese puesto desde Permisos.
     Capacidad('usar_caja', 'Usar la caja',
-              'Vender refacciones en el mostrador y cobrar.', NIVEL_ADMIN, 'Mostrador'),
+              'Cobrar en el mostrador: refacciones y, si están encendidas, '
+              'maquinaria y rentas. Es del puesto de mostrador: no se enciende '
+              'por nivel, ni para administración ni para el dueño.', None, 'Mostrador'),
     Capacidad('corte_caja', 'Hacer corte de caja',
-              'Arqueo del turno.', NIVEL_ADMIN, 'Mostrador'),
+              'Arqueo del turno. Va con la caja: tampoco cascadea por nivel.',
+              None, 'Mostrador'),
     # ── Padrón de clientes ──
     Capacidad('ver_clientes', 'Ver clientes',
               'Buscar en el padrón y abrir la ficha de un cliente. Sin esto, el '
@@ -263,15 +393,39 @@ CATALOGO = (
 )
 
 
-#: Capacidades que NINGUNA pantalla reparte. Que estén aquí no significa que
-#: nadie las tenga: significa que su valor es el de fábrica y ahí se queda.
-#: `tener_codigo_propio` entra porque quien tiene NIP se autoriza a sí mismo las
-#: excepciones —ajustar el precio al vender, entre otras—, que es la vía discreta
-#: de sacar dinero que documenta `CambioPrecioLista`.
-NUCLEO = frozenset({
-    'gestionar_usuarios', 'editar_datos_bancarios', 'borrar_catalogo',
-    'tener_codigo_propio', 'configurar_permisos',
-})
+#: Capacidades que ninguna pantalla reparte. HOY NO HAY NINGUNA.
+#:
+#: Estas cinco vivían aquí con candado —gestionar usuarios, datos bancarios,
+#: borrar del catálogo, tener NIP propio y configurar los permisos—, y el dueño
+#: pidió abrirlas (ago-2026): él decide a quién se las da. Es una decisión suya y
+#: con consecuencias, así que queda escrita en vez de perderse en un diff:
+#:
+#:   · `configurar_permisos` es la llave que reparte las demás. A quien la
+#:     reciba se le puede conceder TODO lo otro, incluida ella misma. El único
+#:     freno que queda es el código de 6 dígitos al guardar —y para el Gestor,
+#:     que ese código es el del DUEÑO (ver `seguridad.verificar_codigo`).
+#:   · `tener_codigo_propio` decide quién se autoriza a sí mismo las excepciones
+#:     —ajustar el precio al vender, entre otras—, que es la vía discreta de
+#:     sacar dinero que documenta `CambioPrecioLista`.
+#:
+#: El conjunto se queda vacío y no se borra: el mecanismo sigue en pie por si
+#: mañana hay que volver a cerrar alguna.
+NUCLEO: frozenset = frozenset()
+
+#: Capacidades que SÍ mandan, pero no desde `permission_classes` de una ruta.
+#: La prueba que vigila que ninguna casilla sea decorativa no puede verlas, así
+#: que van aquí con el lugar exacto donde se imponen. Cualquier agregado necesita
+#: su renglón: esto es una excepción documentada, no un basurero.
+IMPUESTAS_EN_EL_CUERPO = {
+    # `ProtectedDestroyMixin.destroy` las pesa antes de borrar. Va en el mixin y
+    # no en cada vista para que agregar una vista nueva no abra el hueco por
+    # olvido (ver `maquinaria/views.py`).
+    'borrar_catalogo': 'ProtectedDestroyMixin.destroy',
+    # No es una ruta: es un FILTRO DE CAMPOS. Los datos bancarios viajan dentro
+    # de la configuración del negocio, y lo que se protege es que no salgan ni
+    # entren por ahí (ver `ConfiguracionSitioSerializer`).
+    'editar_datos_bancarios': 'ConfiguracionSitioSerializer',
+}
 
 #: Capacidades que NO gatean endpoints porque no describen una acción, sino un
 #: escritorio: qué pantalla ve alguien al entrar. Lo que se hace DESDE esos
@@ -280,15 +434,17 @@ NUCLEO = frozenset({
 #: docs/superpowers/notas/2026-08-22-inventario-permisos.md
 SOLO_PANTALLA = frozenset({'jornada_campo', 'ver_jornada'})
 
-#: Los roles que la pantalla configura. El Dueño no está: lo puede todo, siempre,
-#: y una casilla suya solo sería una forma de encerrarse fuera de su sistema.
-ROLES_EDITABLES = (ROL_GESTOR, ROL_ADMIN, ROL_CAJERO, ROL_TECNICO)
+#: Qué nivel trae cada puesto de fábrica. Los que crea el dueño traen el suyo
+#: guardado en la tabla; `nivel_de_rol` los resuelve a los dos.
+NIVEL_POR_ROL = dict(NIVEL_FABRICA)
 
-#: Nivel de partida de cada rol editable.
-NIVEL_POR_ROL = {
-    ROL_GESTOR: NIVEL_ADMIN, ROL_ADMIN: NIVEL_ADMIN,
-    ROL_CAJERO: NIVEL_TECNICO, ROL_TECNICO: NIVEL_TECNICO,
-}
+
+def nivel_de_rol(clave: str) -> int:
+    """El piso de un puesto. Los creados desde la pantalla nacen en operación."""
+    for datos in mapa_roles().values():
+        if datos['clave'] == clave:
+            return datos['nivel']
+    return NIVEL_FABRICA.get(clave, SIN_ACCESO)
 
 
 # Ajustes por PUESTO, para los que comparten el nivel 1 y hacen trabajos
@@ -305,37 +461,51 @@ AJUSTES_POR_PUESTO = {
     #    delega. Los DATOS BANCARIOS se le bloquean aparte, con su propia
     #    capacidad de nivel dueño.
     #  · Borrar del catálogo y dar de alta gente le quedan fuera por nivel.
-    ROL_GESTOR: {'ver_dinero': False, 'configurar_negocio': True,
-                 'tener_codigo_propio': False},
-    # Mostrador: vende y cobra en la caja, no anda en campo.
-    ROL_CAJERO: {'rentar': False, 'reparar': False, 'operar_inventario': False,
-                 'operar_jornada': False,
-                 'usar_caja': True, 'corte_caja': True},
+    CLAVE_GESTOR: {'ver_dinero': False, 'configurar_negocio': True,
+                   'tener_codigo_propio': False},
+    # Mostrador: vende y cobra en la caja, no anda en campo. Desde que la caja
+    # dejó de cascadear por nivel, estas dos líneas son la ÚNICA vía de fábrica
+    # para `usar_caja` y `corte_caja`: el puesto ES la llave del cajón.
+    CLAVE_CAJERO: {'rentar': False, 'reparar': False, 'operar_inventario': False,
+                   'operar_jornada': False,
+                   'usar_caja': True, 'corte_caja': True},
     # Técnico de campo: REPARA, ENTREGA, RECOGE y COBRA lo que él atiende.
     # No vende ni renta —eso se levanta en el mostrador o en administración—,
     # así que esas dos se apagan aunque su nivel las encendería. Sin esto el
     # panel le prometía dos cosas que no le tocan y que además no tenía dónde
     # hacer, porque Ventas y Rentas piden `ver_dinero`.
-    None: {'jornada_campo': True, 'vender': False, 'rentar': False},
+    #
+    # El PADRÓN también se le apaga. Cascadeaba por nivel y le abría el módulo
+    # de Clientes entero: fichas, datos de contacto, estados de cuenta y los
+    # avisos de "Cuenta nueva" con el correo de quien se registró. Su trabajo
+    # llega servido en "Mi jornada" —a quién le entrega y dónde va en cada
+    # tarea—, así que nunca necesita buscar en el padrón.
+    #
+    # Ojo: se le apaga AL TÉCNICO, no al nivel. El MOSTRADOR sí lo necesita, con
+    # el cliente enfrente y el cobro a medias, y el cajero comparte nivel con él.
+    CLAVE_TECNICO: {'jornada_campo': True, 'vender': False, 'rentar': False,
+                    'ver_clientes': False, 'editar_clientes': False},
 }
 
 
-def capacidades_fabrica(rol: str) -> dict:
-    """Lo que un rol puede ANTES de que el dueño configure nada.
+def capacidades_fabrica(clave: str) -> dict:
+    """Lo que un puesto puede ANTES de que el dueño configure nada.
 
     Es la misma cuenta que hacía `puede_de` —nivel, más el ajuste del puesto—,
-    pero indexada por ROL en vez de por usuario: la pantalla necesita saber qué
-    trae de fábrica un puesto sin tener a nadie de ese puesto enfrente.
+    pero indexada por PUESTO en vez de por usuario: la pantalla necesita saber
+    qué trae de fábrica sin tener a nadie de ese puesto enfrente.
+
+    Un puesto CREADO desde la pantalla no tiene fábrica que heredar: nace con
+    todo apagado y entra al panel, y nada más. Es lo contrario de lo cómodo y lo
+    correcto para lo que esto es: quien inventa un puesto le enciende a mano lo
+    que le toca, en vez de descubrir por accidente lo que se le coló.
     """
-    nivel = NIVEL_POR_ROL.get(rol, SIN_ACCESO)
+    if clave not in CLAVES_FABRICA:
+        return {c.nombre: False for c in CATALOGO}
+    nivel = NIVEL_FABRICA[clave]
     caps = {c.nombre: (c.nivel_minimo is not None and nivel >= c.nivel_minimo)
             for c in CATALOGO}
-    if rol == ROL_GESTOR:
-        caps.update(AJUSTES_POR_PUESTO[ROL_GESTOR])
-    elif rol == ROL_CAJERO:
-        caps.update(AJUSTES_POR_PUESTO[ROL_CAJERO])
-    elif rol == ROL_TECNICO:
-        caps.update(AJUSTES_POR_PUESTO[None])
+    caps.update(AJUSTES_POR_PUESTO.get(clave, {}))
     return caps
 
 
@@ -345,19 +515,21 @@ def catalogo_capacidades() -> list:
     return [{**c._asdict(), 'nucleo': c.nombre in NUCLEO} for c in CATALOGO]
 
 
-def overrides_de_rol(rol: str) -> dict:
-    """Lo que el dueño configuró para ese rol. El núcleo se filtra aquí también:
-    la API lo rechaza al guardar, y esto lo vuelve a rechazar al leer, por si
-    una fila llegó por otra vía (un respaldo viejo, el /admin/ de Django).
+def overrides_de_rol(clave: str) -> dict:
+    """Lo que el dueño configuró para ese puesto.
+
+    `NUCLEO` se sigue filtrando aunque hoy esté vacío: es el mecanismo por si
+    mañana hay que volver a cerrar una capacidad, y así una fila que llegara por
+    otra vía —un respaldo viejo, el /admin/ de Django— tampoco la abriría.
 
     Fail-closed: si la consulta truena —base a medio migrar, por ejemplo—,
     devuelve vacío y manda la fábrica. Un error no reparte permisos.
     """
-    if rol not in ROLES_EDITABLES:
+    if clave not in roles_editables():
         return {}
     try:
         from .models import PermisoRol
-        filas = PermisoRol.objects.filter(rol=rol).values_list('capacidad', 'permitido')
+        filas = PermisoRol.objects.filter(rol=clave).values_list('capacidad', 'permitido')
         return {cap: bool(val) for cap, val in filas if cap not in NUCLEO}
     except Exception:
         return {}
@@ -374,10 +546,12 @@ def puede_de(user) -> dict:
     """
     n = nivel_de(user)
     rol = rol_de(user)
+    clave = clave_de(user)
+    editables = roles_editables()
     if n == SIN_ACCESO:
         caps = {c.nombre: False for c in CATALOGO}
     else:
-        caps = capacidades_fabrica(rol) if rol in ROLES_EDITABLES else {
+        caps = capacidades_fabrica(clave) if clave in editables else {
             c.nombre: (c.nivel_minimo is not None and n >= c.nivel_minimo) for c in CATALOGO
         }
         # `is_staff` con un grupo de nivel 1 (cajero, técnico) vale nivel
@@ -386,11 +560,11 @@ def puede_de(user) -> dict:
         # el panel le escondería lo que la API sí le permite —y ese desfase es el
         # que produce botones que responden 403 y funciones invisibles que sí
         # existen—. El nivel sigue siendo el piso; el puesto solo ajusta ENCIMA.
-        if rol in ROLES_EDITABLES and n > NIVEL_POR_ROL.get(rol, SIN_ACCESO):
+        if clave in editables and n > nivel_de_rol(clave):
             for c in CATALOGO:
                 if c.nivel_minimo is not None and n >= c.nivel_minimo:
                     caps[c.nombre] = True
-        caps.update(overrides_de_rol(rol))
+        caps.update(overrides_de_rol(clave))
     caps['nivel'] = n
     caps['rol'] = rol
     return caps
@@ -441,6 +615,39 @@ class EsOperador(_NivelMinimo):
     message = 'Necesitas acceso al panel.'
 
 
+class NoEsDelNegocio(permissions.BasePermission):
+    """Los caminos del CLIENTE: invitado o cuenta de cliente, nunca el equipo.
+
+    Decisión del dueño (sep 2026): una cuenta del negocio entra al panel a hacer
+    lo de su puesto y nada más. Si alguien del equipo quiere pedir una cotización
+    como cliente, se hace su cuenta de cliente.
+
+    El motivo no es celo: es que las dos cosas se ven IGUAL en la base y después
+    no se distinguen. Una cotización pedida desde la tienda por el cajero entra
+    al mismo buzón que la de un cliente real, dispara los mismos correos y
+    aparece en los mismos conteos —"solicitudes de esta semana"— sin que nadie
+    pueda saber cuáles eran clientes. Lo mismo con los borradores y las obras
+    guardadas: son el taller personal de un cliente, no del mostrador.
+
+    Ojo con quién pasa: el ANÓNIMO sí. La tienda es pública y un visitante sin
+    cuenta tiene que poder pedir su cotización; ese es el camino que da clientes
+    nuevos. Lo que se corta es la cuenta con acceso al panel.
+
+    Lo del panel NO se toca: levantar una renta, registrar una venta o cotizar
+    desde Cotizaciones sigue siendo el trabajo del equipo. Aquello es el negocio
+    registrando; esto es alguien pidiendo.
+    """
+    message = ('Tu cuenta es del equipo de REMALI y esto es del cliente. Si necesitas '
+               'pedirlo como cliente, crea una cuenta de cliente; si es para el '
+               'negocio, hazlo desde el panel.')
+
+    def has_permission(self, request, view):
+        u = getattr(request, 'user', None)
+        if not u or not u.is_authenticated:
+            return True          # invitado de la tienda: su camino de siempre
+        return nivel_de(u) <= SIN_ACCESO
+
+
 class PuedeVerDinero(ExigeCapacidad):
     """Las cuentas del negocio: el Resumen y sus métricas.
 
@@ -474,9 +681,11 @@ class PuedeConfigurarNegocio(ExigeCapacidad):
 
 
 class PuedeUsarCaja(ExigeCapacidad):
-    """La caja (POS de refacciones). No es un nivel: el cajero la usa aunque
-    comparta número con el técnico, y el técnico de campo no, aunque lo comparta
-    con el cajero. Por eso pregunta por la capacidad, no por el nivel."""
+    """La caja (POS del mostrador). No es un nivel, y desde ago-2026 tampoco
+    cascadea: el cajero la usa aunque comparta número con el técnico, y NADIE
+    más la trae de fábrica —ni administración, ni el gestor, ni el dueño—.
+    Cobrar en el cajón es el puesto de mostrador; lo demás se vende desde
+    Ventas, Pedidos o Rentas, que tienen sus propias capacidades."""
     capacidad = 'usar_caja'
     message = 'No tienes acceso a la caja.'
 
@@ -535,6 +744,31 @@ class PuedeReparar(ExigeCapacidad):
     """
     capacidad = 'reparar'
     message = 'No puedes trabajar órdenes de reparación.'
+
+
+class PuedeGestionarUsuarios(ExigeCapacidad):
+    """Dar de alta al equipo, cambiarle el puesto y quitarle el acceso.
+
+    Era de nivel dueño y ahora se reparte: quien la reciba puede crear cuentas y
+    asignarles puesto, o sea repartir acceso al panel. El dueño no se puede
+    quedar fuera —su nivel se la enciende siempre y los overrides no lo tocan—,
+    así que no hay forma de encerrarlo fuera de su propio sistema.
+    """
+    capacidad = 'gestionar_usuarios'
+    message = 'No puedes gestionar las cuentas del equipo.'
+
+
+class PuedeTenerCodigoPropio(ExigeCapacidad):
+    """Fijarse un NIP propio, el que autoriza las acciones delicadas.
+
+    Quien lo tiene se autoriza SOLO sus propias excepciones —ajustar un precio,
+    un anticipo bajo el mínimo—, y por eso el Gestor no lo trae de fábrica: las
+    suyas las aprueba el dueño con el de él, que es una persona distinta de la
+    que ejecuta.
+    """
+    capacidad = 'tener_codigo_propio'
+    message = ('Tu puesto no usa código propio: las acciones que lo requieren '
+               'las autoriza el dueño con el suyo.')
 
 
 class PuedeVender(ExigeCapacidad):

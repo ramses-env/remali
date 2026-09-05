@@ -20,18 +20,21 @@ from django.core.management.base import BaseCommand
 # Apps cuyos permisos administra el panel.
 APPS_PANEL = ['maquinaria', 'inventario', 'refacciones', 'renta', 'ventas', 'cotizaciones', 'clientes', 'facturacion']
 
+# Indexados por CLAVE, no por nombre: el dueño puede renombrar sus puestos, y un
+# comando que fuera por el nombre le crearía un "Cajero" vacío al lado de su
+# "Mostrador" cada vez que se despliega.
 ROLES = {
-    'Administrador': 'todo',
+    'administrador': 'todo',
     # Administración DELEGADA. Mismos permisos finos de Django que el
     # Administrador: lo que lo distingue (no ve las métricas, no borra del
     # catálogo, no toca los datos bancarios y sus acciones delicadas las autoriza
     # el DUEÑO con su NIP) lo impone `puede_de` y las clases de permiso, no esta
     # tabla, que solo alimenta el admin de Django.
-    'Gestor': 'todo',
-    'Técnico': ['view', 'change'],   # ve y ajusta equipo; no borra ni configura
+    'gestor': 'todo',
+    'tecnico': ['view', 'change'],   # ve y ajusta equipo; no borra ni configura
     # Cajero solo consulta en el admin de Django; la caja de verdad (vender
     # refacciones, corte) la gobierna PuedeUsarCaja, no estos permisos.
-    'Cajero': ['view'],
+    'cajero': ['view'],
 }
 
 # Roles retirados. Se BORRAN al correr el comando para que no vuelvan a aparecer
@@ -64,7 +67,18 @@ class Command(BaseCommand):
 
         del_panel = Permission.objects.filter(content_type__app_label__in=APPS_PANEL)
 
-        for nombre, alcance in ROLES.items():
+        # El nombre sale de la tabla `Rol`, que es la que sabe cómo se llama hoy
+        # cada puesto. Si la fila no existe todavía (base recién creada), se cae
+        # al nombre de fábrica, que es con el que nace.
+        from maquinaria.models import Rol
+        from maquinaria.permissions import NIVEL_FABRICA, NOMBRE_FABRICA
+
+        for clave, alcance in ROLES.items():
+            fila = Rol.objects.filter(clave=clave).first()
+            if not fila:
+                fila = Rol.objects.create(clave=clave, nombre=NOMBRE_FABRICA[clave],
+                                          nivel=NIVEL_FABRICA[clave], protegido=True)
+            nombre = fila.nombre
             grupo, creado = Group.objects.get_or_create(name=nombre)
             permisos = del_panel if alcance == 'todo' else del_panel.filter(
                 codename__regex=r'^(' + '|'.join(alcance) + ')_'

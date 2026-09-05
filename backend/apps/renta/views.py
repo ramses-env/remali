@@ -17,12 +17,14 @@ from rest_framework.decorators import throttle_classes
 
 from maquinaria.permissions import (
     IsAdminGroupOrStaff, EsOperador, PuedeFacturar, PuedeOperarJornada,
-    PuedeRentar, PuedeVerMontosOperacion, PuedeVerOperacion, nivel_de, NIVEL_ADMIN,
+    PuedeRentar, PuedeVerMontosOperacion, PuedeVerOperacion, nivel_de, puede_de,
+    NIVEL_ADMIN,
 )
 from maquinaria.throttling import SubidaEvidenciaThrottle
 from . import evidencia as ev
 from inventario.models import Inventario
-from .models import EvidenciaRenta, Renta
+from .models import EvidenciaRenta, Renta, adeudo_vencido_de, nota_de_liquidacion
+from server.rastro import tragado
 
 logger = logging.getLogger(__name__)
 
@@ -59,9 +61,7 @@ def _serialize_renta(r: Renta, ver_dinero: bool = True):
     Los montos van incluidos por defecto: quien entrega también cobra. El
     parámetro existe para vistas donde no hacen falta (ver `ubicaciones_equipos`).
     """
-    from decimal import Decimal as _D
-    pagado = sum((_D(str(p.get('monto', 0))) for p in (r.pagos or [])), _D('0'))
-    saldo = max((r.total or _D('0')) + (r.recargo or _D('0')) - pagado, _D('0'))
+    pagado, saldo = _pagado_saldo(r)
     datos = {
         'id': r.id,
         'usuario_id': r.usuario_id,
@@ -74,6 +74,10 @@ def _serialize_renta(r: Renta, ver_dinero: bool = True):
         'pagos': r.pagos or [],
         'pagado': str(pagado),
         'saldo': str(saldo),
+        # Lo que falta para poder RECOGER (piso de liquidación). Distinto del
+        # saldo: el saldo es todo lo que debe, esto es solo lo que frena la
+        # recolección. Cero = la máquina ya se puede recoger.
+        'falta_liquidar': str(r.falta_para_liquidar()),
         # Depósito en garantía: su estado (retenido → devuelto/a_favor/por_devolver/
         # aplicado) y cuánto se le regresa/queda debiendo al cliente.
         'deposito_estado': r.deposito_estado,
@@ -89,6 +93,7 @@ def _serialize_renta(r: Renta, ver_dinero: bool = True):
         'duracion': r.duracion,
         'fecha_inicio': r.fecha_inicio,
         'fecha_fin': r.fecha_fin,
+        'hora_entrega_estimada': r.hora_entrega_estimada,
         'fecha_devolucion_real': r.fecha_devolucion_real,
         # Cliente
         'cliente': r.cliente_texto,
@@ -104,6 +109,24 @@ def _serialize_renta(r: Renta, ver_dinero: bool = True):
         'estado': r.estado,
         'vencida': r.vencida,
         'dias_restantes': r.dias_restantes,
+        # El INSTANTE, no solo el día: una renta de un día entregada a las 2 pm
+        # se recoge a las 2 pm, y el panel necesita poder decirlo.
+        'vence_en': r.vence_en,
+        'horas_restantes': round(r.horas_restantes, 1),
+        # Quién decide si "toca avisar" es el MODELO, no cada pantalla: el
+        # umbral es proporcional a la renta y estaba a punto de escribirse a
+        # mano en el panel, en la caja y en el cron, con tres criterios.
+        'por_vencer': r.por_vencer,
+        # En qué va DE VERDAD: 'por_entregar' mientras siga en bodega, aunque el
+        # estado ya sea 'activa' porque la unidad está comprometida.
+        'fase': r.fase,
+        'fase_label': r.fase_label,
+        'cancelable_por_cliente': r.cancelable_por_cliente,
+        'en_ruta': {
+            'salio': bool(r.salida_ruta_en),
+            'en': r.salida_ruta_en,
+            'por': r.salida_ruta_por.get_username() if r.salida_ruta_por_id else None,
+        },
         'alerta': 'Ya tienes que recoger el equipo' if r.vencida else (
             'Vence hoy' if (r.estado == 'activa' and r.dias_restantes == 0) else None
         ),
@@ -163,11 +186,49 @@ def _parse_date(value):
         return None
 
 
+def _hora_de_entrega(datos, cotizacion_id=None):
+    """La hora estimada de entrega: la que se capture, o la que ya se prometió.
+
+    Si la renta nace de una cotización que ya traía `entrega_prometida`, se
+    hereda su hora. El compromiso con el cliente ya se hizo ahí; volver a pedirlo
+    en la hoja de la renta sería escribir lo mismo dos veces, que es justo lo que
+    hacía sentir ese campo como un trámite de más.
+    """
+    hora = _parse_hora(datos.get('hora_entrega_estimada'))
+    if hora or not cotizacion_id:
+        return hora
+    try:
+        from cotizaciones.models import Cotizacion
+        cot = Cotizacion.objects.filter(pk=cotizacion_id).first()
+        if cot and cot.entrega_prometida:
+            return timezone.localtime(cot.entrega_prometida).time()
+    except Exception:
+        tragado()
+    return None
+
+
+def _parse_hora(value):
+    """La hora estimada de entrega ('HH:MM' o 'HH:MM:SS'), o None.
+
+    Es opcional y decorativa para el cálculo: una hora que no se entiende se
+    ignora en vez de tumbar la renta. Nadie se queda sin su máquina porque el
+    reloj venía mal escrito.
+    """
+    from datetime import time as _time
+    if not value:
+        return None
+    if isinstance(value, _time):
+        return value
+    try:
+        return _time.fromisoformat(str(value).strip())
+    except (ValueError, TypeError):
+        return None
+
+
 def _pagado_saldo(r):
-    """(pagado, saldo) de una renta a partir de sus abonos."""
-    pagado = sum((Decimal(str(p.get('monto', 0))) for p in (r.pagos or [])), Decimal('0'))
-    saldo = max((r.total or Decimal('0')) + (r.recargo or Decimal('0')) - pagado, Decimal('0'))
-    return pagado, saldo
+    """(pagado, saldo) de una renta. La cuenta vive en el modelo; esto la sirve
+    en pareja porque casi toda vista necesita las dos."""
+    return r.pagado(), r.saldo_pendiente()
 
 
 def _rango_fechas(params):
@@ -256,6 +317,26 @@ def exportar_adeudos_csv(request):
     w.writerow([])
     w.writerow(['', '', '', '', '', '', '', 'TOTAL POR COBRAR', str(tdebe)])
     return resp
+
+
+@api_view(['GET'])
+@permission_classes([PuedeVerOperacion])
+def renta_detalle(request, pk):
+    """UNA renta por id, con la misma forma que trae la lista.
+
+    Existe porque la hoja de detalle del panel vive en su propia dirección
+    (`/dashboard/rentas/<id>`) y tiene que poder cargarse sola: pegada en la
+    barra, recargada, o llegando de un enlace que alguien pasó por WhatsApp.
+    Sacarla de la lista no sirve — la lista viene filtrada por estado, y la
+    renta que te mandaron a ver bien puede estar finalizada.
+    """
+    r = (Renta.objects
+         .select_related('inventario', 'inventario__equipo', 'cliente', 'obra', 'usuario')
+         .prefetch_related('evidencias', 'solicitudes_factura')
+         .filter(pk=pk).first())
+    if not r:
+        return Response({'detalle': 'No encontramos esa renta.'}, status=404)
+    return Response({'renta': _serialize_renta(r)})
 
 
 @api_view(['GET'])
@@ -354,8 +435,7 @@ def rentas_adeudos(request):
           .prefetch_related('evidencias', 'solicitudes_factura'))
     filas, con_saldo, total = [], [], Decimal('0')
     for r in qs:
-        pagado = sum((Decimal(str(p.get('monto', 0))) for p in (r.pagos or [])), Decimal('0'))
-        saldo = (r.total or Decimal('0')) + (r.recargo or Decimal('0')) - pagado
+        saldo = r.saldo_pendiente()
         if saldo > 0:
             filas.append(_serialize_renta(r))
             con_saldo.append(r)
@@ -376,6 +456,64 @@ def rentas_adeudos(request):
     return Response({'rentas': filas, 'total': str(total), 'clientes': len(identidades)})
 
 
+@api_view(['GET'])
+@permission_classes([EsOperador])
+def rentas_recordatorios(request):
+    """A QUIÉN HAY QUE RECORDARLE HOY que traiga la máquina.
+
+    Es la otra mitad de `recordar_rentas`. Ese comando avisa dentro de la app,
+    pero solo alcanza a clientes CON CUENTA — y la mayoría de las rentas de
+    mostrador se levantan con un nombre y un teléfono, nada más. Esta lista es
+    para esos: sale con el teléfono a la mano para llamar o mandar WhatsApp.
+
+    Sustituye al recargo por retraso. La empresa no cobra por tardarse, así que
+    lo que trae la máquina de vuelta es insistir, y para insistir hay que saber a
+    quién. El aviso viejo del panel no servía para esto: se creaba UNA vez por
+    renta (`ref='vencida-{id}'`) y no volvía a aparecer nunca, así que una
+    máquina con veinte días afuera se anunciaba el primer día y luego silencio.
+
+    Devuelve dos grupos, ordenados por urgencia:
+      · `vencidas`   — ya pasó la fecha, de más atrasada a menos.
+      · `por_vencer` — vencen hoy o mañana.
+    """
+    hoy = timezone.localdate()
+    qs = (Renta.objects.filter(estado='activa')
+          .select_related('inventario', 'inventario__equipo', 'cliente', 'obra', 'usuario'))
+
+    vencidas, por_vencer = [], []
+    for r in qs:
+        if not r.fecha_fin:
+            continue
+        dias = (r.fecha_fin - hoy).days
+        if dias > 1:
+            continue
+        fila = {
+            'renta_id': r.id,
+            'equipo': (r.inventario.equipo.modelo
+                       if r.inventario_id and r.inventario.equipo else 'Equipo'),
+            'codigo': r.inventario.codigo if r.inventario_id else '',
+            'cliente': r.cliente_nombre,
+            'telefono': r.telefono_cliente or '',
+            'fecha_fin': r.fecha_fin,
+            'dias': dias,
+            # Con cuenta ya recibió el aviso dentro de la app; sin cuenta, la
+            # llamada es el ÚNICO canal. El panel lo distingue para no gastar
+            # llamadas en quien ya está enterado.
+            'tiene_cuenta': bool(r.usuario_id),
+            'saldo': str(r.saldo_pendiente()),
+            **_lugar_de(r),
+        }
+        (vencidas if dias < 0 else por_vencer).append(fila)
+
+    vencidas.sort(key=lambda f: f['dias'])          # la más atrasada primero
+    por_vencer.sort(key=lambda f: f['dias'])
+    return Response({
+        'vencidas': vencidas,
+        'por_vencer': por_vencer,
+        'total': len(vencidas) + len(por_vencer),
+    })
+
+
 @api_view(['POST'])
 @permission_classes([PuedeFacturar])
 def mandar_por_facturar_renta(request, pk):
@@ -394,7 +532,7 @@ def mandar_por_facturar_renta(request, pk):
     if r.solicitudes_factura.exclude(estado='cancelada').exists():
         return Response({'detalle': 'Ya está en la bandeja de facturación.', 'ya': True})
     perfil = getattr(r.usuario, 'perfil', None) if r.usuario_id else None
-    base = (r.total or Decimal('0')) + (r.recargo or Decimal('0'))
+    base = r.total or Decimal('0')   # ya trae el recargo por retraso adentro
     iva = (base * Decimal('0.16')).quantize(Decimal('0.01'))
     ult = (r.pagos or [{}])[-1].get('metodo', '') if r.pagos else ''
     fp = {'efectivo': '01', 'transferencia': '03', 'tarjeta': '04'}.get(ult, '')
@@ -437,8 +575,7 @@ def registrar_abono(request, pk):
     if metodo not in ('efectivo', 'tarjeta', 'transferencia'):
         return Response({'detalle': 'Método no válido.'}, status=400)
     # Nadie abona más de lo que debe: el tope es el saldo vivo.
-    pagado_previo = sum((Decimal(str(p.get('monto', 0))) for p in (r.pagos or [])), Decimal('0'))
-    saldo = max((r.total or Decimal('0')) + (r.recargo or Decimal('0')) - pagado_previo, Decimal('0'))
+    saldo = r.saldo_pendiente()
     if monto > saldo:
         return Response({'detalle': f'El abono (${monto}) es mayor al saldo (${saldo}).'}, status=400)
     # Fecha del abono: hoy por defecto; editable hacia atrás (se les olvida
@@ -459,6 +596,29 @@ def registrar_abono(request, pk):
         r.save(update_fields=['pagos', 'actualizado_en'])
         aviso = _abono_a_caja(request.user, monto=monto, metodo=metodo, renta=r,
                               concepto=f'Abono renta #{r.id}')
+    # El cliente se entera en su carril del dinero. Sin este aviso el saldo baja
+    # en silencio: el único que sabe que ya se le contó es quien lo cobró.
+    try:
+        if r.usuario_id:
+            from maquinaria.models import crear_notificacion
+            saldo_nuevo = r.saldo_pendiente()
+            equipo_nombre = (r.inventario.equipo.modelo
+                             if r.inventario_id and r.inventario.equipo else 'tu renta')
+            if saldo_nuevo > 0:
+                _titulo = 'Registramos tu abono'
+                _cuerpo = (f'Recibimos ${monto} a cuenta de {equipo_nombre}. '
+                           f'Te queda un saldo de ${saldo_nuevo}.')
+            else:
+                _titulo = 'Quedaste al corriente'
+                _cuerpo = f'Con este abono de ${monto} liquidaste {equipo_nombre}. ¡Gracias!'
+            crear_notificacion(
+                'renta', _titulo, _cuerpo, seccion='mis-adeudos',
+                ref=f'abono-renta-{r.id}-{len(r.pagos or [])}',
+                usuario=r.usuario,
+                data={'renta_id': r.id, 'saldo': str(saldo_nuevo)},
+            )
+    except Exception:
+        logger.exception('No se pudo avisarle al cliente de su abono')
     salida = {'detalle': 'Abono registrado', 'renta': _serialize_renta(r)}
     if aviso:
         salida['caja'] = aviso
@@ -468,18 +628,31 @@ def registrar_abono(request, pk):
 @api_view(['POST'])
 @permission_classes([EsOperador])
 def vincular_cuenta(request, pk):
-    """Vincula (o cambia) la cuenta de cliente de una renta ya registrada.
+    """Vincula la cuenta de cliente de una renta ya registrada.
 
-    Al crearla es opcional; este endpoint permite hacerlo después, para que
-    la renta aparezca en el panel "Tus rentas" del cliente correcto."""
+    Al crearla es opcional; este endpoint permite hacerlo después, para que la
+    renta aparezca en "Tus rentas" del cliente.
+
+    SE VINCULA UNA VEZ. Antes también cambiaba y desvinculaba, y eso es más
+    peligroso de lo que parece: mover una renta de una cuenta a otra se la quita
+    a una persona del historial y se la cuelga a otra, sin dejar rastro y sin
+    que ninguna de las dos se entere. Un error de dedo aquí borra la renta del
+    panel de quien sí la tuvo.
+
+    Si el cliente resultó tener dos cuentas, el camino es FUNDIR las fichas
+    (`/clientes/<id>/fusionar/`): esa sí es una operación de nivel 2, arrastra
+    todo el historial junto y deja anotado quién la hizo y por qué.
+    """
     r = Renta.objects.filter(pk=pk).first()
     if not r:
         return Response({'detalle': 'Renta no encontrada'}, status=404)
+    if r.usuario_id:
+        return Response({'detalle': 'Esta renta ya está vinculada a una cuenta y no se puede cambiar. '
+                                    'Si el cliente tiene cuentas duplicadas, fusiona sus fichas en Clientes.'},
+                        status=409)
     uid = request.data.get('usuario_id')
     if not uid:
-        r.usuario = None
-        r.save(update_fields=['usuario'])
-        return Response({'cuenta': None})
+        return Response({'detalle': 'Falta la cuenta a vincular.'}, status=400)
     from django.contrib.auth import get_user_model
     u = get_user_model().objects.filter(pk=uid, is_active=True, groups__name='Cliente').first()
     if not u:
@@ -577,6 +750,15 @@ def crear_renta(request):
     datos = request.data or {}
     desde_caja = bool(datos.get('desde_caja'))
     turno_abierto_ahora = False
+    # Levantar la renta es una cosa y COBRARLA EN EL CAJÓN es otra: la bandera
+    # cuelga el cobro (y el depósito) del turno de quien la manda, así que sin
+    # `usar_caja` no se acepta. Ver la misma puerta en `inventario.vender_unidad`.
+    if desde_caja and not puede_de(request.user).get('usar_caja'):
+        return Response(
+            {'detalle': 'No tienes acceso a la caja. La renta se levanta desde Rentas.',
+             'codigo': 'sin_caja'},
+            status=403,
+        )
     if desde_caja and not caja_permite('renta'):
         return Response(
             {'detalle': 'Levantar rentas desde la caja está apagado. Enciéndelo en Ajustes → Caja.',
@@ -602,8 +784,8 @@ def crear_renta(request):
     descuento = _dec(datos.get('descuento'))
     deposito = _dec(datos.get('deposito'))
     # Pago combinado: array [{'metodo':'efectivo','monto':'1200'}] o un solo
-    # metodo. Si no viene nada, se registra como efectivo con monto = total en
-    # pagos (para que "pagado" y "saldo" calculen bien).
+    # metodo. Lo que NO viene se queda en cero: una renta que nadie cobró nace
+    # debiendo, no liquidada.
     metodo_pago_uno = (datos.get('metodo_pago') or 'efectivo').lower()
     pagos_raw = datos.get('pagos')
     pagos_limpios = []
@@ -618,36 +800,101 @@ def crear_renta(request):
                 mo = Decimal('0')
             if mo > 0 and m in ('efectivo', 'tarjeta', 'transferencia'):
                 pagos_limpios.append({'metodo': m, 'monto': str(mo)})
+    # Lo que el mostrador dice haber recibido es lo único que se cobra: puede ser
+    # el total, un anticipo o nada. Aquí se rentaba dando por hecho que toda
+    # máquina se pagaba de golpe al levantarla, y el sistema rellenaba el total
+    # cuando nadie capturaba un monto; toda renta nacía liquidada y la cobranza
+    # nunca veía una. Ese relleno ya no existe: quien no cobra, no cobró.
     if not pagos_limpios:
-        try:
-            monto_unico = _dec(datos.get('monto_pago') or None)
-        except Exception:
-            monto_unico = Decimal('0')
-        if monto_unico <= 0:
-            monto_unico = Decimal('0')
-        pagos_limpios.append({'metodo': metodo_pago_uno, 'monto': str(monto_unico)})
+        monto_unico = _dec(datos.get('monto_pago'))
+        if monto_unico > 0:
+            pagos_limpios.append({'metodo': metodo_pago_uno, 'monto': str(monto_unico)})
 
     if modalidad not in ('dia', 'semana', 'mes'):
         return Response({'detalle': 'Modalidad inválida. Usa dia, semana o mes.'}, status=400)
     if not inventario_id:
         return Response({'detalle': 'inventario_id es requerido'}, status=400)
 
-    # Una cotización se concreta UNA sola vez. El botón del panel ya se esconde
-    # cuando la renta existe, pero eso es maquillaje: una pestaña vieja, dos
-    # personas trabajando a la vez o el puente guardado en otra pestaña bastan
-    # para colgar una SEGUNDA renta de la misma cotización — y entonces el
-    # cliente tiene una máquina en la obra y REMALI dos rentas cobrándole.
-    # Va ANTES de crear nada: si fallara al final habría que deshacer la renta,
-    # la unidad ocupada y el movimiento de caja.
+    # ── La palanca de cobro ───────────────────────────────────────────────────
+    # Quien debe de una renta YA TERMINADA no se lleva otra máquina hasta
+    # ponerse al corriente.
+    #
+    # Va AQUÍ y no en la entrega, y la diferencia es de operación, no de código:
+    # levantar la renta pasa por el mostrador —con el cliente enfrente y un
+    # administrador a la mano para autorizar—, mientras que confirmar la entrega
+    # la hace el técnico en la obra, con la máquina ya en el camión y sin nadie
+    # a quien pedirle permiso. Es el mismo error que se corrigió en la
+    # recolección; no se repite aquí.
+    #
+    # Y aquí el candado sí presiona: el cliente QUIERE llevarse algo tuyo. En la
+    # recolección era al revés (ver `nota_de_liquidacion`).
+    adeudo, cuantas = adeudo_vencido_de(
+        cliente_id=cliente_id,
+        usuario_id=datos.get('usuario_id') or None,
+        nombre=cliente,
+    )
+    autorizacion_adeudo = ''
+    if adeudo > 0:
+        from maquinaria.seguridad import verificar_codigo, etiqueta_autorizacion
+        codigo = (datos.get('codigo_ajuste') or '').strip()
+        cifras = {'codigo': 'cliente_con_adeudo', 'adeudo': str(adeudo), 'rentas': cuantas}
+        plural = 'renta' if cuantas == 1 else 'rentas'
+        terminada = 'terminada' if cuantas == 1 else 'terminadas'
+        aviso = (f'Este cliente debe ${adeudo} de {cuantas} {plural} ya {terminada}. '
+                 f'Cóbrale o autoriza para levantar esta renta.')
+
+        if not codigo:
+            # Nadie intentó autorizar: el camino normal es COBRAR. Explicarle aquí
+            # que su rol no autoriza sería contestar una pregunta que no hizo.
+            return Response({'detalle': aviso, **cifras}, status=409)
+
+        ok_cod, detalle_cod, status_cod, _c = verificar_codigo(
+            request.user if request.user.is_authenticated else None, codigo)
+        if not ok_cod:
+            return Response({'detalle': f'{aviso} {detalle_cod}', **cifras}, status=status_cod)
+
+        autorizacion_adeudo = (f'Cliente con ${adeudo} de adeudo vencido; renta autorizada '
+                               f'por {etiqueta_autorizacion(request.user)}.')
+
+    # El tope es CUÁNTAS MÁQUINAS se cotizaron, no "una y ya".
+    #
+    # Antes bastaba con que existiera una renta de esa cotización para rechazar
+    # la siguiente, y eso era correcto mientras una cotización fuera una
+    # máquina. Con dos equipos —o una partida de dos revolvedoras— el segundo
+    # equipo se estrellaba contra este candado: la cotización decía tres
+    # máquinas y el sistema solo dejaba salir una.
+    #
+    # Lo que hay que impedir sigue ahí y es lo importante: que una pestaña
+    # vieja, dos personas trabajando a la vez o el puente guardado en otro lado
+    # cuelguen rentas DE MÁS —el cliente con una máquina en la obra y REMALI dos
+    # rentas cobrándole—. Por eso se cuenta contra lo cotizado en vez de quitar
+    # el freno. Va ANTES de crear nada: si fallara al final habría que deshacer
+    # la renta, la unidad ocupada y el movimiento de caja.
     if cotizacion_id:
-        ya = (Renta.objects.filter(cotizacion_id=cotizacion_id)
-              .exclude(estado='cancelada').only('id').first())
-        if ya:
+        from cotizaciones.models import Cotizacion as _CotTope, CotizacionItem
+        pedidas = sum(
+            max(1, it.cantidad or 1)
+            for it in CotizacionItem.objects.filter(
+                cotizacion_id=cotizacion_id, modalidad__in=('dia', 'semana', 'mes'))
+        ) or 1
+        hechas = (Renta.objects.filter(cotizacion_id=cotizacion_id)
+                  .exclude(estado='cancelada').count())
+        if hechas >= pedidas:
+            ultima = (Renta.objects.filter(cotizacion_id=cotizacion_id)
+                      .exclude(estado='cancelada').order_by('-id').only('id').first())
+            folio = _CotTope.objects.filter(pk=cotizacion_id).values_list('folio', flat=True).first()
             return Response({
-                'detalle': f'Esa cotización ya se concretó en la renta #{ya.id}. '
-                           'Si el trato cambió, cancela esa renta antes de levantar otra.',
+                # El número de la ÚLTIMA renta va en el texto a propósito: el
+                # admin necesita poder ir a verla, no solo enterarse de que no
+                # puede levantar otra.
+                'detalle': (f'Esa cotización ya salió completa: {hechas} de {pedidas} '
+                            f'máquina{"s" if pedidas != 1 else ""} '
+                            f'{"rentadas" if pedidas != 1 else "rentada"}'
+                            + (f' ({folio})' if folio else '')
+                            + (f'; la última es la renta #{ultima.id}' if ultima else '')
+                            + '. Si el trato cambió, cancela una renta antes de levantar otra.'),
                 'codigo': 'ya_concretada',
-                'renta_id': ya.id,
+                'renta_id': ultima.id if ultima else None,
             }, status=409)
     if not direccion:
         return Response({'detalle': 'direccion es requerida'}, status=400)
@@ -668,11 +915,20 @@ def crear_renta(request):
         # Un solo lugar decide a quién le estamos rentando (apps/clientes/
         # resolucion.py). Si viene `cliente_id` se usa; si no, se crea uno con lo
         # que se capturó. NUNCA se une por teléfono sin confirmación.
-        from clientes.resolucion import resolver_cliente
+        from clientes.resolucion import resolver_cliente, cuenta_de
         cli, contacto = resolver_cliente(
             cliente_id=cliente_id, contacto_id=datos.get('contacto_id'),
             nombre=cliente, telefono=telefono_cliente,
         )
+        # Si esa ficha ya tiene cuenta, la renta cae SOLA en "Tus rentas". Antes
+        # había que ir a vincularla a mano después, y nadie se acordaba: el
+        # cliente entraba a su panel y no veía la máquina que tenía en la obra.
+        # No se pisa un `usuario_id` que venga en la petición (concretar una
+        # cotización ya trae el suyo).
+        usuario_cliente = datos.get('usuario_id') or None
+        if not usuario_cliente:
+            u = cuenta_de(cli, contacto)
+            usuario_cliente = u.id if u else None
 
         r = Renta(
             inventario=inv,
@@ -684,26 +940,30 @@ def crear_renta(request):
             cliente=cli,
             contacto=contacto,
             obra_id=obra_id,
-            usuario_id=datos.get('usuario_id') or None,   # cuenta del cliente, para "Tus rentas"
+            usuario_id=usuario_cliente,   # cuenta del cliente, para "Tus rentas"
             descuento=descuento,
             deposito=deposito,
             fecha_inicio=fecha_inicio,
+            hora_entrega_estimada=_hora_de_entrega(datos, cotizacion_id),
             estado=estado,
             aplica_iva=bool(datos.get('requiere_factura')),  # precios sin IVA; se suma si hay factura
+            # Si se levantó pese a un adeudo vencido, aquí queda quién lo dejó
+            # pasar y por cuánto. Una excepción sin huella no se puede revisar.
+            liquidacion_nota=autorizacion_adeudo[:255],
         )
         r.fecha_fin = r.calcular_fecha_fin()
 
         try:
             r.save()
-            # Guarda pagos combinados o el pago único: si los montos están en
-            # 0 (no se capturó), se asume que el cliente entrega el total
-            # en efectivo (comportamiento histórico).
+            # Guarda pagos combinados o el pago único, tal cual se capturaron.
             try:
                 total = r.total or Decimal('0')
                 suma_pagos = sum((Decimal(str(p.get('monto', 0))) for p in pagos_limpios), Decimal('0'))
-                if suma_pagos <= 0 and total > 0:
-                    # Fallback retro-compatible: capturar el total en efectivo.
-                    pagos_limpios = [{'metodo': metodo_pago_uno, 'monto': str(total)}]
+                if suma_pagos > total:
+                    # Cobrar de más al levantar la renta es un dedazo, y uno caro:
+                    # nace con "saldo a favor" que ningún abono puede corregir.
+                    transaction.set_rollback(True)
+                    return Response({'detalle': f'Lo cobrado (${suma_pagos}) es mayor al total de la renta (${total}).'}, status=400)
                 # Normaliza cada pago a {fecha, monto, metodo, por} —igual que
                 # registrar_abono— para que el detalle no truene al leer p.fecha.
                 _sello = timezone.now().isoformat()
@@ -717,7 +977,13 @@ def crear_renta(request):
                 r.pagos = pagos_limpios
                 r.save(update_fields=['pagos'])
             except Exception:
-                pass
+                # AQUÍ NO se traga: si la escritura de los pagos falla, la renta
+                # quedaría guardada con saldo por el total completo y el efectivo
+                # que el cliente ya dejó no existiría en ninguna parte. Mejor que
+                # truene, el atomic() de arriba deshaga todo y el mostrador la
+                # levante otra vez, que una renta con el cobro perdido.
+                tragado('pagos de la renta que se estaba levantando')
+                raise
             # Liga con su cotización: explícita si viene, o match único e inequívoco
             # (mismo cliente, tipo renta, aceptada y sin rentas ya ligadas).
             try:
@@ -739,10 +1005,14 @@ def crear_renta(request):
                     if cot.cupon_id:
                         cot.cupon.marcar_usado()
             except Exception:
-                pass  # valida traslape, calcula montos y ocupa la unidad si es 'activa'
+                tragado()  # valida traslape, calcula montos y ocupa la unidad si es 'activa'
         except ValidationError as e:
+            # `return` dentro de un atomic() COMMITEA lo ya escrito: sin esto,
+            # una operación a medias se queda guardada y nadie se entera.
+            transaction.set_rollback(True)
             return Response({'detalle': ' '.join(e.messages)}, status=400)
         except ValueError as e:
+            transaction.set_rollback(True)
             return Response({'detalle': str(e)}, status=400)
 
         try:
@@ -774,6 +1044,13 @@ def crear_renta(request):
                         f'Rentaste {inv.codigo} por {r.duracion} {_modal}{"s" if r.duracion != 1 else ""}, '
                         f'total ${r.total}. Entrega en: {direccion}. Si necesitas algo, avísanos.'
                     )
+                # Si la renta sale con saldo, el cliente se entera en el mismo
+                # aviso: el dinero que debe vive en "Mis adeudos", no escondido
+                # en el detalle de la renta.
+                _pagado, _saldo = _pagado_saldo(r)
+                if _saldo > 0:
+                    _cuerpo += (f' Llevas pagado ${_pagado} y queda un saldo de ${_saldo}, '
+                                'que puedes ir abonando en "Mis adeudos".')
                 try:
                     crear_notificacion(
                         'renta',
@@ -789,9 +1066,9 @@ def crear_renta(request):
                         },
                     )
                 except Exception:
-                    pass
+                    tragado()
         except Exception:
-            pass
+            tragado()
 
         # Solicitud de factura (si el cliente la pedirá) → bandeja "por facturar".
         if datos.get('requiere_factura'):
@@ -923,6 +1200,8 @@ def renovar_renta(request, pk: int):
             descuento=_dec(datos.get('descuento')),
             deposito=deposito_nuevo,
             fecha_inicio=fecha_inicio,
+            hora_entrega_estimada=(_parse_hora(datos.get('hora_entrega_estimada'))
+                                   or prev.hora_entrega_estimada),
             estado=estado,
             aplica_iva=prev.aplica_iva,
             renta_origen=prev,
@@ -981,9 +1260,9 @@ def renovar_renta(request, pk: int):
                               'codigo': inv.codigo, 'accion_cliente': 'renovaste'},
                     )
                 except Exception:
-                    pass
+                    tragado()
         except Exception:
-            pass
+            tragado()
 
         return Response({
             'renta': _serialize_renta(nueva),
@@ -1006,29 +1285,57 @@ def devolver_renta(request, pk: int):
         return Response({'detalle': f'La renta no está activa (estado: {r.estado})'}, status=400)
 
     fecha_dev = _parse_date((request.data or {}).get('fecha_devolucion'))
-    r.finalizar(fecha_devolucion=fecha_dev, commit=True)
-
-    # Quién la recogió y cuándo: el mismo rastro que la entrega.
-    r.recogida_en = timezone.now()
-    r.recogida_por = request.user if request.user.is_authenticated else None
-    r.save(update_fields=['recogida_en', 'recogida_por', 'actualizado_en'])
-    _avisar_movimiento(r, 'recogió', request.user)
-
-    # Cierre del DEPÓSITO (lo decide el técnico al devolver): si mandó cómo
-    # resolverlo y hay depósito retenido, se liquida en el mismo movimiento.
     dep = (request.data or {}).get('deposito')
-    if dep and (r.deposito or 0) > 0:
-        r.resolver_deposito(
-            aplicar_deuda=dep.get('aplicar_deuda') or 0,
-            aplicar_dano=dep.get('aplicar_dano') or 0,
-            reembolso_tipo=dep.get('reembolso_tipo') or 'devuelto',
-            nota=dep.get('nota') or '',
-            user=request.user if request.user.is_authenticated else None,
-        )
+
+    # La devolución se arma COMPLETA y hasta el final se decide si se queda: si
+    # el cliente todavía debe, nada de esto pasó. El orden importa —el recargo
+    # por retraso nace en `finalizar()` y la garantía puede cubrir la deuda—, así
+    # que el saldo solo es de fiar cuando ya se cerró y ya se resolvió el depósito.
+    with transaction.atomic():
+        r.finalizar(fecha_devolucion=fecha_dev, commit=True)
+
+        # Quién la recogió y cuándo: el mismo rastro que la entrega.
+        r.recogida_en = timezone.now()
+        r.recogida_por = request.user if request.user.is_authenticated else None
+        r.save(update_fields=['recogida_en', 'recogida_por', 'actualizado_en'])
+
+        # Cierre del DEPÓSITO (lo decide el técnico al devolver): si mandó cómo
+        # resolverlo y hay depósito retenido, se liquida en el mismo movimiento.
+        if dep and (r.deposito or 0) > 0:
+            r.resolver_deposito(
+                aplicar_deuda=dep.get('aplicar_deuda') or 0,
+                aplicar_dano=dep.get('aplicar_dano') or 0,
+                reembolso_tipo=dep.get('reembolso_tipo') or 'devuelto',
+                nota=dep.get('nota') or '',
+                user=request.user if request.user.is_authenticated else None,
+            )
+
+        # La recolección NUNCA se frena por dinero. El piso de liquidación es una
+        # META de cobranza, no un candado: si el cliente no llegó, la máquina se
+        # recoge igual, el saldo se va a Adeudos y administración recibe el
+        # aviso el mismo día. El porqué está en `nota_de_liquidacion`, pero en
+        # corto: bloquear hacía crecer el recargo (y con él el propio piso) y
+        # dejaba la máquina en la obra, que es exactamente al revés de lo que le
+        # conviene a la empresa.
+        #
+        # Va DESPUÉS de resolver el depósito a propósito: lo que el técnico
+        # aplique de la garantía a la deuda ya entró como abono y cuenta.
+        nota_liq = nota_de_liquidacion(r.total, r.pagado())
+        if nota_liq:
+            r.liquidacion_nota = nota_liq[:255]
+            r.save(update_fields=['liquidacion_nota', 'actualizado_en'])
+            _avisar_recoleccion_bajo_piso(r, request, nota_liq)
+
+    _avisar_movimiento(r, 'recogió', request.user)
 
     detalle = 'Equipo devuelto y renta finalizada'
     if r.recargo and r.recargo > 0:
         detalle += f'. Recargo por retraso: ${r.recargo}'
+    # Lo que quedó debiendo se dice AQUÍ, no en un 409: la máquina ya volvió y
+    # quien la recibió tiene que saber que el cobro sigue vivo.
+    saldo_final = r.saldo_pendiente()
+    if saldo_final > 0:
+        detalle += f'. Quedan ${saldo_final} en cobranza'
     return Response({'renta': _serialize_renta(r), 'detalle': detalle})
 
 
@@ -1080,10 +1387,16 @@ def cancelar_reserva_cliente(request, pk: int):
          .filter(pk=pk, usuario=request.user).first())
     if not r:
         return Response({'detalle': 'Renta no encontrada'}, status=404)
-    if r.estado != 'reservada' or r.entregada_en:
-        return Response({'detalle': 'Esta renta ya no es una reserva; contáctanos para cualquier cambio.'}, status=400)
-    if r.fecha_inicio and r.fecha_inicio <= timezone.localdate():
-        return Response({'detalle': 'Ya llegó el día de tu reserva; contáctanos por WhatsApp para cualquier cambio.'}, status=400)
+    # El corte es FÍSICO, no de calendario. Antes se pedían dos cosas —que
+    # siguiera siendo 'reservada' y que la fecha fuera futura— y las dos fallaban
+    # en el caso real: una entrega programada para HOY nace 'activa' desde la
+    # madrugada, así que a las 7 am, con la máquina en el patio, el cliente ya no
+    # podía cancelar. El chofer salía cargado para nada.
+    if not r.cancelable_por_cliente:
+        detalle = ('Tu equipo ya va en camino; háblanos por WhatsApp para cualquier cambio.'
+                   if r.salida_ruta_en and not r.entregada_en
+                   else 'Tu equipo ya fue entregado; háblanos por WhatsApp para cualquier cambio.')
+        return Response({'detalle': detalle}, status=400)
     motivo = (request.data or {}).get('motivo', '').strip()[:500]
     r.cancelar(motivo=f'Cancelada por el cliente{": " + motivo if motivo else ""}')
     try:
@@ -1100,7 +1413,7 @@ def cancelar_reserva_cliente(request, pk: int):
             data={'renta_id': r.id},
         )
     except Exception:
-        pass
+        tragado()
     return Response({'detalle': 'Tu reserva quedó cancelada.', 'renta': _serialize_renta(r)})
 
 
@@ -1165,7 +1478,7 @@ def sustituir_unidad_renta(request, pk: int):
             seccion='rentas', ref=f'sustitucion-{r.id}-{nueva.pk}', data={'renta_id': r.id},
         )
     except Exception:
-        pass
+        tragado()
     return Response({'renta': _serialize_renta(r),
                      'detalle': f'Listo: la renta ahora usa {nueva.codigo}; {vieja.codigo} pasó a mantenimiento.'})
 
@@ -1320,6 +1633,68 @@ def evidencia_renta_eliminar(request, pk: int, evidencia_id: int):
 # ─────────────────────────────────────────────
 #  EL DÍA DEL TÉCNICO: dónde está el equipo y qué hay en taller
 # ─────────────────────────────────────────────
+def _bandera(data, clave, por_defecto=True):
+    """Lee un booleano del body sin creerle a las apariencias.
+
+    `request.data.get(...)` devuelve el string `'false'` cuando el cliente manda
+    form-data en vez de JSON, y `'false'` es verdadero en Python: el "deshacer"
+    de estas marcas quedaba desarmado según cómo se hubiera mandado la petición,
+    que es la peor clase de bug — funciona en la prueba y falla en el campo.
+    """
+    v = (data or {}).get(clave, por_defecto)
+    if isinstance(v, str):
+        return v.strip().lower() not in ('false', '0', 'no', '')
+    return bool(v)
+
+
+@api_view(['POST'])
+@permission_classes([PuedeOperarJornada])
+def marcar_en_camino(request, pk: int):
+    """El técnico marca que ya salió con el equipo. Body: {"en_camino": true|false}.
+
+    Es el único momento que le importa al cliente: hasta aquí puede cancelar
+    solo; a partir de aquí, la camioneta ya salió y cualquier cambio se habla
+    con administración. Por eso lo marca una persona y no un reloj —si el chofer
+    sale tarde, el candado tiene que salir tarde con él—.
+
+    De paso el cliente se entera de que su equipo va en camino, que hoy no sabía:
+    veía "Activa" desde la madrugada y no podía distinguir la máquina que sigue
+    en bodega de la que ya viene.
+    """
+    r = (Renta.objects
+         .select_related('inventario', 'inventario__equipo', 'usuario')
+         .filter(pk=pk).first())
+    if not r:
+        return Response({'detalle': 'Renta no encontrada'}, status=404)
+    if r.estado in ('finalizada', 'cancelada'):
+        return Response({'detalle': f'La renta está {r.get_estado_display().lower()}.'}, status=400)
+    if r.entregada_en:
+        return Response({'detalle': 'El equipo ya está entregado.'}, status=400)
+
+    if not _bandera(request.data, 'en_camino'):
+        r.salida_ruta_en, r.salida_ruta_por = None, None
+        r.save(update_fields=['salida_ruta_en', 'salida_ruta_por', 'actualizado_en'])
+        return Response({'detalle': 'Se quitó la marca de salida', 'renta': _serialize_renta(r)})
+
+    if r.salida_ruta_en:
+        return Response({'detalle': 'Ya estaba marcada como en camino', 'renta': _serialize_renta(r)})
+
+    r.salida_ruta_en = timezone.now()
+    r.salida_ruta_por = request.user if request.user.is_authenticated else None
+    r.save(update_fields=['salida_ruta_en', 'salida_ruta_por', 'actualizado_en'])
+
+    if r.usuario_id:
+        from maquinaria.models import crear_notificacion
+        eq = r.inventario.equipo.modelo if (r.inventario and r.inventario.equipo) else 'tu equipo'
+        crear_notificacion(
+            'renta', 'Tu equipo va en camino',
+            f'{eq} ya salió rumbo a {r.direccion or "tu obra"}. A partir de ahora, '
+            f'cualquier cambio háblalo con nosotros.',
+            seccion='rentas', ref=f'en-camino-{r.id}', usuario=r.usuario,
+        )
+    return Response({'detalle': 'Marcada en camino', 'renta': _serialize_renta(r)})
+
+
 @api_view(['POST'])
 @permission_classes([PuedeOperarJornada])
 def confirmar_entrega(request, pk: int):
@@ -1342,7 +1717,7 @@ def confirmar_entrega(request, pk: int):
         if r.estado in ('finalizada', 'cancelada'):
             return Response({'detalle': f'La renta está {r.get_estado_display().lower()}; ya no se puede marcar la entrega.'}, status=400)
 
-        entregado = request.data.get('entregado', True)
+        entregado = _bandera(request.data, 'entregado')
         if not entregado:
             r.entregada_en, r.entregada_por = None, None
             r.save(update_fields=['entregada_en', 'entregada_por', 'actualizado_en'])
@@ -1374,10 +1749,26 @@ def confirmar_entrega(request, pk: int):
         r.entregada_en = timezone.now()
         r.entregada_por = request.user if request.user.is_authenticated else None
         r.save(update_fields=['entregada_en', 'entregada_por', 'actualizado_en'])
+        # La renta corre desde que la máquina SALIÓ: el cliente paga días de
+        # uso, no de calendario. Si la fecha nueva pisa la reserva de otro,
+        # `choque` la trae para avisarlo — la entrega no se frena por eso.
+        choque = r.correr_fin_por_entrega()
 
     # Los avisos van FUERA de la transacción: que falle una notificación no
     # puede deshacer una entrega que ya ocurrió en el mundo real.
     _avisar_movimiento(r, 'entregó', request.user)
+    if choque:
+        # Nadie se entera de un traslape mirando una tabla: se avisa al equipo
+        # con los dos folios, para que muevan la reserva o llamen al cliente.
+        from maquinaria.models import crear_notificacion
+        crear_notificacion(
+            'renta', 'Ojo: dos rentas sobre la misma unidad',
+            f'La renta #{r.id} se entregó tarde y su recolección se recorrió al '
+            f'{r.fecha_fin:%d/%m}. Con esas fechas se encima con la #{choque.id}, '
+            f'que va del {choque.fecha_inicio:%d/%m} al {choque.fecha_fin:%d/%m}. '
+            f'Hay que mover una de las dos.',
+            ref=f'traslape-{r.id}-{choque.id}',
+        )
     # Aviso PERSONAL al cliente ligado a la renta.
     if r.usuario_id:
         from maquinaria.models import crear_notificacion
@@ -1407,7 +1798,46 @@ def _avisar_movimiento(r, verbo, usuario):
             data={'renta_id': r.id, 'movimiento': verbo},
         )
     except Exception:
-        pass
+        tragado()
+
+
+def _avisar_recoleccion_bajo_piso(r, request, nota):
+    """La máquina volvió sin que el cliente llegara al piso de cobro.
+
+    Es el control que sustituyó al candado: nadie pide permiso en la obra —el
+    administrador está en la oficina y el código de autorización es PERSONAL,
+    así que dictárselo por teléfono al técnico lo vaciaría de sentido—, pero
+    administración se entera el mismo día y persigue el cobro con nombre,
+    teléfono y cifras a la mano.
+
+    Va como BROADCAST (sin `usuario`): lo ve todo el equipo, no un buzón que
+    puede estar de vacaciones. La `ref` evita que se duplique si la devolución
+    se reintenta.
+    """
+    try:
+        from maquinaria.models import crear_notificacion
+        equipo = r.inventario.equipo.modelo if r.inventario_id and r.inventario.equipo else 'Equipo'
+        quien = getattr(request.user, 'get_username', lambda: 'Alguien')()
+        cliente = (r.cliente_texto or r.cliente_nombre or 'Cliente sin nombre').strip()
+        saldo = r.saldo_pendiente()
+        # La nota que el técnico escribió en la hoja suele ser el dato que hace
+        # cobrable el adeudo ("dijo que pasa el viernes"), así que viaja también.
+        capturada = ((request.data or {}).get('nota') or '').strip() if isinstance(request.data, dict) else ''
+        cuerpo = f'{cliente} · {equipo} ({r.inventario.codigo}). {nota} Recogió {quien}.'
+        if capturada:
+            cuerpo += f' Nota: “{capturada}”.'
+        crear_notificacion(
+            'renta',
+            f'Se recogió con saldo: ${saldo}',
+            cuerpo,
+            seccion='adeudos',
+            ref=f'bajo-piso-renta-{r.id}',
+            data={'renta_id': r.id, 'saldo': str(saldo), 'telefono': r.telefono_cliente or ''},
+        )
+    except Exception:
+        # Un aviso que falla no puede tumbar una recolección ya hecha: la máquina
+        # ya está en el camión y el rastro quedó en `liquidacion_nota`.
+        tragado()
 
 
 def _lugar_de(r):
@@ -1444,12 +1874,10 @@ def mis_tareas(request):
               .select_related('inventario', 'inventario__equipo', 'cliente', 'obra', 'usuario')
               .prefetch_related('evidencias', 'solicitudes_factura'))
 
-    from decimal import Decimal as _D
     for r in rentas:
         # Adeudo: lo ÚNICO de dinero que el técnico sí debe ver — si recoge y
         # el cliente no ha liquidado, tiene que saber cuánto cobrar en campo.
-        pagado = sum((_D(str(p.get('monto', 0))) for p in (r.pagos or [])), _D('0'))
-        saldo = max((r.total or _D('0')) + (r.recargo or _D('0')) - pagado, _D('0'))
+        saldo = r.saldo_pendiente()
         base = {
             'renta_id': r.id,
             'equipo': r.inventario.equipo.modelo if r.inventario.equipo else 'Equipo',
@@ -1457,8 +1885,11 @@ def mis_tareas(request):
             'numero_serie': r.inventario.numero_serie,
             'fecha_inicio': r.fecha_inicio,
             'fecha_fin': r.fecha_fin,
+            'hora_entrega_estimada': r.hora_entrega_estimada,
             'evidencias': _contar_evidencias(r),
             'adeudo': str(saldo) if saldo > 0 else None,
+            # Lo que frena la recolección. El técnico cobra ESTO, no el adeudo.
+            'falta_liquidar': str(r.falta_para_liquidar()),
             **_lugar_de(r),
         }
 
@@ -1470,7 +1901,16 @@ def mis_tareas(request):
             else:
                 urgencia = 'proxima'
                 etiqueta = f'Entregar el {r.fecha_inicio:%d/%m}'
-            tareas.append({**base, 'tipo': 'entregar', 'urgencia': urgencia, 'etiqueta': etiqueta})
+            # La hora que se le prometió al cliente: es lo que decide a qué hora
+            # sale el técnico. Sin ella, "entregar hoy" no dice si es a las 8 o
+            # a las 6 de la tarde.
+            if r.hora_entrega_estimada:
+                etiqueta += f' · {r.hora_entrega_estimada:%H:%M}'
+            # `en_camino` le dice a la tarjeta si el chofer ya salió: mientras
+            # sea falso el cliente todavía puede cancelar, y ese es justo el
+            # botón que el técnico tiene que tocar antes de arrancar.
+            tareas.append({**base, 'tipo': 'entregar', 'urgencia': urgencia,
+                           'etiqueta': etiqueta, 'en_camino': bool(r.salida_ruta_en)})
             continue
 
         # Ya entregada: solo es tarea si toca recogerla pronto. A mitad de renta
@@ -1549,7 +1989,7 @@ def mis_tareas(request):
                 'etiqueta': f"Entrega prometida · {timezone.localtime(c.entrega_prometida):%H:%M}",
             })
     except Exception:
-        pass
+        tragado()
 
     return Response({'tareas': tareas, 'resumen': resumen})
 
@@ -1559,37 +1999,38 @@ def mis_tareas(request):
 def rentas_mias(request):
     """Las rentas ligadas a la cuenta del cliente (para 'Tus rentas')."""
     hoy = timezone.localdate()
-    LABEL = {'activa': 'Activa', 'reservada': 'Reservada',
-             'finalizada': 'Finalizada', 'cancelada': 'Cancelada'}
     qs = (Renta.objects
           .filter(usuario=request.user)
           .select_related('inventario__equipo')
           .order_by('-creado_en')[:100])
-    from decimal import Decimal as _D
     data = []
     for r in qs:
         eq = getattr(getattr(r.inventario, 'equipo', None), 'modelo', '') if r.inventario_id else ''
-        vencida = r.estado == 'activa' and r.fecha_fin and r.fecha_fin < hoy
+        # La FASE, no el estado: al cliente se le enseñaba "Activa" para una
+        # máquina que sigue en la bodega, y eso se lee como "ya la tienes".
+        fase = r.fase
         # El cliente ve SUS abonos y su saldo: transparencia de cuánto lleva.
-        pagado = sum((_D(str(p.get('monto', 0))) for p in (r.pagos or [])), _D('0'))
-        saldo = max((r.total or _D('0')) + (r.recargo or _D('0')) - pagado, _D('0'))
+        pagado, saldo = _pagado_saldo(r)
         data.append({
             'id': r.id,
             'equipo': eq,
             'modalidad': r.modalidad,
-            'estado': r.estado,
-            'estado_label': 'Vencida' if vencida else LABEL.get(r.estado, r.estado),
+            'estado': fase,
+            'estado_label': r.fase_label,
+            # El estado en base de datos, por si alguna pantalla lo necesita.
+            'estado_db': r.estado,
             'fecha_inicio': r.fecha_inicio,
             'fecha_fin': r.fecha_fin,
+            'hora_entrega_estimada': r.hora_entrega_estimada,
             'total': str(r.total),
             'direccion': r.direccion,
             'pagos': [{'fecha': p.get('fecha'), 'monto': p.get('monto'), 'metodo': p.get('metodo')} for p in (r.pagos or [])],
             'pagado': str(pagado),
             'saldo': str(saldo),
-            # El cliente puede cancelar SOLO mientras siga siendo una reserva a
-            # futuro: sin entregar y antes del día. Llegado el día o entregada,
-            # REMALI ya movió la máquina — de ahí en más, se habla con ellos.
-            'cancelable': (r.estado == 'reservada' and not r.entregada_en
-                           and bool(r.fecha_inicio) and r.fecha_inicio > hoy),
+            # Puede cancelar mientras la MÁQUINA no se haya movido, no mientras
+            # falten días. Un cliente que avisa a las 7 de la mañana que ya no la
+            # necesita le ahorra el viaje al chofer; decirle que no porque "ya
+            # llegó el día" hacía salir la camioneta cargada para nada.
+            'cancelable': r.cancelable_por_cliente,
         })
     return Response({'rentas': data})

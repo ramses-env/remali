@@ -21,6 +21,7 @@ urlpatterns = [
     path('caja/sesiones/<int:pk>/movimiento/', caja_views.movimiento_caja, name='caja-movimiento'),
     path('caja/ventas-recientes/', caja_views.ventas_recientes, name='caja-ventas-recientes'),
     path('caja/devolucion/', caja_views.devolucion_caja, name='caja-devolucion'),
+    path('ventas/<int:pk>/', views.venta_detalle, name='ventas-detalle'),
     path('ventas/<int:pk>/abono/', views.registrar_abono_venta, name='ventas-abono'),
     path('ventas/<int:pk>/entregar/', views.entregar_venta, name='ventas-entregar'),
     # Sacar UNA máquina de una venta de varias (acción sensible: pide código).

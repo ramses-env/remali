@@ -8,13 +8,14 @@ import Migas from '../components/Migas'
 import { formatMoney } from '../lib/utils'
 import { useAuth } from '../store/auth'
 import { useCart, type Modalidad } from '../store/cart'
-import { useToast } from '../store/toast'
+import { useToast, type Notify } from '../store/toast'
 import {
   listarBorradores, eliminarBorrador, duplicarBorrador, enviarBorrador, actualizarBorrador,
   mandarAAutorizar, retirarPaquete, migrarBorradoresLocales, reclamarEspacio,
   totalBorrador, resumenBorrador, aLineasDeCarrito, tieneEquiposCaidos,
   MAX_BORRADORES, type Borrador, type Paquete,
 } from '../lib/borradores'
+import { anotarFallo } from '../lib/fallo'
 
 type CotMia = {
   folio: string
@@ -79,7 +80,7 @@ function AutorizarModal({ seleccion, onClose, onEnviado, notify }: {
   seleccion: Borrador[]
   onClose: () => void
   onEnviado: () => void
-  notify: (m: string, kind?: 'x') => void
+  notify: Notify
 }) {
   const [perfil, setPerfil] = useState<PerfilLote | null>(null)
   const [obras, setObras] = useState<ObraCli[]>([])
@@ -98,7 +99,7 @@ function AutorizarModal({ seleccion, onClose, onEnviado, notify }: {
       setObras(list)
       const pred = list.find(o => o.predeterminada) || list[0]
       if (pred) setObraId(pred.id)
-    }).catch(() => {})
+    }).catch(anotarFallo)
   }, [])
 
   const totalLote = seleccion.reduce((s, b) => s + totalBorrador(b), 0)
@@ -133,7 +134,7 @@ function AutorizarModal({ seleccion, onClose, onEnviado, notify }: {
       const paquete = await mandarAAutorizar(seleccion.map(b => b.id), modo, mensaje.trim())
       setLiga(`${window.location.origin}${paquete.liga}`)
     } catch (e) {
-      notify((e as { response?: { data?: { detalle?: string } } })?.response?.data?.detalle || 'No se pudo crear la liga', 'x')
+      notify((e as { response?: { data?: { detalle?: string } } })?.response?.data?.detalle || 'No se pudo crear la liga', 'err')
     } finally {
       setCreando(false)
     }
@@ -141,7 +142,7 @@ function AutorizarModal({ seleccion, onClose, onEnviado, notify }: {
 
   async function copiar() {
     if (!liga) return
-    try { await navigator.clipboard.writeText(liga); setCopiada(true); setTimeout(() => setCopiada(false), 2000) } catch { notify('No se pudo copiar', 'x') }
+    try { await navigator.clipboard.writeText(liga); setCopiada(true); setTimeout(() => setCopiada(false), 2000) } catch { notify('No se pudo copiar', 'err') }
   }
 
   const wa = liga ? `https://wa.me/?text=${encodeURIComponent(`Hola, te comparto ${seleccion.length === 1 ? 'una cotización' : `${seleccion.length} cotizaciones`} de maquinaria para autorizar. Ábrela, revisa el total y autorízala aquí:\n${liga}`)}` : ''
@@ -208,7 +209,7 @@ function AutorizarModal({ seleccion, onClose, onEnviado, notify }: {
                 <p className="text-[11px] font-bold uppercase tracking-wide text-mute mb-1.5">Recado para quien autoriza <span className="normal-case font-normal">(opcional)</span></p>
                 <textarea value={mensaje} onChange={e => setMensaje(e.target.value)} rows={2}
                   placeholder="Ej. Es para la obra Norte, la necesitamos el martes."
-                  className="w-full bg-surface-2 border border-edge rounded-xl px-4 py-2.5 text-sm text-ink placeholder-mute focus:outline-none focus:border-gold/60 transition-colors resize-none" />
+                  className="campo campo-area" />
               </div>
 
               <div>
@@ -221,8 +222,18 @@ function AutorizarModal({ seleccion, onClose, onEnviado, notify }: {
               <div>
                 <p className="text-[11px] font-bold uppercase tracking-wide text-mute mb-1.5">Obra{varias ? ' · la misma para todas' : ''}</p>
                 {obras.length
-                  ? <select value={obraId ?? ''} onChange={e => setObraId(Number(e.target.value))} className="w-full bg-surface-2 border border-edge rounded-xl px-4 py-2.5 text-sm text-ink focus:outline-none focus:border-gold/60 transition-colors">
-                      {obras.map(o => <option key={o.id} value={o.id} className="bg-surface">{o.direccion || o.nombre}{o.responsable ? ` · ${o.responsable}` : ''}</option>)}
+                  ? <select value={obraId ?? ''} onChange={e => setObraId(Number(e.target.value))} className="campo">
+                      {/* El NOMBRE primero. Aquí salía la dirección, con el
+                          nombre solo como respaldo, y era al revés de lo que
+                          sirve: una obra se identifica por como le dicen
+                          ("Hotel Princess", "Bodega del puerto"), no por su
+                          calle. Con tres obras sobre la misma avenida, la lista
+                          mostraba tres renglones casi idénticos y había que
+                          adivinar cuál era cuál. La dirección va detrás, que es
+                          lo que confirma que es esa; el responsable se quitó
+                          porque no distingue nada —suele ser la misma persona
+                          en varias obras—. Igual que en el armador y el perfil. */}
+                      {obras.map(o => <option key={o.id} value={o.id} className="bg-surface">{o.nombre}{o.direccion ? ` · ${o.direccion}` : ''}</option>)}
                     </select>
                   : <p className="text-[13px] text-mute">No tienes obras guardadas. <Link to="/cotizacion" className="text-gold-ink font-semibold">Guarda una en el armador</Link> y regresa.</p>}
               </div>
@@ -307,7 +318,7 @@ export default function MisCotizaciones() {
     const cargar = (fondo = false) =>
       api.get<{ cotizaciones: CotMia[] }>('/cotizaciones/mias/', { fondo } as never)
         .then(r => { if (vivo) setCots(r.data?.cotizaciones || []) })
-        .catch(() => {})
+        .catch(anotarFallo)
         .finally(() => vivo && setCargando(false))
     cargar()
     recargar.current = () => cargar(true)
@@ -316,10 +327,10 @@ export default function MisCotizaciones() {
        lee la lista, o el cliente vería su taller vacío por un instante. */
     reclamarEspacio()
       .then(() => migrarBorradoresLocales())
-      .then(n => { if (n) notify(`Subimos ${n} borrador(es) que tenías guardados en este navegador`) })
+      .then(n => { if (n) notify(`Subimos ${n} borrador(es) que tenías guardados en este navegador`, 'info') })
       // El taller es una parte de la pantalla, no la pantalla: si el servidor
       // falla aquí, la lista de lo que ya mandó tiene que seguir cargando.
-      .catch(() => {})
+      .catch(anotarFallo)
       .finally(() => { if (vivo) recargarBorradores() })
     return () => { vivo = false }
   }, [token, nav])
@@ -351,8 +362,8 @@ export default function MisCotizaciones() {
 
   function seguirEditando(b: Borrador) {
     dispatch({ type: 'reemplazar', items: aLineasDeCarrito(b) })
-    if (tieneEquiposCaidos(b)) notify('Alguno de sus equipos ya no está en el catálogo; lo quitamos', 'x')
-    else notify('Borrador cargado — sigue editándolo')
+    if (tieneEquiposCaidos(b)) notify('Alguno de sus equipos ya no está en el catálogo; lo quitamos', 'err')
+    else notify('Borrador cargado — sigue editándolo', 'info')
     nav('/cotizacion')
   }
 
@@ -360,9 +371,9 @@ export default function MisCotizaciones() {
     try {
       await duplicarBorrador(b.id)
       await recargarBorradores()
-      notify('Copia lista — ajústala y vuelve a mandarla')
+      notify('Copia lista — ajústala y vuelve a mandarla', 'info')
     } catch (e) {
-      notify((e as { response?: { data?: { detalle?: string } } })?.response?.data?.detalle || 'No se pudo duplicar', 'x')
+      notify((e as { response?: { data?: { detalle?: string } } })?.response?.data?.detalle || 'No se pudo duplicar', 'err')
     }
   }
 
@@ -370,9 +381,9 @@ export default function MisCotizaciones() {
     try {
       await retirarPaquete(p.id)
       await recargarBorradores()
-      notify('Liga retirada: tus borradores volvieron a estar editables')
+      notify('Liga retirada: tus borradores volvieron a estar editables', 'neutro')
     } catch {
-      notify('No se pudo retirar', 'x')
+      notify('No se pudo retirar', 'err')
     }
   }
 
@@ -391,7 +402,7 @@ export default function MisCotizaciones() {
         nav('/cotizacion', { state: { enviarBorradorId: b.id } })
         return
       }
-      notify(err?.response?.data?.detalle || 'No se pudo enviar', 'x')
+      notify(err?.response?.data?.detalle || 'No se pudo enviar', 'err')
     }
   }
 
@@ -405,9 +416,9 @@ export default function MisCotizaciones() {
     try {
       await eliminarBorrador(id)
       await recargarBorradores()
-      notify('Borrador borrado')
+      notify('Borrador borrado', 'neutro')
     } catch {
-      notify('No se pudo borrar', 'x')
+      notify('No se pudo borrar', 'err')
     } finally {
       setConfirmando(null)
     }
@@ -416,7 +427,7 @@ export default function MisCotizaciones() {
   function volverACotizar(c: CotMia) {
     if (!c.carrito?.length) return
     dispatch({ type: 'reemplazar', items: c.carrito.map((l, idx) => ({ lineId: Date.now() + idx, id: l.id, title: l.title, price: l.price, qty: l.qty, duracion: l.duracion, unit: l.unit })) })
-    notify('Cotización cargada de nuevo')
+    notify('Cotización cargada de nuevo', 'info')
     nav('/cotizacion')
   }
 
@@ -464,7 +475,7 @@ export default function MisCotizaciones() {
             })}
           </div>
           <input value={q} onChange={e => setQ(e.target.value)} placeholder="Folio o equipo…"
-            className="flex-1 min-w-[200px] h-[44px] px-4 rounded-xl border border-edge bg-surface text-sm text-ink placeholder-mute focus:outline-none focus:border-gold/60 transition-colors" />
+            className="campo flex-1 w-auto min-w-[200px] bg-surface" />
         </div>
 
         {/* ── Esperando a quien autoriza (aún NO llegan a REMALI) ── */}
@@ -485,7 +496,7 @@ export default function MisCotizaciones() {
                   <div className="min-w-0">
                     <div className="flex items-center gap-2.5 flex-wrap">
                       <span className="text-[16.5px] font-bold tracking-tight">{formatMoney(Number(pq.total))}</span>
-                      <span className={`text-[11px] font-bold tracking-wide px-2.5 py-1 rounded-full whitespace-nowrap border ${pq.vencido ? 'bg-red-500/10 text-red-500 border-red-500/30' : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30'}`}>
+                      <span className={`text-[11px] font-bold tracking-wide px-2.5 py-1 rounded-full whitespace-nowrap border ${pq.vencido ? 'bg-red-500/10 text-red-500 border-red-500/30' : 'bg-amber-500/10 text-taller-ink border-amber-500/30'}`}>
                         {pq.vencido ? 'Liga vencida' : 'Esperando'}
                       </span>
                       {pq.modo === 'opciones' && n > 1 && (
@@ -500,7 +511,7 @@ export default function MisCotizaciones() {
                   </div>
                   <div className="flex items-center gap-2 flex-wrap">
                     {!pq.vencido && <>
-                      <button onClick={async () => { try { await navigator.clipboard.writeText(liga); notify('Liga copiada: mándasela a quien autoriza') } catch { notify('No se pudo copiar', 'x') } }}
+                      <button onClick={async () => { try { await navigator.clipboard.writeText(liga); notify('Liga copiada: mándasela a quien autoriza') } catch { notify('No se pudo copiar', 'err') } }}
                         className="h-[40px] px-4 rounded-xl bg-gold-soft text-gold-ink text-[13.5px] font-bold grid place-items-center hover:opacity-85 transition-opacity">Copiar liga</button>
                       <a href={wa} target="_blank" rel="noopener noreferrer" className="h-[40px] px-4 rounded-xl border border-[#25D366]/40 text-[#1c9d4d] dark:text-[#25D366] text-[13.5px] font-bold grid place-items-center hover:bg-[#25D366]/10 transition-colors">WhatsApp</a>
                     </>}

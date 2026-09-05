@@ -8,6 +8,7 @@ websockets ni infra nueva.
 """
 from django.apps import apps as django_apps
 from django.db.models.signals import post_save, post_delete
+from server.rastro import tragado
 
 # Modelo → temas del bus del frontend (lib/realtime.ts) que invalida.
 REGISTRO = {
@@ -19,6 +20,9 @@ REGISTRO = {
     'maquinaria.ConfiguracionSitio': ('config',),
     'maquinaria.PerfilUsuario': ('usuarios',),
     'maquinaria.PermisoRol': ('permisos',),
+    # Crear, renombrar o borrar un puesto cambia lo que puede la gente que lo
+    # tiene, y también el selector de rol de Usuarios: los dos se refrescan.
+    'maquinaria.Rol': ('permisos', 'usuarios'),
     'maquinaria.Notificacion': ('notificaciones',),
     'inventario.Inventario': ('unidades', 'equipos'),
     'inventario.Mantenimiento': ('reparaciones', 'unidades'),
@@ -57,7 +61,7 @@ def _receptor(temas):
         try:
             tocar(*temas)
         except Exception:
-            pass  # el latido jamás debe tumbar un guardado del negocio
+            tragado()  # el latido jamás debe tumbar un guardado del negocio
     return fn
 
 

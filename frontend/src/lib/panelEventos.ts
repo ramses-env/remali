@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 
 import { expandTemas, invalidar, type Tema } from './realtime'
 import { leerToken } from './token'
+import wsUrl from './wsUrl'
 
 type PanelPayload = { topics?: string[] }
 
@@ -19,8 +20,7 @@ export function usePanelEventos() {
     const conectar = () => {
       const token = leerToken()
       if (!token || !vivo) return
-      const proto = location.protocol === 'https:' ? 'wss' : 'ws'
-      ws = new WebSocket(`${proto}://${location.host}/ws/panel-eventos/?token=${encodeURIComponent(token)}`)
+      ws = new WebSocket(wsUrl('/ws/panel-eventos/', token))
       ws.onmessage = (e) => {
         try {
           const data = JSON.parse(e.data) as PanelPayload

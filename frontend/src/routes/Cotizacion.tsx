@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect } from 'react'
+import { useIrAlTope } from '../components/ScrollAlTope'
 import { useCart, MODALIDAD_LABEL } from '../store/cart'
 // Solo el TIPO: la función se importa dinámicamente al descargar, para que
 // jsPDF (~350 KB) no entre al bundle inicial de la tienda.
@@ -15,9 +16,12 @@ import Migas from '../components/Migas'
 import { waLink } from '../lib/whatsapp'
 import { useConfigPublica } from '../lib/configPublica'
 import { useProfile } from '../store/profile'
-import { formatMoney } from '../lib/utils'
+import { formatMoney, ligaAbsoluta } from '../lib/utils'
+import { anotarFallo } from '../lib/fallo'
+import DialogoHost, { confirmar, pedir } from '../components/Dialogo'
+import AddressAutocomplete from '../components/AddressAutocomplete'
 
-const inputBase = 'w-full bg-surface-2 border rounded-xl px-4 py-2.5 text-sm text-ink placeholder-mute focus:outline-none transition-colors'
+const inputBase = 'campo'
 const money = formatMoney
 
 // Periodos que se cobran de una línea: la duración en renta; 1 en venta.
@@ -54,6 +58,15 @@ export default function Cotizacion() {
   const { notify } = useToast()
   const cfg = useConfigPublica()   // WhatsApp del negocio, configurado en el panel
   const { user } = useProfile()    // si hay sesión, precargamos su perfil
+  /* Cupón. El código se emitía, se notificaba y se pintaba en el perfil… y no
+     había DÓNDE ponerlo: el 5% prometido por completar el perfil no se podía
+     reclamar en ningún lado. Este es el campo que faltaba.
+     `cuponAbierto` solo controla el desplegable de teclear a mano; quien ya
+     tiene su cupón de bienvenida no pasa por ahí, lo aplica de un toque. */
+  const [cuponAbierto, setCuponAbierto] = useState(false)
+  const [cuponTexto, setCuponTexto] = useState('')
+  const [cuponCargando, setCuponCargando] = useState(false)
+  const [cuponError, setCuponError] = useState<string | null>(null)
   const [prefilled, setPrefilled] = useState(false)
   const [obras, setObras] = useState<ObraCli[]>([])   // obras guardadas del cliente
   const [nombre, setNombre] = useState('')
@@ -92,9 +105,9 @@ export default function Cotizacion() {
       setResponsable(v => keep(v, p.obra_responsable))
       setDireccion(v => keep(v, p.obra_direccion))
       if (p.first_name || p.empresa || p.telefono) setPrefilled(true)
-    }).catch(() => { /* sin sesión o sin perfil: se llena a mano */ })
+    }).catch(anotarFallo)
     // Obras guardadas: para elegir una y no re-escribir sus datos.
-    api.get<ObraCli[]>('/obras-cliente/').then(r => vivo && setObras(r.data || [])).catch(() => {})
+    api.get<ObraCli[]>('/obras-cliente/').then(r => vivo && setObras(r.data || [])).catch(anotarFallo)
     return () => { vivo = false }
   }, [user])
 
@@ -105,20 +118,50 @@ export default function Cotizacion() {
     setObraTelefono((o.telefono || '').replace(/\D+/g, '').slice(0, 10))
   }
 
-  // Guardar la obra actual en la cuenta, para reusarla después.
+  /* Guardar la obra actual en la cuenta, para reusarla después.
+   *
+   *  El NOMBRE se pregunta. Antes se rellenaba con la dirección recortada a 60
+   *  caracteres, y por eso las obras guardadas se veían como
+   *  "Av. Costera Miguel Alemán 1250, Fracc…" — tres obras en la misma avenida
+   *  quedaban idénticas en el listado y había que abrirlas para saber cuál era
+   *  cuál. Una obra se identifica por como le dicen ("Hotel Princess",
+   *  "Bodega del puerto"), no por su calle; la dirección ya viaja en su propio
+   *  campo y se muestra debajo. */
   async function guardarObra() {
-    if (!direccion.trim() && !responsable.trim()) { notify('Llena la obra antes de guardarla', 'x'); return }
-    const nombre = direccion.trim().slice(0, 60) || `Obra ${obras.length + 1}`
-    // Sin duplicados: si ya existe una obra igual, no se crea otra.
+    if (!direccion.trim() && !responsable.trim()) { notify('Llena la obra antes de guardarla', 'err'); return }
     const norm = (v: string) => v.trim().toLowerCase()
-    if (obras.some(o => norm(o.direccion || o.nombre) === norm(direccion || nombre))) {
-      notify('Esa obra ya está guardada en tu cuenta', 'x'); return
+    /* Se sugiere la EMPRESA, nunca la dirección.
+     *
+     * Aquí se prellenaba con la calle recortada, y como el diálogo trae el
+     * valor puesto, aceptar sin pensarlo dejaba obras llamadas "Calle Gardenias
+     * Co. U…" — con la tarjeta enseñando la misma calle arriba y abajo, que es
+     * exactamente lo que este nombre existe para evitar. La línea contradecía
+     * al comentario que tiene encima.
+     *
+     * Sin empresa se deja VACÍO a propósito: es preferible que el campo pida
+     * escribir algo a que ofrezca un mal nombre listo para aceptar. */
+    const sugerido = empresa.trim()
+    const nombre = (await pedir({
+      titulo: '¿Cómo le llamas a esta obra?',
+      mensaje: 'El nombre de la obra o de la empresa: "Hotel Princess", "Bodega del puerto", "Constructora del Bajío". La dirección ya se guarda aparte.',
+      placeholder: 'Nombre de la obra o empresa',
+      valor: sugerido,
+    }))?.trim()
+    if (!nombre) return
+    // Y si aun así escriben la calle, se ataja: el nombre es para distinguir
+    // dos obras, y dos obras de la misma avenida quedarían idénticas.
+    if (norm(nombre) === norm(direccion) || norm(direccion).startsWith(norm(nombre))) {
+      notify('Ponle un nombre, no la dirección: esa ya se guarda aparte.', 'err'); return
+    }
+    // Sin duplicados: se compara por NOMBRE, que es lo que identifica la obra.
+    if (obras.some(o => norm(o.nombre) === norm(nombre))) {
+      notify('Ya tienes una obra con ese nombre', 'err'); return
     }
     try {
       const r = await api.post<ObraCli>('/obras-cliente/', { nombre, responsable, direccion, telefono: obraTelefono })
       setObras(prev => [...prev.filter(o => o.id !== r.data.id), r.data])
       notify('Obra guardada en tu cuenta')
-    } catch { notify('No se pudo guardar la obra', 'x') }
+    } catch { notify('No se pudo guardar la obra', 'err') }
   }
 
   const isEmail = (v: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)
@@ -146,7 +189,7 @@ export default function Cotizacion() {
   }
   async function handleDownload() {
     if (!formValid) {
-      notify('Completa los campos obligatorios para generar la cotización', 'x')
+      notify('Completa los campos obligatorios para generar la cotización', 'err')
       setShowErrors(true)
       return
     }
@@ -177,7 +220,7 @@ export default function Cotizacion() {
       await recargarBorradores()
       return true
     } catch (err: any) {
-      notify(err?.response?.data?.detalle || 'No se pudo preparar la autorización', 'x')
+      notify(err?.response?.data?.detalle || 'No se pudo preparar la autorización', 'err')
       return false
     } finally { setSending(false) }
   }
@@ -186,7 +229,7 @@ export default function Cotizacion() {
      una liga pública (sin cuenta) y al autorizar llega SOLA a REMALI. */
   async function autorizarCarrito() {
     if (!formValid) {
-      notify('Completa los campos obligatorios para mandarla a autorizar', 'x')
+      notify('Completa los campos obligatorios para mandarla a autorizar', 'err')
       setShowErrors(true)
       return
     }
@@ -194,28 +237,33 @@ export default function Cotizacion() {
   }
   async function handleSend() {
     if (!formValid) {
-      notify('Completa los campos obligatorios para enviar la solicitud', 'x')
+      notify('Completa los campos obligatorios para enviar la solicitud', 'err')
       setShowErrors(true)
       return
     }
     setSending(true)
     try {
-      const r = await api.post<{ folio: string; liga?: string }>('/tienda/cotizacion/', {
+      const r = await api.post<{ folio: string; liga?: string; cupon_error?: string | null }>('/tienda/cotizacion/', {
         items: state.items.map(i => ({ equipo_id: i.id, cantidad: i.qty, duracion: periodosDe(i), unit: i.unit || 'venta' })),
         cliente: { nombre, empresa, email, telefono },
         obra: { responsable, direccion, telefono: obraTelefono },
         requiere_factura: factura,
+        codigo_cupon: state.coupon?.code || '',
       })
+      /* El servidor tiene la última palabra sobre el cupón: si entre que se
+         validó y se envió alguien lo desactivó, aquí nos enteramos. Callarlo
+         dejaría al cliente esperando un descuento que no va a llegar. */
+      if (r.data.cupon_error) notify(r.data.cupon_error, 'warning')
       // Mensaje de WhatsApp pre-llenado (se arma ANTES de limpiar el carrito).
       const resumen = state.items.map(i => `${i.qty}x ${i.title}`).join(', ')
       setSentWaMsg(`Hola, soy ${nombre}. Envié la solicitud de cotización ${r.data.folio}${resumen ? ` (${resumen})` : ''}. Quisiera continuar por aquí.`)
       setSentPdfArgs(pdfArgs())   // conserva los datos para descargar el PDF tras limpiar
       setSentResumen({ items: state.items, total: totalConIVA, obra: direccion.trim() || empresa.trim() })
-      setSentLiga(r.data.liga || null)
+      setSentLiga(r.data.liga ? ligaAbsoluta(r.data.liga) : null)
       setSentFolio(r.data.folio)
       dispatch({ type: 'clear' })
     } catch (err: any) {
-      notify(err?.response?.data?.detalle || 'No se pudo enviar la solicitud', 'x')
+      notify(err?.response?.data?.detalle || 'No se pudo enviar la solicitud', 'err')
     } finally {
       setSending(false)
     }
@@ -225,6 +273,46 @@ export default function Cotizacion() {
      incluyen IVA (solo se desglosa, nunca se suma); los de RENTA van sin IVA
      y se les suma 16% únicamente si el cliente pide factura. El descuento se
      reparte proporcional entre ambas porciones. */
+  /* El cupón de bienvenida de ESTE cliente, si aún no lo gasta. Es lo que
+     convierte "teclea tu código" en "aplícalo": el cliente no tiene por qué
+     recordar ocho caracteres que le mandamos por correo hace tres semanas. */
+  const miCupon = user?.cupon && !user.cupon.usado && !user.cupon.vencido ? user.cupon : null
+
+  /* "Vence el 5 de diciembre" y no "vence en 47 días": la fecha es la que el
+     cliente puede apuntar en su calendario, y es la misma que va a leer en su
+     perfil y en el correo. Una cuenta regresiva obliga a hacer la resta al
+     revés para saber de qué día estamos hablando. */
+  const venceEl = (iso?: string | null) =>
+    iso ? new Date(iso).toLocaleDateString('es-MX', { day: 'numeric', month: 'long' }) : null
+
+  const aplicarCupon = async (codigo: string) => {
+    const code = codigo.trim().toUpperCase()
+    if (!code || cuponCargando) return
+    setCuponCargando(true)
+    setCuponError(null)
+    try {
+      /* `fondo: true` calla la alerta global: el error se lee AQUÍ, pegado al
+         campo, que es donde está mirando quien acaba de teclear mal su código. */
+      const r = await api.post<{ discount: number; codigo: string; personal?: boolean }>(
+        '/cupones/aplicar/', { code }, { fondo: true } as any)
+      dispatch({ type: 'coupon', code: r.data.codigo, discount: r.data.discount, personal: r.data.personal })
+      setCuponAbierto(false)
+      setCuponTexto('')
+      notify(`Cupón aplicado: ${Math.round(r.data.discount * 100)}% de descuento`, 'ok')
+    } catch (e: any) {
+      setCuponError(e?.response?.data?.detail || 'No pudimos aplicar ese cupón.')
+    } finally {
+      setCuponCargando(false)
+    }
+  }
+
+  /* El cupón vive en localStorage y sobrevive al cierre de sesión. Uno personal
+     ya no vale para nadie: sin esto el visitante seguía viendo su 5% pintado en
+     el resumen y se enteraba de que no aplicaba hasta enviar la solicitud. */
+  useEffect(() => {
+    if (!user && state.coupon?.personal) dispatch({ type: 'quitar-cupon' })
+  }, [user, state.coupon?.personal, dispatch])
+
   const subVenta = state.items.reduce((s, i) => s + (i.unit === 'venta' ? importeLinea(i) : 0), 0)
   const subRenta = state.items.reduce((s, i) => s + (i.unit !== 'venta' ? importeLinea(i) : 0), 0)
   const subtotal = subVenta + subRenta
@@ -233,6 +321,13 @@ export default function Cotizacion() {
   const ventaNeta = subVenta * factor            // IVA incluido
   const rentaNeta = subRenta * factor            // sin IVA
   const ivaVentaIncluido = ventaNeta - ventaNeta / 1.16   // desglose informativo
+  /* Lo mínimo que el SAT pide para timbrar. Sin esto la cotización prometía una
+     factura que después nadie iba a poder emitir, y el cliente se enteraba al
+     final. Solo aplica a quien tiene sesión: al invitado se le piden al
+     confirmar, junto con todo lo demás. */
+  const faltanFiscales = !!user && !(
+    (user.fiscal_rfc || '').trim() && (user.fiscal_regimen || '').trim() && (user.fiscal_cp || '').trim()
+  )
   const ivaRenta = factura ? rentaNeta * 0.16 : 0
   const baseSinIVA = ventaNeta / 1.16 + rentaNeta
   const ivaAmt = ivaVentaIncluido + ivaRenta     // lo que la factura desglosaría
@@ -241,12 +336,12 @@ export default function Cotizacion() {
   const inp = (ok: boolean) => `${inputBase} ${showErrors && !ok ? 'border-red-500' : 'border-edge focus:border-gold/60'}`
 
   async function copiarLiga() {
-    if (!sentLiga) { notify('Primero envía tu solicitud: la liga se genera con el folio', 'x'); return }
+    if (!sentLiga) { notify('Primero envía tu solicitud: la liga se genera con el folio', 'err'); return }
     try {
       await navigator.clipboard.writeText(sentLiga)
       setLigaCopiada(true)
       window.setTimeout(() => setLigaCopiada(false), 2000)
-    } catch { notify('No se pudo copiar. Mantén presionado para copiar manualmente', 'x') }
+    } catch { notify('No se pudo copiar. Mantén presionado para copiar manualmente', 'err') }
   }
 
   const monoLabel = 'text-[10.5px] font-mono tracking-[0.14em] text-mute uppercase'
@@ -265,10 +360,10 @@ export default function Cotizacion() {
   useEffect(() => {
     reclamarEspacio()
       .then(() => migrarBorradoresLocales())
-      .then(n => { if (n) notify(`Subimos ${n} borrador(es) que tenías guardados en este navegador`) })
+      .then(n => { if (n) notify(`Subimos ${n} borrador(es) que tenías guardados en este navegador`, 'info') })
       // Si el taller no carga, el armador sigue sirviendo para cotizar: es lo
       // que el cliente vino a hacer.
-      .catch(() => {})
+      .catch(anotarFallo)
       .finally(recargarBorradores)
     // Solo al montar: el rescate de lo viejo se hace una vez.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -284,8 +379,8 @@ export default function Cotizacion() {
   })
 
   async function guardarBorrador() {
-    if (!state.items.length) { notify('Agrega equipos antes de guardar el borrador', 'x'); return }
-    if (borradores.length >= MAX_BORRADORES) { notify(`Máximo ${MAX_BORRADORES} borradores; borra alguno primero`, 'x'); return }
+    if (!state.items.length) { notify('Agrega equipos antes de guardar el borrador', 'err'); return }
+    if (borradores.length >= MAX_BORRADORES) { notify(`Máximo ${MAX_BORRADORES} borradores; borra alguno primero`, 'err'); return }
     const tipo = state.items[0].unit === 'venta' ? 'Venta' : 'Renta'
     const nom = `${tipo} · ${state.items.length} equipo${state.items.length === 1 ? '' : 's'} · ${money(totalConIVA)}`
     try {
@@ -293,20 +388,25 @@ export default function Cotizacion() {
       await recargarBorradores()
       notify('Borrador guardado')
     } catch (e) {
-      notify((e as { response?: { data?: { detalle?: string } } })?.response?.data?.detalle || 'No se pudo guardar', 'x')
+      notify((e as { response?: { data?: { detalle?: string } } })?.response?.data?.detalle || 'No se pudo guardar', 'err')
     }
   }
 
   function cargarBorrador(b: Borrador) {
     dispatch({ type: 'reemplazar', items: aLineasDeCarrito(b) })
-    if (tieneEquiposCaidos(b)) notify('Alguno de sus equipos ya no está en el catálogo; lo quitamos', 'x')
-    else notify('Borrador cargado — revisa y envía cuando quieras')
+    if (tieneEquiposCaidos(b)) notify('Alguno de sus equipos ya no está en el catálogo; lo quitamos', 'err')
+    else notify('Borrador cargado — revisa y envía cuando quieras', 'info')
   }
 
   async function borrarBorrador(id: number) {
     try { await borrarEnServidor(id); await recargarBorradores() }
-    catch { notify('No se pudo borrar el borrador', 'x') }
+    catch { notify('No se pudo borrar el borrador', 'err') }
   }
+  /* Al enviar, la pantalla se transforma entera sin cambiar de dirección: sin
+     esto te quedas donde estaba el botón —hasta abajo, en el pie— y la
+     confirmación nace fuera de cuadro. */
+  useIrAlTope(!!sentAut || !!sentFolio)
+
   if (sentAut) {
     const waJefe = `https://wa.me/?text=${encodeURIComponent(`Hola, te comparto la cotización de maquinaria para autorizar. Ábrela, revisa el total y autorízala aquí:\n${sentAut.liga}`)}`
     return (
@@ -330,7 +430,7 @@ export default function Cotizacion() {
 
             <div className="mt-5 flex items-center gap-2.5 bg-surface-2 border border-edge rounded-xl px-3 py-2.5">
               <span className="flex-1 min-w-0 text-[12.5px] text-mute overflow-hidden text-ellipsis whitespace-nowrap">{sentAut.liga.replace(/^https?:\/\//, '')}</span>
-              <button onClick={async () => { try { await navigator.clipboard.writeText(sentAut.liga); setLigaAutCopiada(true); setTimeout(() => setLigaAutCopiada(false), 1800) } catch { notify('Copia el texto manualmente', 'x') } }}
+              <button onClick={async () => { try { await navigator.clipboard.writeText(sentAut.liga); setLigaAutCopiada(true); setTimeout(() => setLigaAutCopiada(false), 1800) } catch { notify('Copia el texto manualmente', 'err') } }}
                 className="h-8 px-3 shrink-0 rounded-lg border border-edge bg-surface text-[12px] font-bold text-ink hover:bg-surface-2 transition-colors">
                 {ligaAutCopiada ? '✓ Copiada' : 'Copiar'}
               </button>
@@ -466,8 +566,51 @@ export default function Cotizacion() {
 
   const tipoActual = state.items.length ? (state.items[0].unit === 'venta' ? 'venta' : 'renta') : null
 
+  /* Una cuenta del EQUIPO no arma cotizaciones aquí. El backend ya lo rechaza
+     (`NoEsDelNegocio`), pero enterarse al final —después de elegir máquinas,
+     capturar la obra y tocar Enviar— es la peor forma de saberlo. Se dice al
+     entrar, con la salida a la mano.
+
+     `nivel > 0` = tiene acceso al panel. El invitado (sin sesión) y el cliente
+     (nivel 0) pasan de largo, que es el camino de siempre. */
+  const nivelCuenta = Number(user?.puede?.nivel ?? 0)
+  if (user && nivelCuenta > 0) {
+    return (
+      <div className="pantalla-mensaje bg-app text-ink">
+        <div className="max-w-lg px-4 py-12 text-center">
+          <h1 className="text-2xl font-black">Esto es para clientes</h1>
+          <p className="mt-3 text-[15px] leading-relaxed text-mute">
+            Tu cuenta es del equipo de REMALI. Las cotizaciones del negocio se
+            levantan desde el panel, donde quedan a nombre del cliente que las pidió.
+          </p>
+          <p className="mt-2 text-[14px] leading-relaxed text-mute">
+            ¿La necesitas como cliente, para ti? Créate una cuenta de cliente con
+            otro correo.
+          </p>
+          <div className="mt-7 flex flex-col sm:flex-row gap-2.5 justify-center">
+            <Link to="/dashboard"
+              className="h-11 px-6 grid place-items-center rounded-full bg-gold text-gold-on text-sm font-bold transition-[transform,opacity] duration-150 hover:opacity-90 active:scale-[0.98]">
+              Ir al panel
+            </Link>
+            <Link to="/equipos"
+              className="h-11 px-6 grid place-items-center rounded-full border border-edge text-ink text-sm font-bold transition-colors hover:bg-surface-2">
+              Ver el catálogo
+            </Link>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="bg-app min-h-screen text-ink">
+      {/* El anfitrión de los diálogos vive en el panel; aquí hace falta el suyo
+          porque esta pantalla pregunta el nombre de la obra al guardarla. Sin
+          él, `pedir()` cae al `window.prompt` del navegador —una caja gris del
+          sistema en medio de la tienda—. Registra UNA sola ranura, así que no
+          puede montarse global mientras el Dashboard monte el suyo; en rutas
+          distintas nunca coexisten. */}
+      <DialogoHost />
       <div className="max-w-[1320px] mx-auto px-4 sm:px-8 pt-24 pb-16">
 
         {/* Encabezado */}
@@ -593,14 +736,40 @@ export default function Cotizacion() {
                         <button type="button" onClick={() => usarObra(o)}
                           className="flex flex-col items-start gap-0.5 pl-4 pr-8 py-2.5 rounded-xl border border-edge bg-app text-left hover:border-gold/60 transition-colors active:scale-[0.98]">
                           <span className="text-[13.5px] font-bold text-ink max-w-[160px] truncate">{o.nombre}</span>
-                          {o.responsable && <span className="text-[12px] text-mute max-w-[160px] truncate">{o.responsable}</span>}
+                          {/* Debajo va la DIRECCIÓN: el nombre dice cuál es y
+                              la calle confirma que es esa. El responsable no
+                              distingue nada —suele ser la misma persona en
+                              varias obras— y ocupaba el único renglón útil. */}
+                          {/* Y no se repite: una obra guardada de antes puede
+                              traer la calle DE nombre (así se prellenaba), y la
+                              tarjeta enseñaba el mismo texto dos veces. */}
+                          {(() => {
+                            const abajo = o.direccion || o.responsable
+                            if (!abajo || abajo.trim().toLowerCase().startsWith(o.nombre.trim().toLowerCase())) return null
+                            return <span className="text-[12px] text-mute max-w-[160px] truncate" title={abajo}>{abajo}</span>
+                          })()}
                         </button>
+                        {/* Preguntar antes de borrar, y con el nombre de la obra en
+                            la pregunta. Antes borraba al primer clic: una obra
+                            guardada es dirección, responsable y teléfono que
+                            alguien capturó una vez, y la × mide 20px pegada a la
+                            tarjeta que se toca para USAR esa obra. Un dedazo
+                            costaba volver a teclearlo todo, sin deshacer.
+                            El área de toque se lleva a 32px y el aspa se queda
+                            del mismo tamaño: crece el blanco alrededor, no el
+                            dibujo. Aun así no es un botón que deba ser fácil. */}
                         <button type="button" aria-label={`Borrar ${o.nombre}`}
                           onClick={async () => {
-                            try { await api.delete(`/obras-cliente/${o.id}/`); setObras(prev => prev.filter(x => x.id !== o.id)); notify('Obra borrada') }
-                            catch { notify('No se pudo borrar la obra', 'x') }
+                            if (!await confirmar({
+                              titulo: `¿Borrar la obra "${o.nombre}"?`,
+                              mensaje: 'Se pierden su dirección, su responsable y su teléfono. Las cotizaciones que ya la usaron no se tocan.',
+                              aceptar: 'Borrar obra',
+                              tono: 'peligro',
+                            })) return
+                            try { await api.delete(`/obras-cliente/${o.id}/`); setObras(prev => prev.filter(x => x.id !== o.id)); notify('Obra borrada', 'neutro') }
+                            catch { notify('No se pudo borrar la obra', 'err') }
                           }}
-                          className="absolute top-1.5 right-1.5 w-5 h-5 grid place-items-center rounded-full text-mute hover:text-red-500 hover:bg-red-500/10 transition-colors">
+                          className="absolute top-0.5 right-0.5 w-8 h-8 grid place-items-center rounded-full text-mute hover:text-red-500 hover:bg-red-500/10 transition-colors">
                           <svg viewBox="0 0 24 24" className="w-3 h-3 stroke-current fill-none" strokeWidth="2.2" strokeLinecap="round"><path d="M6 6l12 12M18 6L6 18" /></svg>
                         </button>
                       </div>
@@ -623,7 +792,35 @@ export default function Cotizacion() {
                 <Field label="QUIÉN AUTORIZA" ok={validResponsable} showErrors={showErrors}><input className={inp(validResponsable)} value={responsable} onChange={e => setResponsable(e.target.value)} placeholder="Encargado o jefe de obra" /></Field>
                 <Field label="TELÉFONO EN OBRA" ok={validObraTelefono} showErrors={showErrors}><input type="tel" inputMode="numeric" maxLength={10} className={inp(validObraTelefono)} value={obraTelefono} onChange={e => setObraTelefono(e.target.value.replace(/\D+/g, '').slice(0, 10))} placeholder="10 dígitos" /></Field>
                 <div className="sm:col-span-2">
-                  <Field label="DIRECCIÓN DE ENTREGA" ok={validDireccion} showErrors={showErrors}><input className={inp(validDireccion)} value={direccion} onChange={e => setDireccion(e.target.value)} placeholder="Calle, número, colonia" /></Field>
+                  {/* Autocompletado de Google, SOLO con sesión iniciada.
+                      Una dirección tecleada a mano manda al chofer a buscar
+                      —"calle gardenias" hay muchas—; elegida de la lista llega
+                      resuelta, con calle, número, colonia, CP y coordenadas.
+
+                      Y solo para quien tiene cuenta porque cada tecleo es una
+                      llamada de PAGO a Google: un armador abierto al público
+                      es un grifo de costo que cualquiera puede dejar corriendo.
+                      El invitado escribe su dirección a mano, que es como
+                      estaba, y al registrarse gana el buscador.
+
+                      Con sesión tampoco se obliga a elegir de la lista: hay
+                      obras que no están en el mapa (un lote, un tramo de
+                      carretera) y exigirlo dejaría fuera justo esas. */}
+                  <Field label="DIRECCIÓN DE ENTREGA" ok={validDireccion} showErrors={showErrors}>
+                    {user ? (
+                      <AddressAutocomplete
+                        value={direccion}
+                        onChange={setDireccion}
+                        onSelect={a => setDireccion(a.display_name)}
+                        placeholder="Calle, número, colonia"
+                        inputClassName={`${inp(validDireccion)} pl-11 pr-11`}
+                      />
+                    ) : (
+                      <input className={inp(validDireccion)} value={direccion}
+                        onChange={e => setDireccion(e.target.value)}
+                        placeholder="Calle, número, colonia" />
+                    )}
+                  </Field>
                 </div>
               </div>
             </div>
@@ -635,8 +832,13 @@ export default function Cotizacion() {
               <span className="text-[16px] font-bold">Resumen</span>
 
               <div className="flex flex-col gap-2.5 text-sm">
-                {subRenta > 0 && <div className="flex justify-between gap-3"><span className="text-mute">Renta (sin IVA)</span><span className="font-semibold">{money(rentaNeta)}</span></div>}
-                {subVenta > 0 && <div className="flex justify-between gap-3"><span className="text-mute">Venta (IVA incluido)</span><span className="font-semibold">{money(ventaNeta)}</span></div>}
+                {/* En BRUTO, antes del cupón. Estas dos líneas pintaban el importe
+                    YA descontado y debajo volvía a aparecer "Descuento −$250":
+                    la resta salía dos veces y la columna no cuadraba con su
+                    propio total. Nunca se notó porque hasta hoy nadie podía
+                    aplicar un cupón. Sin cupón el factor es 1 y no cambia nada. */}
+                {subRenta > 0 && <div className="flex justify-between gap-3"><span className="text-mute">Renta (sin IVA)</span><span className="font-semibold">{money(subRenta)}</span></div>}
+                {subVenta > 0 && <div className="flex justify-between gap-3"><span className="text-mute">Venta (IVA incluido)</span><span className="font-semibold">{money(subVenta)}</span></div>}
                 {state.coupon && <div className="flex justify-between gap-3"><span className="text-mute">Descuento ({(state.coupon.discount * 100).toFixed(0)}%)</span><span className="font-semibold text-red-500">− {money(discountAmt)}</span></div>}
                 {factura && (
                   <div className="border-t border-edge pt-2.5 flex flex-col gap-2.5">
@@ -655,11 +857,89 @@ export default function Cotizacion() {
                   <div>
                     <p className="text-sm font-semibold">Necesito factura</p>
                     <p className="text-[12.5px] text-mute mt-0.5 leading-snug">Con factura, la renta suma IVA 16%.</p>
+                    {/* Le faltan sus datos fiscales. Se AVISA, no se bloquea: son
+                        seis campos del SAT y pedirlos aquí, con la cotización a
+                        medio armar, es el punto exacto donde la gente cierra la
+                        pestaña. Su cotización sale igual; los datos se piden
+                        antes de timbrar, que es cuando de verdad hacen falta. */}
+                    {factura && faltanFiscales && (
+                      <div className="mt-2.5 rounded-xl border border-[color-mix(in_oklab,var(--c-taller)_34%,transparent)] bg-[color-mix(in_oklab,var(--c-taller)_10%,transparent)] px-3 py-2.5">
+                        <p className="text-[12.5px] leading-snug text-taller-ink">
+                          <b>Nos faltan tus datos fiscales</b> (RFC, régimen y CP). Tu cotización se envía igual — te los pedimos antes de facturar.
+                        </p>
+                        <Link to="/perfil#facturacion" className="mt-2 inline-flex h-8 items-center rounded-full bg-ink px-3.5 text-[12px] font-bold text-app transition-opacity hover:opacity-90">
+                          Llenarlos ahora
+                        </Link>
+                      </div>
+                    )}
                   </div>
                 </div>
               ) : (
                 <p className="border-t border-edge pt-4 text-[12.5px] text-mute leading-snug">El precio de venta ya incluye IVA · factura disponible al confirmar.</p>
               )}
+
+              {/* ── Cupón ──────────────────────────────────────────────────
+                  Va encima del Total y por debajo de él en peso: el número
+                  grande sigue siendo lo que el cliente vino a ver. Tres estados
+                  y ninguno pide más de lo necesario:
+                  · con cupón ganado → un botón, cero tecleo;
+                  · sin cupón → una liga discreta que despliega el campo (un
+                    input de "código promocional" siempre abierto le dice a
+                    quien no tiene ninguno que está pagando de más);
+                  · aplicado → la confirmación, con salida.  */}
+              <div className="border-t border-edge pt-4">
+                {state.coupon ? (
+                  <div className="flex items-center justify-between gap-3 rounded-[13px] border border-gold/40 bg-gold-soft px-3.5 py-3">
+                    <div className="min-w-0">
+                      <p className="text-[13px] font-bold text-ink">
+                        Cupón aplicado · {Math.round(state.coupon.discount * 100)}% menos
+                      </p>
+                      <p className="mt-0.5 truncate font-mono text-[12px] text-mute">{state.coupon.code}</p>
+                    </div>
+                    <button type="button" onClick={() => dispatch({ type: 'quitar-cupon' })}
+                      className="h-8 shrink-0 rounded-lg px-2.5 text-[12.5px] font-semibold text-mute transition-colors hover:text-ink active:scale-[0.97]">
+                      Quitar
+                    </button>
+                  </div>
+                ) : miCupon ? (
+                  <button type="button" onClick={() => aplicarCupon(miCupon.codigo)} disabled={cuponCargando}
+                    className="flex w-full items-center justify-between gap-3 rounded-[13px] border border-gold/40 bg-gold-soft px-3.5 py-3 text-left transition-opacity hover:opacity-90 active:scale-[0.99] disabled:opacity-50">
+                    <div className="min-w-0">
+                      <p className="text-[13px] font-bold text-ink">
+                        Tienes {Math.round(miCupon.descuento * 100)}% de bienvenida
+                      </p>
+                      <p className="mt-0.5 text-[12px] text-mute">
+                        Por completar tu perfil. De un solo uso
+                        {venceEl(miCupon.expira) ? ` · vence el ${venceEl(miCupon.expira)}` : ''}.
+                      </p>
+                    </div>
+                    <span className="shrink-0 text-[12.5px] font-extrabold text-gold-ink">
+                      {cuponCargando ? 'Aplicando…' : 'Aplicar'}
+                    </span>
+                  </button>
+                ) : cuponAbierto ? (
+                  <div>
+                    <div className="flex gap-2">
+                      <input autoFocus value={cuponTexto}
+                        onChange={e => { setCuponTexto(e.target.value); setCuponError(null) }}
+                        onKeyDown={e => { if (e.key === 'Enter') aplicarCupon(cuponTexto) }}
+                        placeholder="Código de cupón" aria-label="Código de cupón"
+                        className="h-11 min-w-0 flex-1 rounded-xl border border-edge bg-app px-3.5 font-mono text-[13.5px] uppercase tracking-wider text-ink placeholder:font-sans placeholder:normal-case placeholder:tracking-normal placeholder:text-mute focus:border-gold focus:outline-none" />
+                      <button type="button" onClick={() => aplicarCupon(cuponTexto)}
+                        disabled={cuponCargando || !cuponTexto.trim()}
+                        className="h-11 shrink-0 rounded-xl border border-edge px-4 text-[13px] font-bold text-ink transition-colors hover:bg-surface-2 active:scale-[0.97] disabled:opacity-40">
+                        {cuponCargando ? '…' : 'Aplicar'}
+                      </button>
+                    </div>
+                    {cuponError && <p className="mt-2 text-[12.5px] font-semibold text-red-500">{cuponError}</p>}
+                  </div>
+                ) : (
+                  <button type="button" onClick={() => setCuponAbierto(true)}
+                    className="text-[12.5px] font-semibold text-mute underline underline-offset-4 transition-colors hover:text-ink">
+                    ¿Tienes un cupón?
+                  </button>
+                )}
+              </div>
 
               <div className="border-t border-edge pt-4 flex items-baseline justify-between gap-3">
                 <span className="text-[15px] font-bold">Total</span>

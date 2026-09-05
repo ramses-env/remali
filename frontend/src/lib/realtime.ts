@@ -87,10 +87,32 @@ const suscriptores = new Map<Tema, Set<() => void>>()
 let pendientes = new Set<Tema>()
 let timer: number | null = null
 
+/* Oyentes que quieren enterarse de TODO lo que se invalida, sin apuntarse tema
+   por tema. Lo usa la caché de `lib/datos.ts` para tirar lo que quedó viejo.
+
+   Van en su propia lista y NO en `suscriptores` a propósito: `alVolver()`
+   invalida todos los temas que tengan suscriptores, así que apuntar la caché
+   ahí haría que cada vez que vuelves a la pestaña se recargara el programa
+   entero. Aquí solo escucha; no pide nada por su cuenta. */
+const oyentesGlobales = new Set<(temas: Tema[]) => void>()
+
+/** Avisa de cada tanda de invalidación. Devuelve cómo darse de baja. */
+export function alInvalidar(fn: (temas: Tema[]) => void): () => void {
+  oyentesGlobales.add(fn)
+  return () => { oyentesGlobales.delete(fn) }
+}
+
 function vaciar() {
   timer = null
   const temas = pendientes
   pendientes = new Set()
+  // Primero la caché, luego quien recarga: si fuera al revés, el suscriptor
+  // pediría de nuevo y la caché le devolvería justo el dato viejo que se
+  // acababa de invalidar.
+  const lista = Array.from(temas)
+  for (const fn of oyentesGlobales) {
+    try { fn(lista) } catch { /* un oyente roto no debe frenar a los demás */ }
+  }
   for (const tema of temas) {
     for (const fn of suscriptores.get(tema) || []) {
       try { fn() } catch { /* un suscriptor roto no debe frenar a los demás */ }
@@ -149,12 +171,19 @@ if (typeof window !== 'undefined') {
 /**
  * Suscribe una carga de datos a sus temas y la ejecuta al montar.
  * `cargar` debe ser estable (useCallback con deps vacías), como los load* actuales.
+ *
+ * `activo` sirve para pedir SOLO lo que la pantalla abierta necesita. Apagado,
+ * ni carga ni se suscribe: el latido puede invalidar ese tema veinte veces que
+ * nadie va a pedir la lista. Al encenderse (entras a la sección) carga y se
+ * suscribe; al apagarse suelta la suscripción y los datos que ya tenía se
+ * quedan en su estado, así volver a la sección no parpadea en vacío.
  */
-export function useRecurso(temas: Tema[], cargar: () => void) {
+export function useRecurso(temas: Tema[], cargar: () => void, activo = true) {
   useEffect(() => {
+    if (!activo) return
     cargar()
     return suscribir(temas, cargar)
     // Los temas se declaran fijos en cada llamada; cargar es estable.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cargar])
+  }, [cargar, activo])
 }

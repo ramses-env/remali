@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom'
 import LogoRemali from '@/components/ui/logo-remali'
+import PieByRix from './PieByRix'
 import { useConfigPublica } from '../lib/configPublica'
 
 export default function Footer() {
@@ -52,6 +53,10 @@ export default function Footer() {
             </a>
           </div>
         </div>
+
+        {/* Quién construyó el sistema y qué versión ve el cliente. El © ya va
+            arriba (es el del negocio), aquí solo la versión y la firma. */}
+        <PieByRix copyright={false} fondo="surface-2" className="mt-6" />
       </div>
     </footer>
   )

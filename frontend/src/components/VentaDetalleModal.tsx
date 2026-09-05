@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom'
 import api from '../lib/api'
 import { descargarBlob } from '../lib/descargar'
 import TicketModal from './TicketModal'
+import type { Notify } from '../store/toast'
 
 type VentaLike = {
   id: number
@@ -21,6 +22,11 @@ type VentaLike = {
   unidad?: { codigo: string; equipo?: string | null } | null
   /** Una entrada por máquina de la venta (con su serie y su precio). */
   maquinas?: { id: number; codigo: string | null; numero_serie?: string | null; equipo?: string | null; precio: string; entregada: boolean }[]
+  /** Las que se dieron de baja de esta venta, con su rastro. `maquinas` solo
+   *  trae las vivas —y con razón: el ticket no debe listar lo que el cliente no
+   *  se llevó—, pero el efecto era que el renglón cancelado desaparecía entero
+   *  con su quién/cuándo/por qué dentro. */
+  maquinas_canceladas?: { id: number; codigo: string | null; equipo: string | null; precio: string; cancelada_en: string | null; cancelada_por: string | null; motivo: string }[]
   factura_estado?: string | null
   nota_ajuste?: string | null
   origen?: { folio: string; resumen: string } | null
@@ -35,7 +41,7 @@ export default function VentaDetalleModal({ venta, onClose, onChanged, notify, o
   venta: VentaLike
   onClose: () => void
   onChanged: () => void
-  notify: (m: string, t?: 'ok' | 'err') => void
+  notify: Notify
   /** Sacar UNA máquina de la venta. Lo pide el panel (que es quien sabe pedir el
    *  código de autorización); aquí solo se ofrece el botón. */
   onQuitarMaquina?: (maquinaId: number) => void
@@ -93,7 +99,7 @@ export default function VentaDetalleModal({ venta, onClose, onChanged, notify, o
     setCancelando(true)
     try {
       await api.post(`/ventas/${venta.id}/cancelar/`, {})
-      notify('Venta cancelada')
+      notify('Venta cancelada', 'neutro')
       onChanged()
       onClose()
     } catch (e: unknown) {
@@ -160,7 +166,7 @@ export default function VentaDetalleModal({ venta, onClose, onChanged, notify, o
                 {cancelada ? 'CANCELADA' : 'ACTIVA'}
               </span>
               {factura && (
-                <span className={`text-[12px] font-bold tracking-[0.04em] px-2.5 py-[5px] rounded-full ${factura === 'facturada' ? 'bg-violet-500/15 text-violet-700 dark:text-violet-400' : 'bg-amber-500/15 text-amber-700 dark:text-amber-400'}`}>
+                <span className={`text-[12px] font-bold tracking-[0.04em] px-2.5 py-[5px] rounded-full ${factura === 'facturada' ? 'bg-violet-500/15 text-violet-700 dark:text-violet-400' : 'bg-amber-500/15 text-taller-ink'}`}>
                   {factura === 'facturada' ? 'FACTURADA' : 'POR FACTURAR'}
                 </span>
               )}
@@ -174,6 +180,30 @@ export default function VentaDetalleModal({ venta, onClose, onChanged, notify, o
         </div>
 
         <div className="px-6 sm:px-[26px] pt-[22px]">
+          {/* Máquinas dadas de BAJA. Quitar una de una venta de tres es una
+              acción sensible —pide código de seguridad— y hasta ahora se
+              tragaba su propio rastro: el renglón desaparecía y con él quién lo
+              quitó, cuándo y por qué. Aquí queda a la vista, atenuado y tachado
+              para que no se confunda con lo que el cliente sí se llevó. */}
+          {(venta.maquinas_canceladas?.length || 0) > 0 && (
+            <div className="border border-edge rounded-[14px] divide-y divide-edge opacity-70">
+              {venta.maquinas_canceladas!.map(m => (
+                <div key={m.id} className="px-4 py-3">
+                  <div className="flex items-center gap-3">
+                    <span className="text-[14px] font-bold text-mute line-through truncate">{m.equipo || 'Maquinaria'}</span>
+                    <span className="text-[12px] text-mute">{m.codigo || 'sin código'}</span>
+                    <span className="ml-auto text-[13px] font-bold text-mute line-through whitespace-nowrap">{money(m.precio)}</span>
+                  </div>
+                  <p className="text-[12px] text-mute mt-1 leading-snug">
+                    Quitada{m.cancelada_por ? ` por ${m.cancelada_por}` : ''}
+                    {m.cancelada_en ? ` el ${new Date(m.cancelada_en).toLocaleDateString('es-MX')}` : ''}
+                    {m.motivo ? ` · ${m.motivo}` : ''}
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
+
           {/* Equipo(s). Con varias máquinas se listan TODAS: cada una es una
               pieza distinta, con su número de serie y su precio. */}
           {(venta.maquinas?.length || 0) > 1 ? (
@@ -238,7 +268,7 @@ export default function VentaDetalleModal({ venta, onClose, onChanged, notify, o
           {/* Ajuste de precio: rastro de que se vendió a un precio distinto al de lista */}
           {venta.nota_ajuste && (
             <div className="border border-amber-500/30 bg-amber-500/10 rounded-[14px] px-[18px] py-3.5 mt-4">
-              <div className="text-[12px] font-bold uppercase tracking-wide text-amber-600 dark:text-amber-400">Precio ajustado a mano</div>
+              <div className="text-[12px] font-bold uppercase tracking-wide text-taller-ink">Precio ajustado a mano</div>
               <div className="text-[13.5px] text-ink leading-relaxed mt-1">{venta.nota_ajuste}</div>
               {venta.vendedor && <div className="text-[12px] text-mute mt-1">Por {venta.vendedor}</div>}
             </div>
@@ -301,7 +331,7 @@ export default function VentaDetalleModal({ venta, onClose, onChanged, notify, o
             )}
             {!cancelada && !factura && (
               <button onClick={mandarPorFacturar} disabled={mandando}
-                className="h-[44px] px-4 rounded-[12px] border border-amber-500/40 bg-amber-500/10 text-[14px] font-semibold text-amber-700 dark:text-amber-400 hover:bg-amber-500/20 transition-colors whitespace-nowrap disabled:opacity-50">
+                className="h-[44px] px-4 rounded-[12px] border border-amber-500/40 bg-amber-500/10 text-[14px] font-semibold text-taller-ink hover:bg-amber-500/20 transition-colors whitespace-nowrap disabled:opacity-50">
                 {mandando ? 'Mandando…' : 'Mandar a Por facturar'}
               </button>
             )}

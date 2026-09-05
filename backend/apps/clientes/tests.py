@@ -451,39 +451,90 @@ class CuentaNuevaTest(TestCase):
             'telefono': telefono,
         }, format='json')
 
-    def test_el_registro_no_crea_un_cliente(self):
+    def test_un_token_viejo_en_el_navegador_no_bloquea_el_registro(self):
+        """El bug del "botón que no hace nada".
+
+        Quien viene a crear una cuenta casi siempre trae una sesión muerta
+        colgando en el navegador, y el front manda ese Bearer en TODAS las
+        peticiones. DRF valida el token antes de mirar el AllowAny: sin
+        `authentication_classes([])` esto contestaba 401, la vista nunca corría,
+        y el front —que trataba el 401 como "se venció tu sesión"— borraba el
+        token y mandaba al usuario a /login. Como /login y /registro comparten
+        marco visual, se veía como si el botón no hiciera nada."""
+        self.publico.credentials(HTTP_AUTHORIZATION='Bearer token.completamente.invalido')
+
+        r = self._registrar(email='conbasura@bajio.mx')
+
+        self.assertEqual(r.status_code, 201, r.data)
+        self.assertTrue(User.objects.filter(email='conbasura@bajio.mx').exists())
+
+    def test_un_token_viejo_tampoco_bloquea_el_login(self):
+        """El mismo agujero, en la puerta de al lado: es justo cuando tu token
+        ya no sirve cuando vienes a iniciar sesión."""
+        User.objects.create_user(username='vieja', email='vieja@bajio.mx', password='Remali-2026-clave')
+        self.publico.credentials(HTTP_AUTHORIZATION='Bearer token.completamente.invalido')
+
+        r = self.publico.post('/api/auth/login/', {
+            'username': 'vieja', 'password': 'Remali-2026-clave',
+        }, format='json')
+
+        self.assertNotEqual(r.status_code, 401, r.data)
+
+    def test_el_registro_YA_crea_su_ficha(self):
+        """Antes el padrón se quedaba limpio y la cuenta en un limbo.
+
+        La decisión cambió: quien abre cuenta ES un cliente, y dejarlo "sin
+        vincular" lo dejaba sin historial y sin poder recibir una renta hasta
+        que alguien se acordara de resolverlo. El padrón se veía impecable
+        mientras la operación pasaba por fuera.
+        """
         r = self._registrar()
 
         self.assertEqual(r.status_code, 201, r.data)
-        self.assertEqual(Cliente.objects.count(), 0)      # el padrón sigue limpio
-        self.assertEqual(Contacto.sin_vincular().count(), 1)
+        self.assertEqual(Cliente.objects.count(), 1)
+        contacto = Contacto.objects.get(usuario__email='laura@bajio.mx')
+        self.assertIsNotNone(contacto.cliente)
+        self.assertTrue(contacto.principal)
+        self.assertFalse(Contacto.sin_vincular().exists())
 
     def test_avisa_al_equipo_con_la_pista_del_telefono(self):
         from maquinaria.models import Notificacion
-        Cliente.objects.create(tipo=Cliente.MORAL, nombre='Constructora del Bajío',
-                               telefono='4771111111')
+        otro = Cliente.objects.create(tipo=Cliente.MORAL, nombre='Constructora del Bajío',
+                                      telefono='4771111111')
 
         self._registrar()
 
         aviso = Notificacion.objects.filter(titulo__startswith='Cuenta nueva').first()
         self.assertIsNotNone(aviso)
         self.assertIn('Constructora del Bajío', aviso.mensaje)   # la pista
-        self.assertEqual(Contacto.sin_vincular().count(), 1)     # NO se unió sola
 
-    def test_la_bandeja_muestra_la_pista_sin_aplicarla(self):
+        # La regla que NO cambió: el teléfono no une nada solo. Nace su propia
+        # ficha, marcada para que una persona decida si es la misma y la funda.
+        nueva = Contacto.objects.get(usuario__email='laura@bajio.mx').cliente
+        self.assertNotEqual(nueva.pk, otro.pk)
+        self.assertTrue(nueva.requiere_revision)
+        self.assertIn('Constructora del Bajío', nueva.revision_motivo)
+
+    def test_la_bandeja_de_sueltos_queda_para_los_historicos(self):
+        """El endpoint sigue vivo: en la base hay contactos que nacieron sin
+        ficha cuando esa era la regla, y hay que poder resolverlos."""
         cli = Cliente.objects.create(tipo=Cliente.MORAL, nombre='Constructora del Bajío',
                                      telefono='4771111111')
-        self._registrar()
+        # `sin_vincular()` pide cuenta: un contacto sin `usuario` es del padrón,
+        # no una cuenta esperando dueño.
+        viejo_user = User.objects.create_user(username='deantes', email='deantes@bajio.mx')
+        suelto = Contacto.objects.create(cliente=None, nombre='De antes',
+                                         telefono='4771111111', usuario=viejo_user)
 
         r = self.api.get('/api/clientes/sin-vincular/')
 
         self.assertEqual(r.data['total'], 1)
+        self.assertEqual(r.data['contactos'][0]['id'], suelto.pk)
         self.assertEqual(r.data['contactos'][0]['pista']['id'], cli.pk)
 
     def test_vincular_le_pone_su_cliente_y_deja_rastro(self):
         cli = Cliente.objects.create(tipo=Cliente.MORAL, nombre='Constructora del Bajío')
-        self._registrar()
-        contacto = Contacto.sin_vincular().first()
+        contacto = Contacto.objects.create(cliente=None, nombre='Laura', telefono='4779999999')
 
         r = self.api.post(f'/api/clientes/{cli.pk}/vincular/',
                           {'contacto_id': contacto.pk}, format='json')
@@ -749,3 +800,63 @@ class GarantiaTest(TestCase):
         g = Garantia.emitir(venta, meses=1, inicia=date(2026, 1, 31))
 
         self.assertEqual(g.vence, date(2026, 2, 28))
+
+
+class LaCuentaEsUnDatoDelContactoTest(TestCase):
+    """La ficha del cliente dice si su gente entra a la app, y en qué estado.
+
+    Es la mitad de la decisión de arquitectura: la cuenta NO es otra entidad ni
+    otra pantalla, es un dato de la persona. Un cliente te renta con cuenta o sin
+    ella —y el mismo señor cruza esa línea solo, el día que se registra—, así que
+    partir el padrón por ahí volvería a romper el historial en dos.
+    """
+
+    def setUp(self):
+        from rest_framework.test import APIClient
+        self.admin = User.objects.create_user('adm_cuenta', password='pass12345', is_staff=True)
+        self.api = APIClient(); self.api.force_authenticate(self.admin)
+        self.cliente = Cliente.objects.create(nombre='Constructora Ríos')
+
+    def _ficha(self):
+        return self.api.get(f'/api/clientes/{self.cliente.pk}/').data
+
+    def test_un_contacto_sin_cuenta_lo_dice_y_ya(self):
+        Contacto.objects.create(cliente=self.cliente, nombre='Doña Mago', principal=True)
+
+        c = self._ficha()['contactos'][0]
+
+        self.assertFalse(c['tiene_cuenta'])
+        self.assertIsNone(c['cuenta_id'])
+        self.assertIsNone(c['cuenta_activa'])
+
+    def test_uno_con_cuenta_trae_con_qué_decidir(self):
+        """Quién entra, con qué correo, si confirmó y si sigue teniendo acceso:
+        es todo lo que hace falta para quitárselo o devolvérselo desde la ficha."""
+        from maquinaria.models import PerfilUsuario
+        u = User.objects.create_user('mago', 'mago@bajio.mx', 'pass12345')
+        PerfilUsuario.objects.update_or_create(usuario=u, defaults={'email_verificado': True})
+        Contacto.objects.create(cliente=self.cliente, nombre='Doña Mago', usuario=u, principal=True)
+
+        c = self._ficha()['contactos'][0]
+
+        self.assertTrue(c['tiene_cuenta'])
+        self.assertEqual(c['cuenta_id'], u.id)
+        self.assertEqual(c['cuenta_correo'], 'mago@bajio.mx')
+        self.assertTrue(c['cuenta_activa'])
+        self.assertTrue(c['cuenta_verificada'])
+
+    def test_una_cuenta_sin_correo_confirmado_se_ve_distinta(self):
+        """Sin confirmar NO puede iniciar sesión: "tiene cuenta" a secas mentiría."""
+        u = User.objects.create_user('nuevo', 'nuevo@bajio.mx', 'pass12345')
+        Contacto.objects.create(cliente=self.cliente, nombre='Beto', usuario=u, principal=True)
+
+        c = self._ficha()['contactos'][0]
+
+        self.assertTrue(c['tiene_cuenta'])
+        self.assertFalse(c['cuenta_verificada'])
+
+    def test_a_quien_le_quitaron_el_acceso_se_le_nota(self):
+        u = User.objects.create_user('exbeto', 'ex@bajio.mx', 'pass12345', is_active=False)
+        Contacto.objects.create(cliente=self.cliente, nombre='Ex Beto', usuario=u, principal=True)
+
+        self.assertFalse(self._ficha()['contactos'][0]['cuenta_activa'])

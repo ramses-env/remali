@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import api from '../lib/api'
+import { useEffect, useMemo, useState } from 'react'
+import { FRESCO_LARGO, useDatos } from '../lib/datos'
 
 type FilterOption = {
   id: number
@@ -39,11 +39,30 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   )
 }
 
+/** Nombres limpios y ordenados de un catálogo (marcas, categorías, tipos). */
+function nombres(datos: { nombre?: string }[] | undefined): string[] {
+  return (datos || [])
+    .map(x => (x.nombre || '').trim())
+    .filter(Boolean)
+    .sort((a, b) => a.localeCompare(b))
+}
+
 export default function FilterSidebar({ value, onChange }: Props) {
   const [expanded, setExpanded] = useState<Record<number, boolean>>({})
-  const [marcas, setMarcas] = useState<string[]>([])
-  const [categorias, setCategorias] = useState<string[]>([])
-  const [tipos, setTipos] = useState<string[]>([])
+  /* Marcas, categorías y tipos cambian una vez al mes, y hasta ahora se pedían
+     en CADA montaje: el sidebar vive montado dos veces en el catálogo (fijo en
+     escritorio, cajón en móvil) y el cajón se desmonta al cerrarse, así que
+     abrirlo y cerrarlo tres veces eran nueve peticiones por tres datos que no
+     se habían movido. La caché los sirve de memoria y los refresca cada diez
+     minutos; las tres llamadas simultáneas del doble montaje se funden en una.
+     Si el admin edita un catálogo, el bus invalida "catalogos" y se recargan. */
+  const { datos: crudoMarcas } = useDatos<{ nombre?: string }[]>('/marcas/', { frescoMs: FRESCO_LARGO })
+  const { datos: crudoCategorias } = useDatos<{ nombre?: string }[]>('/categorias/', { frescoMs: FRESCO_LARGO })
+  const { datos: crudoTipos } = useDatos<{ nombre?: string }[]>('/tipos/', { frescoMs: FRESCO_LARGO })
+
+  const marcas = useMemo(() => nombres(crudoMarcas), [crudoMarcas])
+  const categorias = useMemo(() => nombres(crudoCategorias), [crudoCategorias])
+  const tipos = useMemo(() => nombres(crudoTipos), [crudoTipos])
   const [minPrice, setMinPrice] = useState('')
   const [maxPrice, setMaxPrice] = useState('')
 
@@ -52,11 +71,6 @@ export default function FilterSidebar({ value, onChange }: Props) {
     { label: 'Seminuevo', value: 'seminueva' },
   ]
 
-  useEffect(() => {
-    api.get<any[]>('/marcas/').then(r => setMarcas(r.data.map((m: any) => (m.nombre || '').trim()).filter(Boolean).sort((a: string, b: string) => a.localeCompare(b)))).catch(() => setMarcas([]))
-    api.get<any[]>('/categorias/').then(r => setCategorias(r.data.map((c: any) => (c.nombre || '').trim()).filter(Boolean).sort((a: string, b: string) => a.localeCompare(b)))).catch(() => setCategorias([]))
-    api.get<any[]>('/tipos/').then(r => setTipos(r.data.map((t: any) => (t.nombre || '').trim()).filter(Boolean).sort((a: string, b: string) => a.localeCompare(b)))).catch(() => setTipos([]))
-  }, [])
 
   function toggle(param: string, opt: FilterOption) {
     const next = { ...value }
@@ -167,7 +181,7 @@ export default function FilterSidebar({ value, onChange }: Props) {
             value={minPrice}
             onChange={e => setMinPrice(e.target.value)}
             onBlur={applyPrice}
-            className="w-full bg-surface-2 border border-edge rounded-lg px-3 py-2 text-sm text-ink placeholder-mute focus:outline-none focus:border-gold/40 transition-colors"
+            className="campo campo-sm"
           />
           <input
             inputMode="numeric"
@@ -175,7 +189,7 @@ export default function FilterSidebar({ value, onChange }: Props) {
             value={maxPrice}
             onChange={e => setMaxPrice(e.target.value)}
             onBlur={applyPrice}
-            className="w-full bg-surface-2 border border-edge rounded-lg px-3 py-2 text-sm text-ink placeholder-mute focus:outline-none focus:border-gold/40 transition-colors"
+            className="campo campo-sm"
           />
         </div>
         <button

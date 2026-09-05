@@ -221,10 +221,24 @@ if importlib.util.find_spec('cloudinary') and importlib.util.find_spec('cloudina
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
-    # NOTA: 'server.csp.ContentSecurityPolicyMiddleware' se cayó aquí porque la
-    # colisión de sesiones borró server/csp.py. Se quita la referencia colgante
-    # para que el backend arranque; recrear el CSP aparte (con cuidado de no
-    # romper el front) y volver a habilitarlo.
+    # Comprime la respuesta cuando el navegador dice que sabe (Accept-Encoding).
+    # Lo que se nota es la API: el catálogo (`/equipos/`) viaja sin paginar y con
+    # una veintena de campos por equipo, y el JSON comprime alrededor del 80%.
+    # En una red móvil eso es la diferencia entre ver la pantalla y esperarla.
+    #
+    # Va arriba para que comprima TODO lo que devuelvan los de abajo, pero
+    # DEBAJO de SecurityMiddleware, que es quien redirige a https: no tiene caso
+    # comprimir un 301. Las imágenes y los PDF ya vienen comprimidos y el propio
+    # middleware los deja en paz (si el resultado no es más chico, no lo aplica).
+    'django.middleware.gzip.GZipMiddleware',
+    # Abre una caché que dura lo que la petición. Va arriba para que TODO lo de
+    # abajo (permisos incluidos) la aproveche. Ver server/porpeticion.py.
+    'server.porpeticion.CachePorPeticion',
+    # Content-Security-Policy. Arranca en modo REPORTE (solo anota violaciones
+    # en la consola del navegador, no bloquea): un CSP mal calibrado deja la
+    # página en blanco. Cuando el sitio lleve unos días sin reportar nada, se
+    # pone CSP_REPORT_ONLY=False y pasa a bloquear. Ver server/csp.py.
+    'server.csp.ContentSecurityPolicyMiddleware',
     # Freno de fuerza bruta del admin. Va arriba, antes de sesiones y auth: a
     # quien ya está bloqueado no tiene caso montarle sesión ni resolver usuario.
     'server.admin_bruteforce.FrenoFuerzaBrutaAdmin',
@@ -453,8 +467,8 @@ REST_FRAMEWORK = {
         'google_login': '10/min',         # inicio de sesión con Google por IP
         'cupon': '30/hour',               # validar/aplicar cupón, por cuenta
         'token_publico': '120/hour',      # acceso por liga/QR/PDF público por IP
-        'direcciones_min': '20/min',      # autocompletado de direcciones: ráfaga de tecleo (invitados)
-        'direcciones_hora': '120/hour',   # techo por IP anónima: cada consulta nueva = llamada de pago a Google
+        'direcciones_min': '20/min',      # autocompletado de direcciones: ráfaga de tecleo
+        'direcciones_hora': '120/hour',   # techo POR CUENTA: cada consulta nueva = llamada de pago a Google
     },
 }
 
@@ -542,6 +556,17 @@ from corsheaders.defaults import default_headers  # noqa: E402
 
 CORS_ALLOW_HEADERS = (*default_headers, "x-espacio")
 
+# Cookies EN LAS PETICIONES CROSS-ORIGIN. Sin esto, el navegador descarta la
+# respuesta de cualquier llamada con `withCredentials` y la cookie del refresh
+# nunca viaja: el frontend en remali.mx pide un access nuevo a api.remali.mx,
+# no manda el refresh, y al usuario lo sacan de su sesión cada hora sin que
+# nadie entienda por qué. El default de django-cors-headers es False, y mientras
+# el frontend lo servía el mismo dominio no hacía falta.
+#
+# No abre nada de más: las cookies solo viajan a los orígenes de
+# CORS_ALLOWED_ORIGINS, que es una lista explícita.
+CORS_ALLOW_CREDENTIALS = True
+
 CORS_ALLOWED_ORIGINS = _lista_env("CORS_ALLOWED_ORIGINS", [
     "https://remali.up.railway.app",
     "https://remali.mx",
@@ -592,6 +617,10 @@ DEFAULT_FROM_EMAIL = os.environ.get('DEFAULT_FROM_EMAIL', 'no-reply@remali.up.ra
 
 
 
+
+# CSP: en reporte por defecto (no bloquea). Poner CSP_REPORT_ONLY=False cuando
+# el sitio lleve días sin violaciones en la consola.
+CSP_REPORT_ONLY = os.environ.get('CSP_REPORT_ONLY', 'True') != 'False'
 
 if not DEBUG:
     SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')

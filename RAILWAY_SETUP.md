@@ -1,53 +1,66 @@
-# Configuración para Desplegar en Railway
+# Desplegar REMALI en Railway
 
-Este proyecto se puede desplegar de dos formas:
-1. **Opción Recomendada (Todo en Uno)**: Un solo servicio que ejecuta Backend y sirve el Frontend.
-2. **Opción Avanzada (Separados)**: Dos servicios (Backend y Frontend separados).
+Un solo servicio sirve el backend **y** el frontend: el `Dockerfile` de la raíz
+construye el front con Vite, lo copia dentro y arranca Django por ASGI (uvicorn),
+que atiende HTTP y los WebSockets de las notificaciones.
 
----
+> El `nixpacks.toml` y el `Procfile` que mencionaban las versiones viejas de este
+> documento ya no existen: todo pasa por el `Dockerfile`.
 
-## Opción 1: Despliegue Todo en Uno (Más fácil y barato)
+Servicios en el proyecto de Railway:
 
-Hemos configurado el archivo `nixpacks.toml` en la raíz para que Railway instale Python y Node.js automáticamente.
-
-### Pasos:
-1. Crea un **Nuevo Proyecto** en Railway desde GitHub.
-2. Selecciona este repositorio.
-3. Configura las **Variables de Entorno** (Tab *Variables*):
-
-| Variable | Valor / Descripción |
-|----------|---------------------|
-| `SECRET_KEY` | Tu clave secreta de Django. |
-| `DEBUG` | `False` |
-| `ALLOWED_HOSTS` | `*` |
-| `DATABASE_URL` o `MYSQL_URL` | Se configuran solas si agregas un servicio de MySQL. |
-| `CLOUDINARY_...` | Tus claves de Cloudinary (ver abajo). |
-
-4. **Base de Datos**: Agrega un servicio de MySQL (Add Service -> Database -> MySQL) y espera a que se despliegue. Railway conectará automáticamente las variables.
-
-**Nota**: No necesitas configurar `start.sh` ni comandos de inicio. El archivo `nixpacks.toml` se encarga de todo.
+| Servicio | Para qué | ¿Obligatorio? |
+|---|---|---|
+| `remali` | La aplicación. Imagen del `Dockerfile`. | Sí |
+| `MySQL` | La base. Railway conecta `MYSQL_URL` solo. | Sí |
+| `Redis` | Caché y capa de WebSockets **compartida entre workers**. | Sí con más de un worker (ver abajo) |
+| `cron` | Respaldos y recordatorios diarios. Misma imagen, `railway.cron.json`. | Sí, si quieres respaldos |
 
 ---
 
-## Opción 2: Despliegue Separado (Frontend y Backend aislados)
+## Antes de abrir al público: la revisión de despegue
 
-### 1. Backend (Django)
-1. Crea un servicio con **Root Directory**: `backend`.
-2. Variables: Las mismas de arriba.
+```bash
+railway run python manage.py revisar_produccion
+```
 
-### 2. Frontend (React)
-1. Crea un servicio con **Root Directory**: `frontend`.
-2. Variables: `VITE_API_URL` = URL de tu backend.
+Corre **dentro** del entorno real y revisa DEBUG, `SECRET_KEY`, los hosts, la
+base, las migraciones, las cuentas de prueba, Cloudinary, el correo, los
+estáticos, Redis, HTTPS y el CSP. Nunca imprime el valor de una variable —solo
+si está o no—, así que la salida se puede pegar en un chat sin filtrar nada.
+
+Sale con código 1 si encuentra algo que impida salir a producción. Mientras diga
+`BLOQUEA`, no abras.
 
 ---
 
-## Variables de Entorno
+## Las tres que más muerden
 
-**La lista completa y comentada está en [`backend/.env.example`](backend/.env.example).**
+**`ALLOWED_HOSTS` no se pone en `*`.** Con `*`, cualquiera puede mandar un `Host:`
+falso y envenenar los enlaces de "restablecer contraseña" que salen por correo.
+`settings.py` ya trae `remali.mx`, `www.remali.mx` y `localhost` por defecto: si
+el dominio no cambia, no hace falta definir la variable.
+
+**`FRONTEND_URL` y `BACKEND_URL` sí hay que definirlas.** Su valor por defecto es
+`https://remali.up.railway.app`, un dominio que este proyecto ya no tiene (hoy
+sirve en `remali.mx`). Ahí van los enlaces de verificar correo, restablecer
+contraseña y los QR de las máquinas: si apuntan a un dominio muerto, el cliente
+recibe un correo con una liga que no abre. Pon las dos en `https://remali.mx`.
+
+**`token_blacklist` tiene que estar migrada.** Sin sus tablas, emitir el JWT
+truena y el login lo devuelve como "credenciales inválidas" —con la contraseña
+correcta—. El `migrate` del arranque la aplica; si alguna vez NADIE puede entrar,
+esto es lo primero que hay que mirar.
+
+---
+
+## Variables de entorno
+
+La lista completa y comentada está en [`backend/.env.example`](backend/.env.example).
 Ese archivo es la única fuente de verdad: cada variable con su para qué.
 
-> ⚠️ **Nunca pongas valores reales en este documento ni en ningún archivo del
-> repositorio.** Las credenciales van en la pestaña *Variables* de Railway (y en
+> Nunca pongas valores reales en este documento ni en ningún archivo del
+> repositorio. Las credenciales van en la pestaña *Variables* de Railway (y en
 > un `.env` local, que está ignorado por git). Un secreto commiteado sigue en el
 > historial aunque después se borre del archivo: hay que rotarlo.
 
@@ -120,7 +133,7 @@ cd backend && ../env/bin/python manage.py respaldar_bd
 ```
 
 En Railway hace falta un **volumen**, porque el disco del contenedor se borra en
-cada despliegue — justo cuando más falta haría el respaldo:
+cada despliegue, justo cuando más falta haría el respaldo:
 
 1. En el servicio **cron**: *Settings → Volumes → New Volume*, punto de montaje `/data`.
 2. En ese mismo servicio, variable `BACKUP_LOCAL_DIR=/data/backups`.
@@ -176,7 +189,7 @@ y seguro de correr a diario: si la unidad no está disponible, lo registra y sig
 Debe correr **una vez al día**. En Railway se hace con un **servicio de cron aparte**
 (NO se pone el `cronSchedule` en el servicio web, porque apagaría el servidor).
 
-### Opción A — Config as code (recomendada, ya incluida)
+### Opción A: config as code (la recomendada, ya incluida)
 
 Se incluye `railway.cron.json` en la raíz (misma imagen Docker, start command del
 comando, `cronSchedule` diario a las 12:00 UTC ≈ 6:00 am CDMX, `restartPolicyType: NEVER`).
@@ -184,10 +197,10 @@ comando, `cronSchedule` diario a las 12:00 UTC ≈ 6:00 am CDMX, `restartPolicyT
 1. En tu proyecto de Railway: **New → GitHub Repo** → el mismo repositorio.
 2. En ese nuevo servicio: **Settings → Config as code → Path** = `railway.cron.json`.
 3. Copia las **mismas variables de entorno** del servicio web (incluida `DATABASE_URL`/`MYSQL_URL`
-   — usa "Add Reference" para apuntar a la misma base de datos MySQL).
+   usando "Add Reference" para apuntar a la misma base de datos MySQL).
 4. Deploy. Railway lo ejecutará a diario; el servicio arranca, corre el comando y termina.
 
-### Opción B — Solo el panel (sin archivo)
+### Opción B: solo el panel, sin archivo
 
 1. **New → GitHub Repo** (mismo repo) o **Empty Service** con la misma imagen.
 2. **Settings → Deploy → Custom Start Command**: `python manage.py procesar_rentas`

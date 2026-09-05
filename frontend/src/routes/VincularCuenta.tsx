@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import api from '../lib/api'
 import { useAuth } from '../store/auth'
 import { formatMoney } from '../lib/utils'
+import { MarcaVeredicto, TarjetaViva } from '../components/Veredicto'
 
 type Info = {
   tipo: string
@@ -58,9 +59,15 @@ export default function VincularCuenta({ tipo }: { tipo: 'venta' | 'renta' | 'co
     }
   }
 
+  /* Qué está mostrando la tarjeta. Cuando esto cambia se hace el relevo: lo
+     anterior se va y la caja viaja a su nuevo alto en vez de saltar. */
+  const paso = cargando ? 'cargando' : !sesion ? 'sin-sesion' : ok ? 'listo' : error ? 'error' : info ? 'confirmar' : 'vacio'
+
   return (
     <div className="min-h-[70vh] flex items-center justify-center px-4 py-16">
-      <div className="w-full max-w-md rounded-3xl border border-edge bg-surface shadow-[0_24px_60px_rgba(17,24,39,0.10)] p-8 text-center">
+      <TarjetaViva paso={paso}
+        className="w-full max-w-md rounded-3xl border border-edge bg-surface shadow-[0_24px_60px_rgba(17,24,39,0.10)]"
+        interior="p-8 text-center">
         {cargando ? (
           <div className="py-10 flex flex-col items-center gap-4">
             <span className="w-8 h-8 rounded-full border-2 border-gold border-t-transparent animate-spin" />
@@ -84,14 +91,9 @@ export default function VincularCuenta({ tipo }: { tipo: 'venta' | 'renta' | 'co
           </>
         ) : ok ? (
           <>
-            {/* Un solo momento de delight: la insignia hace pop, un anillo pulsa
-                una vez y la palomita se dibuja; el texto sube en cascada detrás. */}
-            <div className="relative w-[76px] h-[76px] mx-auto mb-6 grid place-items-center">
-              <span aria-hidden="true" className="exito-ring absolute inset-0 rounded-full border-2 border-emerald-500/60" />
-              <div className="exito-pop w-[76px] h-[76px] rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 grid place-items-center">
-                <svg className="w-9 h-9" fill="none" stroke="currentColor" strokeWidth="2.4" viewBox="0 0 24 24"><path className="exito-check" pathLength={1} strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
-              </div>
-            </div>
+            {/* El sí: anillo que pulsa una vez, rebote mínimo y la palomita
+                trazándose. El texto sube en cascada detrás. */}
+            <MarcaVeredicto tipo="exito" className="mb-6" />
             <h1 className="vc-rise text-[26px] font-black tracking-tight text-ink" style={{ animationDelay: '300ms' }}>¡Listo!</h1>
             <p className="vc-rise text-mute text-sm mt-2 max-w-[30ch] mx-auto" style={{ animationDelay: '370ms' }}>Tu {titulo} ya vive en tu cuenta.</p>
             <button
@@ -105,11 +107,9 @@ export default function VincularCuenta({ tipo }: { tipo: 'venta' | 'renta' | 'co
           </>
         ) : error ? (
           <>
-            {/* Contraparte sobria del éxito: la insignia entra calmada y el "!"
-                hace un "no" sutil una vez; el texto sube en cascada detrás. */}
-            <div className="vc-pop w-16 h-16 mx-auto rounded-full bg-red-500/10 text-red-500 flex items-center justify-center mb-5">
-              <svg className="err-shake w-8 h-8" fill="none" stroke="currentColor" strokeWidth="2.2" viewBox="0 0 24 24" strokeLinecap="round"><path d="M12 7v6" /><circle cx="12" cy="17" r="0.6" className="fill-current" /></svg>
-            </div>
+            {/* Contraparte sobria del sí: entra calmada, sin anillo, y hace un
+                "no" sutil una sola vez. */}
+            <MarcaVeredicto tipo="alerta" className="mb-5" />
             <h1 className="vc-rise text-[22px] font-black text-ink" style={{ animationDelay: '160ms' }}>Enlace no disponible</h1>
             <p className="vc-rise text-mute text-sm mt-2" style={{ animationDelay: '230ms' }}>{error}</p>
             <button onClick={() => nav('/')} style={{ animationDelay: '310ms' }} className="vc-rise mt-7 w-full py-3.5 rounded-full border border-edge text-ink font-semibold text-sm transition-[transform,background-color] duration-150 ease-out hover:bg-surface-2 active:scale-[0.97]">
@@ -154,7 +154,7 @@ export default function VincularCuenta({ tipo }: { tipo: 'venta' | 'renta' | 'co
             </div>
 
             {info.ya_ligada && (
-              <p className="vc-rise text-amber-600 dark:text-amber-400 text-xs mt-3" style={{ animationDelay: '310ms' }}>Esta {titulo} ya estaba en una cuenta; al confirmar pasará a la tuya.</p>
+              <p className="vc-rise text-taller-ink text-xs mt-3" style={{ animationDelay: '310ms' }}>Esta {titulo} ya estaba en una cuenta; al confirmar pasará a la tuya.</p>
             )}
             <button onClick={vincular} disabled={vinculando}
               style={{ animationDelay: '340ms' }}
@@ -164,7 +164,7 @@ export default function VincularCuenta({ tipo }: { tipo: 'venta' | 'renta' | 'co
             <p className="vc-rise text-[11.5px] text-mute mt-3" style={{ animationDelay: '400ms' }}>Se guardará en la cuenta con la que iniciaste sesión.</p>
           </>
         ) : null}
-      </div>
+      </TarjetaViva>
     </div>
   )
 }

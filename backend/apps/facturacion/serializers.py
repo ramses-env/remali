@@ -1,39 +1,6 @@
 from rest_framework import serializers
 
-from .models import Factura, SolicitudFactura
-
-
-class FacturaSerializer(serializers.ModelSerializer):
-    """Sin el XML: pesa y no se usa para pintar. Se baja por su propia ruta."""
-    subida_por_nombre = serializers.SerializerMethodField()
-    # De dónde salió. En el panel evita abrir la solicitud para saberlo, y en
-    # "Mis facturas" es lo único que le dice al cliente de qué es esta factura:
-    # un UUID no le dice nada a nadie.
-    folio_origen = serializers.SerializerMethodField()
-    concepto = serializers.SerializerMethodField()
-
-    class Meta:
-        model = Factura
-        fields = [
-            'id', 'uuid', 'serie', 'folio', 'estado',
-            'folio_origen', 'concepto',
-            'rfc_receptor', 'nombre_receptor',
-            'subtotal', 'iva', 'total', 'moneda',
-            'fecha_emision', 'fecha_certificacion',
-            'envio_estado', 'enviada_en', 'envio_error',
-            'cancelada_en', 'cancelada_motivo', 'sustituye_a',
-            'subida_en', 'subida_por_nombre',
-        ]
-
-    def get_subida_por_nombre(self, obj):
-        u = obj.subida_por
-        return (u.get_full_name() or u.username) if u else ''
-
-    def get_folio_origen(self, obj):
-        return obj.solicitud.folio_origen
-
-    def get_concepto(self, obj):
-        return obj.solicitud.concepto
+from .models import SolicitudFactura
 
 
 class SolicitudFacturaSerializer(serializers.ModelSerializer):
@@ -41,7 +8,6 @@ class SolicitudFacturaSerializer(serializers.ModelSerializer):
     cliente_display = serializers.CharField(read_only=True)
     datos_completos = serializers.BooleanField(read_only=True)
     fecha_origen = serializers.SerializerMethodField()
-    facturas = FacturaSerializer(many=True, read_only=True)
 
     class Meta:
         model = SolicitudFactura
@@ -50,7 +16,7 @@ class SolicitudFacturaSerializer(serializers.ModelSerializer):
             'rfc', 'razon_social', 'codigo_postal', 'regimen_fiscal', 'uso_cfdi', 'email',
             'subtotal', 'iva', 'total', 'forma_pago', 'concepto',
             'estado', 'uuid', 'fecha_timbrado', 'notas',
-            'cliente_display', 'datos_completos', 'fecha_origen', 'facturas',
+            'cliente_display', 'datos_completos', 'fecha_origen',
             'creada', 'actualizada',
         ]
         # El alta se hace desde las ventas/rentas; aquí solo se completan/marcan.

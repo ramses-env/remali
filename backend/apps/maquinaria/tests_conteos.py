@@ -30,7 +30,7 @@ class ConteosTest(TestCase):
         self.assertEqual(r.data['unidades'], 0)
         self.assertEqual(r.data['adeudos'], 0)
         # El propio usuario cuenta: es una cuenta activa.
-        self.assertEqual(r.data['usuarios_activos'], 1)
+        self.assertEqual(r.data['equipo_activos'], 1)
 
     def test_sin_sesion_no_pasa(self):
         self.assertIn(self.client.get('/api/dashboard/conteos/').status_code, (401, 403))
@@ -39,3 +39,33 @@ class ConteosTest(TestCase):
         cliente = User.objects.create_user('juan', 'juan@correo.mx', 'x' * 12)
         self.client.force_authenticate(cliente)
         self.assertEqual(self.client.get('/api/dashboard/conteos/').status_code, 403)
+
+
+class ConteoDeEquipoTest(TestCase):
+    """El globito del menú cuenta EQUIPO, no todas las cuentas del sistema.
+
+    Vive sobre la sección Equipo, que enseña solo cuentas de trabajo. Contando a
+    los clientes decía "302" y prometía una lista que la sección no tiene.
+    """
+
+    def setUp(self):
+        from django.contrib.auth.models import Group
+        self.client = APIClient()
+        self.duenio = User.objects.create_superuser('jefa2', 'jefa2@remali.mx', 'x' * 12)
+        self.client.force_authenticate(self.duenio)
+        tecnico = User.objects.create_user('tec', 'tec@remali.mx', 'x' * 12)
+        tecnico.groups.add(Group.objects.get_or_create(name='Técnico')[0])
+        for n in range(3):
+            cliente = User.objects.create_user(f'cli{n}', f'cli{n}@x.com', 'x' * 12)
+            cliente.groups.add(Group.objects.get_or_create(name='Cliente')[0])
+
+    def test_los_clientes_no_cuentan(self):
+        r = self.client.get('/api/dashboard/conteos/')
+
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.data['equipo_activos'], 2)   # la dueña y el técnico
+
+    def test_una_cuenta_sin_acceso_tampoco(self):
+        User.objects.filter(username='tec').update(is_active=False)
+
+        self.assertEqual(self.client.get('/api/dashboard/conteos/').data['equipo_activos'], 1)

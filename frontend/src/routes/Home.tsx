@@ -1,12 +1,5 @@
 import { useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
-import { gsap } from "gsap";
-import { ScrollTrigger } from "gsap/ScrollTrigger";
-import { TextPlugin } from "gsap/TextPlugin";
-
-gsap.registerPlugin(ScrollTrigger, TextPlugin);
-// Solo en dev: poder inspeccionar los triggers desde la consola.
-if (import.meta.env.DEV) (window as any).__ST = ScrollTrigger;
 
 const machines = [
   {
@@ -66,165 +59,138 @@ export default function Home() {
   const rootRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const ctx = gsap.context(() => {
-      /* ──────────────────────────────────────
-         1. HERO — letras caen una a una
-      ────────────────────────────────────── */
-      gsap.from(".char", {
-        yPercent: 120,
-        opacity: 0,
-        duration: 1.1,
-        ease: "expo.out",
-        stagger: 0.035,
-      });
-      gsap.from([".hero-sub", ".hero-actions", ".hero-stats-row"], {
-        y: 50,
-        opacity: 0,
-        duration: 1,
-        ease: "power3.out",
-        stagger: 0.18,
-        delay: 0.5,
-      });
+    /* GSAP (núcleo + dos plugins) son ~47 KB comprimidos que NO hacen falta
+       para pintar la página: solo la animan. Importados arriba viajaban en el
+       chunk de entrada, así que los bajaba también quien abría /login o el
+       panel y nunca vería esta pantalla. Aquí se piden después del montaje —
+       los tres en paralelo, que no dependen entre sí— y la portada pinta
+       primero y se anima un instante después. */
+    let cancelado = false;
+    let limpiar: (() => void) | undefined;
 
-      /* ──────────────────────────────────────
-         2. HERO — parallax suave del grid bg
-      ────────────────────────────────────── */
-      gsap.to(".hero-grid", {
-        yPercent: 40,
-        ease: "none",
-        scrollTrigger: {
-          trigger: ".hero-section",
-          start: "top top",
-          end: "bottom top",
-          scrub: true,
-        },
-      });
+    void (async () => {
+      const [{ gsap }, { ScrollTrigger }, { TextPlugin }] = await Promise.all([
+        import("gsap"),
+        import("gsap/ScrollTrigger"),
+        import("gsap/TextPlugin"),
+      ]);
+      // Desmontado mientras bajaba GSAP: no hay nada que animar.
+      if (cancelado) return;
+      gsap.registerPlugin(ScrollTrigger, TextPlugin);
+      // Solo en dev: poder inspeccionar los triggers desde la consola.
+      if (import.meta.env.DEV) (window as any).__ST = ScrollTrigger;
 
-      /* ──────────────────────────────────────
-         3. MARQUEE infinito
-      ────────────────────────────────────── */
-      const track = document.querySelector(".marquee-track") as HTMLElement;
-      if (track) {
-        const w = track.scrollWidth / 2;
-        gsap.to(track, { x: -w, duration: 30, ease: "none", repeat: -1 });
-      }
-
-      /* ──────────────────────────────────────
-         4. INTRO TEXTO — "¿Qué hacemos?" aparece con typewriter scrub
-      ────────────────────────────────────── */
-      gsap.fromTo(
-        ".intro-line",
-        { width: "0%" },
-        {
-          width: "100%",
-          ease: "none",
-          scrollTrigger: {
-            trigger: ".intro-section",
-            start: "top 80%",
-            end: "top 20%",
-            scrub: 1,
-          },
-        },
-      );
-      gsap.from(".intro-word", {
-        y: 80,
-        opacity: 0,
-        duration: 0.9,
-        ease: "expo.out",
-        stagger: 0.07,
-        scrollTrigger: {
-          trigger: ".intro-section",
-          start: "top 75%",
-          toggleActions: "play none none none",
-        },
-      });
-
-      /* Showcase de plataforma: el marco de la imagen sube y se asienta al
-         entrar a vista (reveal suave, respeta el estado final). */
-      gsap.fromTo(
-        ".plataforma-frame",
-        { y: 60, opacity: 0, scale: 0.98 },
-        {
-          y: 0,
-          opacity: 1,
-          scale: 1,
+      const ctx = gsap.context(() => {
+        /* ──────────────────────────────────────
+           1. HERO — letras caen una a una
+        ────────────────────────────────────── */
+        gsap.from(".char", {
+          yPercent: 120,
+          opacity: 0,
           duration: 1.1,
           ease: "expo.out",
+          stagger: 0.035,
+        });
+        gsap.from([".hero-sub", ".hero-actions", ".hero-stats-row"], {
+          y: 50,
+          opacity: 0,
+          duration: 1,
+          ease: "power3.out",
+          stagger: 0.18,
+          delay: 0.5,
+        });
+
+        /* ──────────────────────────────────────
+           2. HERO — parallax suave del grid bg
+        ────────────────────────────────────── */
+        gsap.to(".hero-grid", {
+          yPercent: 40,
+          ease: "none",
           scrollTrigger: {
-            trigger: ".plataforma-section",
-            start: "top 80%",
-            toggleActions: "play none none none",
+            trigger: ".hero-section",
+            start: "top top",
+            end: "bottom top",
+            scrub: true,
           },
-        },
-      );
+        });
 
-      /* ──────────────────────────────────────
-         5. GALERÍA — clipPath expand + parallax interno
-      ────────────────────────────────────── */
-      gsap.utils.toArray<HTMLElement>(".expand-card").forEach((card, i) => {
-        const img = card.querySelector<HTMLElement>(".expand-img");
-        const overlay = card.querySelector<HTMLElement>(".expand-overlay");
-        const info = card.querySelector<HTMLElement>(".expand-info");
-        const num = card.querySelector<HTMLElement>(".card-num");
-        const accent = card.querySelector<HTMLElement>(".card-accent-line");
+        /* ──────────────────────────────────────
+           3. MARQUEE infinito
+        ────────────────────────────────────── */
+        const track = document.querySelector(".marquee-track") as HTMLElement;
+        if (track) {
+          const w = track.scrollWidth / 2;
+          gsap.to(track, { x: -w, duration: 30, ease: "none", repeat: -1 });
+        }
 
-        // clip abre al entrar
+        /* Showcase de plataforma: el marco de la imagen sube y se asienta al
+           entrar a vista (reveal suave, respeta el estado final). */
         gsap.fromTo(
-          img,
-          { clipPath: "inset(18% 10% 18% 10% round 28px)", scale: 1.25 },
+          ".plataforma-frame",
+          { y: 60, opacity: 0, scale: 0.98 },
           {
-            clipPath: "inset(0% 0% 0% 0% round 0px)",
+            y: 0,
+            opacity: 1,
             scale: 1,
-            ease: "power2.inOut",
+            duration: 1.1,
+            ease: "expo.out",
             scrollTrigger: {
-              trigger: card,
-              start: "top 92%",
-              end: "top 5%",
-              scrub: 1.8,
+              trigger: ".plataforma-section",
+              start: "top 80%",
+              toggleActions: "play none none none",
             },
           },
         );
 
-        // overlay se aclara
-        gsap.fromTo(
-          overlay,
-          { opacity: 0.75 },
-          {
-            opacity: 0.2,
-            ease: "none",
-            scrollTrigger: {
-              trigger: card,
-              start: "top 92%",
-              end: "top 20%",
-              scrub: true,
-            },
-          },
-        );
+        /* ──────────────────────────────────────
+           4. GALERÍA — clipPath expand + parallax interno
+        ────────────────────────────────────── */
+        gsap.utils.toArray<HTMLElement>(".expand-card").forEach((card, i) => {
+          const img = card.querySelector<HTMLElement>(".expand-img");
+          const overlay = card.querySelector<HTMLElement>(".expand-overlay");
+          const info = card.querySelector<HTMLElement>(".expand-info");
+          const num = card.querySelector<HTMLElement>(".card-num");
+          const accent = card.querySelector<HTMLElement>(".card-accent-line");
 
-        // parallax interno de la imagen (se mueve más lento)
-        gsap.fromTo(
-          img,
-          { yPercent: -10 },
-          {
-            yPercent: 10,
-            ease: "none",
-            scrollTrigger: {
-              trigger: card,
-              start: "top bottom",
-              end: "bottom top",
-              scrub: true,
-            },
-          },
-        );
-
-        // número grande se hace más pequeño al subir
-        if (num) {
+          // clip abre al entrar
           gsap.fromTo(
-            num,
-            { scale: 1.6, opacity: 0.05 },
+            img,
+            { clipPath: "inset(18% 10% 18% 10% round 28px)", scale: 1.25 },
             {
+              clipPath: "inset(0% 0% 0% 0% round 0px)",
               scale: 1,
-              opacity: 0.12,
+              ease: "power2.inOut",
+              scrollTrigger: {
+                trigger: card,
+                start: "top 92%",
+                end: "top 5%",
+                scrub: 1.8,
+              },
+            },
+          );
+
+          // overlay se aclara
+          gsap.fromTo(
+            overlay,
+            { opacity: 0.75 },
+            {
+              opacity: 0.2,
+              ease: "none",
+              scrollTrigger: {
+                trigger: card,
+                start: "top 92%",
+                end: "top 20%",
+                scrub: true,
+              },
+            },
+          );
+
+          // parallax interno de la imagen (se mueve más lento)
+          gsap.fromTo(
+            img,
+            { yPercent: -10 },
+            {
+              yPercent: 10,
               ease: "none",
               scrollTrigger: {
                 trigger: card,
@@ -234,193 +200,217 @@ export default function Home() {
               },
             },
           );
-        }
 
-        // línea acento se extiende
-        if (accent) {
+          // número grande se hace más pequeño al subir
+          if (num) {
+            gsap.fromTo(
+              num,
+              { scale: 1.6, opacity: 0.05 },
+              {
+                scale: 1,
+                opacity: 0.12,
+                ease: "none",
+                scrollTrigger: {
+                  trigger: card,
+                  start: "top bottom",
+                  end: "bottom top",
+                  scrub: true,
+                },
+              },
+            );
+          }
+
+          // línea acento se extiende
+          if (accent) {
+            gsap.fromTo(
+              accent,
+              { scaleX: 0, transformOrigin: "left center" },
+              {
+                scaleX: 1,
+                duration: 0.8,
+                ease: "expo.out",
+                scrollTrigger: {
+                  trigger: card,
+                  start: "top 60%",
+                  toggleActions: "play none none none",
+                },
+              },
+            );
+          }
+
+          // info sube
           gsap.fromTo(
-            accent,
-            { scaleX: 0, transformOrigin: "left center" },
+            info,
+            { y: 70, opacity: 0 },
             {
-              scaleX: 1,
-              duration: 0.8,
+              y: 0,
+              opacity: 1,
+              duration: 1,
               ease: "expo.out",
+              delay: i * 0.04,
               scrollTrigger: {
                 trigger: card,
-                start: "top 60%",
+                start: "top 65%",
                 toggleActions: "play none none none",
               },
             },
           );
-        }
+        });
 
-        // info sube
+        /* ──────────────────────────────────────
+           5. STATS — contadores animados
+        ────────────────────────────────────── */
+        gsap.utils.toArray<HTMLElement>(".stat-count").forEach((el) => {
+          const target = parseInt(el.dataset.target || "0", 10);
+          gsap.fromTo(
+            el,
+            { innerText: 0 },
+            {
+              innerText: target,
+              duration: 2.5,
+              ease: "power1.out",
+              snap: { innerText: 1 },
+              scrollTrigger: {
+                trigger: ".stats-section",
+                start: "top 75%",
+                toggleActions: "play none none none",
+              },
+            },
+          );
+        });
+
+        /* fromTo y no from: con from() el "final" se lee del estado del DOM al
+           crear el tween, y si el montaje doble de StrictMode dejó un opacity: 0
+           inline, la sección termina la animación… invisible. Con el fin
+           explícito eso no puede pasar. `once` además libera el trigger. */
         gsap.fromTo(
-          info,
-          { y: 70, opacity: 0 },
+          ".stat-item",
+          { y: 60, opacity: 0 },
           {
             y: 0,
             opacity: 1,
-            duration: 1,
+            duration: 0.9,
             ease: "expo.out",
-            delay: i * 0.04,
-            scrollTrigger: {
-              trigger: card,
-              start: "top 65%",
-              toggleActions: "play none none none",
-            },
-          },
-        );
-      });
-
-      /* ──────────────────────────────────────
-         6. STATS — contadores animados
-      ────────────────────────────────────── */
-      gsap.utils.toArray<HTMLElement>(".stat-count").forEach((el) => {
-        const target = parseInt(el.dataset.target || "0", 10);
-        gsap.fromTo(
-          el,
-          { innerText: 0 },
-          {
-            innerText: target,
-            duration: 2.5,
-            ease: "power1.out",
-            snap: { innerText: 1 },
+            stagger: 0.12,
             scrollTrigger: {
               trigger: ".stats-section",
-              start: "top 75%",
-              toggleActions: "play none none none",
+              start: "top 80%",
+              once: true,
             },
           },
         );
-      });
 
-      /* fromTo y no from: con from() el "final" se lee del estado del DOM al
-         crear el tween, y si el montaje doble de StrictMode dejó un opacity: 0
-         inline, la sección termina la animación… invisible. Con el fin
-         explícito eso no puede pasar. `once` además libera el trigger. */
-      gsap.fromTo(
-        ".stat-item",
-        { y: 60, opacity: 0 },
-        {
-          y: 0,
-          opacity: 1,
-          duration: 0.9,
-          ease: "expo.out",
-          stagger: 0.12,
-          scrollTrigger: {
-            trigger: ".stats-section",
-            start: "top 80%",
-            once: true,
+        /* ──────────────────────────────────────
+           6. FEATURES — entrada escalonada con línea que crece
+        ────────────────────────────────────── */
+        gsap.fromTo(
+          ".feature-card",
+          { y: 80, opacity: 0 },
+          {
+            y: 0,
+            opacity: 1,
+            duration: 0.9,
+            ease: "expo.out",
+            stagger: 0.1,
+            scrollTrigger: {
+              trigger: ".features-section",
+              start: "top 75%",
+              once: true,
+            },
           },
-        },
-      );
+        );
 
-      /* ──────────────────────────────────────
-         7. FEATURES — entrada escalonada con línea que crece
-      ────────────────────────────────────── */
-      gsap.fromTo(
-        ".feature-card",
-        { y: 80, opacity: 0 },
-        {
-          y: 0,
-          opacity: 1,
-          duration: 0.9,
-          ease: "expo.out",
-          stagger: 0.1,
-          scrollTrigger: {
-            trigger: ".features-section",
-            start: "top 75%",
-            once: true,
+        gsap.fromTo(
+          ".features-divider",
+          { scaleX: 0, transformOrigin: "left center" },
+          {
+            scaleX: 1,
+            duration: 1.4,
+            ease: "expo.out",
+            scrollTrigger: {
+              trigger: ".features-section",
+              start: "top 70%",
+              once: true,
+            },
           },
-        },
-      );
+        );
 
-      gsap.fromTo(
-        ".features-divider",
-        { scaleX: 0, transformOrigin: "left center" },
-        {
-          scaleX: 1,
-          duration: 1.4,
-          ease: "expo.out",
-          scrollTrigger: {
-            trigger: ".features-section",
-            start: "top 70%",
-            once: true,
+        /* ──────────────────────────────────────
+           7. HORIZONTAL TICKER en stats (frase)
+        ────────────────────────────────────── */
+        const ticker2 = document.querySelector(".ticker2-track") as HTMLElement;
+        if (ticker2) {
+          const w2 = ticker2.scrollWidth / 2;
+          gsap.to(ticker2, { x: -w2, duration: 20, ease: "none", repeat: -1 });
+        }
+
+        /* ──────────────────────────────────────
+           8. CTA — escala desde abajo + glow pulse
+        ────────────────────────────────────── */
+        gsap.fromTo(
+          ".cta-box",
+          { scale: 0.88, opacity: 0, y: 80 },
+          {
+            scale: 1,
+            opacity: 1,
+            y: 0,
+            duration: 1.4,
+            ease: "expo.out",
+            scrollTrigger: { trigger: ".cta-box", start: "top 85%", once: true },
           },
-        },
-      );
+        );
 
-      /* ──────────────────────────────────────
-         8. HORIZONTAL TICKER en stats (frase)
-      ────────────────────────────────────── */
-      const ticker2 = document.querySelector(".ticker2-track") as HTMLElement;
-      if (ticker2) {
-        const w2 = ticker2.scrollWidth / 2;
-        gsap.to(ticker2, { x: -w2, duration: 20, ease: "none", repeat: -1 });
-      }
+        gsap.fromTo(
+          ".cta-btn",
+          { y: 30, opacity: 0 },
+          {
+            y: 0,
+            opacity: 1,
+            duration: 0.9,
+            ease: "power3.out",
+            stagger: 0.15,
+            scrollTrigger: { trigger: ".cta-box", start: "top 75%", once: true },
+          },
+        );
 
-      /* ──────────────────────────────────────
-         9. CTA — escala desde abajo + glow pulse
-      ────────────────────────────────────── */
-      gsap.fromTo(
-        ".cta-box",
-        { scale: 0.88, opacity: 0, y: 80 },
-        {
-          scale: 1,
-          opacity: 1,
-          y: 0,
-          duration: 1.4,
-          ease: "expo.out",
-          scrollTrigger: { trigger: ".cta-box", start: "top 85%", once: true },
-        },
-      );
+        /* ──────────────────────────────────────
+           9. SCROLL PROGRESS BAR
+        ────────────────────────────────────── */
+        ScrollTrigger.create({
+          start: "top top",
+          end: "max",
+          onUpdate: (self) => {
+            const bar = document.querySelector(".scroll-bar") as HTMLElement;
+            if (bar) bar.style.width = `${self.progress * 100}%`;
+          },
+        });
+      }, rootRef);
 
-      gsap.fromTo(
-        ".cta-btn",
-        { y: 30, opacity: 0 },
-        {
-          y: 0,
-          opacity: 1,
-          duration: 0.9,
-          ease: "power3.out",
-          stagger: 0.15,
-          scrollTrigger: { trigger: ".cta-box", start: "top 75%", once: true },
-        },
-      );
+      /* Las imágenes (y los datos) llegan después del montaje y recorren el
+         layout. ScrollTrigger midió posiciones viejas: hay secciones que se
+         quedan invisibles porque su trigger nunca se cruza. Cada imagen que
+         carga refresca las mediciones (con debounce para no recalcular 10 veces
+         seguidas). El listener va en fase de captura porque `load` no burbujea. */
+      let t: number | undefined;
+      const refrescar = () => {
+        window.clearTimeout(t);
+        t = window.setTimeout(() => ScrollTrigger.refresh(), 150);
+      };
+      const raiz = rootRef.current;
+      raiz?.addEventListener("load", refrescar, true);
+      window.addEventListener("load", refrescar);
 
-      /* ──────────────────────────────────────
-         10. SCROLL PROGRESS BAR
-      ────────────────────────────────────── */
-      ScrollTrigger.create({
-        start: "top top",
-        end: "max",
-        onUpdate: (self) => {
-          const bar = document.querySelector(".scroll-bar") as HTMLElement;
-          if (bar) bar.style.width = `${self.progress * 100}%`;
-        },
-      });
-    }, rootRef);
-
-    /* Las imágenes (y los datos) llegan después del montaje y recorren el
-       layout. ScrollTrigger midió posiciones viejas: hay secciones que se
-       quedan invisibles porque su trigger nunca se cruza. Cada imagen que
-       carga refresca las mediciones (con debounce para no recalcular 10 veces
-       seguidas). El listener va en fase de captura porque `load` no burbujea. */
-    let t: number | undefined;
-    const refrescar = () => {
-      window.clearTimeout(t);
-      t = window.setTimeout(() => ScrollTrigger.refresh(), 150);
-    };
-    const raiz = rootRef.current;
-    raiz?.addEventListener("load", refrescar, true);
-    window.addEventListener("load", refrescar);
+      limpiar = () => {
+        window.clearTimeout(t);
+        raiz?.removeEventListener("load", refrescar, true);
+        window.removeEventListener("load", refrescar);
+        ctx.revert();
+      };
+    })();
 
     return () => {
-      window.clearTimeout(t);
-      raiz?.removeEventListener("load", refrescar, true);
-      window.removeEventListener("load", refrescar);
-      ctx.revert();
+      cancelado = true;
+      limpiar?.();
     };
   }, []);
 
@@ -594,40 +584,9 @@ export default function Home() {
       </div>
 
       {/* ══════════════════════════════════
-          INTRO — párrafo grande con reveal
-      ══════════════════════════════════ */}
-      <section className="intro-section pt-24 pb-12 md:pt-28 md:pb-16">
-        <div className="contenedor">
-          <div className="intro-line h-px bg-gold/40 w-0 mb-14" />
-          <div className="overflow-hidden">
-            <p className="text-3xl md:text-4xl lg:text-5xl font-black leading-[1.15] text-ink max-w-4xl">
-              {[
-                "Maquinaria",
-                "que",
-                "trabaja",
-                "tan",
-                "duro",
-                "como",
-                "tú.",
-                "Equipos",
-                "confiables,",
-                "servicio",
-                "sin",
-                "igual.",
-              ].map((w, i) => (
-                <span key={i} className="intro-word inline-block mr-[0.3em]">
-                  {w}
-                </span>
-              ))}
-            </p>
-          </div>
-        </div>
-      </section>
-
-      {/* ══════════════════════════════════
           PLATAFORMA — showcase del catálogo (imagen enmarcada, sin recortes)
       ══════════════════════════════════ */}
-      <section className="plataforma-section relative pt-4 md:pt-8 pb-24 md:pb-32 overflow-hidden">
+      <section className="plataforma-section relative pt-24 md:pt-32 pb-24 md:pb-32 overflow-hidden">
         <div
           aria-hidden
           className="pointer-events-none absolute left-1/2 top-1/3 -z-10 h-[440px] w-[440px] -translate-x-1/2 rounded-full bg-gold/[0.06] blur-[130px]"

@@ -2,7 +2,10 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '../lib/api'
 import { leerToken } from '../lib/token'
+import { cuandoLlego } from '../lib/utils'
+import wsUrl from '../lib/wsUrl'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
+import { anotarFallo } from '../lib/fallo'
 
 type Notif = {
   id: number
@@ -177,14 +180,19 @@ function _colorAcento(acento: MetaTipo['acento']): { ring: string; chipBg: strin
 
 function _ctaPara(n: Notif): { texto: string; to: string } | null {
   const d = n.data ?? {}
+  // El dinero manda: si el aviso es de un abono o de un saldo, el cliente va a
+  // "Mis adeudos" —no al detalle de la renta— porque ahí es donde liquida.
+  if (n.seccion === 'mis-adeudos') {
+    return { texto: 'Ver mis adeudos', to: '/mis-adeudos' }
+  }
   if ((n.seccion === 'mis-compras' || n.tipo === 'venta') && typeof d.venta_id === 'number') {
-    return { texto: 'Ver mi compra', to: '/cuenta/compras' }
+    return { texto: 'Ver mi compra', to: '/mis-compras' }
   }
   if ((n.seccion === 'mis-rentas' || n.tipo === 'renta') && typeof d.renta_id === 'number') {
-    return { texto: 'Ver mi renta', to: '/cuenta/rentas' }
+    return { texto: 'Ver mi renta', to: '/mis-rentas' }
   }
   if (n.seccion === 'cotizaciones' || /cotizaci[oó]n/iu.test(n.titulo)) {
-    return { texto: 'Ir a cotizaciones', to: '/cuenta/cotizaciones' }
+    return { texto: 'Ir a cotizaciones', to: '/mis-cotizaciones' }
   }
   return null
 }
@@ -205,7 +213,7 @@ export default function CampanaCliente() {
         setItems(r.data.notificaciones || [])
         setNoLeidas(r.data.no_leidas || 0)
       })
-      .catch(() => {})
+      .catch(anotarFallo)
   }
 
   useEffect(() => {
@@ -223,8 +231,7 @@ export default function CampanaCliente() {
     const conectar = () => {
       const token = leerToken()
       if (!token || !vivo) return
-      const proto = location.protocol === 'https:' ? 'wss' : 'ws'
-      ws = new WebSocket(`${proto}://${location.host}/ws/notificaciones/?token=${encodeURIComponent(token)}`)
+      ws = new WebSocket(wsUrl('/ws/notificaciones/', token))
       ws.onmessage = (e) => {
         try {
           const n: Notif = JSON.parse(e.data)
@@ -255,7 +262,7 @@ export default function CampanaCliente() {
     const abrir = !abierto
     setAbierto(abrir)
     if (abrir && noLeidas > 0) {
-      api.post('/notificaciones/mias/leer/', {}, { fondo: true } as never).catch(() => {})
+      api.post('/notificaciones/mias/leer/', {}, { fondo: true } as never).catch(anotarFallo)
       setNoLeidas(0)
       setItems(prev => prev.map(n => ({ ...n, leida: true })))
     }
@@ -263,12 +270,12 @@ export default function CampanaCliente() {
 
   const eliminar = (id: number) => {
     setItems(prev => prev.filter(n => n.id !== id))
-    api.post(`/notificaciones/mias/${id}/eliminar/`, {}, { fondo: true } as never).catch(() => {})
+    api.post(`/notificaciones/mias/${id}/eliminar/`, {}, { fondo: true } as never).catch(anotarFallo)
   }
 
   const limpiarTodas = () => {
     setItems([]); setNoLeidas(0)
-    api.post('/notificaciones/mias/limpiar/', {}, { fondo: true } as never).catch(() => {})
+    api.post('/notificaciones/mias/limpiar/', {}, { fondo: true } as never).catch(anotarFallo)
   }
 
   const durMs = useMemo(() => (sinMovimiento ? 0 : undefined), [sinMovimiento])
@@ -377,7 +384,7 @@ export default function CampanaCliente() {
                                 {meta.chip}
                               </span>
                               <span className="text-[11.5px] text-mute tabular-nums font-medium">
-                                {tiempoRelativo(n.creada)}
+                                {cuandoLlego(n.creada)}
                               </span>
                             </div>
                             <div className="text-[14.5px] font-extrabold text-ink leading-snug tracking-tight">
@@ -427,17 +434,3 @@ export default function CampanaCliente() {
   )
 }
 
-/** Tiempo relativo corto: "hace 5 min", "ayer". */
-function tiempoRelativo(iso: string): string {
-  const d = new Date(iso)
-  const seg = Math.floor((Date.now() - d.getTime()) / 1000)
-  if (seg < 60) return 'hace un momento'
-  const min = Math.floor(seg / 60)
-  if (min < 60) return `hace ${min} min`
-  const h = Math.floor(min / 60)
-  if (h < 24) return `hace ${h} h`
-  const dias = Math.floor(h / 24)
-  if (dias === 1) return 'ayer'
-  if (dias < 7) return `hace ${dias} días`
-  return d.toLocaleDateString('es-MX', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
-}

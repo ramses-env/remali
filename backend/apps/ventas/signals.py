@@ -3,6 +3,7 @@ from django.dispatch import receiver
 
 from maquinaria.ws_events import omitir_en_restauracion, push_panel_event, push_user_event
 from ventas.models import Venta
+from server.rastro import tragado
 
 
 def _emitir_venta_eventos(venta: Venta | None, accion: str):
@@ -46,7 +47,7 @@ def _emitir_garantia(venta: Venta):
         from clientes.models import Garantia
         Garantia.emitir(venta)
     except Exception:
-        pass
+        tragado()
 
 
 @receiver(post_delete, sender=Venta)

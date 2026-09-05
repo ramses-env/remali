@@ -129,7 +129,10 @@ def render_comprobante_pdf(data: dict, width_mm=58) -> bytes:
     t.sep()
     for it in data.get('items', []):
         t.add(it.get('nombre', ''), size=8)
-        left = it.get('detalle') or ''
+        if it.get('detalle'):
+            t.add(f"  {it['detalle']}", size=7)
+        cant, uni = it.get('cantidad'), it.get('unitario')
+        left = f"  {cant} x ${uni}" if cant and uni else ''
         right = f"${it['importe']}" if it.get('importe') is not None else ''
         if left or right:
             t.row(left, right, size=8)

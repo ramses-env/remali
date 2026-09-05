@@ -1,15 +1,19 @@
 import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { createPortal } from 'react-dom'
 import { useAuth } from '../store/auth'
-import CampanaCliente from './CampanaCliente'
 import { useProfile } from '../store/profile'
 import { useCart } from '../store/cart'
 import { useFavoritos } from '../store/favoritos'
-import { useState, useEffect, useRef } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
+import { useState, useEffect, useRef, lazy, Suspense } from 'react'
 import ThemeToggle from './ThemeToggle'
 import { AvatarUsuario } from '@/components/ui/avatar-usuario'
 import LogoRemali from '@/components/ui/logo-remali'
+import { useEsDelNegocio } from '../store/profile'
+
+/* La campana solo la ve un cliente con sesión, y arrastra framer-motion. Suelta
+   —estática— metía esa librería en la PRIMERA carga de la tienda, para todos,
+   incluido quien nunca inicia sesión. */
+const CampanaCliente = lazy(() => import('./CampanaCliente'))
 
 
 export default function Navbar() {
@@ -20,6 +24,7 @@ export default function Navbar() {
   const { user } = useProfile()
   const { state } = useCart()
   const cartCount = state.items.reduce((n, i) => n + i.qty, 0)
+  const delNegocio = useEsDelNegocio()
   const { count: favCount } = useFavoritos()
   const [confirm, setConfirm] = useState(false)
   const [scrolled, setScrolled] = useState(false)
@@ -57,7 +62,11 @@ export default function Navbar() {
   return (
     <header
       ref={barraRef}
-      className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 border-b ${
+      /* `top` no es 0 fijo: la barra de aviso publica su alto en `--alto-aviso`
+         y el menú baja esa distancia. Sin aviso la variable no existe y el
+         respaldo `0px` lo deja donde siempre estuvo. */
+      style={{ top: 'var(--alto-aviso, 0px)' }}
+      className={`fixed left-0 right-0 z-50 transition-all duration-300 border-b ${
         scrolled
           ? 'bg-app/90 backdrop-blur-md border-edge py-3'
           : 'bg-app/70 backdrop-blur-md border-transparent py-5'
@@ -101,14 +110,18 @@ export default function Navbar() {
           </Link>
           {/* Cotización del cliente: es el módulo de cotizar, no un carrito de
               tienda — el ícono de documento comunica eso (igual que el dock). */}
+          {/* El atajo a la cotización es del cliente; una cuenta del equipo
+              no la arma (ver `useEsDelNegocio`). */}
+          {!delNegocio && (
           <Link to="/cotizacion" aria-label="Tu cotización" className="relative w-9 h-9 rounded-full border border-edge bg-surface-2 text-mute hover:text-gold-ink transition-colors flex items-center justify-center">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="8" y="2" width="8" height="4" rx="1" /><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" /><path d="M9 12h6M9 16h4" /></svg>
             {cartCount > 0 && (
               <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-gold text-black text-[10px] font-black flex items-center justify-center">{cartCount}</span>
             )}
           </Link>
+          )}
           <ThemeToggle />
-          {esCliente && <CampanaCliente />}
+          {esCliente && <Suspense fallback={null}><CampanaCliente /></Suspense>}
 
           {token ? (
             <div className="relative flex items-center">
@@ -219,19 +232,19 @@ export default function Navbar() {
 
       {/* Modal de confirmación (portal a body para centrar sobre toda la pantalla) */}
       {createPortal(
-        <AnimatePresence>
+        <>
+          {/* Animado por CSS, no por framer-motion. El backdrop ya traía
+              `modal-in`, que en index.css hace justo esto: funde el fondo y
+              levanta el panel (`.modal-in > *`) con escala 0.97. La librería
+              repetía la misma animación y costaba 123 KB en la PRIMERA carga de
+              la tienda pública —el navbar sale en todas las páginas— para un
+              diálogo que solo se ve al cerrar sesión. */}
           {confirm && (
-            <motion.div
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              transition={{ duration: 0.2 }}
+            <div
               className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50 backdrop-blur-md modal-in"
               onClick={() => setConfirm(false)}
             >
-              <motion.div
-                initial={{ scale: 0.96, opacity: 0, y: 8 }}
-                animate={{ scale: 1, opacity: 1, y: 0 }}
-                exit={{ scale: 0.97, opacity: 0, y: 6 }}
-                transition={{ type: 'spring', stiffness: 320, damping: 26 }}
+              <div
                 onClick={e => e.stopPropagation()}
                 className="relative w-full max-w-[380px] bg-surface border border-edge rounded-2xl p-7 shadow-[0_24px_70px_-15px_rgba(0,0,0,0.55)] overflow-hidden"
               >
@@ -263,10 +276,10 @@ export default function Navbar() {
                     Cerrar sesión
                   </button>
                 </div>
-              </motion.div>
-            </motion.div>
+              </div>
+            </div>
           )}
-        </AnimatePresence>,
+        </>,
         document.body
       )}
     </header>

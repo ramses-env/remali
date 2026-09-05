@@ -7,6 +7,7 @@ urlpatterns = [
     path('equipos/', views.EquipoListCreate.as_view()),
     path('equipos/<int:pk>/', views.EquipoRetrieveUpdateDestroy.as_view()),
     path('equipos/<int:pk>/imagenes/', views.upload_product_images),
+    path('equipos/<int:pk>/relacionados/', views.EquipoRelacionados.as_view()),
 
     # Catálogos
     path('categorias/', views.CategoriaList.as_view()),
@@ -53,11 +54,9 @@ urlpatterns = [
     path('auth/password/olvide/', views.solicitar_restablecer),
     path('auth/password/restablecer/', views.restablecer_password),
     path('auth/password/restablecer/<str:uidb64>/<str:token>/', views.verificar_token_restablecer),
-    # Confirmar el correo: lo consume la página del front (/verificar/:token), que
-    # con la sesión que devuelve entra sola. El GET de abajo es el puente para las
-    # ligas viejas que aún apuntan al backend: solo redirige al front.
+    # Confirmar el correo con el CÓDIGO de 6 dígitos. Body: {correo, codigo}.
+    # Devuelve la sesión abierta, igual que hacía la liga que sustituyó.
     path('auth/verificar-correo/', views.verificar_correo),
-    path('auth/verificar-correo/<str:token>/', views.verificar_correo_usuario),  # público (link viejo)
     path('auth/reenviar-verificacion/', views.reenviar_verificacion),
     path('auth/reenviar-verificacion-publica/', views.reenviar_verificacion_publica),
     # Onboarding — guía interactiva de primer uso
@@ -77,6 +76,9 @@ urlpatterns = [
     path('latido/', views.latido_panel),
     path('permisos/', views_permisos.permisos),
     path('permisos/bitacora/', views_permisos.bitacora),
+    # Los puestos en sí: crearlos, renombrarlos, borrarlos.
+    path('roles/', views_permisos.crear_rol),
+    path('roles/<slug:clave>/', views_permisos.rol_detalle),
     path('usuarios/', views_usuarios.usuarios),
     path('usuarios/roles/', views_usuarios.roles_disponibles),
     path('usuarios/<int:pk>/', views_usuarios.usuario_detalle),

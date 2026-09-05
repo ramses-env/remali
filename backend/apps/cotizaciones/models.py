@@ -229,11 +229,22 @@ class Cotizacion(models.Model):
         """Importe del descuento del cupón que el cliente aplicó a ESTA cotización.
 
         Es un % sobre el total con IVA (igual que lo muestra el PDF del cliente).
-        Da 0 si no hay cupón, si el admin lo apagó, o si YA se gastó — así el
-        descuento no se aplica dos veces ni se cuela en otra cotización cuyo
-        cupón ya se usó en una compra anterior."""
+
+        NO mira `usado`, y es a propósito. Un cupón personal se quema en el
+        momento en que se enlaza a una cotización, así que mirarlo aquí borraba
+        el descuento de la cotización que acababa de gastarlo: el cliente veía
+        su 5%, lo aplicaba, y el total volvía solo al precio completo.
+
+        Lo que esa bandera quería evitar —que un código ya gastado se cuele en
+        otra cotización— se resuelve donde de verdad toca, al APLICARLO
+        (`maquinaria.cupones.cupon_valido_para` rechaza los personales usados).
+        Aquí el enlace ya existe, y un descuento que el cliente ya reclamó no
+        se le puede quitar.
+
+        `activo` sí se mira: es el freno de emergencia del admin para un código
+        que se filtró."""
         c = self.cupon
-        if not c or not c.activo or c.usado:
+        if not c or not c.activo:
             return Decimal('0.00')
         bruto = (self.base + self.iva).quantize(Decimal('0.01'))
         return (bruto * Decimal(str(c.descuento))).quantize(Decimal('0.01'))
@@ -290,6 +301,45 @@ class Cotizacion(models.Model):
 
     def __str__(self):
         return f'{self.folio} · {self.cliente_display}'
+
+
+def avisar_equipo_liberado(equipo_id: int):
+    """Le dice a quien cotizó este equipo que ya se liberó una máquina.
+
+    El cliente puede cotizar algo que no hay —no se le bloquea, porque una
+    cotización es justo la conversación para conseguirlo— pero entonces la
+    cotización se queda esperando a que alguien devuelva una máquina, y ese
+    momento no lo ve nadie: pasa un martes cualquiera cuando el técnico recoge
+    en obra. Sin este aviso, la cotización se muere de vieja mientras la unidad
+    que pedía está parada en la bodega.
+
+    Se avisa UNA vez por cotización y equipo (`ref`). Si la máquina se vuelve a
+    rentar y a liberar, no se repite: el segundo aviso ya no es información, es
+    insistencia.
+
+    Solo a cotizaciones VIVAS y con cuenta: sin `usuario` no hay a quién
+    notificar dentro del sistema, y una cotización rechazada o cancelada ya no
+    espera nada.
+    """
+    from maquinaria.models import crear_notificacion
+    vivas = (Cotizacion.objects
+             .filter(estado__in=('borrador', 'enviada', 'aceptada'),
+                     usuario__isnull=False,
+                     items__equipo_id=equipo_id,
+                     items__modalidad__in=('dia', 'semana', 'mes'))
+             .distinct()
+             .select_related('usuario'))
+    for cot in vivas:
+        item = cot.items.filter(equipo_id=equipo_id).first()
+        equipo = item.descripcion.split(' · ')[0] if item else 'el equipo'
+        crear_notificacion(
+            'cotizacion', 'Ya hay unidad disponible',
+            f'Se liberó {equipo}, que pediste en tu cotización '
+            f'{cot.folio or ""}. Escríbenos para apartarla.'.replace('  ', ' '),
+            seccion='cotizaciones',
+            ref=f'libre-{cot.id}-{equipo_id}',
+            usuario=cot.usuario,
+        )
 
 
 class CotizacionItem(models.Model):

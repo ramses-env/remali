@@ -19,9 +19,15 @@ function proxySinRuido(opts: ProxyOptions): ProxyOptions {
 }
 
 // https://vite.dev/config/
-export default defineConfig(({ mode }) => ({
+export default defineConfig(() => ({
   plugins: [react()],
-  base: mode === 'production' ? '/static/' : '/',
+  // El SPA vive en su PROPIO servicio estático y se sirve desde la raíz. La base
+  // '/static/' venía de cuando Django lo servía desde sus staticfiles: con los
+  // servicios separados el HTML pediría /static/assets/… a un servidor donde eso
+  // no existe, el fallback del SPA devolvería index.html con content-type
+  // text/html, el navegador se negaría a ejecutarlo y la página saldría en blanco
+  // sin un error que apunte a la causa.
+  base: '/',
   build: {
     rollupOptions: {
       output: {
@@ -32,9 +38,19 @@ export default defineConfig(({ mode }) => ({
            las demás solo bajan cuando la pantalla que las usa se abre. */
         manualChunks: {
           'react-vendor': ['react', 'react-dom', 'react-router-dom'],
-          motion: ['framer-motion'],
+          /* framer-motion ya NO se nombra aquí. Nombrarlo lo volvía un chunk
+             ESTÁTICO, y Vite le ponía su <link modulepreload> en index.html:
+             123 KB en la primera carga de la tienda para todos. Hoy todos sus
+             consumidores son lazy (toasts, campana, recordatorios, tours, panel),
+             así que Rollup lo pone solo en un chunk compartido que baja cuando
+             el primero de ellos lo pide. */
           iconos: ['lucide-react'],
           codigos: ['qrcode', 'jsbarcode'],
+          /* GSAP lo comparten la portada (que lo pide dinámicamente, después de
+             pintar) y el catálogo (que lo importa arriba). Sin nombrarlo aquí,
+             Rollup lo mete en el chunk del catálogo y la portada acabaría
+             bajando el catálogo entero para animar un título. */
+          gsap: ['gsap', 'gsap/ScrollTrigger', 'gsap/TextPlugin'],
         },
       },
     },
@@ -49,7 +65,7 @@ export default defineConfig(({ mode }) => ({
     host: true,
     // Permite abrir el sitio a través de un túnel público (cloudflared/localtunnel)
     // para pruebas. Vite bloquea hosts desconocidos por defecto.
-    allowedHosts: true,
+    allowedHosts: true as const,
     proxy: {
       // WebSocket de notificaciones en tiempo real (Channels).
       '/ws': proxySinRuido({

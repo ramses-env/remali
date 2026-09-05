@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import api from '../lib/api'
 import { formatMoney } from '../lib/utils'
+import { MarcaVeredicto, TarjetaViva, type Veredicto } from '../components/Veredicto'
+import { useIrAlTope } from '../components/ScrollAlTope'
 
 /* Página PÚBLICA de quien autoriza: sin cuenta, sin login.
 
@@ -130,58 +132,62 @@ export default function AutorizarCotizacion() {
   }
 
   const primerNombre = (quien.nombre || '').split(' ')[0] || 'quien te la mandó'
-  const caja = 'w-full max-w-lg rounded-3xl border border-edge bg-surface shadow-[0_24px_60px_rgba(17,24,39,0.10)] p-8'
+  const caja = 'w-full max-w-lg rounded-3xl border border-edge bg-surface shadow-[0_24px_60px_rgba(17,24,39,0.10)]'
 
   // ── Ya se resolvió (ahora, o en otra visita) ──
-  if (resultado || (paquete && paquete.estado === 'resuelto' && !cargando)) {
-    const autorizadas = resultado?.autorizadas ?? (paquete?.autorizada_por ? -1 : 0)
-    const pidioCambios = (resultado?.cambios || 0) > 0
-    const hubo = autorizadas !== 0
-    return (
-      <div className="min-h-[70vh] flex items-center justify-center px-4 py-16">
-        <div className={`${caja} text-center`}>
-          <div className={`w-16 h-16 mx-auto rounded-full flex items-center justify-center mb-5 ${hubo ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400' : pidioCambios ? 'bg-gold-soft text-gold-ink' : 'bg-red-500/10 text-red-500'}`}>
-            {hubo || pidioCambios
-              ? <svg className="w-8 h-8" fill="none" stroke="currentColor" strokeWidth="2.4" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
-              : <svg className="w-8 h-8" fill="none" stroke="currentColor" strokeWidth="2.4" viewBox="0 0 24 24" strokeLinecap="round"><path d="M6 6l12 12M18 6L6 18" /></svg>}
-          </div>
-          <h1 className="text-[22px] font-black text-ink">
-            {resultado ? (hubo ? 'Autorizada' : pidioCambios ? 'Cambios pedidos' : 'Rechazada') : 'Esto ya se resolvió'}
-          </h1>
-          <p className="text-mute text-sm mt-2 max-w-[40ch] mx-auto">
-            {resultado
-              ? (hubo
-                ? <>Ya {resultado.autorizadas === 1 ? 'está' : 'están'} en manos de REMALI{resultado.folios.length ? <> (<b className="text-ink">{resultado.folios.join(', ')}</b>)</> : null}. El equipo contacta a {primerNombre} para coordinar.</>
-                : pidioCambios
-                ? <>Le avisamos a {primerNombre} con tu comentario. Cuando lo corrija te mandará la versión nueva. REMALI no recibió nada.</>
-                : <>Le avisamos a {primerNombre} para que prepare otra versión. REMALI no recibió nada.</>)
-              : <>{paquete?.autorizada_por ? `${paquete.autorizada_por} ya lo resolvió` : 'Ya se resolvió'}{paquete?.resuelto_en ? ` el ${new Date(paquete.resuelto_en).toLocaleDateString('es-MX', { day: 'numeric', month: 'long' })}` : ''}. No hace falta que hagas nada.</>}
-          </p>
-        </div>
-      </div>
-    )
-  }
+  const resuelto = !!resultado || (!!paquete && paquete.estado === 'resuelto' && !cargando)
+  /* El veredicto hay que VERLO. Si eran tres cotizaciones y el cliente decidió
+     con el botón de hasta abajo, al resolverse la tarjeta encoge de golpe y la
+     respuesta le quedaría fuera de cuadro. */
+  useIrAlTope(resuelto)
+  const autorizadas = resultado?.autorizadas ?? (paquete?.autorizada_por ? -1 : 0)
+  const pidioCambios = (resultado?.cambios || 0) > 0
+  const hubo = autorizadas !== 0
+  /* Cada desenlace tiene su propia marca y su propio tono. El sí se dibuja y se
+     celebra; el no se dibuja y NO se celebra; "cambios" es dorado porque esto no
+     terminó, regresa. Y cuando nadie decidió nada ahora —ya venía resuelto— la
+     marca es neutra: informar no es dictaminar (antes salía una tache roja,
+     como si lo hubieras rechazado tú en ese momento). */
+  const veredicto: Veredicto = hubo ? 'exito' : pidioCambios ? 'cambios' : resultado ? 'rechazo' : 'neutro'
+
+  /* Qué está mostrando la tarjeta. Al cambiar, la caja hace el relevo: la
+     propuesta se va, la caja viaja a su nuevo alto y el veredicto sube. */
+  const paso = resuelto ? 'resuelto' : cargando ? 'cargando' : !paquete ? 'sin-enlace' : 'propuesta'
 
   return (
     <div className="min-h-[70vh] flex items-center justify-center px-4 py-16">
-      <div className={caja}>
-        {cargando ? (
+      <TarjetaViva paso={paso} className={caja} interior="p-8">
+        {resuelto ? (
+          <div className="text-center">
+            <MarcaVeredicto tipo={veredicto} className="mb-5" />
+            <h1 className="vc-rise text-[22px] font-black text-ink" style={{ animationDelay: '220ms' }}>
+              {resultado ? (hubo ? 'Autorizada' : pidioCambios ? 'Cambios pedidos' : 'Rechazada') : 'Esto ya se resolvió'}
+            </h1>
+            <p className="vc-rise text-mute text-sm mt-2 max-w-[40ch] mx-auto" style={{ animationDelay: '300ms' }}>
+              {resultado
+                ? (hubo
+                  ? <>Ya {resultado.autorizadas === 1 ? 'está' : 'están'} en manos de REMALI{resultado.folios.length ? <> (<b className="text-ink">{resultado.folios.join(', ')}</b>)</> : null}. El equipo contacta a {primerNombre} para coordinar.</>
+                  : pidioCambios
+                  ? <>Le avisamos a {primerNombre} con tu comentario. Cuando lo corrija te mandará la versión nueva. REMALI no recibió nada.</>
+                  : <>Le avisamos a {primerNombre} para que prepare otra versión. REMALI no recibió nada.</>)
+                : <>{paquete?.autorizada_por ? `${paquete.autorizada_por} ya lo resolvió` : 'Ya se resolvió'}{paquete?.resuelto_en ? ` el ${new Date(paquete.resuelto_en).toLocaleDateString('es-MX', { day: 'numeric', month: 'long' })}` : ''}. No hace falta que hagas nada.</>}
+            </p>
+          </div>
+        ) : cargando ? (
           <div className="py-10 flex flex-col items-center gap-4">
             <span className="w-8 h-8 rounded-full border-2 border-gold border-t-transparent animate-spin" />
             <p className="text-mute text-sm">Abriendo la propuesta…</p>
           </div>
         ) : !paquete ? (
           <div className="text-center">
-            <div className="w-16 h-16 mx-auto rounded-full bg-red-500/10 text-red-500 flex items-center justify-center mb-5">
-              <svg className="w-8 h-8" fill="none" stroke="currentColor" strokeWidth="2.2" viewBox="0 0 24 24" strokeLinecap="round"><path d="M12 7v6" /><circle cx="12" cy="17" r="0.6" className="fill-current" /></svg>
-            </div>
-            <h1 className="text-[22px] font-black text-ink">Enlace no disponible</h1>
-            <p className="text-mute text-sm mt-2">{error}</p>
+            <MarcaVeredicto tipo="alerta" className="mb-5" />
+            <h1 className="vc-rise text-[22px] font-black text-ink" style={{ animationDelay: '200ms' }}>Enlace no disponible</h1>
+            <p className="vc-rise text-mute text-sm mt-2" style={{ animationDelay: '270ms' }}>{error}</p>
           </div>
         ) : (
           <>
             <div className="text-center">
-              <div className="w-16 h-16 mx-auto rounded-full bg-gold-soft text-gold-ink flex items-center justify-center mb-5">
+              <div className="vc-pop w-16 h-16 mx-auto rounded-full bg-gold-soft text-gold-ink flex items-center justify-center mb-5">
                 <svg className="w-7 h-7" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" strokeLinecap="round" strokeLinejoin="round"><path d="M9 12l2 2 4-4" /><path d="M12 3l7 3v5c0 4.5-3 8.2-7 10-4-1.8-7-5.5-7-10V6z" /></svg>
               </div>
               <h1 className="text-[22px] font-black text-ink leading-tight">Solicitud de autorización</h1>
@@ -274,7 +280,7 @@ export default function AutorizarCotizacion() {
             <div className="mt-6">
               <label className="block text-[12.5px] font-semibold text-mute mb-1.5">Tu nombre (quien autoriza)</label>
               <input value={nombre} onChange={e => setNombre(e.target.value)} placeholder="Nombre y apellido"
-                className="w-full bg-surface-2 border border-edge rounded-xl px-4 py-3 text-sm text-ink placeholder-mute focus:outline-none focus:border-gold/60 transition-colors" />
+                className="campo" />
             </div>
 
             {respondiendo && (
@@ -284,7 +290,7 @@ export default function AutorizarCotizacion() {
                 </label>
                 <textarea value={motivo} onChange={e => setMotivo(e.target.value)} rows={2}
                   placeholder={respondiendo === 'cambios' ? 'Ej. Quítale el compresor y bájale a 2 semanas' : 'Ej. Excede el presupuesto de la obra'}
-                  className={`w-full bg-surface-2 border border-edge rounded-xl px-4 py-3 text-sm text-ink placeholder-mute focus:outline-none transition-colors resize-none ${respondiendo === 'cambios' ? 'focus:border-gold/60' : 'focus:border-red-400/60'}`} />
+                  className={`campo campo-area ${respondiendo === 'cambios' ? 'focus:border-gold/60' : 'focus:border-red-400/60'}`} />
               </div>
             )}
 
@@ -331,7 +337,7 @@ export default function AutorizarCotizacion() {
             </p>
           </>
         )}
-      </div>
+      </TarjetaViva>
     </div>
   )
 }

@@ -12,6 +12,21 @@ import { useAuth } from '../store/auth'
 import { useProfile } from '../store/profile'
 import { useOnboarding } from '../store/onboarding'
 import { AvatarUsuario } from '@/components/ui/avatar-usuario'
+import { anotarFallo } from '../lib/fallo'
+import AddressAutocomplete from '../components/AddressAutocomplete'
+
+/* Fuera del componente: declarado dentro de su cuerpo era una función nueva en
+   cada render, o sea un componente distinto para React, que tira el botón y lo
+   vuelve a montar en vez de actualizarlo. Recibe por props lo que antes tomaba
+   por closure. Ver rerender-no-inline-components. */
+function Ojo({ ver, alternar }: { ver: boolean; alternar: () => void }) {
+  return (
+    <button type="button" onClick={alternar} aria-label={ver ? 'Ocultar contraseñas' : 'Mostrar contraseñas'}
+      className="absolute right-3.5 top-1/2 -translate-y-1/2 text-mute transition-colors hover:text-gold-ink">
+      {ver ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+    </button>
+  )
+}
 
 /* ── Tipos ── */
 
@@ -38,7 +53,7 @@ type Perfil = {
   tiene_password?: boolean
   email_verificado?: boolean
   perfil_verificado?: boolean
-  cupon?: { codigo: string; descuento: number; usado?: boolean } | null
+  cupon?: { codigo: string; descuento: number; usado?: boolean; usado_en?: string | null; expira?: string | null; vencido?: boolean } | null
   fiscal_razon_social?: string
   fiscal_rfc?: string
   fiscal_regimen?: string
@@ -85,7 +100,7 @@ const USOS_CFDI = [
 ] as const
 
 /* Estilo de la casa para esta página (inputs 50px, tarjetas 20px). */
-const CAMPO = 'h-[50px] w-full rounded-[13px] border border-edge bg-surface-2 px-4 text-[15px] text-ink placeholder-mute outline-none transition-colors focus:border-gold/60 focus:bg-surface'
+const CAMPO = 'campo text-[15px]'
 const TARJETA = 'rounded-[20px] border border-edge bg-surface p-6 sm:p-7'
 const SECCIONES = ['datos', 'obras', 'facturacion', 'seguridad'] as const
 
@@ -119,7 +134,7 @@ export default function Perfil() {
   const cargarObras = () =>
     api.get<Obra[]>('/obras-cliente/', { fondo: true } as never)
       .then(r => setObras(r.data || []))
-      .catch(() => {})
+      .catch(anotarFallo)
 
   // El perfil (datos de cliente y facturación) es SOLO para clientes. Admin y
   // técnico administran en el panel; si caen aquí (por URL), se les manda ahí.
@@ -142,7 +157,7 @@ export default function Perfil() {
         setFactura(Boolean(r.data.fiscal_rfc || r.data.fiscal_razon_social || r.data.fiscal_regimen))
       }),
       api.get<Obra[]>('/obras-cliente/', { fondo: true } as never).then(r => { if (vivo) setObras(r.data || []) }),
-    ]).catch(() => {}).finally(() => vivo && setCargando(false))
+    ]).catch(anotarFallo).finally(() => vivo && setCargando(false))
     return () => { vivo = false }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token])
@@ -470,6 +485,22 @@ function AvisoArriba({ perfil, falta, oculto, onOcultar, onIr, pctCompleto }: {
   // 3) Todo listo y con cupón. Si ya lo gastó, se lo recordamos sin código para
   //    copiar (es de único uso); si sigue disponible, lo enseñamos para copiar.
   if (pctCompleto && cupon) {
+    /* Se le acabó el tiempo. Va ANTES de "usado" y de "disponible" porque si no
+       un cupón caducado se pintaba como listo para copiar, con su código y
+       todo: el cliente lo tecleaba en la tienda para que se lo rechazaran. */
+    if (cupon.vencido) {
+      return (
+        <div className="rounded-[20px] border border-edge bg-surface px-5 py-5 sm:px-6">
+          <div className="flex items-center gap-2 text-ink">
+            <BadgePercent className="h-5 w-5 text-mute" />
+            <p className="text-sm font-bold">Tu {Math.round(cupon.descuento * 100)}% de bienvenida venció</p>
+          </div>
+          <p className="mt-1 text-sm text-mute">
+            Duraba tres meses y se acabó{cupon.expira ? ` el ${new Date(cupon.expira).toLocaleDateString('es-MX', { day: '2-digit', month: 'long', year: 'numeric' })}` : ''}. Escríbenos si estabas por usarlo.
+          </p>
+        </div>
+      )
+    }
     if (cupon.usado) {
       return (
         <div className="rounded-[20px] border border-edge bg-surface px-5 py-5 sm:px-6">
@@ -477,7 +508,12 @@ function AvisoArriba({ perfil, falta, oculto, onOcultar, onIr, pctCompleto }: {
             <BadgePercent className="h-5 w-5 text-mute" />
             <p className="text-sm font-bold">Ya usaste tu {Math.round(cupon.descuento * 100)}% de bienvenida</p>
           </div>
-          <p className="mt-1 text-sm text-mute">Tu descuento de único uso ya se aplicó. ¡Gracias por tu compra!</p>
+          {/* La FECHA. Se guardaba y no salía, así que "ya lo usaste" era una
+              afirmación sin respaldo: quien no lo recuerda no tiene con qué
+              comprobarlo, y es justo el momento en que llama a preguntar. */}
+          <p className="mt-1 text-sm text-mute">
+            Tu descuento de único uso ya se aplicó{cupon.usado_en ? ` el ${new Date(cupon.usado_en).toLocaleDateString('es-MX', { day: '2-digit', month: 'long', year: 'numeric' })}` : ''}. ¡Gracias por tu compra!
+          </p>
         </div>
       )
     }
@@ -485,7 +521,7 @@ function AvisoArriba({ perfil, falta, oculto, onOcultar, onIr, pctCompleto }: {
       navigator.clipboard?.writeText(cupon.codigo).then(() => {
         setCopiado(true)
         window.setTimeout(() => setCopiado(false), 1600)
-      }).catch(() => {})
+      }).catch(anotarFallo)
     }
     return (
       <div className="rounded-[20px] border border-gold/40 bg-gold-soft px-5 py-5 sm:px-6">
@@ -493,7 +529,10 @@ function AvisoArriba({ perfil, falta, oculto, onOcultar, onIr, pctCompleto }: {
           <BadgePercent className="h-5 w-5 text-gold-ink" />
           <p className="text-sm font-bold">¡Ganaste {Math.round(cupon.descuento * 100)}% de bienvenida por completar tu perfil!</p>
         </div>
-        <p className="mt-1 text-sm text-mute">Aplícalo una sola vez, en la compra o renta que tú elijas. Usa este código:</p>
+        <p className="mt-1 text-sm text-mute">
+          Aplícalo una sola vez, en la compra o renta que tú elijas
+          {cupon.expira ? `. Vence el ${new Date(cupon.expira).toLocaleDateString('es-MX', { day: 'numeric', month: 'long', year: 'numeric' })}` : ''}. Usa este código:
+        </p>
         <div className="mt-3 flex items-center gap-2">
           <code className="rounded-lg border border-gold/40 bg-surface px-3 py-2 font-mono text-base font-bold tracking-wider text-ink">
             {cupon.codigo}
@@ -647,14 +686,21 @@ function FormObra({ f, setF, error, ocupado, onGuardar, onCancelar, onEliminar }
   f: ObraForm; setF: (v: ObraForm) => void; error: string; ocupado: boolean
   onGuardar: () => void; onCancelar: () => void; onEliminar?: () => void
 }) {
-  const mini = 'h-[42px] w-full rounded-[11px] border border-edge bg-surface-2 px-3.5 text-[14px] text-ink placeholder-mute outline-none transition-colors focus:border-gold/60 focus:bg-surface'
+  const mini = 'campo campo-sm'
   return (
     <div className="rounded-[16px] border border-gold/40 bg-surface p-4.5 sm:p-5">
       <div className="grid gap-3">
         <input className={mini} value={f.nombre} placeholder='Nombre de la obra (ej. "Torre Costera")'
           onChange={e => setF({ ...f, nombre: e.target.value })} />
-        <input className={mini} value={f.direccion} placeholder="Dirección de entrega"
-          onChange={e => setF({ ...f, direccion: e.target.value })} />
+        {/* La misma dirección que después viaja a la cotización y a la hoja del
+            chofer: se captura igual aquí para que no dependa de por dónde entró. */}
+        <AddressAutocomplete
+          value={f.direccion}
+          onChange={v => setF({ ...f, direccion: v })}
+          onSelect={a => setF({ ...f, direccion: a.display_name })}
+          placeholder="Dirección de entrega"
+          inputClassName={`${mini} pl-11 pr-11`}
+        />
         <div className="grid grid-cols-2 gap-3">
           <input className={mini} value={f.responsable} placeholder="Quién recibe"
             onChange={e => setF({ ...f, responsable: e.target.value })} />
@@ -725,13 +771,7 @@ function SeccionSeguridad({ perfil, onGuardado, onCerrarSesion, onReiniciarGuia 
     }
   }
 
-  const CAMPO_P = 'h-[46px] w-full rounded-[12px] border border-edge bg-surface-2 px-4 pr-12 text-[14.5px] text-ink placeholder-mute outline-none transition-colors focus:border-gold/60 focus:bg-surface'
-  const Ojo = () => (
-    <button type="button" onClick={() => setVer(v => !v)} aria-label={ver ? 'Ocultar contraseñas' : 'Mostrar contraseñas'}
-      className="absolute right-3.5 top-1/2 -translate-y-1/2 text-mute transition-colors hover:text-gold-ink">
-      {ver ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-    </button>
-  )
+  const CAMPO_P = 'campo pr-12'
 
   return (
     <section id="seguridad" className={`${TARJETA} scroll-mt-24`}>
@@ -762,19 +802,19 @@ function SeccionSeguridad({ perfil, onGuardado, onCerrarSesion, onReiniciarGuia 
               <div className="relative">
                 <input type={ver ? 'text' : 'password'} className={CAMPO_P} value={actual} placeholder="Contraseña actual"
                   autoComplete="current-password" onChange={e => setActual(e.target.value)} />
-                <Ojo />
+                <Ojo ver={ver} alternar={() => setVer(v => !v)} />
               </div>
             )}
             <div className="grid gap-3.5 sm:grid-cols-2">
               <div className="relative">
                 <input type={ver ? 'text' : 'password'} className={CAMPO_P} value={nueva} placeholder="Nueva (mínimo 8)"
                   autoComplete="new-password" onChange={e => setNueva(e.target.value)} />
-                <Ojo />
+                <Ojo ver={ver} alternar={() => setVer(v => !v)} />
               </div>
               <div className="relative">
                 <input type={ver ? 'text' : 'password'} className={CAMPO_P} value={confirmar} placeholder="Repítela"
                   autoComplete="new-password" onChange={e => setConfirmar(e.target.value)} />
-                <Ojo />
+                <Ojo ver={ver} alternar={() => setVer(v => !v)} />
               </div>
             </div>
             {error && <p className="text-[13px] font-semibold text-red-500">{error}</p>}

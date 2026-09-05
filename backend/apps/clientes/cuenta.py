@@ -46,7 +46,40 @@ def estado_de_cuenta(cliente, *, con_documentos=False) -> dict:
     }
     if con_documentos:
         datos['documentos'] = _historial(cliente, rentas, ventas)
+        datos['garantias'] = _garantias(cliente)
     return datos
+
+
+def _garantias(cliente) -> list:
+    """Las garantías del cliente, vivas primero.
+
+    Van APARTE del historial y no como un documento más, porque no lo son: un
+    documento tiene folio, total y saldo, y una garantía es una fecha límite.
+    Meterla en la misma lista habría obligado a inventarle un importe.
+
+    Se incluyen también las vencidas y las anuladas: la pregunta del mostrador
+    —"se me descompuso, ¿todavía tengo garantía?"— se contesta igual de bien con
+    un "venció hace cuatro meses", y sin ellas no habría con qué contestarla.
+    """
+    from django.utils import timezone
+    hoy = timezone.localdate()
+    filas = []
+    for g in cliente.garantias.select_related('venta').order_by('-vence'):
+        filas.append({
+            'id': g.id,
+            'descripcion': g.descripcion,
+            'venta_id': g.venta_id,
+            'inicia': g.inicia,
+            'vence': g.vence,
+            'meses': g.meses,
+            'vigente': g.vigente,
+            'anulada': g.anulada_en is not None,
+            'anulada_motivo': g.anulada_motivo,
+            # Negativo = venció hace tantos días. El signo es el dato: dice si
+            # se hace válida o si hay que cobrar la reparación.
+            'dias_restantes': (g.vence - hoy).days,
+        })
+    return filas
 
 
 def _historial(cliente, rentas, ventas) -> list:

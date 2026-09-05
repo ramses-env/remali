@@ -9,6 +9,7 @@ import Migas from '../components/Migas'
 import { descargarBlob } from '../lib/descargar'
 import { formatMoney } from '../lib/utils'
 import { useAuth } from '../store/auth'
+import { anotarFallo } from '../lib/fallo'
 
 type RentaMia = {
   id: number
@@ -18,6 +19,8 @@ type RentaMia = {
   estado_label: string
   fecha_inicio: string
   fecha_fin: string
+  /** Hora ESTIMADA de entrega (HH:MM:SS). Opcional: la renta guarda el día. */
+  hora_entrega_estimada?: string | null
   total: string
   direccion: string
   pagos?: { fecha: string; monto: string; metodo: string }[]
@@ -35,11 +38,25 @@ const fechaPago = (s: string) => {
   const d = new Date(s && s.length === 10 ? `${s}T12:00:00` : s)
   return isNaN(d.getTime()) ? '—' : d.toLocaleDateString('es-MX', { day: '2-digit', month: 'short' })
 }
+/* La hora estimada llega como 'HH:MM:SS'. Se muestra en formato de reloj de la
+   casa y SIEMPRE con la palabra "estimada" al lado: es una aproximación de a qué
+   hora pasa el técnico, no un compromiso al minuto. */
+const horaEstimada = (s?: string | null) => {
+  if (!s) return null
+  const [h, m] = String(s).split(':')
+  const d = new Date()
+  d.setHours(Number(h) || 0, Number(m) || 0, 0, 0)
+  return isNaN(d.getTime()) ? null : d.toLocaleTimeString('es-MX', { hour: 'numeric', minute: '2-digit' })
+}
 const MOD: Record<string, string> = { dia: 'por día', semana: 'por semana', mes: 'por mes' }
 
 function estiloEstado(estado: string) {
   if (estado === 'activa') return 'bg-libre/10 text-libre'
   if (estado === 'reservada') return 'bg-blue-500/10 text-blue-500'
+  // Todavía en bodega: gris, porque no ha pasado nada aún. Y en camino, el azul
+  // del sistema, que ya significa "la máquina se está moviendo".
+  if (estado === 'por_entregar') return 'bg-surface-2 text-mute'
+  if (estado === 'en_camino') return 'bg-renta/10 text-renta'
   if (estado === 'finalizada') return 'bg-libre/10 text-libre'
   if (estado === 'vencida') return 'bg-red-500/10 text-red-500'
   return 'bg-ink/10 text-mute'
@@ -82,6 +99,9 @@ function Tarjeta({ r, i, onCambio }: { r: RentaMia; i: number; onCambio: () => v
       <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1.5 text-[13px] text-mute min-w-0">
         <CalendarClock className="h-3.5 w-3.5 shrink-0" />
         <span className="whitespace-nowrap">Del {fecha(r.fecha_inicio)} al {fecha(r.fecha_fin)}</span>
+        {horaEstimada(r.hora_entrega_estimada) && (
+          <span className="whitespace-nowrap">· entrega estimada {horaEstimada(r.hora_entrega_estimada)}</span>
+        )}
         <button
           onClick={async () => {
             try {
@@ -99,14 +119,16 @@ function Tarjeta({ r, i, onCambio }: { r: RentaMia; i: number; onCambio: () => v
           </button>
         )}
       </div>
-      {/* Cancelar la reserva: solo mientras siga siendo reserva a futuro. Una
-          vez que llega el día o te entregan la máquina, este botón desaparece. */}
-      {r.estado === 'reservada' && r.cancelable && (
+      {/* Cancelar: mientras la MÁQUINA no se haya movido. Ya no se pregunta por
+          el estado —una entrega programada para hoy nace 'activa' desde la
+          madrugada, y el botón desaparecía con el equipo todavía en bodega—;
+          manda `cancelable`, que el servidor calcula mirando si el chofer salió. */}
+      {r.cancelable && (
         cancelando ? (
           <div className="mt-3 pt-3 border-t border-edge">
             <p className="text-[13px] font-bold text-ink">¿Cancelar tu reserva de {r.equipo || 'este equipo'}?</p>
             <textarea value={motivo} onChange={e => setMotivo(e.target.value)} rows={2} placeholder="Motivo (opcional)"
-              className="mt-2 w-full bg-surface-2 border border-edge rounded-xl px-3.5 py-2.5 text-[13px] text-ink placeholder-mute focus:outline-none focus:border-red-400/60 transition-colors resize-none" />
+              className="campo campo-area mt-2 focus:border-red-400/60" />
             <div className="mt-2.5 flex gap-2">
               <button onClick={() => { setCancelando(false); setMotivo('') }} disabled={enviando}
                 className="h-9 px-4 rounded-xl border border-edge text-ink text-[13px] font-semibold hover:bg-surface-2 transition-colors">Mejor no</button>
@@ -182,7 +204,7 @@ export default function MisRentas() {
     let vivo = true
     const cargar = () => api.get<{ rentas: RentaMia[] }>('/rentas/mias/', { fondo: true } as never)
       .then(r => { if (vivo) setRentas(r.data.rentas || []) })
-      .catch(() => {})
+      .catch(anotarFallo)
       .finally(() => { if (vivo) setCargando(false) })
     cargar()
     recargar.current = cargar
@@ -195,16 +217,28 @@ export default function MisRentas() {
     const ev: { fecha: Date; titulo: string; sub: string }[] = []
     for (const r of rentas) {
       if (r.estado === 'cancelada' || r.estado === 'finalizada') continue
-      const ini = r.fecha_inicio ? new Date(r.fecha_inicio + 'T12:00') : null
+      // El mediodía es el ancla de siempre para que la zona horaria no corra el
+      // día. Con hora estimada capturada se usa esa, que es la que de verdad le
+      // sirve al cliente para organizarse.
+      const horaIni = (r.hora_entrega_estimada || '').slice(0, 5)
+      const ini = r.fecha_inicio ? new Date(`${r.fecha_inicio}T${horaIni || '12:00'}`) : null
       const fin = r.fecha_fin ? new Date(r.fecha_fin + 'T12:00') : null
-      if (ini && ini >= hoy) ev.push({ fecha: ini, titulo: `Entrega · ${r.equipo}`, sub: `Inicio de renta ${MOD[r.modalidad] || ''}`.trim() })
+      const conHora = horaEstimada(r.hora_entrega_estimada)
+      if (ini && ini >= hoy) ev.push({
+        fecha: ini, titulo: `Entrega · ${r.equipo}`,
+        sub: (conHora ? `Estimada ${conHora} · ` : '') + `Inicio de renta ${MOD[r.modalidad] || ''}`.trim(),
+      })
       if (fin && fin >= hoy) ev.push({ fecha: fin, titulo: `Recolección · ${r.equipo}`, sub: 'Fin de renta' })
     }
     return ev.sort((a, b) => a.fecha.getTime() - b.fecha.getTime()).slice(0, 3)
   }, [rentas])
   const mesDia = (d: Date) => ({ mes: d.toLocaleDateString('es-MX', { month: 'short' }).replace('.', '').toUpperCase(), dia: String(d.getDate()).padStart(2, '0') })
 
-  const activas = rentas.filter(r => ['activa', 'vencida', 'reservada'].includes(r.estado))
+  /* Ahora `estado` trae la FASE, no el estado crudo: una entrega programada
+     para hoy llega como 'por_entregar' y una en ruta como 'en_camino'. Sin
+     sumarlas aquí, la renta del cliente desaparecía de su lista justo el día
+     que más la mira. */
+  const activas = rentas.filter(r => ['activa', 'vencida', 'reservada', 'por_entregar', 'en_camino'].includes(r.estado))
   const historial = rentas.filter(r => ['finalizada', 'cancelada'].includes(r.estado))
 
   return (

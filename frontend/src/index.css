@@ -52,14 +52,55 @@
   --c-renta-on:   #FFFFFF;   /* texto sobre el azul sólido */
   --c-renta-glow: rgba(43, 95, 173, 0.34);
   --c-taller:     #FFC61A;   /* en mantenimiento */
+  /* El ámbar tiene los MISMOS dos roles que el dorado, y le faltaba el par.
+     Como fondo de insignia (`bg-amber-500/10`) funciona; como TEXTO sobre
+     claro da 2.1:1 y no pasa AA, así que las pantallas usaban `text-amber-600`
+     a mano —un color pensado para fondo claro— y en tema oscuro ese ámbar
+     quemado se hundía contra el panel: el triángulo de advertencia y las
+     insignias "Pendiente"/"Sin verificar" se perdían.
+     Este es el par, con el criterio ya escrito para --c-gold-ink: mismo matiz,
+     luminosidad ajustada hasta pasar en cada tema. NO se reusa --c-gold-ink
+     porque aquél es el ACENTO de marca (el dueño lo tiene en negro) y esto es
+     un DATO: taller, pendiente, ojo con esto. */
+  --c-taller-ink: #8A6100;   /* 5.54:1 sobre blanco */
+  /* "Vencida" era el único estado sin token: andaba como #C23B3B a mano en el
+     Resumen, calculado para fondo claro, y en oscuro deslumbraba. Ahora es un
+     estado más, con su par claro/oscuro como los demás. */
+  --c-vencida:    #C23B3B;   /* renta que ya se pasó de fecha */
   --c-price:      #111827;   /* precios: negro en claro (el amarillo no se lee sobre blanco) */
+  /* FIRMA de quien construyó el sistema (ByRix). Azul PROPIO, no el de
+     `--c-renta`: ahí el azul es un DATO (una unidad rentada, en obra) y aquí es
+     una marca; si compartieran token, cambiar el estado repintaría la firma.
+     Claro: 5.17:1 sobre blanco y 4.53:1 sobre surface-2 (pasa AA en los dos
+     fondos donde se para el pie). */
+  --c-byrix:      #2563EB;
   --c-stroke:     #E5E7EB;
   --c-grid:       rgba(17, 24, 39, 1);
-  /* Colores SUAVES solo para gráficas (dona, barras), estilo dashboard pastel.
-     No se usan en botones/insignias: esos necesitan contraste fuerte. */
-  --chart-blue:   #6E8CF0;   /* azul aciano */
-  --chart-green:  #57BE86;   /* verde menta */
-  --chart-gray:   #AEB6C9;   /* gris lavanda */
+  /* ── Marcas de gráfica ──────────────────────────────────────────────────
+     Antes aquí vivía una paleta "pastel" (menta, azul aciano, gris lavanda).
+     Se fue porque REPRUEBA: el verde daba 2.3:1 contra el panel y el gris caía
+     por debajo del piso de croma (se lee gris, no color). Estos nombres dicen
+     QUÉ significan, no a qué se parecen, que es la regla de la casa.
+
+     Los tres NO cambian entre claro y oscuro, y no es descuido: es el juego que
+     pasa las seis comprobaciones —daltonismo, banda de luminosidad y contraste—
+     contra AMBAS superficies (#FFFFFF y #161618). Si cambias uno, vuelve a
+     validarlo: a ojo no se ve.
+
+     Serie de ingresos: RENTA vs VENTA. Estos dos NO cambian entre claro y
+     oscuro, y no es descuido: es el único par que pasa las seis comprobaciones
+     de daltonismo, banda de luminosidad y contraste contra AMBAS superficies
+     (#FFFFFF y #161618). Si cambias uno, vuelve a validarlo — a ojo no se ve. */
+  --chart-renta:  #6E8CF0;   /* azul: renta, el mismo de "rentado" en todo el panel */
+  --chart-venta:  #C67C1A;   /* ocre: venta */
+  --chart-libre:  #2E9E63;   /* verde: disponible */
+  /* Ocre y no el amarillo de la marca. `--c-taller` es #FFC61A y como RELLENO de
+     gráfica da 1.57:1 contra el panel — el mismísimo número que este sistema ya
+     cita para el dorado como texto. Su regla es "cuando un color no pase AA en
+     un rol, se crea el par, no se baja la vara", y esto es ese par: el amarillo
+     sigue siendo el fondo de la insignia (con texto oscuro encima, donde sí
+     funciona) y el ocre es la marca cuando hay que pintar área. */
+  --chart-taller: #C67C1A;   /* ocre: en mantenimiento */
   /* Fuente de los NÚMEROS en todo el sitio. Pila de SISTEMA: en cada equipo usa
      su tipografía nativa —SF Pro en Mac/iPhone, Segoe UI en Windows, Roboto en
      Android—, todas con cifras limpias y un "1" recto. Cero carga de red. Un
@@ -87,17 +128,17 @@
   /* Los tonos profundos del tema claro se hunden contra el panel #161618
      (2.9:1 el azul). Aquí suben para volver a ser legibles. */
   --c-libre:      #4ADE80;
+  --c-vencida:    #F87171;
   --c-renta:      #7BAAF0;
   --c-renta-on:   #0a0a0b;
   --c-renta-glow: rgba(123, 170, 240, 0.26);
   --c-taller:     #FFC61A;
+  --c-taller-ink: #FFC61A;   /* en oscuro el amarillo SÍ se lee: 11.48:1 sobre el panel */
   --c-price:      #FFC61A;   /* precios: el amarillo sí resalta en oscuro */
+  --c-byrix:      #7BAAF0;   /* el azul profundo se hunde contra el panel; este da 7.7:1 */
   --c-stroke:     rgba(255, 255, 255, 0.16);
   --c-grid:       rgba(255, 255, 255, 1);
   /* Versión más brillante para que resalten sobre el panel oscuro. */
-  --chart-blue:   #8AA6F5;
-  --chart-green:  #63D196;
-  --chart-gray:   #8B93A6;
 }
 
 /* Tokens expuestos como utilidades de Tailwind (cascada con .dark) */
@@ -123,7 +164,9 @@
   --color-libre:      var(--c-libre);
   --color-renta:      var(--c-renta);
   --color-taller:     var(--c-taller);
+  --color-taller-ink: var(--c-taller-ink);
   --color-price:      var(--c-price);
+  --color-byrix:      var(--c-byrix);
   --color-amber-400:  var(--c-gold);
   --color-amber-500:  var(--c-gold);
   --color-background: var(--c-bg);
@@ -213,6 +256,70 @@
 }
 
 /* ─────────────────────────────────────────────
+   GRÁFICAS — entrada y relieve
+   Una gráfica que aparece de golpe se lee como una imagen; una que se levanta
+   se lee como una medición. La animación es de ENTRADA, no de adorno: dura poco,
+   no se repite y respeta a quien pidió menos movimiento.
+   Las clases viven aquí y no en el componente porque los keyframes con
+   `--retraso`/`--largo` por elemento no se pueden expresar con utilidades.
+   ───────────────────────────────────────────── */
+@keyframes barra-sube {
+  from { transform: scaleY(0); }
+  to   { transform: scaleY(1); }
+}
+.barra-sube {
+  transform-origin: bottom;
+  animation: barra-sube 620ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: var(--retraso, 0ms);
+}
+
+@keyframes barra-crece {
+  from { transform: scaleX(0); }
+  to   { transform: scaleX(1); }
+}
+.barra-crece {
+  transform-origin: left;
+  animation: barra-crece 720ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: var(--retraso, 0ms);
+}
+
+/* El trazo se dibuja solo, revelándose de izquierda a derecha.
+   Se hace con `clip-path` y NO con `stroke-dasharray`: el trazo lleva
+   `vectorEffect="non-scaling-stroke"` —para que no engorde al estirarse el
+   viewBox— y esa combinación deja el guion medido en un espacio y el trazo en
+   otro; el resultado era una línea que se cortaba a la mitad y ahí se quedaba. */
+@keyframes revela-derecha {
+  from { clip-path: inset(0 100% 0 0); }
+  to   { clip-path: inset(0 0 0 0); }
+}
+.revela-derecha {
+  animation: revela-derecha 900ms cubic-bezier(0.33, 1, 0.68, 1) both;
+}
+@keyframes area-aparece {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.area-aparece { animation: area-aparece 700ms 260ms ease-out both; }
+
+/* La dona entra girando desde donde empieza el primer tramo (las 12 en punto),
+   que es como se lee: en el sentido del reloj. */
+@keyframes dona-entra {
+  from { transform: rotate(-24deg) scale(0.94); opacity: 0; }
+  to   { transform: none; opacity: 1; }
+}
+.dona-entra {
+  transform-origin: center;
+  animation: dona-entra 700ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .barra-sube, .barra-crece, .revela-derecha, .area-aparece, .dona-entra {
+    animation: none;
+    clip-path: none;
+  }
+}
+
+/* ─────────────────────────────────────────────
    Panel del super administrador
    El dueño ve el mismo panel, pero su acento es negro en vez de dorado: al
    entrar sabe de inmediato que está en la cuenta que puede tocarlo todo.
@@ -247,6 +354,62 @@
 .tema-dueno.bg-gold { color: var(--c-gold-on); }
 
 @layer components {
+  /* ─── El campo ───────────────────────────────────────────────
+     La píldora de todos los formularios, escrita UNA vez.
+
+     Antes cada pantalla llevaba su propia cadena de Tailwind: 103 variantes de
+     la misma caja, con seis radios y cinco alturas distintas conviviendo en el
+     mismo formulario, y cambiar el aspecto de "un input" era buscar y reemplazar
+     en 29 archivos. Aquí vive el aspecto; las pantallas solo dicen `campo`.
+
+     Lo que sí cambia de sitio a sitio —el ancho, `font-mono`, el padding para
+     hacerle lugar a un ícono— se sigue poniendo con utilidades al lado: van en
+     una capa posterior y por eso le ganan a esto sin necesidad de `!`. */
+  .campo {
+    width: 100%;
+    height: 3rem;
+    padding-inline: 1.25rem;
+    border-radius: 9999px;
+    border: 1px solid var(--c-border);
+    background-color: var(--c-surface-2);
+    color: var(--c-ink);
+    font-size: 0.875rem;
+    line-height: 1.25;
+    transition: border-color 180ms cubic-bezier(0.23, 1, 0.32, 1),
+                box-shadow 180ms cubic-bezier(0.23, 1, 0.32, 1),
+                background-color 180ms cubic-bezier(0.23, 1, 0.32, 1);
+  }
+  .campo::placeholder { color: var(--c-mute); }
+  /* El foco no se anuncia solo con el borde dorado: sobre el panel oscuro ese
+     cambio de color casi no se ve, y quien navega con Tab necesita saber dónde
+     está parado. El halo suave es la misma firma del botón primario. */
+  .campo:focus {
+    outline: none;
+    border-color: color-mix(in srgb, var(--c-gold) 60%, transparent);
+    box-shadow: 0 0 0 3px var(--c-gold-soft);
+  }
+  .campo:disabled { opacity: 0.6; cursor: not-allowed; }
+  select.campo { cursor: pointer; }
+
+  /* Compacto: barras de filtros y renglones de tabla, donde 48px de alto
+     empujan el contenido fuera de la pantalla. */
+  .campo-sm {
+    height: 2.5rem;
+    padding-inline: 1rem;
+    font-size: 0.8125rem;
+  }
+
+  /* Varias líneas. NO es píldora a propósito: con el radio completo el texto se
+     recorta contra la curva en el primer y el último renglón. */
+  .campo-area {
+    height: auto;
+    min-height: 5.5rem;
+    padding-block: 0.875rem;
+    border-radius: 1rem;
+    line-height: 1.5;
+    resize: vertical;
+  }
+
   /* Botón primario: píldora con halo del propio acento.
      El halo es la firma del botón; por eso vive aquí y no repetido en cada uso:
      cambia con el tema (dorado / negro / claro) sin tocar los componentes. */
@@ -394,8 +557,6 @@
 .font-mono { font-variant-numeric: tabular-nums; font-weight: 600; }
 
 /* Alerta superior: entra deslizando desde arriba. */
-@keyframes toast-in { from { opacity: 0; transform: translateY(-14px) scale(0.97); } to { opacity: 1; transform: none; } }
-.toast-in { animation: toast-in 0.35s cubic-bezier(0.23, 1, 0.32, 1); }
 /* Barra de vida de una alerta: se vacía en el tiempo que la alerta permanece. */
 @keyframes toast-avance { from { width: 100%; } to { width: 0%; } }
 
@@ -473,24 +634,21 @@
 /* Un solo pulso detrás de la insignia: el "quedó hecho". */
 @keyframes exito-ring {
   0%   { opacity: 0.5; transform: scale(0.75); }
-  100% { opacity: 0;   transform: scale(1.9); }
+  100% { opacity: 0;   transform: scale(1.7); }
 }
-@keyframes exito-check { to { stroke-dashoffset: 0; } }
 @keyframes vc-rise {
   0%   { opacity: 0; transform: translateY(10px); }
   100% { opacity: 1; transform: translateY(0); }
 }
 .exito-pop  { animation: exito-pop 520ms cubic-bezier(0.23, 1, 0.32, 1) both; }
+/* 1.7 y no más: a 1.9 el anillo rebasa el respiro (p-8) de la tarjeta y se
+   recorta justo mientras la caja está creciendo. */
 .exito-ring { animation: exito-ring 900ms cubic-bezier(0.23, 1, 0.32, 1) 140ms both; }
-/* pathLength=1 normaliza la palomita: dasharray/offset 1 = trazo completo oculto,
-   →0 la dibuja. Arranca cuando el círculo casi terminó su pop. */
-.exito-check { stroke-dasharray: 1; stroke-dashoffset: 1; animation: exito-check 360ms cubic-bezier(0.23, 1, 0.32, 1) 300ms forwards; }
 /* Cascada genérica del texto/botones de vincular; delay inline por elemento. */
 .vc-rise { opacity: 0; animation: vc-rise 460ms cubic-bezier(0.23, 1, 0.32, 1) both; }
 @media (prefers-reduced-motion: reduce) {
-  .exito-pop, .exito-check, .vc-rise { animation: none; }
+  .exito-pop, .vc-rise { animation: none; }
   .exito-pop  { opacity: 1; transform: none; }
-  .exito-check { stroke-dashoffset: 0; }
   .vc-rise { opacity: 1; transform: none; }
   .exito-ring { display: none; }
 }
@@ -514,6 +672,65 @@
 @media (prefers-reduced-motion: reduce) {
   .vc-pop    { animation: none; opacity: 1; transform: none; }
   .err-shake { animation: none; }
+}
+
+/* ── Pantalla de un solo mensaje ─────────────────────────────────────────────
+   404, 500, "esto es para clientes": páginas que dicen UNA cosa y ofrecen una
+   salida. Van centradas en el espacio que de verdad queda libre, que no es la
+   ventana entera:
+
+     · arriba lo comen la barra de aviso (`--alto-aviso`) y el menú (`--nav-h`),
+       los dos FIJOS, así que no ocupan sitio en el flujo pero sí tapan pantalla.
+     · centrar en `100vh` deja el texto alto y con un hueco abajo; centrar en un
+       `78vh` a ojo —como estaba la 404— falla distinto según haya aviso o no.
+
+   Las dos variables las publican sus componentes midiéndose (`BarraAviso`,
+   `Navbar`), y si no existen valen 0: la misma clase sirve dentro y fuera de
+   la tienda. `dvh` y no `vh` por el navegador móvil, donde la barra de
+   direcciones se encoge al hacer scroll y `vh` se queda con el alto viejo. */
+.pantalla-mensaje {
+  min-height: calc(100dvh - var(--alto-aviso, 0px));
+  padding-top: var(--nav-h, 0px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ── Casillas del código de verificación (OTP) ───────────────────────────────
+   Esta pantalla se ve UNA vez por cuenta, y esa frecuencia es la que decide
+   cuánto movimiento cabe: lo que en un atajo de teclado —cientos de usos al
+   día— sería un estorbo, aquí es cuidado. Aun así nada dura más de 200ms.
+
+   El vocabulario es el que ya existe (`vc-rise` para la cascada, `err-shake`
+   para el "no"); solo se agrega lo que estas cajas necesitan y no había. */
+.otp-casilla {
+  /* Nunca `all`: solo lo que de verdad cambia, y transform/opacity van por GPU. */
+  transition: border-color 150ms ease, background-color 150ms ease,
+              transform 140ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+/* Al caer el dígito la caja da un tirón mínimo. Confirma que el teclazo entró
+   sin obligar a mirar: se siente antes de verse. */
+.otp-llena  { transform: scale(1.04); }
+/* La activa se levanta un poco: dice dónde vas sin que haya que leer. */
+.otp-activa { transform: scale(1.03); }
+
+/* Cursor de la casilla activa. Solo opacidad, y `steps` para que parpadee como
+   un cursor de verdad en vez de desvanecerse. */
+@keyframes otp-caret { 0%, 45% { opacity: 1; } 55%, 100% { opacity: 0; } }
+.otp-caret { animation: otp-caret 1.1s steps(1, end) infinite; }
+
+/* El "no" del código incorrecto. Reusa `err-shake` pero SIN su retraso de
+   300ms: aquel espera a que entre una insignia; aquí la respuesta tiene que
+   salir en el instante del error o deja de leerse como respuesta. */
+.otp-error { animation: err-shake 440ms ease-in-out 1 both; }
+
+@media (prefers-reduced-motion: reduce) {
+  /* Reducir no es apagar: el color sigue transicionando porque ayuda a
+     entender; lo que se va es el movimiento. */
+  .otp-llena, .otp-activa { transform: none; }
+  .otp-caret { animation: none; }
+  .otp-error { animation: none; }
 }
 
 /* ── Anti-zoom al enfocar inputs en iOS ──────────────────────────────────────
@@ -546,6 +763,20 @@ select {
   background-size: 16px;
 }
 select::-ms-expand { display: none; }
+
+/* Las OPCIONES del desplegable, que en oscuro no se leían.
+   La causa: `.campo` pinta el select con `--c-surface-2`, que en tema oscuro es
+   `rgba(255,255,255,0.05)` —translúcido a propósito, para que las superficies
+   secundarias se fundan con el panel—. El popup nativo hereda ese fondo, pero
+   NO hereda el panel de atrás: se dibuja sobre el blanco del sistema, así que
+   quedaba texto casi blanco sobre casi blanco.
+
+   Es el mismo caso que las alertas y se resuelve igual: lo que FLOTA sobre la
+   página va opaco. `--c-alert` existe exactamente para eso. */
+select option {
+  background-color: var(--c-alert);
+  color: var(--c-ink);
+}
 
 /* Inputs numéricos: fuera las flechitas nativas (spinners), se ven baratas y
    descuadran el alto. El número se teclea. Global: todos los <input type=number>. */
@@ -605,4 +836,66 @@ input[type="number"]::-webkit-outer-spin-button {
   .tabla-panel td .truncate { overflow: visible; text-overflow: clip; white-space: normal; }
   .tabla-panel td[class*="max-w-["],
   .tabla-panel td [class*="max-w-["] { max-width: none; }
+}
+
+/* ── El cursor de la tienda ──────────────────────────────────────────────────
+   Una punta de navegación: cuatro vértices simétricos respecto a la diagonal y
+   esquinas VIVAS, sin redondear. El vértice de en medio es la MUESCA —el único
+   cóncavo— y es el que forma la colita: acercarlo a la punta la alarga,
+   alejarlo la borra. Es el único número con criterio en toda la figura.
+
+   Ojo con "simplificarla" a un triángulo de lados rectos: se lee como botón de
+   "play", no como cursor. La muesca es lo que la vuelve flecha.
+
+   Recortada de la página, no puesta encima: el relleno es la tinta y el halo es
+   el color del fondo. Por eso se invierte sola en tema oscuro y por eso nunca se
+   pierde sobre la foto de una retroexcavadora — el halo la despega de lo que sea
+   que tenga debajo.
+
+   Lo accionable NO cambia de figura: es LA MISMA punta, encendida en naranja de
+   obra (#FF6B2C). Cambiar de forma (a la manita) mueve el punto de clic y obliga
+   a reaprender dónde apuntas; cambiar de color dice "aquí sí" sin mover nada.
+   Naranja y no el dorado de la marca porque lo accionable casi siempre ES
+   dorado: el cursor tiene que despegarse del botón, no fundirse con él.
+
+   Lo dibuja el sistema operativo, no el navegador: va pegado al pixel, sin JS y
+   sin un frame de retraso. Si el SVG falla, cae al cursor nativo (la palabra
+   suelta al final de cada regla) y nadie se entera.
+
+   Fuera de la tienda no existe: en el panel se trabaja horas seguidas, con
+   tablas y selección de texto, y ahí el cursor del sistema es el correcto.
+   `body:has(.tienda)` traza esa frontera, sin una línea de JS.
+
+   El 4 4 del final de cada url() es el punto de clic y cae en el vértice de la
+   punta. Si mueves la geometría, muévelo: el día que no coincidan, la gente
+   apunta a un lado y hace clic en otro. */
+@media (hover: hover) and (pointer: fine) and (forced-colors: none) {
+  body:has(.tienda) { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cpath d='M4 4 21.7 11.2 12.7 12.7 11.2 21.7Z' fill='none' stroke='%23F6F7F9' stroke-width='3' stroke-linejoin='round'/%3E%3Cpath d='M4 4 21.7 11.2 12.7 12.7 11.2 21.7Z' fill='%23111827'/%3E%3C/svg%3E") 4 4, auto; }
+  body:has(.tienda) :is(a, button, [role="button"], summary, select, label[for], .cursor-pointer, [data-accionable]) { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cpath d='M4 4 21.7 11.2 12.7 12.7 11.2 21.7Z' fill='none' stroke='%23F6F7F9' stroke-width='3' stroke-linejoin='round'/%3E%3Cpath d='M4 4 21.7 11.2 12.7 12.7 11.2 21.7Z' fill='%23FF6B2C'/%3E%3C/svg%3E") 4 4, pointer; }
+  body:has(.tienda) :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="submit"]):not([type="button"]), textarea, [contenteditable="true"]) { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cpath d='M12 4v16M9 4h6M9 20h6' fill='none' stroke='%23F6F7F9' stroke-width='3.6' stroke-linecap='round'/%3E%3Cpath d='M12 4v16M9 4h6M9 20h6' fill='none' stroke='%23111827' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E") 12 12, text; }
+
+  .dark body:has(.tienda) { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cpath d='M4 4 21.7 11.2 12.7 12.7 11.2 21.7Z' fill='none' stroke='%230a0a0b' stroke-width='3' stroke-linejoin='round'/%3E%3Cpath d='M4 4 21.7 11.2 12.7 12.7 11.2 21.7Z' fill='%23f4f4f5'/%3E%3C/svg%3E") 4 4, auto; }
+  .dark body:has(.tienda) :is(a, button, [role="button"], summary, select, label[for], .cursor-pointer, [data-accionable]) { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cpath d='M4 4 21.7 11.2 12.7 12.7 11.2 21.7Z' fill='none' stroke='%230a0a0b' stroke-width='3' stroke-linejoin='round'/%3E%3Cpath d='M4 4 21.7 11.2 12.7 12.7 11.2 21.7Z' fill='%23FF6B2C'/%3E%3C/svg%3E") 4 4, pointer; }
+  .dark body:has(.tienda) :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="submit"]):not([type="button"]), textarea, [contenteditable="true"]) { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cpath d='M12 4v16M9 4h6M9 20h6' fill='none' stroke='%230a0a0b' stroke-width='3.6' stroke-linecap='round'/%3E%3Cpath d='M12 4v16M9 4h6M9 20h6' fill='none' stroke='%23f4f4f5' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E") 12 12, text; }
+
+  /* Lo apagado se queda con el aviso del sistema: "no se puede" es información,
+     no decoración, y el nativo ya lo dice en el idioma de cada quien. */
+  body:has(.tienda) :is(a, button, [role="button"], input, select, textarea):is(:disabled, [aria-disabled="true"]) { cursor: not-allowed; }
+}
+
+/* ── Página de error ────────────────────────────────────────────────────────
+   Estaban en framer-motion, y esa página es el fallback del ErrorBoundary: no
+   puede depender de una librería de 123 KB para pintarse justo cuando algo se
+   rompió. Son decorativas, así que van en CSS y de paso respetan
+   prefers-reduced-motion sin preguntarle a un hook. */
+@keyframes error-entra { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
+.error-entra { animation: error-entra 500ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+/* Banda de precaución de obra: el patrón se desliza en bucle. */
+@keyframes banda-obra { from { background-position-x: 0; } to { background-position-x: 44px; } }
+.banda-obra { animation: banda-obra 1.6s linear infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  .error-entra { animation: none; }
+  .banda-obra { animation: none; }
 }

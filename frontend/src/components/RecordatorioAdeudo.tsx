@@ -6,6 +6,7 @@ import { ArrowRight, X } from 'lucide-react'
 import api from '../lib/api'
 import { formatMoney } from '../lib/utils'
 import { useProfile } from '../store/profile'
+import { anotarFallo } from '../lib/fallo'
 
 /* Igual que el recordatorio de perfil: cerrarlo no lo mata — reaparece pasado
    el intervalo mientras el adeudo siga vivo. Se apaga solo al quedar en ceros. */
@@ -45,7 +46,7 @@ export default function RecordatorioAdeudo() {
           .reduce((a, x) => a + Number(x.saldo || 0), 0)
         setDeuda(total)
       })
-      .catch(() => {})
+      .catch(anotarFallo)
     return () => { vivo = false }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [esCliente, loc.pathname])

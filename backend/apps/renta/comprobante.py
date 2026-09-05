@@ -1,5 +1,7 @@
 """Datos estructurados del comprobante de renta (fuente única para modal y PDF)."""
 
+from server.documentos import fecha_larga
+
 
 def datos_comprobante_renta(r) -> dict:
     meta = [
@@ -20,7 +22,9 @@ def datos_comprobante_renta(r) -> dict:
     eq = r.inventario.equipo.modelo if r.inventario.equipo else 'Equipo'
     items = [{
         'nombre': f'{eq} ({r.inventario.codigo})',
-        'detalle': f'${r.precio_unitario} x {r.duracion}',
+        'detalle': r.get_modalidad_display(),
+        'cantidad': f'{r.duracion}',
+        'unitario': f'{r.precio_unitario}',
         'importe': f'{r.subtotal}',
     }]
 
@@ -32,7 +36,7 @@ def datos_comprobante_renta(r) -> dict:
     # IVA solo si la renta llevará factura.
     if getattr(r, 'iva', 0) and r.iva > 0:
         totales.append({'label': 'IVA (16%)', 'value': f'{r.iva}'})
-    totales.append({'label': 'TOTAL', 'value': f'{r.total}', 'fuerte': True})
+    totales.append({'label': 'Total', 'value': f'{r.total}', 'fuerte': True})
     if r.deposito and r.deposito > 0:
         totales.append({'label': 'Deposito', 'value': f'{r.deposito}'})
 
@@ -42,7 +46,7 @@ def datos_comprobante_renta(r) -> dict:
         'tipo': 'renta',
         'titulo': 'Comprobante de Renta',
         'folio': f'R-{r.id}',
-        'fecha': r.creado_en.strftime('%d/%m/%Y %H:%M'),
+        'fecha': fecha_larga(r.creado_en),
         'meta': meta,
         'items': items,
         'totales': totales,

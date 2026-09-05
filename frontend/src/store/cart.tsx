@@ -18,7 +18,9 @@ export function tipoCotizacion(items: { unit?: Modalidad }[]): 'venta' | 'renta'
 type Item = { lineId: number; id: number; title: string; price: number; qty: number; duracion?: number; image?: string; unit?: Modalidad }
 type State = {
   items: Item[]
-  coupon?: { code: string; discount: number }
+  /* `personal` distingue el 5% de bienvenida (de una cuenta concreta) de
+     una promoción abierta: solo el primero muere al cerrar sesión. */
+  coupon?: { code: string; discount: number; personal?: boolean }
   /** Intento de agregar un tipo distinto al de la cotización en curso: el
       reducer NO lo agrega; lo deja aquí para que el modal global pregunte
       si se empieza una cotización nueva. No se persiste. */
@@ -42,7 +44,8 @@ type Action =
   | { type: 'remove'; lineId: number }
   | { type: 'qty'; lineId: number; qty: number }
   | { type: 'duracion'; lineId: number; duracion: number }
-  | { type: 'coupon'; code: string; discount: number }
+  | { type: 'coupon'; code: string; discount: number; personal?: boolean }
+  | { type: 'quitar-cupon' }
   | { type: 'clear' }
   | { type: 'reemplazar'; items: Item[] }        // nueva cotización con estas líneas
   | { type: 'conflicto-aceptar' }                // vacía y agrega lo pendiente
@@ -65,9 +68,15 @@ function reducer(state: State, action: Action): State {
     case 'duracion':
       return { ...state, items: state.items.map(i => i.lineId === action.lineId ? { ...i, duracion: action.duracion } : i) }
     case 'coupon':
-      return { ...state, coupon: { code: action.code, discount: action.discount } }
+      return { ...state, coupon: { code: action.code, discount: action.discount, personal: action.personal } }
+    case 'quitar-cupon':
+      return { ...state, coupon: undefined }
     case 'clear':
-      return { items: [], coupon: state.coupon }
+      // El cupón se va CON el carrito. El de bienvenida es de un solo uso y se
+      // quema al enviar: si sobreviviera aquí, la siguiente cotización pintaría
+      // un 5% que el servidor ya no va a reconocer, y el cliente lo descubriría
+      // hasta que le llegara el precio completo.
+      return { items: [] }
     case 'reemplazar':
       return { items: action.items, coupon: state.coupon }
     case 'conflicto-aceptar':

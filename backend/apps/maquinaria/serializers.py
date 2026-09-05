@@ -31,6 +31,12 @@ class PerfilUsuarioSerializer(serializers.ModelSerializer):
     groups = serializers.SerializerMethodField()
     avatar = serializers.ImageField(required=False, allow_null=True)
     avatar_url = serializers.SerializerMethodField()
+    # El dibujo POR ROL. Va SIEMPRE, haya foto subida o no: es la segunda capa
+    # del avatar en el frontend (foto → dibujo del rol → inicial). `avatar_url`
+    # se queda en null cuando no hay foto a propósito —la pantalla de perfil lo
+    # usa para saber si hay algo que quitar—, así que sin este campo el panel se
+    # iba directo a la inicial mientras la tienda enseñaba el dibujo del rol.
+    avatar_url_rol = serializers.SerializerMethodField()
     # Solo lectura: lo decide el modelo. Si el cliente pudiera enviarlo, se
     # marcaría "completo" sin haber llenado nada.
     datos_completos = serializers.BooleanField(read_only=True)
@@ -48,7 +54,7 @@ class PerfilUsuarioSerializer(serializers.ModelSerializer):
         model = PerfilUsuario
         fields = [
             'id', 'username', 'email', 'first_name', 'last_name', 'is_staff', 'is_superuser', 'puede', 'groups',
-            'telefono', 'puesto', 'bio', 'avatar', 'avatar_url',
+            'telefono', 'puesto', 'bio', 'avatar', 'avatar_url', 'avatar_url_rol',
             'empresa', 'obra_direccion', 'obra_responsable', 'datos_completos', 'tiene_password',
             'email_verificado', 'perfil_verificado', 'cupon',
             'fiscal_razon_social', 'fiscal_rfc', 'fiscal_regimen', 'fiscal_cp', 'fiscal_uso_cfdi', 'fiscal_email',
@@ -58,9 +64,14 @@ class PerfilUsuarioSerializer(serializers.ModelSerializer):
         return obj.usuario.has_usable_password()
 
     def get_cupon(self, obj):
-        """El cupón personal de 5% por completar el perfil (o None)."""
-        c = obj.usuario.cupones.filter(motivo='perfil', activo=True).order_by('-id').first()
-        return {'codigo': c.codigo, 'descuento': float(c.descuento)} if c else None
+        """El cupón personal de 5% por completar el perfil (o None).
+
+        `usado` va en la respuesta porque el perfil lo lee: sin él, un cupón ya
+        gastado se pintaba como disponible, con su código listo para copiar, y
+        el cliente lo tecleaba en la siguiente compra para que se lo rechazaran.
+        """
+        from .cupones import cupon_personal
+        return cupon_personal(obj.usuario)
 
     def validate_telefono(self, value):
         """Se guarda como lo escriban, pero si viene, debe traer 10 dígitos."""
@@ -82,6 +93,11 @@ class PerfilUsuarioSerializer(serializers.ModelSerializer):
     def get_puede(self, obj):
         from .permissions import puede_de
         return puede_de(obj.usuario)
+
+    def get_avatar_url_rol(self, obj):
+        from .models import avatar_por_rol
+        request = self.context.get('request')
+        return avatar_por_rol(obj.usuario, absoluta=True, request=request)
 
     def get_avatar_url(self, obj):
         if not obj.avatar:
@@ -186,6 +202,23 @@ class EquipoSerializer(serializers.ModelSerializer):
         return limpio
 
     def validate(self, attrs):
+        # ── Precios ──────────────────────────────────────────────────────────
+        # Va PRIMERO y sin atajos: un precio en cero no es un precio, es una
+        # máquina que sale del patio gratis. La regla vive en el modelo
+        # (`Equipo.errores_de_precio`) y aquí solo se consulta; copiarla haría
+        # que el panel y el admin de Django exigieran cosas distintas.
+        # En una edición parcial se mezcla lo que llega con lo ya guardado:
+        # quien cambia solo la tarifa por día no está diciendo nada del precio
+        # de venta y no puede verse obligado a repetirlo.
+        base = self.instance or Equipo()
+        tentativo = Equipo(**{campo: attrs.get(campo, getattr(base, campo, None))
+                              for campo, _ in Equipo.PRECIOS})
+        errores = tentativo.errores_de_precio()
+        if errores:
+            # Sin llave de campo: cada mensaje ya nombra el precio que está mal,
+            # y el panel los pinta tal cual en vez de "precio_venta: ...".
+            raise serializers.ValidationError(errores)
+
         # Un PATCH de metadatos (p. ej. solo clasificación) no debe fallar por
         # specs que faltaban de antes: la regla aplica al crear o al tocarlas.
         if self.instance is not None and 'condicion' not in attrs and 'especificaciones' not in attrs:
@@ -316,9 +349,28 @@ class ConfiguracionSitioSerializer(serializers.ModelSerializer):
             'ticket_logo', 'ticket_logo_origen', 'ticket_logo_escala', 'ticket_mostrar_logo', 'ticket_lema',
             'ticket_mostrar_direccion', 'ticket_mostrar_telefono', 'ticket_mostrar_rfc', 'ticket_mostrar_web',
             'ticket_codigo_barras', 'ticket_leyenda',
+            # Piso para poder RECOGER una máquina rentada (% del total abonado).
+            'renta_liquidacion_minima_pct',
+            # Barra de aviso de la tienda (temporada, promoción, horario).
+            'aviso_activo', 'aviso_texto', 'aviso_liga', 'aviso_liga_texto', 'aviso_hasta',
             'actualizada',
         ]
         read_only_fields = ['actualizada']
+
+    def validate_renta_liquidacion_minima_pct(self, value):
+        """Un porcentaje, y nada más.
+
+        Arriba de 100 el piso sería inalcanzable y ninguna máquina se podría
+        recoger nunca sin autorización; en 0 la empresa fía sin condiciones. Los
+        dos extremos son decisiones válidas, pero fuera de ese rango el número
+        no significa nada.
+        """
+        if value is None:
+            return value
+        if not (0 <= int(value) <= 100):
+            raise serializers.ValidationError('Debe ser un porcentaje entre 0 y 100.')
+        return value
+
 
     def validate_datos_bancarios(self, value):
         """El titular, banco, cuenta y CLABE se imprimen en CADA cotización y en
@@ -408,6 +460,13 @@ class CuponSerializer(serializers.ModelSerializer):
     class Meta:
         model = Cupon
         fields = '__all__'
+        # `__all__` sin esto dejaba escribir TODO por API, incluido `usado`:
+        # quien puede emitir cupones podía des-gastar uno personal —de un solo
+        # uso— y volver a aplicarlo, o reasignárselo a otra cuenta. No es una
+        # puerta de fuera (hace falta `emitir_cupones`), pero sí un descuento
+        # que se puede reciclar sin dejar rastro, y eso lo decide el sistema al
+        # concretar la venta, no una petición.
+        read_only_fields = ['usado', 'usado_en', 'creado', 'motivo']
 
 class _CatalogoSerializer(serializers.ModelSerializer):
     """Base de catálogos: normaliza el nombre (trim) y valida unicidad

@@ -39,7 +39,7 @@ factura ya no se pierde, aunque el cliente la siga recibiendo por fuera.
 | `backend/apps/facturacion/tests_cfdi.py` | El lector, con un constructor de XML de prueba |
 | `backend/apps/facturacion/tests_subida.py` | Los candados y la transacción |
 | `backend/apps/facturacion/tests_ciclo.py` | Cancelar, refacturar y descargar |
-| `frontend/src/routes/dashboard/facturacion.tsx` | Subir, descargar y cancelar en Por facturar |
+| `frontend/src/routes/Dashboard.tsx` (sección Por facturar, ~5150-5400) | Subir, descargar y cancelar |
 
 **Por qué `cfdi.py` y `validacion.py` separados:** leer un XML y decidir si ese
 XML corresponde a esta venta son dos trabajos distintos. El lector no sabe que

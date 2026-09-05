@@ -10,10 +10,13 @@ de quién las hizo. Desactivar impide entrar y conserva el historial.
 """
 from django.contrib.auth.models import Group, User
 from django.db import transaction
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework.decorators import api_view, parser_classes, permission_classes
+from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 
-from .permissions import EsDueno, ROL_ADMIN, nivel_de, NIVEL_ADMIN
+from .permissions import (
+    CLAVE_ADMIN, PuedeGestionarUsuarios, clave_de_grupo, nivel_de, NIVEL_ADMIN,
+)
 
 def _rol(u: User):
     """Grupo del usuario, o None. Iteramos la caché del prefetch, no .first()."""
@@ -72,6 +75,9 @@ def _serialize(u: User, request=None):
         'creado': u.date_joined,
         'avatar_url': avatar_url,
         'avatar_url_rol': avatar_url_rol,
+        # `avatar_url` SIEMPRE trae algo (cae al dibujo del rol), así que no
+        # sirve para saber si la persona subió una foto de verdad. Esto sí.
+        'tiene_foto': bool(getattr(perfil, 'avatar', None)),
         # Para el AvatarUsuario del frontend: nombre visible + email / username
         'display_nombre': (u.get_full_name() or u.username or u.email or '').strip(),
         'display_correo': (u.email or u.username or '').strip(),
@@ -96,17 +102,47 @@ def _asignar_rol(usuario: User, rol: str | None):
 
 
 @api_view(['GET'])
-@permission_classes([EsDueno])
+@permission_classes([PuedeGestionarUsuarios])
 def roles_disponibles(request):
-    """Grupos existentes, para el selector de rol.
+    """Los puestos que se le pueden asignar a una cuenta de trabajo.
 
-    'Cliente' se excluye a propósito: desde el panel solo se crea EQUIPO;
-    los clientes nacen registrándose en la tienda."""
-    return Response({'roles': list(Group.objects.exclude(name='Cliente').order_by('name').values_list('name', flat=True))})
+    Van con su CLAVE además del nombre: la pantalla necesita preguntar "¿este es
+    el administrador?" para pedirle su PIN, y preguntarlo por el texto deja de
+    funcionar en cuanto el dueño renombra el puesto.
+
+    'Cliente' se excluye a propósito: desde el panel solo se crea EQUIPO; los
+    clientes nacen registrándose en la tienda.
+    """
+    from .permissions import mapa_roles
+    mapa = mapa_roles()
+    vistos, filas = set(), []
+    for grupo in Group.objects.exclude(name='Cliente').order_by('name'):
+        datos = mapa.get(grupo.name)
+        clave = datos['clave'] if datos else ''
+        # Un grupo suelto (sin puesto) sigue saliendo: existe y alguien lo puede
+        # tener. Lo que no se repite es el mismo puesto con su nombre viejo.
+        if clave and clave in vistos:
+            continue
+        vistos.add(clave)
+        filas.append({'clave': clave, 'nombre': grupo.name,
+                      'nivel': datos['nivel'] if datos else 0})
+    return Response({'roles': filas})
+
+
+def _guardar_foto(usuario, archivo):
+    """La foto de la cuenta. Es el mismo `PerfilUsuario.avatar` que el usuario se
+    pone desde su perfil: el panel no inventa un campo aparte, solo se la puede
+    poner de una vez al darlo de alta —que es cuando alguien tiene la foto a la
+    mano— en vez de esperar a que la persona entre a ponérsela."""
+    from .models import PerfilUsuario
+    perfil, _ = PerfilUsuario.objects.get_or_create(usuario=usuario)
+    perfil.avatar = archivo
+    perfil.save(update_fields=['avatar'])
 
 
 @api_view(['GET', 'POST'])
-@permission_classes([EsDueno])
+@permission_classes([PuedeGestionarUsuarios])
+@parser_classes([MultiPartParser, FormParser, JSONParser])
 def usuarios(request):
     if request.method == 'GET':
         qs = User.objects.all().select_related('perfil').prefetch_related('groups').order_by('-is_active', 'username')
@@ -135,9 +171,10 @@ def usuarios(request):
     # (cajero/asesor/técnico) NO autoriza nada —eso lo aprueba un superior—, así
     # que no se le pide ni se le guarda PIN (si el formulario lo mandara, se ignora).
     from .seguridad import formato_valido, hash_codigo
-    from .permissions import ROL_ADMIN
     rol = (d.get('rol') or '').strip()
-    es_autoridad = rol == ROL_ADMIN
+    # Por CLAVE y no por nombre: el dueño puede renombrar "Administrador", y una
+    # comparación contra el texto dejaría de pedir el PIN sin que nadie se entere.
+    es_autoridad = clave_de_grupo(rol) == CLAVE_ADMIN
     codigo = str(d.get('codigo_seguridad') or '').strip()
     if es_autoridad and not formato_valido(codigo):
         return Response({'detalle': 'Define el código de seguridad (6 dígitos): el administrador o gerente lo usa para autorizar acciones sensibles.'}, status=400)
@@ -158,13 +195,17 @@ def usuarios(request):
         if es_autoridad:
             defaults['codigo_seguridad'] = hash_codigo(codigo)
         PerfilUsuario.objects.update_or_create(usuario=u, defaults=defaults)
+        foto = request.FILES.get('avatar')
+        if foto:
+            _guardar_foto(u, foto)
 
     u = User.objects.select_related('perfil').prefetch_related('groups').get(pk=u.pk)
     return Response(_serialize(u, request=request), status=201)
 
 
 @api_view(['PATCH', 'DELETE'])
-@permission_classes([EsDueno])
+@permission_classes([PuedeGestionarUsuarios])
+@parser_classes([MultiPartParser, FormParser, JSONParser])
 def usuario_detalle(request, pk: int):
     try:
         u = User.objects.select_related('perfil').prefetch_related('groups').get(pk=pk)
@@ -243,7 +284,7 @@ def usuario_detalle(request, pk: int):
         nuevo_rol = (d.get('rol') or '').strip() or None
         if nuevo_rol == 'Cliente':
             return Response({'detalle': 'El rol Cliente no se asigna desde el panel.'}, status=400)
-        quedaria_admin = u.is_superuser or u.is_staff or nuevo_rol == ROL_ADMIN
+        quedaria_admin = u.is_superuser or u.is_staff or clave_de_grupo(nuevo_rol or '') == CLAVE_ADMIN
     activo = u.is_active if 'activo' not in d else bool(d.get('activo'))
 
     if u.id == yo and (not activo or not quedaria_admin):
@@ -263,12 +304,16 @@ def usuario_detalle(request, pk: int):
         # Al DEGRADAR (deja de ser autoridad: ya no admin/staff/superuser)
         # se borra su PIN. Un operador no autoriza nada; no debe quedar un código
         # colgando (aunque verificar_codigo ya lo neutraliza por rol).
-        es_autoridad_final = u.is_superuser or u.is_staff or nuevo_rol == ROL_ADMIN
+        es_autoridad_final = u.is_superuser or u.is_staff or clave_de_grupo(nuevo_rol or '') == CLAVE_ADMIN
         if not es_autoridad_final:
             from .models import PerfilUsuario
             PerfilUsuario.objects.filter(usuario=u).exclude(codigo_seguridad='').update(
                 codigo_seguridad='', codigo_intentos=0, codigo_bloqueado_hasta=None,
             )
+
+    foto = request.FILES.get('avatar')
+    if foto:
+        _guardar_foto(u, foto)
 
     telefono, puesto = d.get('telefono'), d.get('puesto')
     if telefono is not None or puesto is not None:

@@ -13,11 +13,14 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import api from '../lib/api'
 import { formatMoney, soloTelefono } from '../lib/utils'
+import { Monto } from '../components/ui/numero'
 import { usePuede } from '../lib/acceso'
 import Modal from '../components/Modal'
 import TicketModal from '../components/TicketModal'
 
-type Notify = (m: string, t?: 'ok' | 'err') => void
+import type { Notify } from '../store/toast'
+import { anotarFallo } from '../lib/fallo'
+import { InputDinero, formatearDinero } from './dashboard/comun'
 
 type Refaccion = {
   id: number; nombre: string; precio_venta: string
@@ -54,7 +57,7 @@ const METODOS: { k: Metodo; label: string }[] = [
 // Chips de categoría del catálogo (familias del diseño). "Todo" = sin filtro.
 const CATEGORIAS = ['Todo', 'Puntas', 'Eléctricos', 'Discos', 'Motor', 'Lubricantes', 'Accesorios']
 
-const input = 'w-full bg-surface-2 border border-edge rounded-xl px-4 py-2.5 text-sm text-ink placeholder-mute focus:outline-none focus:border-gold/50 transition-colors'
+const input = 'campo'
 const label = 'block text-[11px] font-medium text-mute mb-1.5 uppercase tracking-wide'
 
 /** Una unidad de maquinaria vista desde la caja. Lo mínimo para elegirla y
@@ -92,7 +95,7 @@ export default function CajaPOS({
   const [checandoSesion, setChecandoSesion] = useState(true)
   const cargarSesion = () => {
     api.get<{ sesion: Sesion | null }>('/caja/sesion-actual/')
-      .then(r => setSesion(r.data.sesion)).catch(() => {}).finally(() => setChecandoSesion(false))
+      .then(r => setSesion(r.data.sesion)).catch(anotarFallo).finally(() => setChecandoSesion(false))
   }
   useEffect(() => { cargarSesion() }, [])   // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -414,12 +417,12 @@ export default function CajaPOS({
             <div className="px-5 py-3.5 border-t border-edge flex items-end justify-between gap-5 flex-wrap">
               <div className="flex flex-col gap-1 text-[13px] text-mute">
                 <span>{piezas === 1 ? '1 pieza' : `${piezas} piezas`}</span>
-                <span>Subtotal {money(sub)}</span>
-                <span>IVA incluido (16%) {money(iva)}</span>
+                <span>Subtotal <Monto valor={sub} /></span>
+                <span>IVA incluido (16%) <Monto valor={iva} /></span>
               </div>
               <div className="text-right">
                 <div className="text-[11px] font-bold tracking-[0.1em] text-mute">TOTAL</div>
-                <div className="text-4xl font-black text-price tracking-tight leading-none mt-1 tabular-nums">{money(total)}</div>
+                <div className="text-4xl font-black text-price tracking-tight leading-none mt-1 tabular-nums"><Monto valor={total} /></div>
               </div>
             </div>
           </section>
@@ -503,20 +506,24 @@ export default function CajaPOS({
             <div className="bg-app border border-edge rounded-2xl px-5 h-[68px] flex items-center focus-within:border-gold/60 transition-colors">
               {esEfectivo ? (
                 <input
-                  ref={recibidoRef} value={cash} inputMode="decimal" placeholder="0.00"
+                  /* Aquí NO va <InputDinero>: este campo es la caja del
+                     mostrador, con su propio tamaño (32px) y sin el "$" de
+                     adorno —ya lo dice el rótulo—. Lo que sí comparte es el
+                     formateo: `formatearDinero` es el mismo de todo el panel. */
+                  ref={recibidoRef} value={formatearDinero(cash)} inputMode="decimal" placeholder="0.00"
                   onChange={e => { setCash(numOnly(e.target.value)); setUltimo(null) }}
                   onKeyDown={e => { if (e.key === 'Enter') pedirCobro() }}
                   className="w-full bg-transparent border-none outline-none text-[32px] font-black text-ink tabular-nums placeholder:text-mute"
                 />
               ) : (
-                <span className="text-[32px] font-black text-ink tabular-nums">{money(total)}</span>
+                <span className="text-[32px] font-black text-ink tabular-nums"><Monto valor={total} /></span>
               )}
             </div>
           </div>
           <div className="bg-app border border-edge rounded-2xl px-5 h-[60px] flex items-center justify-between">
             <span className="text-[13px] font-semibold text-mute">Cambio</span>
             <span className={`text-[26px] font-black tabular-nums ${!esEfectivo || cashNum === 0 ? 'text-mute' : cambio >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-400'}`}>
-              {!esEfectivo ? '—' : cashNum > 0 ? (cambio >= 0 ? money(cambio) : `Falta ${money(-cambio)}`) : '—'}
+              {!esEfectivo ? '—' : cashNum > 0 ? (cambio >= 0 ? <Monto valor={cambio} /> : <>Falta <Monto valor={-cambio} /></>) : '—'}
             </span>
           </div>
 
@@ -564,13 +571,13 @@ export default function CajaPOS({
               >
                 {lineas.length ? `Cobrar ${money(total)}` : 'Cobrar'}
               </button>
-              {motivoBloqueo && <p className="text-[13px] text-amber-600 dark:text-amber-400 text-center -mt-2">{motivoBloqueo}</p>}
+              {motivoBloqueo && <p className="text-[13px] text-taller-ink text-center -mt-2">{motivoBloqueo}</p>}
             </>
           )}
 
           {/* Pendiente / Devolución */}
           <div className="flex gap-2">
-            <button onClick={() => notify('Ventas pendientes (apartado): próximamente')} className="flex-1 h-10 rounded-xl border border-edge text-mute hover:text-ink hover:bg-surface-2 text-[13px] font-semibold transition-colors">Pendiente</button>
+            <button onClick={() => notify('Ventas pendientes (apartado): próximamente', 'info')} className="flex-1 h-10 rounded-xl border border-edge text-mute hover:text-ink hover:bg-surface-2 text-[13px] font-semibold transition-colors">Pendiente</button>
             <button onClick={() => setDevolucionOpen(true)} className="flex-1 h-10 rounded-xl border border-edge text-mute hover:text-ink hover:bg-surface-2 text-[13px] font-semibold transition-colors">Devolución</button>
           </div>
 
@@ -672,7 +679,7 @@ function AbrirCaja({ notify, onAbierta }: { notify: Notify; onAbierta: (s: Sesio
       <p className="text-[13.5px] text-mute mt-1.5">Para registrar ventas necesitas un turno abierto. Captura con cuánto efectivo empiezas (fondo de caja).</p>
       <div className="mt-5 text-left">
         <label className={label}>Fondo inicial</label>
-        <input value={inicial} onChange={e => setInicial(numOnly(e.target.value))} inputMode="decimal" placeholder="0.00" autoFocus className={`${input} text-lg`} onKeyDown={e => { if (e.key === 'Enter') abrir() }} />
+        <InputDinero etiqueta="Fondo inicial" valor={inicial} onValor={setInicial} placeholder="0.00" autoFocus inputClassName="text-lg" onKeyDown={e => { if (e.key === 'Enter') abrir() }} />
       </div>
       <button onClick={abrir} disabled={busy} className="mt-4 w-full h-12 rounded-xl bg-gold text-gold-on font-black hover:opacity-90 active:scale-[0.99] transition disabled:opacity-60">
         {busy ? 'Abriendo…' : 'Abrir caja'}
@@ -781,8 +788,8 @@ function CerrarCaja({ sesion, notify, onVolver, onCerrada }: {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={() => notify('Impresión del corte: próximamente')} className="h-10 px-4 rounded-xl border border-edge text-mute hover:text-ink hover:bg-surface-2 text-[13.5px] font-semibold transition-colors">Imprimir</button>
-          <button onClick={() => notify('Descarga PDF del corte: próximamente')} className="h-10 px-4 rounded-xl border border-edge text-mute hover:text-ink hover:bg-surface-2 text-[13.5px] font-semibold transition-colors">Descargar PDF</button>
+          <button onClick={() => notify('Impresión del corte: próximamente', 'info')} className="h-10 px-4 rounded-xl border border-edge text-mute hover:text-ink hover:bg-surface-2 text-[13.5px] font-semibold transition-colors">Imprimir</button>
+          <button onClick={() => notify('Descarga PDF del corte: próximamente', 'info')} className="h-10 px-4 rounded-xl border border-edge text-mute hover:text-ink hover:bg-surface-2 text-[13.5px] font-semibold transition-colors">Descargar PDF</button>
         </div>
       </div>
 
@@ -826,7 +833,7 @@ function CerrarCaja({ sesion, notify, onVolver, onCerrada }: {
                   return (
                     <div key={d} className="flex items-center gap-3 px-3.5 py-2.5 border border-edge rounded-xl bg-surface-2">
                       <span className="text-sm font-semibold text-ink w-[62px] shrink-0">${d.toLocaleString('es-MX')}</span>
-                      <input value={counts[d] || ''} onChange={e => setCount(d, e.target.value)} inputMode="numeric" placeholder="0" className="w-16 shrink-0 h-10 px-2 text-center text-[15px] font-bold text-ink bg-app border border-edge rounded-lg focus:outline-none focus:border-gold/60 transition-colors" />
+                      <input value={counts[d] || ''} onChange={e => setCount(d, e.target.value)} inputMode="numeric" placeholder="0" className="campo campo-sm w-16 shrink-0 px-2 text-center text-[15px] font-bold" />
                       <span className={`flex-1 min-w-0 text-right text-[13.5px] tabular-nums ${n ? 'text-ink' : 'text-mute'}`}>{n ? money(d * n).replace('.00', '') : '—'}</span>
                     </div>
                   )
@@ -859,7 +866,7 @@ function CerrarCaja({ sesion, notify, onVolver, onCerrada }: {
                 {movOpen ? (
                   <div className="flex flex-col gap-2.5">
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      <input value={movMonto} onChange={e => setMovMonto(numOnly(e.target.value))} inputMode="decimal" placeholder="Monto" className={input} />
+                      <InputDinero etiqueta="Monto del movimiento" valor={movMonto} onValor={setMovMonto} placeholder="Monto" />
                       <input value={movConcepto} onChange={e => setMovConcepto(e.target.value)} placeholder="Concepto (ej. retiro a bóveda)" className={input} />
                     </div>
                     <div className="flex flex-wrap gap-2">
@@ -908,7 +915,7 @@ function CerrarCaja({ sesion, notify, onVolver, onCerrada }: {
                 <span className="block text-sm font-semibold text-ink">Dejar fondo para mañana</span>
                 <span className="block text-[12.5px] text-mute mt-0.5">Se queda en el cajón.</span>
               </span>
-              <input value={leave} onChange={e => setLeave(numOnly(e.target.value))} inputMode="decimal" className="w-24 h-11 px-3 text-center text-[15px] font-bold text-ink bg-app border border-edge rounded-xl focus:outline-none focus:border-gold/60 transition-colors" />
+              <InputDinero etiqueta="Fondo que se deja" valor={leave} onValor={setLeave} compacto className="w-28 shrink-0" inputClassName="text-[15px]" />
             </label>
             <div className="flex justify-between gap-3 text-sm">
               <span className="text-mute">A entregar en oficina</span><span className="font-bold text-ink tabular-nums">{money(toDeliver)}</span>
@@ -1033,7 +1040,7 @@ function DevolucionModal({ notify, onClose, onDone }: { notify: Notify; onClose:
               <label className={label}>Motivo (opcional)</label>
               <input value={motivo} onChange={e => setMotivo(e.target.value)} placeholder="Pieza defectuosa, equivocada…" className={input} />
             </div>
-            <div className="rounded-xl bg-amber-500/10 border border-amber-500/30 px-3.5 py-2.5 text-[12.5px] text-amber-700 dark:text-amber-400">
+            <div className="rounded-xl bg-amber-500/10 border border-amber-500/30 px-3.5 py-2.5 text-[12.5px] text-taller-ink">
               Se reabastece el stock y {sel.metodo_pago === 'efectivo' ? `se entregan ${money(Number(sel.total))} en efectivo` : 'se revierte el pago'}. Queda registrado (la venta no se borra).
             </div>
             {!verDinero && (

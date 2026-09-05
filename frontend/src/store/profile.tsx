@@ -26,6 +26,20 @@ type User = {
   /* Correo confirmado y "perfil verificado" (correo + datos) = lo que da el 5%. */
   email_verificado?: boolean
   perfil_verificado?: boolean
+  /* Datos fiscales. `/auth/me/` ya los devolvía; sin tiparlos, la cotización no
+     podía saber si el cliente puede pedir factura y le prometía una que después
+     nadie iba a poder emitir. */
+  fiscal_razon_social?: string
+  fiscal_rfc?: string
+  fiscal_regimen?: string
+  fiscal_cp?: string
+  fiscal_uso_cfdi?: string
+  fiscal_email?: string
+  /* El 5% de bienvenida por completar el perfil. Viene en `/auth/me/` para que
+     el armador de la cotización pueda ofrecerlo con un toque en vez de mandar
+     al cliente a copiarlo de su perfil. `usado` importa: sin él se ofrecería un
+     cupón ya gastado. */
+  cupon?: { codigo: string; descuento: number; usado: boolean; usado_en?: string | null; expira?: string | null; vencido?: boolean } | null
   /* Estado del onboarding / guía de primer uso. */
   onboarding?: {
     completado: boolean
@@ -83,4 +97,26 @@ export function useProfile() {
   const ctx = useContext(ProfileContext)
   if (!ctx) throw new Error('Profile context')
   return ctx
+}
+
+/**
+ * ¿Esta cuenta es del EQUIPO de REMALI, y por tanto no actúa como cliente?
+ *
+ * Decisión del dueño (sep 2026): una cuenta del negocio entra al panel a hacer
+ * lo de su puesto. Cotizar como cliente, guardar obras o armar un carrito son
+ * caminos del cliente, y el backend ya los cierra (`NoEsDelNegocio`).
+ *
+ * Existe como HOOK y no como comprobación suelta en cada pantalla porque los
+ * puntos de entrada son varios —la tarjeta del catálogo, la ficha del equipo,
+ * el dock, el contador del menú— y con seis copias de `nivel > 0` basta que se
+ * olvide una para que el botón siga ahí y estrelle al usuario contra un 403.
+ * Pasó: primero se cerró el armador y la tarjeta seguía diciendo "+ Cotizar".
+ *
+ * El invitado (sin sesión) responde `false`: la tienda es pública y de ahí
+ * salen los clientes nuevos.
+ */
+export function useEsDelNegocio(): boolean {
+  const { user } = useProfile()
+  if (!user) return false
+  return Number(user.puede?.nivel ?? 0) > 0
 }

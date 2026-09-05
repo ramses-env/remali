@@ -37,7 +37,7 @@ class MatrizDelGestorTest(TestCase):
     def test_lo_que_puede(self):
         caps = puede_de(self.gestor)
         for c in ('cotizar', 'editar_catalogo', 'alta_inventario', 'operar_inventario',
-                  'ver_operacion', 'facturar', 'usar_caja', 'corte_caja', 'reparar',
+                  'ver_operacion', 'facturar', 'reparar',
                   'gestionar_reparaciones', 'ver_clientes', 'editar_clientes',
                   'ver_montos_operacion', 'ver_jornada', 'configurar_negocio'):
             self.assertTrue(caps.get(c), f'el Gestor debería poder «{c}»')
@@ -45,7 +45,9 @@ class MatrizDelGestorTest(TestCase):
     def test_lo_que_no_puede_ni_con_codigo(self):
         caps = puede_de(self.gestor)
         for c in ('ver_dinero', 'gestionar_usuarios', 'borrar_catalogo',
-                  'editar_datos_bancarios'):
+                  'editar_datos_bancarios',
+                  # La caja es del mostrador: no cascadea por nivel a nadie.
+                  'usar_caja', 'corte_caja'):
             self.assertFalse(caps.get(c), f'el Gestor NO debería poder «{c}»')
 
     def test_opera_sin_ver_las_metricas(self):
@@ -121,8 +123,10 @@ class GestorNoDefineNipTest(TestCase):
         r = api.post('/api/auth/codigo-seguridad/',
                      {'password': 'pass12345', 'codigo': '111111'}, format='json')
 
+        # El 403 lo da ahora la clase de permiso (`PuedeTenerCodigoPropio`), no
+        # una revisión dentro del cuerpo: la capacidad se reparte desde la
+        # pantalla, así que el candado tenía que vivir donde se pesa el permiso.
         self.assertEqual(r.status_code, 403, r.data)
-        self.assertEqual(r.data.get('codigo'), 'gestor_sin_codigo')
 
     def test_el_administrador_si_puede(self):
         admin = _usuario('admin3', 'Administrador')

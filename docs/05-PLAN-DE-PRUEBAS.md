@@ -1,4 +1,4 @@
-# Plan de pruebas de un día — REMALI
+# Plan de pruebas de un día para REMALI
 
 Objetivo: decidir hoy, con evidencia, si REMALI sale a producción.
 Complementa a `04-PREPRODUCCION-CHECKLIST.md` (aquel dice *qué* debe estar en
@@ -25,7 +25,7 @@ Anota todo en la tabla del final, con severidad:
 
 ---
 
-## Fase 0 — Arranque limpio (30 min)
+## Fase 0. Arranque limpio (30 min)
 
 Ya corrido hoy. Estado real de partida:
 
@@ -39,7 +39,7 @@ Ya corrido hoy. Estado real de partida:
 
 Dos cosas que ya salieron y hay que tener presentes:
 
-1. **`ventas.SesionCaja` — warning W036**: MySQL no soporta *unique constraints*
+1. `ventas.SesionCaja`, warning W036: MySQL no soporta *unique constraints*
    condicionales, así que la restricción de "una sola sesión de caja abierta"
    **no existe en la base de producción**. Se prueba a mano en la Fase 4.
 2. **La base de test `test_remali` quedó viva** de una corrida anterior. Corre
@@ -55,7 +55,7 @@ cd /Users/ramses/Developer/Remali/backend && ../env/bin/python manage.py check &
 
 ---
 
-## Fase 1 — Infraestructura local: Redis y respaldos (45 min)
+## Fase 1. Infraestructura local: Redis y respaldos (45 min)
 
 Esto no es opcional: Redis sostiene caché, rate limit y WebSockets entre
 workers. Sin él, en Railway con varios procesos, el rate limit y las
@@ -72,7 +72,7 @@ cd /Users/ramses/Developer/Remali/backend && ../env/bin/python manage.py check_r
 - [ ] `check_redis --strict` responde que Redis funciona para caché **y** Channels
 - [ ] Con Redis levantado, el panel sigue abriendo y las notificaciones llegan
 
-Respaldo y —lo importante— **restauración**:
+Respaldo y, lo importante, restauración:
 
 ```bash
 cd /Users/ramses/Developer/Remali/backend && ../env/bin/python manage.py respaldar_bd --local
@@ -88,7 +88,7 @@ marca hoy, es **P0**.
 
 ---
 
-## Fase 2 — Datos y cuentas de prueba (30 min)
+## Fase 2. Datos y cuentas de prueba (30 min)
 
 Prueba sobre datos limpios; si no, arrastras estados viejos y no sabes si el bug
 es del código o de la basura acumulada.
@@ -103,9 +103,9 @@ Cuentas por rol:
 cd /Users/ramses/Developer/Remali/backend && ../env/bin/python manage.py init_roles && ../env/bin/python manage.py crear_usuarios_prueba
 ```
 
-⚠️ **Hueco conocido**: `crear_usuarios_prueba` solo crea `admin_prueba`
-(Administrador) y `tecnico_prueba` (Técnico). Los roles **Gerente, Cajero y
-Asesor** existen en `init_roles` pero no tienen cuenta de prueba. Créalas a mano
+Hueco conocido: `crear_usuarios_prueba` solo crea `admin_prueba`
+(Administrador) y `tecnico_prueba` (Técnico). Los roles Gerente, Cajero y
+Asesor existen en `init_roles` pero no tienen cuenta de prueba. Créalas a mano
 desde *Usuarios* en el panel antes de la Fase 5, o no vas a poder probar la
 matriz de permisos completa.
 
@@ -117,7 +117,7 @@ matriz de permisos completa.
 
 ---
 
-## Fase 3 — Humo de la API (30 min)
+## Fase 3. Humo de la API (30 min)
 
 Rápido, con la app corriendo en `:8000`. Busca 500 y respuestas raras, no
 detalles de negocio.
@@ -136,7 +136,7 @@ Mientras tanto, en el log de Django: cero *tracebacks*.
 
 ---
 
-## Fase 4 — Flujos de dinero, de punta a punta (2 h) ⭐
+## Fase 4. Flujos de dinero, de punta a punta (2 h)
 
 El corazón del día. Si algo aquí falla, no se sube. Haz cada flujo **completo**,
 sin brincarte pasos, y revisa que los números cuadren al final.
@@ -175,11 +175,11 @@ sin brincarte pasos, y revisa que los números cuadren al final.
 - [ ] Movimiento de entrada y de salida de efectivo
 - [ ] Devolución
 - [ ] Cerrar sesión: el **corte cuadra** contra lo vendido y los movimientos
-- [ ] ⚠️ **Intenta abrir una segunda sesión de caja con la primera abierta** —
-      y también desde otro usuario al mismo tiempo. MySQL no aplica la
+- [ ] Intenta abrir una segunda sesión de caja con la primera abierta, y
+      también desde otro usuario al mismo tiempo. MySQL no aplica la
       restricción condicional (warning W036), así que si la validación no está
-      también en el código, se abren dos y el corte se corrompe. **Esto es P0
-      si se puede duplicar.**
+      también en el código, se abren dos y el corte se corrompe. Si se puede
+      duplicar, es P0.
 
 ### 4.4 Reparaciones e inventario (20 min)
 
@@ -201,7 +201,7 @@ sin brincarte pasos, y revisa que los números cuadren al final.
 
 ---
 
-## Fase 5 — Roles y permisos (45 min)
+## Fase 5. Roles y permisos (45 min)
 
 Dos revisiones por rol, y la segunda es la que importa:
 
@@ -212,7 +212,7 @@ Dos revisiones por rol, y la segunda es la que importa:
 | Rol | Debe ver | No debe ver / no debe poder |
 |---|---|---|
 | Administrador | Todo el negocio | Usuarios y Configuración |
-| Gerente | Nivel administración | — (definir y verificar) |
+| Gerente | Nivel administración | (definir y verificar) |
 | Técnico | Jornada, Inventario, Refacciones, Rentas, Reparaciones | Montos, Resumen, Ventas, Cotizaciones, Por facturar, Usuarios, Configuración |
 | Cajero | Solo lectura + Caja | Alta/edición de catálogo, Usuarios, Configuración |
 | Asesor | Lectura + alta | Borrar, Usuarios, Configuración |
@@ -227,7 +227,7 @@ Esa última casilla es la más importante del día en términos de seguridad.
 
 ---
 
-## Fase 6 — Portal del cliente, ligas públicas y móvil (45 min)
+## Fase 6. Portal del cliente, ligas públicas y móvil (45 min)
 
 - [ ] Registro, verificación de correo y recuperar contraseña (ciclo completo)
 - [ ] Login con Google
@@ -244,7 +244,7 @@ Esa última casilla es la más importante del día en términos de seguridad.
 
 ---
 
-## Fase 7 — Correo, tiempo real y cron (30 min)
+## Fase 7. Correo, tiempo real y cron (30 min)
 
 ```bash
 cd /Users/ramses/Developer/Remali/backend && ../env/bin/python manage.py send_test_email tu-correo@ejemplo.com
@@ -253,7 +253,7 @@ cd /Users/ramses/Developer/Remali/backend && ../env/bin/python manage.py send_te
 - [ ] Llega el correo de prueba y **no** cae en spam
 - [ ] Con dos navegadores abiertos, una acción en uno se refleja en el otro
       (latido / WebSocket)
-- [ ] Notificaciones: marcar leída, eliminar, limpiar todas — en admin y en cliente
+- [ ] Notificaciones: marcar leída, eliminar y limpiar todas, en admin y en cliente
 
 Los tres comandos del cron, a mano:
 
@@ -262,18 +262,18 @@ cd /Users/ramses/Developer/Remali/backend && ../env/bin/python manage.py procesa
 ```
 
 - [ ] Los tres corren sin error
-- [ ] ⚠️ **Revisar**: `railway.cron.json` corre `procesar_rentas`,
+- [ ] Revisar: `railway.cron.json` corre `procesar_rentas`,
       `recordar_reparaciones` y `respaldar_bd`, pero **no**
       `recordar_vigencia` (cotizaciones). Si los recordatorios de vigencia
       deben salir, ese comando falta en el cron.
 
 ---
 
-## Fase 8 — Modo producción, en local (30 min)
+## Fase 8. Modo producción, en local (30 min)
 
-Antes de subir, corre la app como corre en Railway. **Ojo con la trampa**:
+Antes de subir, corre la app como corre en Railway. Ojo con la trampa:
 `settings.py` carga `.env.dev` con `override=True`, así que poner `DEBUG=False`
-en la línea de comandos **no sirve** — lo pisa el archivo. Renombra `.env.dev`
+en la línea de comandos no sirve, porque el archivo lo pisa. Renombra `.env.dev`
 temporalmente:
 
 ```bash
@@ -296,7 +296,7 @@ Y lo administrativo, que es lo que más deploys rompe:
 
 ---
 
-## Fase 9 — Deploy y humo en Railway (45 min)
+## Fase 9. Deploy y humo en Railway (45 min)
 
 Sigue la sección 3 de `04-PREPRODUCCION-CHECKLIST.md` para las variables de
 entorno (web y cron), y luego prueba **en el dominio real**:
@@ -316,7 +316,7 @@ entorno (web y cron), y luego prueba **en el dominio real**:
 
 ---
 
-## Fase 10 — Go / No-Go
+## Fase 10. Go / No-Go
 
 **GO** si todo lo anterior está en verde y no queda ningún P0.
 
@@ -346,19 +346,19 @@ cd /Users/ramses/Developer/Remali/backend && ../env/bin/python manage.py crear_u
 | 2 | 2 | No hay cuentas de prueba para Gerente, Cajero ni Asesor | P1 | Crear a mano |
 | 3 | 7 | `recordar_vigencia` no está en `railway.cron.json` | Por confirmar | Revisar |
 | 4 | 8 | ~144 archivos sin commitear | P0 para deploy | Pendiente |
-| 5 | — | `DashboardLayout.jsx` + `scenes/*` es plantilla muerta y sigue en el bundle | P2 | Backlog |
+| 5 | - | `DashboardLayout.jsx` + `scenes/*` es plantilla muerta y sigue en el bundle | P2 | Backlog |
 | 6 | 0 | Falta migración: `PerfilUsuario.codigo_seguridad`, `codigo_intentos` y `codigo_bloqueado_hasta` están en el modelo pero no en la BD (`makemigrations` pide la 0047). Cualquier consulta que toque esas columnas revienta con `OperationalError 1054` | P0 para deploy | Pendiente |
-| 7 | — | Avatares: fotos viejas apuntan a Cloudinary pero el archivo solo existe en `backend/media/` → 404 | P1 | UI arreglada; falta migrar los archivos |
-| 8 | — | La sección "Perfil" del menú de usuario renderiza una página vacía (`SECTION_META.perfil` existe, pero no hay `section === 'perfil'` que pinte nada) | P1 | Pendiente |
-| 9 | — | En local, `.env` trae credenciales de Cloudinary de **producción**: las fotos de prueba se suben al Cloudinary real | P1 | Pendiente |
-| 10 | 1 | `respaldar_bd` (el comando EXACTO del cron de Railway) tronaba: Cloudinary rechazaba el `.json.gz` con "Invalid image file". **No había ni un respaldo** | P0 | **Arreglado** — escribe a `BACKUP_LOCAL_DIR`; falta montar el volumen en Railway |
-| 11 | 1 | La restauración fallaba por 3 causas distintas: sellos del latido, señales que no respetaban `raw` de `loaddata`, y filas sembradas por migraciones (Caja principal) | P0 | **Arreglado y verificado** (ciclo completo, 13 modelos idénticos) |
-| 12 | 1 | Sin política de retención: nada borraba respaldos viejos | P1 | **Arreglado** — conserva 30, `--retener N` |
-| 13 | 5 | `/admin/` de Django no tenía freno de fuerza bruta (los throttles de DRF no lo cubren) | P1 | **Arreglado** — `server/admin_bruteforce.py`, 10 fallos / 15 min |
+| 7 | - | Avatares: fotos viejas apuntan a Cloudinary pero el archivo solo existe en `backend/media/` → 404 | P1 | UI arreglada; falta migrar los archivos |
+| 8 | - | La sección "Perfil" del menú de usuario renderiza una página vacía (`SECTION_META.perfil` existe, pero no hay `section === 'perfil'` que pinte nada) | P1 | Pendiente |
+| 9 | - | En local, `.env` trae credenciales de Cloudinary de **producción**: las fotos de prueba se suben al Cloudinary real | P1 | Pendiente |
+| 10 | 1 | `respaldar_bd` (el comando EXACTO del cron de Railway) tronaba: Cloudinary rechazaba el `.json.gz` con "Invalid image file". **No había ni un respaldo** | P0 | Arreglado: escribe a `BACKUP_LOCAL_DIR`; falta montar el volumen en Railway |
+| 11 | 1 | La restauración fallaba por 3 causas distintas: sellos del latido, señales que no respetaban `raw` de `loaddata`, y filas sembradas por migraciones (Caja principal) | P0 | Arreglado y verificado (ciclo completo, 13 modelos idénticos) |
+| 12 | 1 | Sin política de retención: nada borraba respaldos viejos | P1 | Arreglado: conserva 30, `--retener N` |
+| 13 | 5 | `/admin/` de Django no tenía freno de fuerza bruta (los throttles de DRF no lo cubren) | P1 | Arreglado: `server/admin_bruteforce.py`, 10 fallos / 15 min |
 | 14 | 1 | El rate limit depende de Redis: con LocMemCache cada worker lleva su propia cuenta y el techo se multiplica por N | P1 | Verificar en prod |
-| 15 | — | El avatar y la imagen del equipo no validaban peso ni tipo (los demás puntos de subida sí) | P1 | **Arreglado** — usan `validacion_archivos.validar_imagen` |
-| 16 | — | CVEs: Django 5.2.9 (14), `pyjwt`, `pillow`, `cryptography`, `urllib3`, `requests`, `idna`, `filelock`, `python-dotenv` | P1 | **Arreglado** — actualizadas y fijadas |
-| 17 | — | La key de Google Maps es `VITE_*`: viaja al bundle por diseño. Necesita restricción por referrer y por API en Google Cloud | P2 | Pendiente (es en la consola de Google) |
-| 18 | — | Avatar del dueño: `_rol_de_usuario` usaba el grupo y `rol_de` el nivel, así que el chip decía DUEÑO junto a la foto de técnico | P2 | **Arreglado** |
+| 15 | - | El avatar y la imagen del equipo no validaban peso ni tipo (los demás puntos de subida sí) | P1 | Arreglado: usan `validacion_archivos.validar_imagen` |
+| 16 | - | CVEs: Django 5.2.9 (14), `pyjwt`, `pillow`, `cryptography`, `urllib3`, `requests`, `idna`, `filelock`, `python-dotenv` | P1 | Arreglado: actualizadas y fijadas |
+| 17 | - | La key de Google Maps es `VITE_*`: viaja al bundle por diseño. Necesita restricción por referrer y por API en Google Cloud | P2 | Pendiente (es en la consola de Google) |
+| 18 | - | Avatar del dueño: `_rol_de_usuario` usaba el grupo y `rol_de` el nivel, así que el chip decía DUEÑO junto a la foto de técnico | P2 | Arreglado |
 | 19 | 7 | `recordar_vigencia` no corría en el cron | P1 | **Arreglado** en `railway.cron.json` |
-| 20 | — | Un respaldo fallido no avisaba a nadie | P1 | **Arreglado** — notificación en el panel + salida con error |
+| 20 | - | Un respaldo fallido no avisaba a nadie | P1 | Arreglado: notificación en el panel + salida con error |

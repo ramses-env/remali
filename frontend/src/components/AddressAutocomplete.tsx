@@ -36,8 +36,7 @@ type Props = {
   autoFocus?: boolean
 }
 
-const DEFAULT_INPUT =
-  'w-full bg-surface-2 border border-edge rounded-xl pl-9 pr-9 py-2.5 text-sm text-ink placeholder-mute focus:outline-none focus:border-gold/50 transition-colors'
+const DEFAULT_INPUT = 'campo pl-11 pr-11'
 
 export default function AddressAutocomplete({
   value, onChange, onSelect,

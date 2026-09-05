@@ -36,9 +36,11 @@ class MatrizDeRolesTest(TestCase):
         u = _con_rol('dueno', staff=True, sup=True)
         self.assertEqual(nivel_de(u), NIVEL_DUENO)
         caps = puede_de(u)
-        # jornada_campo es un PUESTO, no un poder: no cascadea hacia arriba.
+        # Los PUESTOS no son poderes y no cascadean hacia arriba: 'jornada_campo'
+        # es el escritorio del técnico de campo, y la caja (usar/cortar) es el
+        # cajón del mostrador. El dueño no los trae, y es a propósito.
         for c, v in caps.items():
-            if c in ('nivel', 'rol', 'jornada_campo'):
+            if c in ('nivel', 'rol', 'jornada_campo', 'usar_caja', 'corte_caja'):
                 continue
             self.assertTrue(v, f'el dueño debería poder «{c}»')
 
@@ -49,10 +51,13 @@ class MatrizDeRolesTest(TestCase):
             u,
             puede=['ver_dinero', 'ver_montos_operacion', 'vender', 'rentar', 'cotizar',
                    'facturar', 'editar_catalogo', 'alta_inventario', 'operar_inventario',
-                   'reparar', 'gestionar_reparaciones', 'usar_caja', 'corte_caja',
+                   'reparar', 'gestionar_reparaciones',
                    'ver_clientes', 'editar_clientes', 'ver_jornada'],
             # Dar de alta gente y cambiar los datos del negocio son del dueño.
-            no_puede=['gestionar_usuarios', 'configurar_negocio', 'jornada_campo'],
+            # La CAJA es del mostrador: administración registra ventas desde
+            # Ventas y Pedidos, pero no cobra en el cajón del cajero.
+            no_puede=['gestionar_usuarios', 'configurar_negocio', 'jornada_campo',
+                      'usar_caja', 'corte_caja'],
         )
 
     def test_cajero(self):
@@ -75,19 +80,59 @@ class MatrizDeRolesTest(TestCase):
         NO vende ni renta: eso se levanta en el mostrador o en administración.
         Antes las tenía encendidas por nivel y el panel no le mostraba ni una
         pantalla para hacerlas.
+
+        Tampoco toca el PADRÓN. Cascadeaba por nivel y le abría Clientes entero
+        —fichas, teléfonos, estados de cuenta y los avisos de "Cuenta nueva" con
+        el correo de quien se registró—. Su trabajo llega servido en "Mi
+        jornada": a quién le entrega y dónde, sin buscar a nadie.
         """
         u = _con_rol('tecnico1', 'Técnico')
         self.assertEqual(nivel_de(u), NIVEL_TECNICO)
         self._assert_matriz(
             u,
             puede=['reparar', 'operar_inventario', 'jornada_campo',
-                   'ver_montos_operacion', 'ver_clientes', 'editar_clientes'],
+                   'ver_montos_operacion'],
             no_puede=['vender', 'rentar', 'ver_dinero', 'usar_caja', 'corte_caja',
                       'editar_catalogo', 'alta_inventario', 'cotizar', 'facturar',
                       'ver_jornada', 'gestionar_usuarios', 'configurar_negocio',
                       # Lleva el taller es de administración; él lo TRABAJA.
-                      'gestionar_reparaciones'],
+                      'gestionar_reparaciones',
+                      'ver_clientes', 'editar_clientes'],
         )
+
+    def test_el_padron_se_le_apaga_al_tecnico_pero_no_al_mostrador(self):
+        """La línea fina de ese apagado.
+
+        Cajero y técnico comparten NIVEL, así que apagar el padrón "para los de
+        nivel 1" habría roto el buscador del mostrador, que es lo que la cajera
+        usa con el cliente enfrente. Se apaga por PUESTO, no por nivel.
+        """
+        tecnico = _con_rol('tecnico2', 'Técnico')
+        cajera = _con_rol('cajera2', 'Cajero')
+        self.assertEqual(nivel_de(tecnico), nivel_de(cajera))
+        self.assertFalse(puede_de(tecnico)['ver_clientes'])
+        self.assertTrue(puede_de(cajera)['ver_clientes'])
+
+    def test_la_caja_es_solo_del_mostrador(self):
+        """El cajón tiene un dueño y no es la jerarquía.
+
+        `usar_caja` no cascadea por nivel: si administración —o el propio dueño—
+        pudiera cobrar en la misma caja, el corte del turno dejaría de responder
+        "¿lo que hay en el cajón es lo que debería haber?". Quien cobra ahí es
+        quien lo abre, y de fábrica ese es el puesto de mostrador.
+        """
+        for username, grupo, staff, sup in (
+            ('caja_adm', 'Administrador', False, False),
+            ('caja_ges', 'Gestor', False, False),
+            ('caja_tec', 'Técnico', False, False),
+            ('caja_due', None, True, True),
+        ):
+            caps = puede_de(_con_rol(username, grupo, staff=staff, sup=sup))
+            self.assertFalse(caps['usar_caja'], f'{username} no debería usar la caja')
+            self.assertFalse(caps['corte_caja'], f'{username} no debería hacer el corte')
+        caps = puede_de(_con_rol('caja_caj', 'Cajero'))
+        self.assertTrue(caps['usar_caja'])
+        self.assertTrue(caps['corte_caja'])
 
     def test_el_tecnico_repara_pero_no_lleva_el_taller(self):
         """La distinción que quita la sección duplicada: hacer el trabajo no es

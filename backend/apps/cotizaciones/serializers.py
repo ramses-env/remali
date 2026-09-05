@@ -24,10 +24,33 @@ class CotizacionItemSerializer(serializers.ModelSerializer):
     subtotal = serializers.SerializerMethodField()
     modalidad_label = serializers.CharField(read_only=True)
     equipo_imagen = serializers.SerializerMethodField()
+    unidades_libres = serializers.SerializerMethodField()
 
     class Meta:
         model = CotizacionItem
-        fields = ['id', 'descripcion', 'cantidad', 'duracion', 'precio_unitario', 'precio_lista', 'equipo', 'equipo_imagen', 'subtotal', 'modalidad', 'modalidad_label']
+        fields = ['id', 'descripcion', 'cantidad', 'duracion', 'precio_unitario', 'precio_lista', 'equipo', 'equipo_imagen', 'subtotal', 'modalidad', 'modalidad_label', 'unidades_libres']
+
+    def get_unidades_libres(self, obj):
+        """Cuántas máquinas de este equipo hay libres AHORA MISMO.
+
+        No se guarda: se cuenta al pedir la cotización. Y no es pereza —el dato
+        cambia solo. Un demoledor sin unidades a las nueve puede tener una a las
+        once porque alguien la devolvió; un campo guardado seguiría diciendo que
+        no hay hasta que alguien lo tocara.
+
+        Existe porque nadie revalidaba nada después de armar la cotización: si
+        había unidad cuando el cliente la agregó y se rentó al día siguiente, la
+        cotización viajaba con un equipo que no existe y el cliente se enteraba
+        cuando le llamaban. En su pantalla la partida se veía igual que las
+        demás.
+
+        `None` cuando la partida no cuelga de un equipo del catálogo (texto
+        libre): ahí no hay nada que contar y decir "0" sería mentir.
+        """
+        if not obj.equipo_id:
+            return None
+        from inventario.models import Inventario
+        return Inventario.objects.filter(equipo_id=obj.equipo_id, estado='disponible').count()
 
     def get_subtotal(self, obj):
         return str(obj.subtotal)
@@ -44,6 +67,7 @@ class CotizacionItemSerializer(serializers.ModelSerializer):
 
 
 class CotizacionSerializer(serializers.ModelSerializer):
+    faltan_datos_fiscales = serializers.SerializerMethodField()
     items = CotizacionItemSerializer(many=True, read_only=True)
     fotos = CotizacionFotoSerializer(many=True, read_only=True)
     subtotal = serializers.SerializerMethodField()
@@ -70,7 +94,12 @@ class CotizacionSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'folio', 'tipo', 'estado', 'origen', 'datos_solicitud',
             'cliente_nombre', 'cliente_telefono', 'cliente_email', 'cliente', 'cliente_padron_nombre',
-            'vigencia_dias', 'aplica_iva', 'notas',
+            'vigencia_dias', 'aplica_iva', 'notas', 'faltan_datos_fiscales',
+            # El sello del SÍ. Se guardaba y no salía: sin él no se puede
+            # contestar cuánto tarda un cliente en decidir, ni si aceptó antes
+            # o después de que su cotización venciera —que es la diferencia
+            # entre respetar el precio y tener que recotizar—.
+            'aceptada_en',
             'items', 'fotos', 'subtotal', 'subtotal_venta', 'subtotal_renta', 'base', 'iva', 'total', 'descuento_cupon', 'cupon',
             'cliente_display', 'vigencia_hasta', 'vencida', 'token_publico',
             'convertida', 'venta_id', 'renta_id', 'atendida_en', 'atendida_por_nombre', 'usuario_nombre', 'usuario_email', 'entrega_prometida', 'escalada_en',
@@ -82,6 +111,26 @@ class CotizacionSerializer(serializers.ModelSerializer):
 
     # Iteran la caché de prefetch_related('conversiones'); .exists()/.first()
     # lanzarían 1 query por cotización (N+1) en la lista.
+    def get_faltan_datos_fiscales(self, obj) -> bool:
+        """Pidió factura y no tenemos con qué timbrársela.
+
+        El cliente puede pedirla sin haber llenado sus datos —se le avisa, no se
+        le bloquea, porque seis campos del SAT en medio de una cotización es
+        donde la gente abandona—, así que administración necesita verlo ANTES de
+        ponerse a facturar y no al final, con el cliente esperando.
+
+        Se mira el PERFIL en vivo: si los llenó después de cotizar, deja de
+        faltar solo.
+        """
+        if not obj.aplica_iva or not obj.usuario_id:
+            return False
+        perfil = getattr(obj.usuario, 'perfil', None)
+        if perfil is None:
+            return True
+        return not all([(perfil.fiscal_rfc or '').strip(),
+                        (perfil.fiscal_regimen or '').strip(),
+                        (perfil.fiscal_cp or '').strip()])
+
     def get_convertida(self, obj):
         # Convertida es convertida: en venta O en renta. Contar solo ventas
         # dejaba la cotización "viva" (editable y con acciones) tras concretar

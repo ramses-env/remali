@@ -74,3 +74,21 @@ def rango_periodo(params):
         ini = _limite(anio, 1, 1)
         fin = _limite(anio + 1, 1, 1)
     return ini, fin
+
+
+def mas_meses(momento, meses):
+    """`momento` corrido N meses hacia adelante, sin `dateutil`.
+
+    Sumar 90 días no es sumar 3 meses: al cliente que recibió su cupón el 30 de
+    noviembre hay que decirle "vence el 28 de febrero", no una fecha a media
+    semana que no cuadra con nada. Y el último día del mes es justo donde una
+    suma ingenua truena (31 de enero + 1 mes no existe), así que se recorta al
+    último día real del mes destino.
+    """
+    import calendar
+
+    mes = momento.month - 1 + meses
+    anio = momento.year + mes // 12
+    mes = mes % 12 + 1
+    dia = min(momento.day, calendar.monthrange(anio, mes)[1])
+    return momento.replace(year=anio, month=mes, day=dia)

@@ -21,6 +21,7 @@ import os
 from django.conf import settings
 from django.core.files.storage import default_storage
 from django.core.management.base import BaseCommand
+from server.rastro import tragado
 
 # (app_label.Modelo, campo). Se resuelven en runtime para no importar apps
 # que podrían no estar instaladas en un despliegue recortado.
@@ -71,7 +72,7 @@ class Command(BaseCommand):
                         ya_ok += 1
                         continue
                 except Exception:
-                    pass  # exists() puede fallar por red: se trata como ausente.
+                    tragado()  # exists() puede fallar por red: se trata como ausente.
 
                 ruta_local = os.path.join(str(settings.MEDIA_ROOT), nombre)
                 if not os.path.exists(ruta_local):

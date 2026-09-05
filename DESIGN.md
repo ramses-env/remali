@@ -31,7 +31,7 @@ Reglas:
   - Metadatos: `text-[11px]` + `font-mono` para fechas/ids
 
 Reglas:
-- Nada de tipografía “display” en labels/controles.
+- Nada de tipografía "display" en labels/controles.
 - No usar texto en mayúsculas salvo tags/badges cortos.
 
 ## 4) Componentes
@@ -45,7 +45,7 @@ Reglas:
 - **Badges:** `text-[10px] uppercase font-semibold` con fondos suaves (10–12%).
 
 ## 5) Layout
-- **Contención:** layouts centrados `max-w-6xl` para módulos tipo “panel”.
+- **Contención:** layouts centrados `max-w-6xl` para módulos tipo "panel".
 - **Estructura:** usar Grid cuando haya 2D real; para paneles tipo inbox, `lg:grid-cols-[420px_1fr]`.
 - **Responsive:** 1 columna en móvil/tablet, 2 columnas en escritorio.
 
@@ -59,8 +59,8 @@ Reglas:
 - Respetar `prefers-reduced-motion`: sin animaciones de entrada.
 
 ## 7) Anti-patrones (prohibido)
-- Gradiente en texto, “glows” externos, glassmorphism por defecto.
-- Bordes laterales tipo “accent stripe”.
+- Gradiente en texto, "glows" externos, glassmorphism por defecto.
+- Bordes laterales tipo "accent stripe".
 - Cards repetidas sin jerarquía (nested cards).
 - Animaciones largas en acciones frecuentes.
 - Texto gris sobre fondos coloreados sin contraste.

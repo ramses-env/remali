@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -38,6 +38,20 @@ export default function Registro() {
 
   const [error, setError] = useState<string | undefined>(undefined)
   const [verPass, setVerPass] = useState(false)
+
+  /* El aviso vive ARRIBA del formulario y el botón está hasta abajo: en un
+     teléfono, o con el teclado abierto, el mensaje nacía fuera de la pantalla.
+     El error estaba bien manejado y aun así el usuario veía un botón que no
+     hacía nada. Manejarlo no basta: hay que llevárselo a los ojos.
+
+     Se mueve el foco además de hacer scroll, para que el lector de pantalla lo
+     anuncie y para que quien navega con teclado no pierda su lugar. */
+  const avisoRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!error) return
+    avisoRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    avisoRef.current?.focus({ preventScroll: true })
+  }, [error])
 
   // El redirect "si ya hay sesión" lo hace el layout, una sola vez para ambas.
   const irTrasEntrar = useIrTrasEntrar(next)
@@ -85,9 +99,12 @@ export default function Registro() {
       return
     }
 
-    // Cuenta creada pero PENDIENTE: el candado de correo real exige confirmar
-    // el link antes de poder entrar. Al login, con el aviso y el reenvío a mano.
-    nav(`/login?confirmar=1&correo=${encodeURIComponent(datos.email.trim().toLowerCase())}`, { replace: true })
+    /* Derecho a escribir el código, sin escala en el login. Antes se rebotaba a
+       `/login?confirmar=1`, que dejaba al recién registrado en una pantalla de
+       ENTRAR —con sus campos de correo y contraseña— cuando lo que tenía que
+       hacer era otra cosa. El correo viaja en la liga porque el código de seis
+       dígitos no identifica a nadie por sí solo. */
+    nav(`/verificar?correo=${encodeURIComponent(datos.email.trim().toLowerCase())}`, { replace: true })
   }
 
   return (
@@ -100,7 +117,12 @@ export default function Registro() {
 
       {error && (
         <AuthItem>
-          <div className="px-4 py-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-600 dark:text-red-400 text-sm">
+          <div
+            ref={avisoRef}
+            role="alert"
+            tabIndex={-1}
+            className="px-4 py-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-600 dark:text-red-400 text-sm outline-none focus-visible:ring-2 focus-visible:ring-red-500/40"
+          >
             {error}
           </div>
         </AuthItem>
@@ -120,7 +142,6 @@ export default function Registro() {
                     <Input
                       placeholder="Juan Pérez"
                       autoComplete="name"
-                      className="h-11 rounded-xl bg-surface-2 border-edge text-ink placeholder:text-mute focus-visible:ring-gold/30"
                       disabled={enviando}
                       {...field}
                     />
@@ -143,7 +164,6 @@ export default function Registro() {
                       type="email"
                       placeholder="correo@ejemplo.com"
                       autoComplete="email"
-                      className="h-11 rounded-xl bg-surface-2 border-edge text-ink placeholder:text-mute focus-visible:ring-gold/30"
                       disabled={enviando}
                       {...field}
                     />
@@ -167,7 +187,7 @@ export default function Registro() {
                         type={verPass ? 'text' : 'password'}
                         placeholder="Mínimo 8 caracteres"
                         autoComplete="new-password"
-                        className="h-11 rounded-xl bg-surface-2 border-edge pr-12 text-ink placeholder:text-mute focus-visible:ring-gold/30"
+                        className="pr-12"
                         disabled={enviando}
                         {...field}
                       />
@@ -199,7 +219,6 @@ export default function Registro() {
                       type={verPass ? 'text' : 'password'}
                       placeholder="Repite tu contraseña"
                       autoComplete="new-password"
-                      className="h-11 rounded-xl bg-surface-2 border-edge text-ink placeholder:text-mute focus-visible:ring-gold/30"
                       disabled={enviando}
                       {...field}
                     />

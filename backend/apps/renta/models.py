@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import datetime, time, timedelta
 from decimal import Decimal
 
 from django.conf import settings
@@ -7,6 +7,92 @@ from django.core.exceptions import ValidationError
 from django.utils import timezone
 
 from inventario.models import Inventario
+
+def nota_de_liquidacion(total, pagado):
+    """Si la máquina se recogió por debajo del piso, la frase que lo deja anotado.
+    Cadena vacía cuando el cliente sí llegó (no hay nada que reportar).
+
+    Ojo con lo que esta función NO hace: **no bloquea**. Y no es un descuido.
+
+    La primera versión sí frenaba la recolección hasta llegar al piso, y estaba
+    mal por dos razones que solo se ven en campo:
+
+    1. El recargo. `finalizar()` cobra `tarifa_diaria × días de retraso` y ese
+       recargo entra en `total`, que es la base del piso. Así que NO recoger
+       subía el piso al día siguiente: un faltante de $250 se volvía uno de
+       $1,000 en 24 horas. El candado hacía crecer la deuda que quería cobrar.
+    2. Al final de una renta la empresa QUIERE su máquina de vuelta. Negarse a
+       recogerla no presiona al cliente —él se queda con la máquina y nosotros
+       sin ella, sin poder rentarla y cargando con el riesgo si se daña—.
+
+    La palanca de cobro se mudó a donde sí hay presión y donde sí hay un
+    administrador presente: la ENTREGA de la siguiente renta (ver
+    `adeudo_vencido_de` y `entregar_renta`).
+
+    Aquí queda el rastro y el aviso: administración se entera el mismo día y
+    persigue el cobro. Control por revisión, no por permiso previo.
+    """
+    from maquinaria.models import ConfiguracionSitio
+
+    total = Decimal(str(total or 0))
+    pagado = Decimal(str(pagado or 0))
+    saldo = max(total - pagado, Decimal('0'))
+    if saldo <= 0:
+        return ''                  # liquidada: nada que anotar
+
+    pct_min = Decimal(str(ConfiguracionSitio.get_solo().renta_liquidacion_minima_pct or 0))
+    if pct_min <= 0:
+        return ''                  # piso apagado: la empresa fía sin condiciones
+
+    minimo = (total * pct_min / Decimal('100')).quantize(Decimal('0.01'))
+    if pagado >= minimo:
+        return ''                  # llegó al piso; el resto es cobranza normal
+
+    pct_dado = (pagado / total * Decimal('100')).quantize(Decimal('0.1')) if total > 0 else Decimal('0')
+    return (f'Recogida con {pct_dado}% abonado (mínimo {int(pct_min)}%). '
+            f'Saldo ${saldo} a cobranza.')
+
+
+def adeudo_vencido_de(*, cliente_id=None, usuario_id=None, nombre='', excluir_id=None):
+    """Cuánto debe ESTE cliente de rentas que YA TERMINARON.
+
+    "Vencido" = la máquina volvió y el dinero no. Una renta viva con saldo no
+    cuenta: el cliente todavía la está usando y todavía está en tiempo de abonar.
+
+    La identidad se resuelve como en `rentas_adeudos`: manda el padrón
+    (`cliente_id`), luego la cuenta (`usuario_id`) y solo al final el texto del
+    nombre —"Naomi" y "Naomí Pérez" son dos personas para una cadena, así que el
+    texto es el último recurso y va normalizado—.
+
+    Devuelve (total_adeudado, cuántas rentas).
+    """
+    qs = Renta.objects.filter(estado='finalizada')
+    if excluir_id:
+        qs = qs.exclude(pk=excluir_id)
+
+    if cliente_id:
+        qs = qs.filter(cliente_id=cliente_id)
+    elif usuario_id:
+        qs = qs.filter(usuario_id=usuario_id)
+    else:
+        limpio = (nombre or '').strip().lower()
+        if not limpio:
+            # Sin forma de identificar a nadie no se le puede cobrar un pasado a
+            # alguien: mejor dejar pasar que frenar al cliente equivocado.
+            return Decimal('0.00'), 0
+        # Solo `cliente_texto` es columna; `cliente_nombre` es una propiedad y
+        # no se puede filtrar por ella en la base.
+        qs = qs.filter(cliente_texto__iexact=limpio)
+
+    total = Decimal('0.00')
+    cuantas = 0
+    for r in qs.only('id', 'total', 'pagos'):
+        saldo = r.saldo_pendiente()
+        if saldo > 0:
+            total += saldo
+            cuantas += 1
+    return total.quantize(Decimal('0.01')), cuantas
+
 
 # Días que representa cada modalidad (fuente única para cálculo de fechas y tarifas)
 MODALIDAD_DIAS = {'dia': 1, 'semana': 7, 'mes': 30}
@@ -97,6 +183,20 @@ class Renta(models.Model):
 
     fecha_inicio = models.DateField(default=timezone.localdate)
     fecha_fin = models.DateField()
+    # Hora ESTIMADA de entrega, aparte de la fecha y opcional.
+    #
+    # Va como campo suelto y no convirtiendo `fecha_inicio` en fecha-y-hora a
+    # propósito: esa fecha la usan el cálculo del vencimiento, el traslape de
+    # reservas y los recordatorios, y cambiarle el tipo tocaría todo eso sin
+    # ninguna necesidad. Así el día sigue mandando y la hora solo acompaña.
+    #
+    # Es lo único que le puede decir al cliente "llega como a las 10": la renta
+    # solo guardaba el día, y su agenda de próximas entregas anclaba todo al
+    # mediodía porque no había hora que mostrar. Vacía, todo queda como antes.
+    hora_entrega_estimada = models.TimeField(
+        null=True, blank=True,
+        help_text='Hora aproximada en que se le entrega al cliente. Opcional.',
+    )
     fecha_devolucion_real = models.DateField(
         null=True, blank=True,
         help_text="Fecha en que realmente se devolvió el equipo"
@@ -149,6 +249,10 @@ class Renta(models.Model):
     deposito_reembolso = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'),
         help_text='Parte del depósito que se le regresa/acredita al cliente.')
     deposito_nota = models.CharField(max_length=255, blank=True, default='')
+    # Rastro de quién dejó recoger la máquina por debajo del piso de liquidación
+    # y con cuánto. Gemelo de `Venta.anticipo_nota`: una excepción que no deja
+    # huella es una excepción que nadie puede revisar después.
+    liquidacion_nota = models.CharField(max_length=255, blank=True, default='')
     deposito_resuelto_en = models.DateTimeField(null=True, blank=True)
     deposito_resuelto_por = models.ForeignKey(
         'auth.User', null=True, blank=True, on_delete=models.SET_NULL, related_name='depositos_resueltos')
@@ -157,6 +261,22 @@ class Renta(models.Model):
     # Una renta se crea "activa", pero el equipo puede tardar en salir. Estas
     # marcas dicen si YA se entregó y si YA se recogió, y quién lo hizo: es lo
     # que administración necesita para saber en qué va, sin llamar a preguntar.
+    # Cuándo SALIÓ la camioneta, que no es lo mismo que cuándo LLEGÓ.
+    #
+    # Existe por una sola razón: es el instante en que el cliente deja de poder
+    # cancelar solo. Antes el corte era el día ("ya llegó la fecha de tu
+    # reserva"), y eso dejaba fuera el caso que ocurre de verdad: una entrega
+    # programada para hoy a las 12:00 que el cliente quiere cancelar a las 7 de
+    # la mañana, con la máquina todavía en el patio. Se le decía que no, y el
+    # chofer salía cargado para nada.
+    #
+    # La marca la pone el técnico al cargar. Podría deducirse de la hora, pero
+    # sería una suposición: si el chofer sale tarde, el candado se cerraría con
+    # la máquina en bodega y volveríamos al mismo problema con otro disfraz.
+    salida_ruta_en = models.DateTimeField(null=True, blank=True)
+    salida_ruta_por = models.ForeignKey(
+        'auth.User', null=True, blank=True, on_delete=models.SET_NULL, related_name='rentas_en_ruta')
+
     entregada_en = models.DateTimeField(null=True, blank=True)
     entregada_por = models.ForeignKey(
         'auth.User', null=True, blank=True, on_delete=models.SET_NULL, related_name='rentas_entregadas')
@@ -226,6 +346,21 @@ class Renta(models.Model):
         if self.fecha_inicio and self.fecha_fin and self.fecha_fin < self.fecha_inicio:
             raise ValidationError("La fecha fin no puede ser anterior a la fecha de inicio.")
 
+        # Ninguna máquina sale del patio gratis. `recalcular_montos` toma la
+        # tarifa del catálogo, y cuando el equipo no la tenía capturada caía a
+        # $0.00 sin decir nada: la renta se levantaba, el cliente se llevaba la
+        # máquina y el saldo nacía en cero. Se revisa solo AL CREAR, para no
+        # tumbar una renta vieja al registrarle un pago.
+        if self._state.adding and (self.precio_unitario or Decimal('0')) <= 0:
+            equipo = self.inventario.equipo if self.inventario_id else None
+            nombre = equipo.modelo if equipo else 'este equipo'
+            unidad = dict(self.MODALIDADES).get(self.modalidad, self.modalidad or '')
+            raise ValidationError(
+                f'{nombre} no tiene tarifa de renta por {str(unidad).lower()}. '
+                'Captúrala en el catálogo o pon el precio de esta renta a mano; '
+                'no se puede rentar en $0.'
+            )
+
         if self.estado in ('activa', 'reservada'):
             if not self.inventario_id:
                 raise ValidationError("La renta necesita una unidad de inventario.")
@@ -290,12 +425,179 @@ class Renta(models.Model):
     # ─────────────────────────────────────────────
     #  PROPIEDADES
     # ─────────────────────────────────────────────
+    # ─────────────────────────────────────────────
+    #  EN QUÉ VA, DE VERDAD
+    # ─────────────────────────────────────────────
+    @property
+    def fase(self) -> str:
+        """Dónde está la renta AHORA, que no es lo mismo que su `estado`.
+
+        `estado` dice si la unidad está comprometida, y para eso 'activa' es
+        correcto desde el momento en que se aparta. Pero al cliente y al
+        mostrador se les enseñaba ese mismo 'activa' para una máquina que sigue
+        en la bodega, y eso se lee como "ya la tienes". El equipo de Josué Ramsés
+        aparecía "Activa" el día anterior a que nadie la moviera.
+
+        La fase se DERIVA: no hay columna nueva, ni migración de los estados que
+        usan los reportes, los filtros y el cron. Solo se dice la verdad de en
+        qué va.
+        """
+        if self.estado in ('finalizada', 'cancelada'):
+            return self.estado
+        if self.estado == 'reservada' and not self.entregada_en:
+            return 'reservada'
+        if not self.entregada_en:
+            return 'en_camino' if self.salida_ruta_en else 'por_entregar'
+        return 'vencida' if self.vencida else 'activa'
+
+    FASE_LABEL = {
+        'reservada': 'Reservada',
+        'por_entregar': 'Por entregar',
+        'en_camino': 'En camino',
+        'activa': 'En obra',
+        'vencida': 'Vencida',
+        'finalizada': 'Finalizada',
+        'cancelada': 'Cancelada',
+    }
+
+    @property
+    def fase_label(self) -> str:
+        return self.FASE_LABEL.get(self.fase, self.get_estado_display())
+
+    @property
+    def cancelable_por_cliente(self) -> bool:
+        """Si el cliente todavía puede cancelar por su cuenta.
+
+        La regla es una sola y es física: **mientras la máquina no se haya
+        movido**. No el día, no el estado. Si el chofer no ha salido, cancelar
+        no le cuesta nada a nadie y evita un viaje en balde; en cuanto sale, el
+        costo ya se incurrió y el cambio se habla con administración.
+        """
+        return (self.estado in ('reservada', 'activa')
+                and not self.salida_ruta_en
+                and not self.entregada_en)
+
+    def correr_fin_por_entrega(self):
+        """Recalcula `fecha_fin` desde el día en que la máquina SALIÓ de verdad.
+
+        El cliente paga días de uso, no días de calendario: si se pactó lunes a
+        martes y el técnico no pudo entregar hasta el martes, la renta de un día
+        empieza el martes y se recoge el miércoles. Antes la fecha pactada no se
+        movía, así que esa renta nacía ya vencida y el cliente pagaba un día que
+        nunca tuvo la máquina.
+
+        Devuelve la renta o reserva de la MISMA unidad con la que la fecha nueva
+        se traslapa, o None si no hay ninguna. Ojo con lo que NO hace: no
+        bloquea. La máquina ya está en la obra —eso pasó en el mundo real, no en
+        la base de datos— y negarse a registrarlo solo deja al técnico sin poder
+        cerrar su tarea. El traslape se devuelve para AVISARLO: administración
+        mueve la reserva del otro cliente o le llama, que es una decisión de
+        persona, no de validación.
+
+        No corre nada hacia atrás: una entrega adelantada respeta el día que se
+        pactó (el cliente no pierde por recibir antes).
+        """
+        if not self.entregada_en:
+            return None
+        salida = timezone.localtime(self.entregada_en).date()
+        if salida <= self.fecha_inicio:
+            return None
+        dias = MODALIDAD_DIAS.get(self.modalidad, 1) * max(self.duracion or 1, 1)
+        nuevo_fin = salida + timedelta(days=dias)
+        if nuevo_fin == self.fecha_fin:
+            return None
+        self.fecha_inicio, self.fecha_fin = salida, nuevo_fin
+        # `update()` y no `save()` a propósito: `save()` pasa por `full_clean()`,
+        # que rechaza el traslape con un ValidationError. Aquí el traslape no
+        # puede tumbar el registro de una entrega ya ocurrida; se anota y se
+        # avisa. Es el mismo criterio de `nota_de_liquidacion`: en campo, el
+        # sistema deja constancia, no frena la operación.
+        Renta.objects.filter(pk=self.pk).update(
+            fecha_inicio=salida, fecha_fin=nuevo_fin, actualizado_en=timezone.now())
+        return (Renta.objects
+                .filter(inventario_id=self.inventario_id,
+                        estado__in=['activa', 'reservada'],
+                        fecha_inicio__lte=nuevo_fin,
+                        fecha_fin__gte=salida)
+                .exclude(pk=self.pk)
+                .first())
+
+    @property
+    def vence_en(self):
+        """El INSTANTE en que se acaba la renta, no solo el día.
+
+        `fecha_fin` es un DateField: dice QUÉ DÍA termina. Hasta aquí el
+        vencimiento se leía como "el día entero", y en una renta de un día eso
+        regala casi otro día completo: entregada hoy a las 2 de la tarde, con
+        fecha_fin mañana, no se marcaba vencida hasta pasado mañana a las 00:00
+        — 34 horas sobre las 24 que se cobraron.
+
+        La HORA sale de la ENTREGA, que es como se cuenta en el mostrador: si el
+        técnico la entregó a las 2 pm, se recoge a las 2 pm. En orden:
+
+          1. `entregada_en` — la hora real en que salió. Es la buena.
+          2. `hora_entrega_estimada` — lo que se pactó, mientras no salga.
+          3. el cierre del día de `fecha_fin` — sin ninguno de los dos datos se
+             comporta igual que antes. Nadie pierde horas de renta por un campo
+             que no capturó.
+
+        Lo que NO hace: mover `fecha_fin`. Ese campo es el que consultan el
+        traslape de reservas y los índices en SQL, y correrlo por una entrega
+        tardía podría chocar con la reserva de otro cliente justo cuando el
+        técnico está en la obra. El día pactado se respeta; lo que se afina es
+        la hora dentro de ese día.
+        """
+        hora = None
+        if self.entregada_en:
+            hora = timezone.localtime(self.entregada_en).time()
+        elif self.hora_entrega_estimada:
+            hora = self.hora_entrega_estimada
+        if hora is None:
+            # Sin dato de hora: vence al cerrar el día, como siempre.
+            hora = time.max
+        ingenuo = datetime.combine(self.fecha_fin, hora)
+        return timezone.make_aware(ingenuo) if timezone.is_naive(ingenuo) else ingenuo
+
     @property
     def vencida(self) -> bool:
-        return self.estado == 'activa' and timezone.localdate() > self.fecha_fin
+        return self.estado == 'activa' and timezone.now() > self.vence_en
+
+    @property
+    def horas_restantes(self) -> float:
+        """Cuántas horas faltan para recogerla. Negativo = de atraso.
+
+        Es lo que necesita una renta corta: en una de un día, "1 día restante"
+        no distingue entre las 24 horas y los últimos veinte minutos.
+        """
+        return (self.vence_en - timezone.now()).total_seconds() / 3600
+
+    @property
+    def por_vencer(self) -> bool:
+        """Si ya toca avisar que hay que recogerla.
+
+        El umbral es PROPORCIONAL a la renta, no dos días fijos. Con los dos
+        días de antes, una renta de UN día nacía en amarillo: se registraba y ya
+        estaba "por vencer", así que la alerta no distinguía nada y se volvía
+        ruido —justo lo que hace que se deje de mirar—.
+
+        Se avisa en el último cuarto del tiempo contratado, con tope de dos
+        días: la de un día avisa en sus últimas 6 horas, la semanal el último
+        día y medio, y de ahí para arriba se queda en dos días, que es lo que un
+        técnico necesita para organizar la ruta. La cuenta va sobre `vence_en`,
+        así que también respeta la hora de entrega.
+        """
+        if self.estado != 'activa' or self.vencida:
+            return False
+        dias = MODALIDAD_DIAS.get(self.modalidad, 1) * max(self.duracion or 1, 1)
+        ventana = min(dias * 24 * 0.25, 48)
+        return self.horas_restantes <= ventana
 
     @property
     def dias_restantes(self) -> int:
+        """Días naturales que faltan. Se queda contando DÍAS a propósito: la
+        jornada del técnico ("recoger hoy" / "recoger mañana") y los
+        recordatorios por correo razonan en días de calendario, y para eso el
+        día es la unidad correcta. Lo fino lo dice `horas_restantes`."""
         return (self.fecha_fin - timezone.localdate()).days
 
     @property
@@ -323,26 +625,60 @@ class Renta(models.Model):
         if self.estado not in ('activa', 'reservada'):
             return
         hoy = fecha_devolucion or timezone.localdate()
-        era_activa = self.estado == 'activa'
+        era_activa = self.estado == 'activa'   # define si hay que liberar la unidad
         self.fecha_devolucion_real = hoy
-        if era_activa and hoy > self.fecha_fin:
-            dias_retraso = (hoy - self.fecha_fin).days
-            self.recargo = (self.tarifa_diaria() * Decimal(dias_retraso)).quantize(Decimal('0.01'))
+        # REMALI NO COBRA RECARGOS POR RETRASO. Aquí se calculaban solos
+        # (`tarifa_diaria × días de retraso`) y nadie los había pedido: una renta
+        # de $1,200 devuelta nueve días tarde generaba $10,800 de deuda que jamás
+        # se iba a cobrar, inflaba Cobranza y —con la palanca de la renta
+        # siguiente— dejaba al cliente sin poder rentar por un adeudo inventado.
+        #
+        # Lo que sustituye al recargo son los RECORDATORIOS: en vez de cobrarle
+        # por tardarse, no se le deja olvidar (ver `recordar_rentas`).
+        #
+        # El campo `recargo` se conserva —hay historial y el admin de Django
+        # podría capturar uno a mano en un caso excepcional—, pero ya nadie lo
+        # llena solo. `recalcular_montos()` lo sigue sumando si alguien lo pone.
         self.estado = 'finalizada'
         if commit:
-            # 'iva' va incluido: al agregar el recargo, recalcular_montos() lo
-            # recomputa; omitirlo dejaría el IVA guardado desfasado del total.
             self.save(update_fields=[
-                'estado', 'fecha_devolucion_real', 'recargo',
-                'subtotal', 'iva', 'total', 'actualizado_en',
+                'estado', 'fecha_devolucion_real', 'actualizado_en',
             ])
         if era_activa:
             self.inventario.liberar('Bodega')
 
+    def pagado(self):
+        """Lo que el cliente lleva abonado, contando lo aplicado de la garantía."""
+        return sum((Decimal(str(p.get('monto', 0))) for p in (self.pagos or [])), Decimal('0'))
+
     def saldo_pendiente(self):
-        """Lo que el cliente aún debe de la renta (total + recargo − abonos)."""
-        pagado = sum((Decimal(str(p.get('monto', 0))) for p in (self.pagos or [])), Decimal('0'))
-        return max((self.total or Decimal('0')) + (self.recargo or Decimal('0')) - pagado, Decimal('0'))
+        """Lo que el cliente aún debe de la renta (total − abonos).
+
+        El recargo por retraso NO se suma aquí: `recalcular_montos()` ya lo metió
+        dentro de `total` (y le puso su IVA si la renta lleva factura). Sumarlo
+        otra vez cobraba el retraso dos veces, que es justo lo que pasaba cuando
+        cada vista repetía la cuenta por su lado. Ahora la cuenta vive aquí y las
+        vistas la llaman.
+        """
+        return max((self.total or Decimal('0')) - self.pagado(), Decimal('0'))
+
+    def falta_para_liquidar(self):
+        """Cuánto falta cobrar para poder RECOGER la máquina. Cero = ya se puede.
+
+        Es la cifra que el técnico necesita en la obra, y NO es el saldo: el
+        saldo es todo lo que el cliente debe, esto es solo lo que falta para
+        alcanzar el piso. Pedir el saldo entero cuando con menos ya se lleva la
+        máquina hace perder el cobro.
+
+        La config va cacheada por petición (`get_solo`), así que servir esto en
+        una lista de rentas no dispara una consulta por fila.
+        """
+        from maquinaria.models import ConfiguracionSitio
+        pct = Decimal(str(ConfiguracionSitio.get_solo().renta_liquidacion_minima_pct or 0))
+        if pct <= 0:
+            return Decimal('0.00')
+        minimo = ((self.total or Decimal('0')) * pct / Decimal('100')).quantize(Decimal('0.01'))
+        return max(minimo - self.pagado(), Decimal('0')).quantize(Decimal('0.01'))
 
     @transaction.atomic
     def resolver_deposito(self, *, aplicar_deuda=Decimal('0'), aplicar_dano=Decimal('0'),

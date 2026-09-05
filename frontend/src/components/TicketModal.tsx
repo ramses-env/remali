@@ -9,8 +9,9 @@ import TicketPaper, { paperCss } from './TicketPaper'
 
 const ANIM_MS = 1900
 
-// El preview y la impresión salen del MISMO modelo de líneas (rejilla de W
-// caracteres monoespaciados) → se ven igual. En pantalla se escala para leerse.
+// El preview, el PDF y la térmica salen del MISMO modelo de líneas: el mismo
+// contenido en el mismo orden. En pantalla y en PDF con letra proporcional; en
+// la térmica sin driver, sobre su rejilla de W caracteres.
 const PRINT_CSS = (mm: number, W: number) => `
 ${paperCss(W)}
 
@@ -41,7 +42,9 @@ ${paperCss(W)}
   .tk-scroll { max-height: none !important; overflow: visible !important; background: #fff !important; padding: 0 !important; display: block !important; }
   .tk-actions, .tk-head, .printer, .tk-paper .tear, .paper.feeding::before { display: none !important; }
   .paper, .paper.feeding, .paper.feeding .ticket { animation: none !important; height: auto !important; overflow: visible !important; transform: none !important; filter: none !important; }
-  .ticket { box-sizing: content-box !important; width: calc(${mm}mm - 3mm) !important; font-size: calc((${mm}mm - 3mm) / ${W} / 0.6) !important; padding: 0 1.5mm !important; box-shadow: none !important; background: #fff !important; }
+  /* En papel manda el papel: el área impresa son los milímetros del rollo menos
+     el margen del cabezal, y el cuerpo de letra sale de esa misma medida. */
+  .ticket { box-sizing: content-box !important; width: calc(${mm}mm - 6mm) !important; font-size: calc((${mm}mm - 6mm) / 19) !important; padding: 2mm 3mm !important; box-shadow: none !important; background: #fff !important; }
   @page { size: ${mm}mm auto; margin: 0; }
 }
 `
@@ -67,7 +70,7 @@ export default function TicketModal({ url, onClose }: { url: string; onClose: ()
 
   // Duración de la animación = largo FÍSICO del ticket (mm) ÷ velocidad de la
   // impresora (mm/s). Así coincide con la impresión real; se calibra en Ajustes.
-  const durMs = Math.min(6000, Math.max(600, Math.round((altoTicketMm(lineas) / (settings.printSpeed || 70)) * 1000)))
+  const durMs = Math.min(6000, Math.max(600, Math.round((altoTicketMm(lineas, 12, W) / (settings.printSpeed || 70)) * 1000)))
 
   useEffect(() => {
     let vivo = true

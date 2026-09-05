@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { leerToken } from './token'
+import wsUrl from './wsUrl'
 
 export type ClienteEvento = {
   topic: 'cotizaciones' | 'rentas' | 'adeudos' | 'compras' | 'reparaciones' | string
@@ -26,8 +27,7 @@ export function useClienteEventos(onEvent: (evt: ClienteEvento) => void) {
     const conectar = () => {
       const token = leerToken()
       if (!token || !vivo) return
-      const proto = location.protocol === 'https:' ? 'wss' : 'ws'
-      ws = new WebSocket(`${proto}://${location.host}/ws/cliente-eventos/?token=${encodeURIComponent(token)}`)
+      ws = new WebSocket(wsUrl('/ws/cliente-eventos/', token))
       ws.onmessage = (e) => {
         try { cb.current(JSON.parse(e.data) as ClienteEvento) } catch { /* ignore */ }
       }

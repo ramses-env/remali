@@ -62,10 +62,18 @@ class FechaDelAbonoTest(TestCase):
         self.assertEqual(self.venta.pagos[0]['fecha'], ayer)
 
     def test_sin_fecha_se_sella_el_momento(self):
+        """Sin fecha capturada, el abono cuenta HOY en la zona del negocio.
+
+        Se comprueba con el mismo lector que usan las métricas y no comparando
+        texto: el sello es un instante en UTC, y de las 6 de la tarde en adelante
+        su fecha en UTC ya es la de mañana. Comparar cadenas hacía que la prueba
+        pasara en la mañana y fallara en la tarde.
+        """
+        from server.cobranza import fecha_de_pago
         resp = self._abonar()
         self.assertEqual(resp.status_code, 200, resp.data)
         self.venta.refresh_from_db()
-        self.assertTrue(self.venta.pagos[0]['fecha'].startswith(timezone.localdate().isoformat()))
+        self.assertEqual(fecha_de_pago(self.venta.pagos[0]), timezone.localdate())
 
     def test_una_fecha_futura_se_rechaza(self):
         """Un ingreso con fecha futura es dinero que todavía no existe."""
@@ -95,19 +103,28 @@ class AbonoYCajaTest(TestCase):
         self.admin = get_user_model().objects.create_superuser('duena2', 'd2@x.com', 'pass12345')
         self.client = APIClient()
         self.client.force_authenticate(self.admin)
+        # El cajón es del MOSTRADOR: el turno lo abre y lo trabaja la cajera, no
+        # el dueño (ver `permissions.usar_caja`). Cobrar el abono sí lo puede
+        # hacer cualquiera de los dos —es `ver_montos_operacion`—, y eso es justo
+        # lo que estas pruebas separan: el dinero que pasa por el cajón contra el
+        # que se recibe en la oficina.
+        self.cajera = get_user_model().objects.create_user('caja_abonos', password='pass12345')
+        self.cajera.groups.add(Group.objects.get_or_create(name='Cajero')[0])
+        self.mostrador = APIClient()
+        self.mostrador.force_authenticate(self.cajera)
         self.venta = Venta.objects.create(
             nombre_cliente='Poli', equipo=_equipo('APS-90'), sobre_pedido=True,
             estado='apartada', inventario=None, precio_maquina=Decimal('15000'),
         )
 
     def _abrir_turno(self):
-        resp = self.client.post('/api/caja/sesiones/abrir/', {'monto_inicial': '500'}, format='json')
+        resp = self.mostrador.post('/api/caja/sesiones/abrir/', {'monto_inicial': '500'}, format='json')
         self.assertIn(resp.status_code, (200, 201), resp.data)
-        return SesionCaja.objects.get(usuario=self.admin, estado=SesionCaja.ABIERTA)
+        return SesionCaja.objects.get(usuario=self.cajera, estado=SesionCaja.ABIERTA)
 
-    def _abonar(self, monto='3000', metodo='efectivo'):
-        return self.client.post(f'/api/ventas/{self.venta.id}/abono/',
-                                {'monto': monto, 'metodo': metodo}, format='json')
+    def _abonar(self, monto='3000', metodo='efectivo', cliente=None):
+        return (cliente or self.client).post(f'/api/ventas/{self.venta.id}/abono/',
+                                             {'monto': monto, 'metodo': metodo}, format='json')
 
     def test_sin_turno_abierto_el_abono_no_toca_la_caja(self):
         """El dueño cobra un anticipo en su oficina: se registra, no entra a un corte."""
@@ -125,7 +142,7 @@ class AbonoYCajaTest(TestCase):
 
     def test_con_turno_abierto_el_efectivo_mueve_el_arqueo(self):
         sesion = self._abrir_turno()
-        resp = self._abonar(monto='3000', metodo='efectivo')
+        resp = self._abonar(monto='3000', metodo='efectivo', cliente=self.mostrador)
         self.assertEqual(resp.status_code, 200, resp.data)
         self.assertTrue(resp.data['caja']['en_corte'])
         mov = sesion.movimientos.filter(venta=self.venta).get()
@@ -136,7 +153,7 @@ class AbonoYCajaTest(TestCase):
 
     def test_con_turno_abierto_la_transferencia_entra_al_corte_pero_no_al_cajon(self):
         sesion = self._abrir_turno()
-        resp = self._abonar(monto='3000', metodo='transferencia')
+        resp = self._abonar(monto='3000', metodo='transferencia', cliente=self.mostrador)
         self.assertEqual(resp.status_code, 200, resp.data)
         self.assertFalse(resp.data['caja']['afecta_efectivo'])
         mov = sesion.movimientos.filter(venta=self.venta).get()
@@ -147,8 +164,8 @@ class AbonoYCajaTest(TestCase):
     def test_un_abono_rechazado_no_deja_movimiento(self):
         """Si el abono no se guarda, la caja no puede haber visto ese dinero."""
         self._abrir_turno()
-        resp = self.client.post(f'/api/ventas/{self.venta.id}/abono/',
-                                {'monto': '99999', 'metodo': 'efectivo'}, format='json')
+        resp = self.mostrador.post(f'/api/ventas/{self.venta.id}/abono/',
+                                   {'monto': '99999', 'metodo': 'efectivo'}, format='json')
         self.assertEqual(resp.status_code, 400, resp.data)
         self.assertEqual(MovimientoCaja.objects.filter(venta=self.venta).count(), 0)
 
@@ -199,6 +216,39 @@ class IngresosDelResumenTest(TestCase):
         v.save(update_fields=['pagos'])
         self.assertEqual(self._metricas()['ingresos_hoy'], 50000.0)
 
+    def test_la_serie_diaria_trae_30_dias_seguidos_con_los_ceros_dentro(self):
+        """Un día sin un peso vale CERO, no vale nada: sin él la gráfica dibuja
+        30 días como si fueran menos, y el mes se ve más corto de lo que fue."""
+        from maquinaria.views import DIAS_SERIE
+        hace_tres = self.hoy - _dt.timedelta(days=3)
+        self._venta_con_pagos([
+            {'fecha': hace_tres.isoformat(), 'monto': '4000', 'metodo': 'efectivo'},
+        ])
+        datos = self._metricas()
+        dias = datos['ingresos_por_dia']
+        self.assertEqual(len(dias), DIAS_SERIE)
+        self.assertEqual(dias[-1]['fecha'], self.hoy.isoformat())
+        # Sin huecos: cada fecha es la anterior más un día.
+        for antes, despues in zip(dias, dias[1:]):
+            self.assertEqual(
+                _dt.date.fromisoformat(despues['fecha']) - _dt.date.fromisoformat(antes['fecha']),
+                _dt.timedelta(days=1))
+        por_fecha = {d['fecha']: d for d in dias}
+        self.assertEqual(por_fecha[hace_tres.isoformat()]['ventas'], 4000.0)
+        self.assertEqual(por_fecha[self.hoy.isoformat()]['total'], 0.0)
+
+    def test_el_tramo_previo_no_se_traslapa_con_el_que_se_grafica(self):
+        """Si el comparativo incluyera días de la propia gráfica, la comparación
+        se estaría midiendo contra sí misma."""
+        from maquinaria.views import DIAS_SERIE
+        dentro = self.hoy - _dt.timedelta(days=DIAS_SERIE - 1)   # primer día graficado
+        antes = dentro - _dt.timedelta(days=1)                    # último del tramo previo
+        self._venta_con_pagos([{'fecha': dentro.isoformat(), 'monto': '900', 'metodo': 'efectivo'}])
+        self._venta_con_pagos([{'fecha': antes.isoformat(), 'monto': '700', 'metodo': 'efectivo'}])
+        datos = self._metricas()
+        self.assertEqual(datos['ingresos_periodo_previo'], 700.0)
+        self.assertEqual(sum(d['total'] for d in datos['ingresos_por_dia']), 900.0)
+
     def test_una_venta_cancelada_no_aporta(self):
         self._venta_con_pagos(
             [{'fecha': self.hoy.isoformat(), 'monto': '5000', 'metodo': 'efectivo'}],
@@ -207,11 +257,11 @@ class IngresosDelResumenTest(TestCase):
 
     def test_los_pagos_de_renta_cuentan_junto_a_los_de_venta(self):
         from renta.models import Renta
-        unidad = Inventario.objects.create(equipo=self.equipo, condicion='seminueva')
+        equipo = _equipo('MAR-30', precio_dia=Decimal('1000'))
+        unidad = Inventario.objects.create(equipo=equipo, condicion='seminueva')
         r = Renta.objects.create(inventario=unidad, cliente_texto='Obra Sur',
-                                 modalidad='dia', direccion='Obra Sur s/n',
-                                 fecha_inicio=self.hoy, fecha_fin=self.hoy + _dt.timedelta(days=3),
-                                 total=Decimal('4000'))
+                                 modalidad='dia', duracion=4, direccion='Obra Sur s/n',
+                                 fecha_inicio=self.hoy, fecha_fin=self.hoy + _dt.timedelta(days=3))
         r.pagos = [{'fecha': self.hoy.isoformat(), 'monto': '4000', 'metodo': 'efectivo'}]
         r.save(update_fields=['pagos'])
         self._venta_con_pagos([{'fecha': self.hoy.isoformat(), 'monto': '1000', 'metodo': 'efectivo'}])
@@ -255,6 +305,12 @@ class AbonoDeRentaTest(TestCase):
         self.admin = get_user_model().objects.create_superuser('duena4', 'd4@x.com', 'pass12345')
         self.client = APIClient()
         self.client.force_authenticate(self.admin)
+        # El turno es del mostrador; cobrar el abono lo puede hacer cualquiera de
+        # los dos. Ver `AbonoYCajaTest`.
+        self.cajera = get_user_model().objects.create_user('caja_rentas', password='pass12345')
+        self.cajera.groups.add(Group.objects.get_or_create(name='Cajero')[0])
+        self.mostrador = APIClient()
+        self.mostrador.force_authenticate(self.cajera)
         equipo = _equipo('MAR-20', precio_dia=Decimal('2000'))
         unidad = Inventario.objects.create(equipo=equipo, condicion='seminueva')
         hoy = timezone.localdate()
@@ -265,10 +321,11 @@ class AbonoDeRentaTest(TestCase):
         )
         self.assertEqual(self.renta.total, Decimal('6000'))
 
-    def _abonar(self, **cuerpo):
+    def _abonar(self, cliente=None, **cuerpo):
         cuerpo.setdefault('monto', '2000')
         cuerpo.setdefault('metodo', 'efectivo')
-        return self.client.post(f'/api/rentas/{self.renta.id}/abonos/', cuerpo, format='json')
+        return (cliente or self.client).post(
+            f'/api/rentas/{self.renta.id}/abonos/', cuerpo, format='json')
 
     def test_la_fecha_capturada_se_respeta(self):
         ayer = (timezone.localdate() - _dt.timedelta(days=2)).isoformat()
@@ -284,9 +341,9 @@ class AbonoDeRentaTest(TestCase):
         self.assertEqual(self.renta.pagos, [])
 
     def test_con_turno_abierto_el_abono_de_renta_entra_al_corte(self):
-        self.client.post('/api/caja/sesiones/abrir/', {'monto_inicial': '0'}, format='json')
-        sesion = SesionCaja.objects.get(usuario=self.admin, estado=SesionCaja.ABIERTA)
-        resp = self._abonar(monto='2000', metodo='efectivo')
+        self.mostrador.post('/api/caja/sesiones/abrir/', {'monto_inicial': '0'}, format='json')
+        sesion = SesionCaja.objects.get(usuario=self.cajera, estado=SesionCaja.ABIERTA)
+        resp = self._abonar(cliente=self.mostrador, monto='2000', metodo='efectivo')
         self.assertEqual(resp.status_code, 200, resp.data)
         mov = sesion.movimientos.filter(renta=self.renta).get()
         self.assertTrue(mov.afecta_efectivo)

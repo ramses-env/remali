@@ -53,3 +53,61 @@ export function formatMoney(n: number | string | null | undefined): string {
   const v = toNumber(n) ?? 0
   return '$' + v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
+
+/** Completa una liga pública con el origen desde el que se está viendo la app.
+
+    El backend manda estas ligas RELATIVAS a propósito (`/api/cotizaciones/…`):
+    detrás del proxy de Vite, `build_absolute_uri` resuelve al host interno y
+    escupe `http://localhost:8000/…`, que no abre desde ningún otro lado —ni
+    desde el túnel de pruebas, ni desde el celular del cliente—. Como <a href>
+    la ruta relativa funciona sola; el problema es COPIARLA: un
+    `/api/…/pdf/` pegado en WhatsApp no es un link, es texto.
+
+    El origen correcto es siempre el de la app: es el mismo host que sirve /api. */
+export function ligaAbsoluta(url: string): string {
+  try { return new URL(url, window.location.origin).href } catch { return url }
+}
+
+
+/**
+ * Cuándo llegó un aviso: qué tan reciente es Y a qué hora exacta.
+ *
+ * "hace 3 h" contesta si algo es nuevo, pero no sirve para lo que la gente
+ * hace de verdad con una notificación: cotejarla contra una llamada, una
+ * entrega o un turno. "¿A qué hora entró ese abono?" no se responde con un
+ * relativo, y menos con "hace 3 d", que era todo lo que daba la campana del
+ * panel. Van los dos: el relativo para ordenar de un vistazo, la hora para
+ * poder decirla por teléfono.
+ *
+ * Vive aquí porque la campana del cliente y la del panel tenían cada una su
+ * propia copia del cálculo, con reglas distintas —una decía "ahora" y la otra
+ * "hace un momento", una llegaba a días y la otra a semanas—: el mismo aviso
+ * se fechaba distinto según quién lo mirara.
+ */
+export function cuandoLlego(iso: string | null | undefined): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+
+  // 12 horas con a.m./p.m., que es como se lee la hora aquí y como ya la
+  // pintaba el resto de la aplicación.
+  const hora = d.toLocaleTimeString('es-MX', { hour: 'numeric', minute: '2-digit' })
+
+  const seg = Math.floor((Date.now() - d.getTime()) / 1000)
+  // Un reloj adelantado en el navegador daba "hace -2 min"; por delante no hay
+  // nada que medir, así que se enseña la hora sola.
+  if (seg < 0) return hora
+
+  let relativo: string
+  const min = Math.floor(seg / 60)
+  const h = Math.floor(min / 60)
+  const dias = Math.floor(h / 24)
+  if (min < 1) relativo = 'ahora'
+  else if (min < 60) relativo = `hace ${min} min`
+  else if (h < 24) relativo = `hace ${h} h`
+  else if (dias === 1) relativo = 'ayer'
+  else if (dias < 7) relativo = `hace ${dias} días`
+  else relativo = d.toLocaleDateString('es-MX', { day: '2-digit', month: 'short' })
+
+  return `${relativo} · ${hora}`
+}

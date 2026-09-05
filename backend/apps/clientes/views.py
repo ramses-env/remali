@@ -79,11 +79,22 @@ def _listar(request):
         qs = qs.filter(tipo=tipo)
     if solo_revision:
         qs = qs.filter(requiere_revision=True)
+    # ¿Entra a la tienda con su cuenta, o es de los que solo existen en el
+    # padrón? Es una diferencia de mostrador: al primero se le manda la liga y
+    # se entera solo; al segundo hay que llamarle.
+    con_cuenta = (request.query_params.get('cuenta') or '').strip()
+    if con_cuenta == '1':
+        qs = qs.filter(contactos__usuario__isnull=False).distinct()
+    elif con_cuenta == '0':
+        qs = qs.exclude(contactos__usuario__isnull=False).distinct()
 
     # Contadores ANOTADOS: calcularlos en el serializer sería una consulta por
     # renglón, que es exactamente cómo una lista de clientes se vuelve inusable.
     qs = qs.annotate(
         contactos_total=Count('contactos', distinct=True),
+        # Cuántos de sus contactos tienen cuenta. Anotado y no la propiedad
+        # `Cliente.tiene_cuenta`, que hace una consulta POR RENGLÓN.
+        cuentas_total=Count('contactos', filter=Q(contactos__usuario__isnull=False), distinct=True),
         documentos_total=(
             Count('ventas', distinct=True) + Count('rentas', distinct=True)
             + Count('cotizaciones', distinct=True) + Count('reparaciones', distinct=True)
@@ -274,6 +285,11 @@ def fusionar(request, pk: int):
     if origen.pk == destino.pk:
         return Response({'detalle': 'El origen y el destino son el mismo cliente.'}, status=400)
 
+    # Las CUENTAS del origen, antes de mover los contactos (después ya cuelgan
+    # del destino y no se sabría cuáles eran suyas).
+    cuentas_origen = list(origen.contactos.filter(usuario__isnull=False)
+                          .values_list('usuario_id', flat=True))
+
     movidos = {
         'ventas': origen.ventas.update(cliente=destino),
         'rentas': origen.rentas.update(cliente=destino),
@@ -284,6 +300,34 @@ def fusionar(request, pk: int):
         # dos principales en la misma ficha es un estado inválido.
         'contactos': origen.contactos.update(cliente=destino, principal=False),
     }
+
+    # ── El vínculo de CUENTA, que es lo que la fusión no movía ──
+    #
+    # Mover la ficha no basta. "Mis rentas" del cliente filtra por su `User`, no
+    # por su ficha: si venía con dos cuentas —el caso que motiva casi toda
+    # fusión—, tras fundir seguía entrando con una y sin ver lo que quedó colgado
+    # de la otra. La ficha se veía completa en el panel de administración y el
+    # cliente juraba que le faltaban rentas, que es de los reportes más difíciles
+    # de entender desde este lado.
+    #
+    # Aquí sí se reasigna el `usuario` de los documentos, y es el ÚNICO lugar
+    # donde se permite: el endpoint de vincular ya no deja cambiar de cuenta, y
+    # esto es una operación de nivel 2 que deja rastro de quién y por qué.
+    cuenta_destino = (destino.contactos.filter(usuario__isnull=False)
+                      .order_by('-principal', 'id')
+                      .values_list('usuario_id', flat=True).first())
+    if cuenta_destino and cuentas_origen:
+        # `exclude` para no contar como movido lo que ya apuntaba al destino.
+        otras = [c for c in cuentas_origen if c != cuenta_destino]
+        if otras:
+            from renta.models import Renta
+            from cotizaciones.models import Cotizacion
+            from ventas.models import Venta
+            from inventario.models import OrdenReparacion
+            movidos['cuentas_rentas'] = Renta.objects.filter(usuario_id__in=otras).update(usuario_id=cuenta_destino)
+            movidos['cuentas_cotizaciones'] = Cotizacion.objects.filter(usuario_id__in=otras).update(usuario_id=cuenta_destino)
+            movidos['cuentas_compras'] = Venta.objects.filter(cliente_usuario_id__in=otras).update(cliente_usuario_id=cuenta_destino)
+            movidos['cuentas_reparaciones'] = OrdenReparacion.objects.filter(usuario_id__in=otras).update(usuario_id=cuenta_destino)
 
     quien = getattr(request.user, 'username', '') or 's/d'
     motivo = (request.data.get('motivo') or '').strip()

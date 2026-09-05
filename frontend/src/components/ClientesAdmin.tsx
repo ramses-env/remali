@@ -13,16 +13,23 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import api from '../lib/api'
 import { soloTelefono } from '../lib/utils'
 import { KpiGrid } from './ui/kpi-grid'
+import { EstadoVacio, FilasEsqueleto } from '../routes/dashboard/comun'
+import Paginador from './ui/paginador'
 import { REGIMEN_FISCAL, USO_CFDI } from '../lib/sat'
 import type { Capacidades } from '../lib/acceso'
 import ModalBase from './Modal'
+import { confirmar, pedir } from './Dialogo'
 
-const input =
-  'w-full bg-surface-2 border border-edge rounded-xl px-4 py-2.5 text-sm text-ink placeholder-mute focus:outline-none focus:border-gold/50 transition-colors'
+const input = 'campo'
 const label = 'block text-[11px] font-medium text-mute mb-1.5 uppercase tracking-wide'
 
-function Card({ children, className = '' }: { children: React.ReactNode; className?: string }) {
-  return <div className={`bg-surface border border-edge rounded-xl shadow-[0_1px_3px_rgba(33,29,22,0.04)] ${className}`}>{children}</div>
+/** Copia local de la tarjeta de la casa (este módulo vive fuera de `dashboard/`).
+ *  Acepta `ref` —React 19 lo pasa como una prop más— para que el pie de
+ *  paginación pueda subir a la cabecera de la tabla al cambiar de página. */
+function Card({ children, className = '', ref }: {
+  children: React.ReactNode; className?: string; ref?: React.Ref<HTMLDivElement>
+}) {
+  return <div ref={ref} className={`bg-surface border border-edge rounded-xl shadow-[0_1px_3px_rgba(33,29,22,0.04)] ${className}`}>{children}</div>
 }
 
 export type ClienteFila = {
@@ -38,6 +45,9 @@ export type ClienteFila = {
   revision_motivo: string
   contactos_total: number
   documentos_total: number
+  /** Cuántos de sus contactos entran a la tienda con su propia cuenta. */
+  cuentas_total: number
+  tiene_cuenta: boolean
 }
 
 type ContactoFicha = {
@@ -47,8 +57,15 @@ type ContactoFicha = {
   email: string
   puesto: string
   principal: boolean
+  /* La cuenta de la tienda es un DATO de esta persona, no otra entidad ni otra
+     pantalla: el mismo señor te renta con cuenta o sin ella, y el día que se
+     registra no deja de ser el mismo cliente. */
   tiene_cuenta: boolean
   cuenta_correo: string | null
+  cuenta_id: number | null
+  cuenta_activa: boolean | null
+  cuenta_verificada: boolean | null
+  cuenta_ultimo_acceso: string | null
 }
 
 type ObraFicha = { id: number; nombre: string; responsable: string; ubicacion: string; estado: string }
@@ -60,7 +77,6 @@ export type ClienteFicha = ClienteFila & {
   notas: string; creado: string
   contactos: ContactoFicha[]
   obras: ObraFicha[]
-  tiene_cuenta: boolean
 }
 
 type DocumentoCuenta = {
@@ -69,10 +85,19 @@ type DocumentoCuenta = {
   concepto: string; total: string; saldo: string; estado: string
 }
 
+type Garantia = {
+  id: number; descripcion: string; venta_id: number
+  inicia: string; vence: string; meses: number
+  vigente: boolean; anulada: boolean; anulada_motivo: string
+  /** Negativo = venció hace tantos días. El signo dice si se hace válida. */
+  dias_restantes: number
+}
+
 type Cuenta = {
   saldo: string; credito_a_favor: string; neto: string
   tiene_adeudo: boolean; tiene_credito: boolean
   documentos: DocumentoCuenta[]
+  garantias: Garantia[]
 }
 
 type Suelto = {
@@ -95,7 +120,7 @@ const ETIQUETA_DOC: Record<DocumentoCuenta['tipo'], string> = {
   venta: 'Venta', renta: 'Renta', cotizacion: 'Cotización', reparacion: 'Reparación',
 }
 
-type Notify = (m: string, t?: 'ok' | 'err') => void
+import type { Notify } from '../store/toast'
 
 export default function ClientesAdmin({ puede, notify, reloadBadge }: {
   puede?: Capacidades
@@ -109,22 +134,37 @@ export default function ClientesAdmin({ puede, notify, reloadBadge }: {
   const [q, setQ] = useState('')
   const [tipo, setTipo] = useState<'' | 'fisica' | 'moral'>('')
   const [soloRevision, setSoloRevision] = useState(false)
+  /** '' todos · '1' solo con cuenta · '0' solo los que nunca abrieron una. */
+  const [conCuenta, setConCuenta] = useState<'' | '1' | '0'>('')
   const [cargando, setCargando] = useState(true)
   const [ficha, setFicha] = useState<ClienteFicha | null>(null)
   const [formOpen, setFormOpen] = useState(false)
   const [sueltos, setSueltos] = useState<Suelto[]>([])
   const [verBandeja, setVerBandeja] = useState(false)
+  /** La cuenta a la que se le está buscando dueño en el padrón. */
+  const [vinculando, setVinculando] = useState<Suelto | null>(null)
 
   const puedeEditar = Boolean(puede?.editar_clientes)
+  // Quitarle el acceso a alguien es del dueño, igual que en Equipo: la ficha lo
+  // ofrece porque aquí es donde se ve a la persona, no porque sea otra regla.
+  const puedeCuentas = Boolean(puede?.gestionar_usuarios)
   const puedeFiscales = (puede?.nivel ?? 0) >= 2
+  // Fusionar mueve historial y saldos de una persona a otra y no se deshace
+  // solo: el backend lo pide de nivel 2 (`EsAdministracion`) y aquí se respeta
+  // el mismo corte, para no ofrecer un botón que va a rebotar con 403.
+  const puedeFusionar = (puede?.nivel ?? 0) >= 2
 
   const cargar = useCallback(() => {
     setCargando(true)
+    // `fondo`: el overlay de pantalla completa no debe taparle el padrón a nadie
+    // por recargar una lista. Esta pantalla ya dice por su cuenta que está
+    // trabajando (ver `refrescando` más abajo).
     const p = new URLSearchParams({ limite: String(POR_PAGINA), desde: String(desde) })
     if (q.trim()) p.set('q', q.trim())
     if (tipo) p.set('tipo', tipo)
     if (soloRevision) p.set('revision', '1')
-    api.get(`/clientes/?${p}`)
+    if (conCuenta) p.set('cuenta', conCuenta)
+    api.get(`/clientes/?${p}`, { fondo: true })
       .then(r => {
         setFilas(r.data?.clientes || [])
         setTotal(r.data?.total || 0)
@@ -132,7 +172,7 @@ export default function ClientesAdmin({ puede, notify, reloadBadge }: {
       })
       .catch(() => notify('No se pudo cargar el padrón', 'err'))
       .finally(() => setCargando(false))
-  }, [q, tipo, soloRevision, desde, notify])
+  }, [q, tipo, soloRevision, conCuenta, desde, notify])
 
   // La búsqueda espera a que dejes de escribir: sin esto son seis consultas
   // mientras tecleas un teléfono.
@@ -145,10 +185,10 @@ export default function ClientesAdmin({ puede, notify, reloadBadge }: {
 
   // Cualquier filtro nuevo vuelve a la primera página: quedarse en la página 4
   // de un resultado que ahora tiene 2 renglones se ve como si no hubiera nada.
-  useEffect(() => { setDesde(0) }, [q, tipo, soloRevision])
+  useEffect(() => { setDesde(0) }, [q, tipo, soloRevision, conCuenta])
 
   const cargarSueltos = useCallback(() => {
-    api.get<{ contactos: Suelto[] }>('/clientes/sin-vincular/')
+    api.get<{ contactos: Suelto[] }>('/clientes/sin-vincular/', { fondo: true })
       .then(r => setSueltos(r.data?.contactos || []))
       .catch(() => setSueltos([]))
   }, [])
@@ -156,7 +196,7 @@ export default function ClientesAdmin({ puede, notify, reloadBadge }: {
 
   function vincular(contactoId: number, clienteId: number) {
     api.post(`/clientes/${clienteId}/vincular/`, { contacto_id: contactoId })
-      .then(() => { notify('Cuenta vinculada'); cargarSueltos(); cargar() })
+      .then(() => { notify('Cuenta vinculada', 'ok'); setVinculando(null); cargarSueltos(); cargar() })
       .catch(err => notify(err?.response?.data?.detalle || 'No se pudo vincular', 'err'))
   }
 
@@ -173,6 +213,16 @@ export default function ClientesAdmin({ puede, notify, reloadBadge }: {
     reloadBadge?.()
   }
 
+  const ancla = useRef<HTMLDivElement | null>(null)
+  /* PRIMERA carga contra RECARGA, que no se veían igual y se trataban igual.
+     Antes, cualquier `cargar()` —teclear en el buscador, pasar de página,
+     volver de dar de alta a alguien— cambiaba la tabla entera por un renglón
+     que decía "Cargando…": la tarjeta se desplomaba de ochocientos píxeles a
+     sesenta y volvía a crecer. Ese era el parpadeo.
+     Ahora la tabla SE QUEDA mientras llega lo nuevo, apenas atenuada; el cartel
+     de carga es solo para cuando todavía no hay nada que enseñar. */
+  const primeraVez = cargando && filas.length === 0
+  const refrescando = cargando && filas.length > 0
   const pagina = Math.floor(desde / POR_PAGINA) + 1
   const paginas = Math.max(Math.ceil(total / POR_PAGINA), 1)
 
@@ -180,8 +230,13 @@ export default function ClientesAdmin({ puede, notify, reloadBadge }: {
     <div className="space-y-5">
       <KpiGrid
         items={[
-          { label: 'Clientes', value: String(total) },
-          { label: 'Requieren revisión', value: String(enRevision), tone: enRevision ? 'danger' : 'default', emphasis: enRevision > 0 },
+          { label: 'Clientes', value: total, helper: 'en el padrón, con cuenta o sin ella', icon: <><circle cx="9" cy="8" r="3.4" /><path d="M2.5 20a6.5 6.5 0 0 1 13 0" /><path d="M16.5 5.2a3.4 3.4 0 0 1 0 5.6M18 20a6.5 6.5 0 0 0-2.6-5.2" /></> },
+          {
+            label: 'Por revisar', value: enRevision,
+            tone: enRevision ? 'danger' : 'default', emphasis: enRevision > 0,
+            helper: enRevision ? 'datos incompletos o duplicados' : 'ninguno con pendientes',
+            icon: <><path d="M10.3 4.3 2.6 18a2 2 0 0 0 1.7 3h15.4a2 2 0 0 0 1.7-3L13.7 4.3a2 2 0 0 0-3.4 0z" /><path d="M12 9v4m0 4h.01" /></>,
+          },
         ]}
       />
 
@@ -209,13 +264,28 @@ export default function ClientesAdmin({ puede, notify, reloadBadge }: {
                     </p>
                   )}
                 </div>
-                {puedeEditar && s2.pista && (
-                  <button
-                    onClick={() => vincular(s2.id, s2.pista!.id)}
-                    className="shrink-0 btn-acento h-9 px-4 rounded-full text-[13px] font-black"
-                  >
-                    Vincular con {s2.pista.nombre}
-                  </button>
+                {/* La pista es el ATAJO, no el único camino. Antes el botón
+                    existía solo cuando el teléfono de la cuenta ya estaba en el
+                    padrón: una cuenta registrada con puro correo —que son la
+                    mayoría— se quedaba sin nada que tocar, contradiciendo el
+                    "tú vinculas" del encabezado. */}
+                {puedeEditar && (
+                  <div className="shrink-0 flex flex-wrap items-center gap-2">
+                    {s2.pista && (
+                      <button
+                        onClick={() => vincular(s2.id, s2.pista!.id)}
+                        className="btn-acento h-9 px-4 rounded-full text-[13px] font-black"
+                      >
+                        Vincular con {s2.pista.nombre}
+                      </button>
+                    )}
+                    <button
+                      onClick={() => setVinculando(s2)}
+                      className="h-9 px-4 rounded-full border border-edge text-[13px] font-bold text-ink hover:bg-surface-2 transition-colors"
+                    >
+                      {s2.pista ? 'Otro cliente…' : 'Vincular con…'}
+                    </button>
+                  </div>
                 )}
               </li>
             ))}
@@ -223,7 +293,7 @@ export default function ClientesAdmin({ puede, notify, reloadBadge }: {
         </Card>
       )}
 
-      <Card className="overflow-hidden">
+      <Card ref={ancla} className="overflow-hidden scroll-mt-24">
         <div className="px-5 py-4 border-b border-edge flex flex-col sm:flex-row sm:items-center gap-3">
           <h2 className="font-bold text-ink shrink-0">
             Padrón <span className="text-mute font-normal">({total})</span>
@@ -242,6 +312,17 @@ export default function ClientesAdmin({ puede, notify, reloadBadge }: {
               <option value="fisica">Personas</option>
               <option value="moral">Empresas</option>
             </select>
+            {/* Tres estados en un botón, no dos: "todos" es el normal, y
+                querer ver SOLO los que nunca abrieron cuenta es tan útil como
+                ver solo los que sí —son a los que hay que llamarles—. */}
+            <button
+              onClick={() => setConCuenta(v => (v === '' ? '1' : v === '1' ? '0' : ''))}
+              className={`h-11 px-4 rounded-[10px] border text-[13px] font-bold transition-colors ${
+                conCuenta ? 'border-gold/50 bg-gold-soft text-ink' : 'border-edge bg-surface-2 text-mute hover:text-ink'
+              }`}
+            >
+              {conCuenta === '1' ? 'Con cuenta' : conCuenta === '0' ? 'Sin cuenta' : 'Cuenta: todos'}
+            </button>
             <button
               onClick={() => setSoloRevision(v => !v)}
               className={`h-11 px-4 rounded-[10px] border text-[13px] font-bold transition-colors ${
@@ -268,21 +349,21 @@ export default function ClientesAdmin({ puede, notify, reloadBadge }: {
           </div>
         </div>
 
-        {cargando ? (
-          <p className="px-5 py-10 text-center text-sm text-mute">Cargando…</p>
+        {primeraVez ? (
+          <FilasEsqueleto filas={5} columnas={3} />
         ) : filas.length === 0 ? (
-          <div className="px-5 py-14 text-center">
-            <p className="text-sm text-ink font-semibold mb-1">
-              {q || tipo || soloRevision ? 'Nada con esos filtros' : 'Todavía no hay clientes'}
-            </p>
-            <p className="text-[13px] text-mute">
-              {q || tipo || soloRevision
-                ? 'Prueba con otro nombre o teléfono.'
-                : 'Da de alta el primero, o deja que se vayan sumando conforme vendas.'}
-            </p>
-          </div>
+          <EstadoVacio
+            titulo={q || tipo || soloRevision || conCuenta ? 'Nada con esos filtros' : 'Todavía no hay clientes'}
+            mensaje={q || tipo || soloRevision || conCuenta
+              ? 'Prueba con otro nombre o teléfono.'
+              : 'Da de alta el primero, o deja que se vayan sumando conforme vendas.'}
+            icono={<><circle cx="9" cy="8" r="3.4" /><path d="M2.5 20a6.5 6.5 0 0 1 13 0" /><path d="M16.5 5.2a3.4 3.4 0 0 1 0 5.6M18 20a6.5 6.5 0 0 0-2.6-5.2" /></>}
+          />
         ) : (
-          <div className="overflow-x-auto">
+          // Atenuada, no ausente: se nota que está trabajando y la tabla no se
+          // mueve un pixel. `aria-busy` lo dice para quien no ve la opacidad.
+          <div className={`overflow-x-auto transition-opacity duration-150 ${refrescando ? 'opacity-55' : ''}`}
+            aria-busy={refrescando}>
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-left text-[11px] uppercase tracking-wide text-mute border-b border-edge">
@@ -303,14 +384,32 @@ export default function ClientesAdmin({ puede, notify, reloadBadge }: {
                           {c.tipo_display}{c.rfc ? ` · ${c.rfc}` : ''}{c.activo === false ? ' · inactivo' : ''}
                         </span>
                       </button>
-                      {c.requiere_revision && (
-                        <span
-                          title={c.revision_motivo}
-                          className="inline-block mt-1 px-2 py-0.5 rounded-full bg-gold-soft text-[10.5px] font-bold uppercase tracking-wide text-ink"
-                        >
-                          Revisar
-                        </span>
-                      )}
+                      <div className="flex flex-wrap items-center gap-1.5 mt-1 empty:mt-0">
+                        {/* Se marca al que SÍ tiene cuenta y no al que no: los
+                            que nunca abrieron una son la mayoría del padrón, y
+                            ponerle una etiqueta a cada renglón sería ruido. */}
+                        {c.tiene_cuenta && (
+                          <span
+                            title={c.cuentas_total > 1
+                              ? `${c.cuentas_total} de sus contactos entran a la tienda con su cuenta`
+                              : 'Entra a la tienda con su cuenta'}
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-surface-2 border border-edge text-[10.5px] font-bold uppercase tracking-wide text-mute"
+                          >
+                            <svg viewBox="0 0 24 24" className="w-3 h-3 stroke-current fill-none" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                              <circle cx="12" cy="8" r="3.4" /><path d="M5 20c0-3.6 3.1-5.6 7-5.6s7 2 7 5.6" />
+                            </svg>
+                            Con cuenta{c.cuentas_total > 1 ? ` · ${c.cuentas_total}` : ''}
+                          </span>
+                        )}
+                        {c.requiere_revision && (
+                          <span
+                            title={c.revision_motivo}
+                            className="inline-block px-2 py-0.5 rounded-full bg-gold-soft text-[10.5px] font-bold uppercase tracking-wide text-ink"
+                          >
+                            Revisar
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="px-5 py-3.5 text-mute tabular-nums">{c.telefono || '—'}</td>
                     <td className="px-5 py-3.5 text-mute tabular-nums">{c.contactos_total}</td>
@@ -327,23 +426,11 @@ export default function ClientesAdmin({ puede, notify, reloadBadge }: {
           </div>
         )}
 
-        {paginas > 1 && (
-          <div className="px-5 py-3 border-t border-edge flex items-center justify-between text-[13px]">
-            <span className="text-mute">Página {pagina} de {paginas}</span>
-            <div className="flex gap-2">
-              <button
-                disabled={desde === 0}
-                onClick={() => setDesde(d => Math.max(d - POR_PAGINA, 0))}
-                className="h-9 px-4 rounded-[10px] border border-edge bg-surface-2 font-bold text-ink disabled:opacity-40 transition-colors"
-              >Anterior</button>
-              <button
-                disabled={desde + POR_PAGINA >= total}
-                onClick={() => setDesde(d => d + POR_PAGINA)}
-                className="h-9 px-4 rounded-[10px] border border-edge bg-surface-2 font-bold text-ink disabled:opacity-40 transition-colors"
-              >Siguiente</button>
-            </div>
-          </div>
-        )}
+        {/* El padrón lo pagina el SERVIDOR (`desde`/`limite`): el pie dice en qué
+            página va y traduce el número de página al corrimiento. */}
+        <Paginador pagina={pagina} paginas={paginas} total={total} porPagina={POR_PAGINA}
+          onIr={n => setDesde((n - 1) * POR_PAGINA)} ancla={ancla} cargando={cargando}
+          nombre="clientes" />
       </Card>
 
       {formOpen && (
@@ -355,11 +442,23 @@ export default function ClientesAdmin({ puede, notify, reloadBadge }: {
         />
       )}
 
+      {vinculando && (
+        <ElegirCliente
+          titulo={`¿De quién es la cuenta de ${vinculando.nombre}?`}
+          ayuda="Elige el cliente del padrón al que pertenece. Desde ese momento verá el historial completo de ese cliente al entrar a la tienda."
+          notify={notify}
+          onElegir={c => vincular(vinculando.id, c.id)}
+          onClose={() => setVinculando(null)}
+        />
+      )}
+
       {ficha && (
         <FichaCliente
           ficha={ficha}
           puedeEditar={puedeEditar}
           puedeFiscales={puedeFiscales}
+          puedeFusionar={puedeFusionar}
+          puedeCuentas={puedeCuentas}
           notify={notify}
           onClose={() => setFicha(null)}
           onChanged={() => { abrir(ficha.id); cargar() }}
@@ -498,7 +597,7 @@ function FormularioCliente({ puedeFiscales, notify, onClose, onSaved }: {
 
         <div className="sm:col-span-2">
           <label className={label} htmlFor="cli-notas">Notas</label>
-          <textarea aria-label="Notas" id="cli-notas" className={input} rows={2} value={f.notas} onChange={e => set('notas', e.target.value)} />
+          <textarea aria-label="Notas" id="cli-notas" className={`${input} campo-area`} rows={2} value={f.notas} onChange={e => set('notas', e.target.value)} />
         </div>
       </div>
 
@@ -517,13 +616,66 @@ function FormularioCliente({ puedeFiscales, notify, onClose, onSaved }: {
 /* ════════════════════════════════════════
    FICHA
    ════════════════════════════════════════ */
-function FichaCliente({ ficha, puedeEditar, puedeFiscales, notify, onClose, onChanged }: {
-  ficha: ClienteFicha; puedeEditar: boolean; puedeFiscales: boolean
+function FichaCliente({ ficha, puedeEditar, puedeFiscales, puedeFusionar, puedeCuentas, notify, onClose, onChanged }: {
+  ficha: ClienteFicha; puedeEditar: boolean; puedeFiscales: boolean; puedeFusionar: boolean; puedeCuentas: boolean
   notify: Notify; onClose: () => void; onChanged: () => void
 }) {
   const [nuevoContacto, setNuevoContacto] = useState(false)
   const [nc, setNc] = useState({ nombre: '', telefono: '', puesto: '' })
+  const [fusionando, setFusionando] = useState(false)
+
+  /** Trae la ficha duplicada AQUÍ: la abierta es la que sobrevive.
+   *
+   *  Se pregunta dos veces a propósito. La primera confirma qué se mueve y qué
+   *  le pasa al origen; la segunda pide el motivo, que se escribe en las notas
+   *  de las DOS fichas junto con quién y cuándo. Una fusión mal hecha no se
+   *  deshace sola, y sin ese renglón nadie puede reconstruir qué pasó. */
+  async function fundirAqui(origen: ClienteFila) {
+    const ok = await confirmar({
+      titulo: `Fundir "${origen.nombre}" en ${ficha.nombre}`,
+      mensaje: `Sus ventas, rentas, cotizaciones, reparaciones, obras y contactos pasan a esta ficha. "${origen.nombre}" se desactiva —no se borra— y deja de aparecer en el padrón.`,
+      aceptar: 'Fundir aquí', tono: 'peligro',
+    })
+    if (!ok) return
+    const motivo = await pedir({
+      titulo: '¿Por qué se funden?',
+      mensaje: 'Queda escrito en las notas de las dos fichas, con tu nombre y la fecha.',
+      placeholder: 'Ej. Se dio de alta dos veces',
+    })
+    if (motivo === null) return
+    api.post(`/clientes/${ficha.id}/fusionar/`, { origen_id: origen.id, motivo: motivo.trim() })
+      .then(() => { notify(`"${origen.nombre}" se fundió aquí`, 'ok'); setFusionando(false); onChanged() })
+      .catch(err => notify(err?.response?.data?.detalle || 'No se pudo fusionar', 'err'))
+  }
+
+  /** Quitarle o devolverle el acceso a la cuenta de este contacto.
+   *
+   * Es la MISMA API que usa Equipo (`/usuarios/<id>/`), porque es la misma
+   * cuenta: lo único que cambia es desde dónde se mira. Y no se borra, se
+   * desactiva —igual que en todo el sistema—, porque su historial de compras y
+   * rentas tiene que seguir en pie aunque ya no entre. */
+  async function cambiarAcceso(c: ContactoFicha) {
+    if (!c.cuenta_id) return
+    const devolver = c.cuenta_activa === false
+    if (!devolver) {
+      const ok = await confirmar({
+        titulo: `Quitarle el acceso a ${c.nombre}`,
+        mensaje: 'Dejará de poder entrar a la tienda con su cuenta. Su historial de compras y rentas se conserva completo.',
+        aceptar: 'Quitar acceso', tono: 'peligro',
+      })
+      if (!ok) return
+    }
+    const peticion = devolver
+      ? api.patch(`/usuarios/${c.cuenta_id}/`, { activo: true })
+      : api.delete(`/usuarios/${c.cuenta_id}/`)
+    peticion
+      .then(() => { notify(devolver ? `${c.nombre} puede entrar de nuevo` : `${c.nombre} ya no puede entrar`, devolver ? 'ok' : 'warning'); onChanged() })
+      .catch(err => notify(err?.response?.data?.detalle || 'No se pudo cambiar el acceso', 'err'))
+  }
   const [cuenta, setCuenta] = useState<Cuenta | null>(null)
+  /** Qué tipo de movimiento se está mirando. '' = todos. */
+  const [tipoDoc, setTipoDoc] = useState<'' | DocumentoCuenta['tipo']>('')
+  const docsVisibles = (cuenta?.documentos || []).filter(d => !tipoDoc || d.tipo === tipoDoc)
   const [docs, setDocs] = useState<Comprobante[]>([])
 
   useEffect(() => {
@@ -568,8 +720,12 @@ function FichaCliente({ ficha, puedeEditar, puedeFiscales, notify, onClose, onCh
         </div>
       )}
 
-      {/* Estado de cuenta: es lo primero que se pregunta de un cliente */}
-      {cuenta && (cuenta.tiene_adeudo || cuenta.tiene_credito) && (
+      {/* Estado de cuenta: es lo primero que se pregunta de un cliente.
+          Se muestra SIEMPRE, también en ceros. Antes solo salía con adeudo o
+          crédito, y "no hay tarjeta" se lee como "no se ha calculado": quien
+          va a entregar una máquina cara necesita ver el cero, no la ausencia
+          de un número. */}
+      {cuenta && (
         <section className="mb-6 rounded-xl border border-edge bg-surface-2 p-4">
           <dl className="grid grid-cols-3 gap-3 text-center">
             <div>
@@ -588,20 +744,85 @@ function FichaCliente({ ficha, puedeEditar, puedeFiscales, notify, onClose, onCh
         </section>
       )}
 
+      {/* GARANTÍAS. Van antes del historial y aparte de él: no son un documento
+          —no tienen folio, total ni saldo— sino una fecha límite, y contestan la
+          pregunta que llega al mostrador con la máquina en la mano: "se me
+          descompuso, ¿todavía tengo garantía?". Se enseñan también las vencidas,
+          porque "venció hace cuatro meses" contesta igual de bien. */}
+      {cuenta && cuenta.garantias?.length > 0 && (
+        <section className="mb-6">
+          <h3 className="text-[11px] uppercase tracking-wide text-mute font-medium mb-2">
+            Garantías ({cuenta.garantias.filter(g => g.vigente).length} vigente{cuenta.garantias.filter(g => g.vigente).length === 1 ? '' : 's'} de {cuenta.garantias.length})
+          </h3>
+          <ul className="space-y-2">
+            {cuenta.garantias.map(g => (
+              <li key={g.id} className={`flex items-start justify-between gap-3 p-3 rounded-xl border ${
+                g.vigente
+                  ? 'border-[color-mix(in_oklab,var(--c-libre)_34%,transparent)] bg-[color-mix(in_oklab,var(--c-libre)_7%,transparent)]'
+                  : 'border-edge bg-surface-2'}`}>
+                <div className="min-w-0">
+                  <p className="text-[13.5px] font-semibold text-ink truncate">{g.descripcion}</p>
+                  <p className="text-[12px] text-mute truncate">
+                    {g.meses} mes{g.meses === 1 ? '' : 'es'} · venta {g.venta_id ? `#${g.venta_id}` : '—'}
+                    {g.anulada && g.anulada_motivo ? ` · anulada: ${g.anulada_motivo}` : ''}
+                  </p>
+                </div>
+                <div className="shrink-0 text-right">
+                  {/* El número que decide: si es válida y por cuánto tiempo. */}
+                  <p className={`text-[13px] font-bold tabular-nums ${g.vigente ? 'text-[color:var(--c-libre)]' : 'text-mute'}`}>
+                    {g.anulada ? 'Anulada'
+                      : g.vigente ? `${g.dias_restantes} día${g.dias_restantes === 1 ? '' : 's'}`
+                        : `venció hace ${Math.abs(g.dias_restantes)} d`}
+                  </p>
+                  <p className="text-[11.5px] text-mute tabular-nums">{g.vence}</p>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       {/* Historial: la respuesta a "¿qué ha hecho este señor con nosotros?" */}
       {cuenta && cuenta.documentos.length > 0 && (
         <section className="mb-6">
-          <h3 className="text-[11px] uppercase tracking-wide text-mute font-medium mb-2">
-            Historial ({cuenta.documentos.length})
-          </h3>
+          <div className="flex items-center justify-between gap-3 mb-2 flex-wrap">
+            <h3 className="text-[11px] uppercase tracking-wide text-mute font-medium">
+              Movimientos ({docsVisibles.length}{tipoDoc ? ` de ${cuenta.documentos.length}` : ''})
+            </h3>
+          </div>
+          {/* Filtrar por tipo: con un cliente de cuarenta movimientos, "¿qué me
+              ha rentado?" no se contesta leyendo una tira mezclada. Solo salen
+              los tipos que ESTE cliente tiene: ofrecer "Reparaciones (0)" es
+              hacerle tocar un filtro que no lleva a ningún lado. */}
+          <div className="flex items-center gap-2 overflow-x-auto no-scrollbar mb-2.5">
+            {([['', 'Todos'], ...(['renta', 'venta', 'cotizacion', 'reparacion'] as const)
+              .filter(t => cuenta.documentos.some(d => d.tipo === t))
+              .map(t => [t, ETIQUETA_DOC[t]] as const)] as const).map(([k, etiqueta]) => {
+              const n = k ? cuenta.documentos.filter(d => d.tipo === k).length : cuenta.documentos.length
+              const activo = tipoDoc === k
+              return (
+                <button key={k || 'todos'} onClick={() => setTipoDoc(k as typeof tipoDoc)} aria-pressed={activo}
+                  className={`shrink-0 inline-flex items-center gap-1.5 h-8 px-3 rounded-full text-[12px] font-bold whitespace-nowrap border transition-colors ${
+                    activo ? 'bg-ink text-app border-transparent'
+                      : 'bg-surface-2 text-mute border-edge hover:text-ink'}`}>
+                  {etiqueta}<span className="tabular-nums text-[11px] opacity-70">{n}</span>
+                </button>
+              )
+            })}
+          </div>
           <ul className="divide-y divide-edge border border-edge rounded-xl overflow-hidden">
-            {cuenta.documentos.map(d => (
+            {docsVisibles.map(d => (
               <li key={`${d.tipo}-${d.id}`} className="px-3.5 py-2.5 flex items-center justify-between gap-3 bg-surface-2">
                 <div className="min-w-0">
                   <p className="text-[13px] font-semibold text-ink truncate">
                     <span className="text-mute font-normal">{ETIQUETA_DOC[d.tipo]}</span> {d.folio}
                   </p>
-                  <p className="text-[12px] text-mute truncate">{d.concepto} · {d.estado}</p>
+                  {/* La FECHA es la mitad de la respuesta: "me rentó una
+                      revolvedora" sin saber si fue el mes pasado o hace tres
+                      años no dice nada del cliente. */}
+                  <p className="text-[12px] text-mute truncate">
+                    {d.fecha ? new Date(d.fecha).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'} · {d.concepto} · {d.estado}
+                  </p>
                 </div>
                 <div className="shrink-0 text-right tabular-nums">
                   {d.total && <p className="text-[13px] font-semibold text-ink">{pesos(d.total)}</p>}
@@ -640,14 +861,36 @@ function FichaCliente({ ficha, puedeEditar, puedeFiscales, notify, onClose, onCh
                 <p className="text-[12.5px] text-mute truncate">
                   {[c.puesto, c.telefono, c.email].filter(Boolean).join(' · ') || '—'}
                 </p>
+                {c.tiene_cuenta && (
+                  <p className="text-[11.5px] text-mute mt-1 truncate">
+                    Entra con <span className="text-ink">{c.cuenta_correo}</span>
+                    {c.cuenta_ultimo_acceso
+                      ? <> · última vez {new Date(c.cuenta_ultimo_acceso).toLocaleDateString('es-MX')}</>
+                      : <> · nunca ha entrado</>}
+                  </p>
+                )}
               </div>
               {c.tiene_cuenta && (
-                <span
-                  title={c.cuenta_correo || ''}
-                  className="shrink-0 px-2 py-0.5 rounded-full bg-gold-soft text-[10.5px] font-bold uppercase tracking-wide text-ink"
-                >
-                  Con cuenta
-                </span>
+                <div className="shrink-0 flex flex-col items-end gap-1.5">
+                  {/* Tres estados distintos, no uno: "tiene cuenta" a secas
+                      mentiría sobre quien no ha confirmado su correo —no puede
+                      iniciar sesión— o sobre quien ya no tiene acceso. */}
+                  {c.cuenta_activa === false ? (
+                    <span className="px-2 py-0.5 rounded-full bg-red-500/10 text-[10.5px] font-bold uppercase tracking-wide text-red-500">Sin acceso</span>
+                  ) : c.cuenta_verificada === false ? (
+                    <span title="Todavía no abre el correo de confirmación: no puede iniciar sesión"
+                      className="px-2 py-0.5 rounded-full border border-amber-500/30 bg-amber-500/5 text-[10.5px] font-bold uppercase tracking-wide text-taller-ink">Sin verificar</span>
+                  ) : (
+                    <span title={c.cuenta_correo || ''}
+                      className="px-2 py-0.5 rounded-full bg-gold-soft text-[10.5px] font-bold uppercase tracking-wide text-ink">Con cuenta</span>
+                  )}
+                  {puedeCuentas && c.cuenta_id && (
+                    <button onClick={() => cambiarAcceso(c)}
+                      className="text-[11.5px] font-semibold text-mute hover:text-ink transition-colors">
+                      {c.cuenta_activa === false ? 'Devolver acceso' : 'Quitar acceso'}
+                    </button>
+                  )}
+                </div>
               )}
             </li>
           ))}
@@ -756,11 +999,115 @@ function FichaCliente({ ficha, puedeEditar, puedeFiscales, notify, onClose, onCh
         </section>
       )}
 
+      {/* Duplicados. Va al FINAL y sin color de alarma: no es una acción del
+          día a día, es la que se busca el día que alguien nota que el mismo
+          señor está dos veces en el padrón. */}
+      {puedeFusionar && (
+        <section className="pt-4 mt-2 border-t border-edge flex flex-wrap items-center justify-between gap-3">
+          <div className="min-w-0">
+            <h3 className="text-[13px] font-bold text-ink">¿Está duplicado?</h3>
+            <p className="text-[12.5px] text-mute">
+              Trae la otra ficha aquí: su historial se suma a esta y aquella se desactiva.
+            </p>
+          </div>
+          <button onClick={() => setFusionando(true)}
+            className="shrink-0 h-10 px-5 rounded-full border border-edge text-[13px] font-bold text-ink hover:bg-surface-2 transition-colors">
+            Fusionar una ficha duplicada
+          </button>
+        </section>
+      )}
+
       {ficha.notas && (
         <section className="pt-4 border-t border-edge">
           <h3 className="text-[11px] uppercase tracking-wide text-mute font-medium mb-1">Notas</h3>
           <p className="text-[13px] text-ink whitespace-pre-line">{ficha.notas}</p>
         </section>
+      )}
+
+      {fusionando && (
+        <ElegirCliente
+          titulo="¿Cuál es la ficha duplicada?"
+          ayuda={`Lo que elijas se funde en ${ficha.nombre} y deja de aparecer en el padrón. Esta ficha es la que sobrevive.`}
+          excluir={ficha.id}
+          notify={notify}
+          onElegir={fundirAqui}
+          onClose={() => setFusionando(false)}
+        />
+      )}
+    </Modal>
+  )
+}
+
+/* ════════════════════════════════════════
+   ELEGIR UN CLIENTE DEL PADRÓN
+   ════════════════════════════════════════ */
+/* El buscador del mostrador (`BuscadorCliente`) no sirve para esto: busca por
+   TELÉFONO de 10 dígitos, porque allá el vendedor tiene el número a la mano.
+   Las dos decisiones que abren este modal —de quién es esta cuenta, cuál ficha
+   es la duplicada— se toman por NOMBRE, y muchas veces la cuenta ni teléfono
+   trae. Aquí se pregunta al mismo endpoint del padrón, que ya busca por nombre,
+   razón social, RFC y nombre de contacto. */
+function ElegirCliente({ titulo, ayuda, excluir, notify, onElegir, onClose }: {
+  titulo: string; ayuda: string
+  /** La ficha desde la que se abrió: no tiene caso ofrecerla contra sí misma. */
+  excluir?: number
+  notify: Notify; onElegir: (c: ClienteFila) => void; onClose: () => void
+}) {
+  const [q, setQ] = useState('')
+  const [filas, setFilas] = useState<ClienteFila[]>([])
+  const [cargando, setCargando] = useState(true)
+
+  useEffect(() => {
+    // Sin teclear se muestran los primeros del padrón: con dos clientes dados de
+    // alta, obligar a escribir para ver una lista de dos es puro trámite.
+    const t = setTimeout(() => {
+      setCargando(true)
+      const p = new URLSearchParams({ limite: '8', desde: '0' })
+      if (q.trim()) p.set('q', q.trim())
+      api.get<{ clientes: ClienteFila[] }>(`/clientes/?${p}`, { fondo: true })
+        // Fuera las desactivadas: una ficha inactiva casi siempre es el
+        // residuo de una fusión anterior, y ni se le vincula una cuenta ni se
+        // vuelve a fundir. El padrón sí las lista (marcadas "inactivo") porque
+        // allá sirven de rastro; aquí solo estorban.
+        .then(r => setFilas((r.data?.clientes || [])
+          .filter(c => c.id !== excluir && c.activo !== false)))
+        .catch(() => { setFilas([]); notify('No se pudo buscar en el padrón', 'err') })
+        .finally(() => setCargando(false))
+    }, q ? 300 : 0)
+    return () => clearTimeout(t)
+  }, [q, excluir, notify])
+
+  return (
+    <Modal titulo={titulo} onClose={onClose}>
+      <p className="text-[13px] text-mute -mt-2 mb-4">{ayuda}</p>
+      <input className={input} autoFocus value={q} onChange={e => setQ(e.target.value)}
+        placeholder="Nombre, teléfono o RFC…" aria-label="Buscar cliente en el padrón" />
+
+      {cargando ? (
+        <p className="py-8 text-center text-[13px] text-mute">Buscando…</p>
+      ) : filas.length === 0 ? (
+        <p className="py-8 text-center text-[13px] text-mute">
+          {q.trim() ? 'Ningún cliente con ese nombre.' : 'El padrón está vacío.'}
+        </p>
+      ) : (
+        <ul className="mt-4 divide-y divide-edge border border-edge rounded-xl overflow-hidden">
+          {filas.map(c => (
+            <li key={c.id}>
+              <button onClick={() => onElegir(c)}
+                className="w-full text-left px-4 py-3 bg-surface-2 hover:bg-surface transition-colors flex items-center justify-between gap-3">
+                <span className="min-w-0">
+                  <span className="block text-sm font-semibold text-ink truncate">{c.nombre}</span>
+                  <span className="block text-[12.5px] text-mute truncate">
+                    {[c.tipo_display, c.telefono, c.rfc].filter(Boolean).join(' · ')}
+                  </span>
+                </span>
+                <span className="shrink-0 text-[12px] text-mute tabular-nums">
+                  {c.documentos_total} doc.
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
       )}
     </Modal>
   )

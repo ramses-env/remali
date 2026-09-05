@@ -10,6 +10,8 @@ import { useConfigPublica } from '../lib/configPublica'
 import { waLink } from '../lib/whatsapp'
 import resolveMediaUrl from '../lib/resolveMediaUrl'
 import FichaTecnicaModal from '../components/FichaTecnicaModal'
+import { anotarFallo } from '../lib/fallo'
+import { useEsDelNegocio } from '../store/profile'
 
 type Equipo = {
   id: number
@@ -47,6 +49,7 @@ const mono = 'font-mono text-[11px] tracking-[0.14em]'
 export default function EquipoDetail() {
   const { id } = useParams()
   const { dispatch } = useCart()
+  const delNegocio = useEsDelNegocio()
   const { notify } = useToast()
   const nav = useNavigate()
   const { unit, setUnit } = usePriceUnit()
@@ -76,22 +79,24 @@ export default function EquipoDetail() {
   }, [id])
   useEffect(() => { setActiveImage(e?.imagen || (e?.imagenes || [])[0] || undefined) }, [e])
 
-  // Relacionados: misma categoría, sin el equipo actual.
+  /* Relacionados: misma categoría primero, sin el equipo actual.
+     Dos cosas cambiaron aquí, y las dos se notan al abrir una ficha:
+
+     1. Depende de `id`, no de `e`. Antes esperaba a que llegara el equipo para
+        recién entonces pedir los relacionados: dos viajes EN SERIE donde el
+        segundo nunca necesitó al primero. Ahora salen juntos.
+     2. Pide `/equipos/{id}/relacionados/` en vez del catálogo completo. Antes se
+        bajaba TODO el catálogo —sin paginar, con imágenes y campos calculados
+        por equipo— para quedarse con cuatro tarjetas; el recorte ahora lo hace
+        la base de datos. */
   useEffect(() => {
-    if (!e) { setRelacionados([]); return }
+    if (!id) { setRelacionados([]); return }
     let vivo = true
-    // Misma categoría primero; si no alcanza, rellena con el resto del catálogo.
-    api.get<Equipo[]>('/equipos/')
-      .then(r => {
-        if (!vivo) return
-        const otros = (r.data || []).filter(x => x.id !== e.id)
-        const mismaCat = otros.filter(x => x.categoria?.id && x.categoria.id === e.categoria?.id)
-        const resto = otros.filter(x => !mismaCat.includes(x))
-        setRelacionados([...mismaCat, ...resto].slice(0, 4))
-      })
-      .catch(() => {})
+    api.get<Equipo[]>(`/equipos/${id}/relacionados/?limit=4`)
+      .then(r => { if (vivo) setRelacionados(Array.isArray(r.data) ? r.data : []) })
+      .catch(anotarFallo)
     return () => { vivo = false }
-  }, [e])
+  }, [id])
 
   const precioVenta = toNumber(e?.precio_venta)
   const precioDia = toNumber(e?.precio_dia)
@@ -162,7 +167,7 @@ export default function EquipoDetail() {
       await api.post(`/equipos/${id}/imagenes/`, fd, { headers: { 'Content-Type': 'multipart/form-data' } })
       const r = await api.get<Equipo>(`/equipos/${id}/`)
       setE(r.data); setUploadedImages([]); notify('Imágenes subidas')
-    } catch { notify('Error al subir imágenes') } finally { ev.target.value = '' }
+    } catch { notify('Error al subir imágenes', 'err') } finally { ev.target.value = '' }
   }
 
   function addToCart() {
@@ -464,12 +469,20 @@ export default function EquipoDetail() {
               )
             })()}
 
-            {/* CTAs */}
+            {/* CTAs. Cotizar es del cliente: una cuenta del equipo no arma
+                cotizaciones aquí (ver `useEsDelNegocio`) y ofrecérselo solo la
+                lleva a un 403 después de elegir todo. El WhatsApp sí se queda:
+                escribirle a la empresa no es un camino de cliente, y al equipo
+                le sirve tener el número a mano. */}
             <div className="flex flex-col gap-2.5">
-              <button onClick={() => { addToCart(); nav('/cotizacion') }}
-                className="h-[52px] rounded-[14px] bg-gold text-black text-[15.5px] font-extrabold btn-acento">Solicitar cotización</button>
-              <button onClick={() => { addToCart(); notify('Añadido a tu cotización') }}
-                className="h-[50px] rounded-[14px] border border-edge text-ink text-[14.5px] font-semibold hover:bg-surface-2 transition-colors">Agregar a mi cotización</button>
+              {!delNegocio && (
+                <>
+                  <button onClick={() => { addToCart(); nav('/cotizacion') }}
+                    className="h-[52px] rounded-[14px] bg-gold text-black text-[15.5px] font-extrabold btn-acento">Solicitar cotización</button>
+                  <button onClick={() => { addToCart(); notify('Añadido a tu cotización') }}
+                    className="h-[50px] rounded-[14px] border border-edge text-ink text-[14.5px] font-semibold hover:bg-surface-2 transition-colors">Agregar a mi cotización</button>
+                </>
+              )}
               {telWa && (
                 <a href={waLink(telWa, waMsg)} target="_blank" rel="noopener noreferrer"
                   className="h-[46px] rounded-[14px] bg-emerald-500/12 text-emerald-500 text-[14px] font-bold grid place-items-center hover:bg-emerald-500/20 transition-colors">

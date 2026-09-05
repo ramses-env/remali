@@ -1,14 +1,12 @@
-import { lazy, Suspense, useEffect } from 'react'
+import { lazy, Suspense } from 'react'
 import { Route, Routes, useLocation } from 'react-router-dom'
 import Navbar from './components/Navbar'
+import BarraAviso from './components/BarraAviso'
 import Home from './routes/Home'
-import RecordatorioAdeudo from './components/RecordatorioAdeudo'
-import RecordatorioPerfil from './components/RecordatorioPerfil'
 import CambioTipoCotizacion from './components/CambioTipoCotizacion'
 import DockTienda from './components/DockTienda'
-import OnboardingTour from './components/onboarding/OnboardingTour'
-import TODOS_TOURS from './components/onboarding/tours'
-import { AuthSplitScreen } from '@/components/ui/auth-split-screen'
+import OnboardingGate from './components/onboarding/OnboardingGate'
+import ScrollAlTope from './components/ScrollAlTope'
 import Footer from './components/Footer'
 import ErrorBoundary from './components/ErrorBoundary'
 import ErrorPage from './routes/ErrorPage'
@@ -27,6 +25,13 @@ const EquipoDetail = lazy(() => import('./routes/EquipoDetail'))
 const Cotizacion = lazy(() => import('./routes/Cotizacion'))
 const Login = lazy(() => import('./routes/Login'))
 const Registro = lazy(() => import('./routes/Registro'))
+/* Estos tres traen framer-motion. Estáticos, metían esa librería (123 KB) en la
+   primera carga de TODA la tienda: los recordatorios solo aparecen si el cliente
+   tiene el perfil a medias o un adeudo, y la pantalla partida solo en /login y
+   /registro. Ninguno pinta nada en el primer render. */
+const RecordatorioAdeudo = lazy(() => import('./components/RecordatorioAdeudo'))
+const RecordatorioPerfil = lazy(() => import('./components/RecordatorioPerfil'))
+const AuthSplitScreen = lazy(() => import('@/components/ui/auth-split-screen').then(m => ({ default: m.AuthSplitScreen })))
 const Recuperar = lazy(() => import('./routes/Recuperar'))
 const Restablecer = lazy(() => import('./routes/Restablecer'))
 const VerificarCorreo = lazy(() => import('./routes/VerificarCorreo'))
@@ -58,9 +63,6 @@ function CargandoRuta() {
 
 function App() {
   const location = useLocation()
-  // Al cambiar de ruta, vuelve al inicio del scroll. Sin esto la SPA conserva la
-  // posición de la página anterior y la nueva abre "a media página".
-  useEffect(() => { window.scrollTo(0, 0) }, [location.pathname])
   // Rutas que NO usan el chrome público (navbar + footer)
   const bare =
     location.pathname.startsWith('/dashboard') ||
@@ -72,6 +74,7 @@ function App() {
 
   return (
     <I18nProvider>
+      <ScrollAlTope />
       <CargaGlobal />
       {bare ? (
         <ErrorBoundary>
@@ -85,7 +88,9 @@ function App() {
               <Route path="/registro" element={<Registro />} />
               <Route path="/recuperar" element={<Recuperar />} />
               <Route path="/restablecer/:uid/:token" element={<Restablecer />} />
-              <Route path="/verificar/:token" element={<VerificarCorreo />} />
+              {/* Sin token: el código se teclea. La liga se retiró porque los
+                  escáneres de correo la abrían solos y quemaban el token. */}
+              <Route path="/verificar" element={<VerificarCorreo />} />
             </Route>
             {/* /dashboard/* : cualquier subruta (bookmark viejo, refresh) cae al
                 panel en vez de renderizar una página en blanco. */}
@@ -109,9 +114,23 @@ function App() {
           <div
             /* pb en móvil: reserva el alto del dock flotante para que no tape el
                final del contenido. En md+ el dock no existe, así que sin padding. */
-            className="min-h-screen flex flex-col bg-app text-ink pb-24 md:pb-0"
-            style={{ ['--c-gold' as any]: '#FFC61A', ['--c-gold-soft' as any]: 'rgba(255,198,26,0.14)' }}
+            /* `tienda` no pinta nada: es la marca que el CSS usa para saber que
+               este recorrido es el de los clientes y no el panel. De ella cuelga
+               el cursor propio (index.css, `body:has(.tienda)`). */
+            className="tienda min-h-screen flex flex-col bg-app text-ink pb-24 md:pb-0"
+            /* `paddingTop` sigue al alto de la barra de aviso: sin ella la
+               variable no existe y vale 0, así que la tienda queda exactamente
+               como estaba. Con ella, todo baja lo justo y el menú (que es fijo)
+               no acaba tapando el primer bloque de cada página. */
+            style={{
+              ['--c-gold' as any]: '#FFC61A',
+              ['--c-gold-soft' as any]: 'rgba(255,198,26,0.14)',
+              paddingTop: 'var(--alto-aviso, 0px)',
+            }}
           >
+            {/* Arriba del todo, incluso de la navegación: un aviso de temporada
+                que aparece debajo del menú no se lee como aviso del sitio. */}
+            <BarraAviso />
             <Navbar />
             <div className="flex-1 w-full">
               <ErrorBoundary>
@@ -161,13 +180,17 @@ function App() {
               style={{ top: 'calc(var(--nav-h, 80px) + 12px)' }}
               className="fixed left-4 right-4 z-40 md:left-auto md:right-5 md:max-w-[360px] flex flex-col gap-3 pointer-events-none transition-[top] duration-300"
             >
-              <RecordatorioPerfil />
-              <RecordatorioAdeudo />
+              <Suspense fallback={null}>
+                <RecordatorioPerfil />
+                <RecordatorioAdeudo />
+              </Suspense>
             </div>
             {/* Pregunta al intentar mezclar venta y renta en una cotización. */}
             <CambioTipoCotizacion />
-            {/* Tour guiado de primer uso (solo corre si el cliente es nuevo y no lo completó ya). */}
-            <OnboardingTour tours={TODOS_TOURS} />
+            {/* Tour guiado de primer uso (solo corre si el cliente es nuevo y no lo completó ya).
+                El portero decide eso SIN bajar react-joyride; la librería llega
+                solo si de verdad hay guía que correr. */}
+            <OnboardingGate />
             {/* Dock inferior (solo móvil): navegación al alcance del pulgar. */}
             <DockTienda />
           </div>

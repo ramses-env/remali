@@ -13,8 +13,7 @@ import { useEffect, useRef, useState } from 'react'
 import api from '../lib/api'
 import { soloTelefono } from '../lib/utils'
 
-const input =
-  'w-full bg-surface-2 border border-edge rounded-xl px-4 py-2.5 text-sm text-ink placeholder-mute focus:outline-none focus:border-gold/50 transition-colors'
+const input = 'campo'
 const label = 'block text-[11px] font-medium text-mute mb-1.5 uppercase tracking-wide'
 
 export type ObraBreve = { id: number; nombre: string; ubicacion: string }

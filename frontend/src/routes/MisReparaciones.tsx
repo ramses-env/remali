@@ -9,6 +9,7 @@ import { descargarBlob } from '../lib/descargar'
 import { formatMoney } from '../lib/utils'
 import { useAuth } from '../store/auth'
 import { useLatido } from '../lib/latido'
+import { anotarFallo } from '../lib/fallo'
 
 type Reparacion = {
   id: number
@@ -105,7 +106,7 @@ export default function MisReparaciones() {
     let vivo = true
     const cargar = () => api.get<{ reparaciones: Reparacion[] }>('/reparaciones/mias/', { fondo: true } as never)
       .then(r => { if (vivo) setReparaciones(r.data.reparaciones || []) })
-      .catch(() => {})
+      .catch(anotarFallo)
       .finally(() => { if (vivo) setCargando(false) })
     cargar()
     recargar.current = cargar

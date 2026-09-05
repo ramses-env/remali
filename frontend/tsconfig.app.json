@@ -10,6 +10,7 @@
       "@/*": ["src/*"]
     },
     "types": ["vite/client"],
+    "resolveJsonModule": true,
     "skipLibCheck": true,
 
     /* Bundler mode */

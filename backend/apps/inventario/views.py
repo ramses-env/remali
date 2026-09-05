@@ -17,10 +17,12 @@ from maquinaria.models import Equipo
 from maquinaria.permissions import (
     IsAdminGroupOrStaff, EsOperador, PuedeDarAltaInventario,
     PuedeGestionarReparaciones, PuedeOperarInventario, PuedeReparar, PuedeVender,
+    puede_de,
 )
 from maquinaria.views import ProtectedDestroyMixin
 from .models import Inventario, OrdenReparacion, OrdenReparacionItem
 from .serializers import InventarioSerializer, OrdenReparacionSerializer
+from server.rastro import tragado
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +60,7 @@ class UnidadesPorEquipo(generics.ListCreateAPIView):
     def get_queryset(self):
         return Inventario.objects.filter(
             equipo_id=self.kwargs['equipo_id']
-        ).select_related('equipo').prefetch_related('rentas').order_by('codigo')
+        ).select_related('equipo').prefetch_related('rentas', 'equipo__unidades').order_by('codigo')
 
     def perform_create(self, serializer):
         equipo = get_object_or_404(Equipo, pk=self.kwargs['equipo_id'])
@@ -105,7 +107,7 @@ class UnidadesGlobal(generics.ListAPIView):
     permission_classes = [EsOperador]
 
     def get_queryset(self):
-        qs = Inventario.objects.all().select_related('equipo').prefetch_related('rentas')
+        qs = Inventario.objects.all().select_related('equipo').prefetch_related('rentas', 'equipo__unidades')
         p = self.request.query_params
         estado = (p.get('estado') or '').strip().lower()
         if estado in ('disponible', 'rentado', 'apartado', 'mantenimiento', 'vendido'):
@@ -129,7 +131,7 @@ class UnidadesGlobal(generics.ListAPIView):
 
 class UnidadDetail(ProtectedDestroyMixin, generics.RetrieveUpdateDestroyAPIView):
     en_uso_label_plural = 'rentas o ventas'
-    queryset = Inventario.objects.all().select_related('equipo').prefetch_related('rentas')
+    queryset = Inventario.objects.all().select_related('equipo').prefetch_related('rentas', 'equipo__unidades')
     serializer_class = InventarioSerializer
     permission_classes = [PuedeOperarInventario]
 
@@ -272,7 +274,7 @@ def _notif(tipo, titulo, mensaje, seccion, data=None):
         from maquinaria.models import crear_notificacion
         crear_notificacion(tipo, titulo, mensaje, seccion=seccion, data=(data or {}))
     except Exception:
-        pass
+        tragado()
 
 
 @api_view(['POST'])
@@ -291,6 +293,16 @@ def vender_unidad(request, pk: int):
     datos = request.data or {}
     desde_caja = bool(datos.get('desde_caja'))
     turno_abierto_ahora = False
+    # Vender es una cosa y COBRAR EN EL CAJÓN es otra. La bandera cuelga el cobro
+    # del turno de quien la manda, así que sin `usar_caja` no se acepta: si no, a
+    # administración le bastaría mandarla a mano para meter dinero en un arqueo
+    # que no es suyo, justo lo que la caja exclusiva del mostrador evita.
+    if desde_caja and not puede_de(request.user).get('usar_caja'):
+        return Response(
+            {'detalle': 'No tienes acceso a la caja. La venta se registra desde Ventas.',
+             'codigo': 'sin_caja'},
+            status=403,
+        )
     if desde_caja and not caja_permite('venta'):
         return Response(
             {'detalle': 'Vender maquinaria desde la caja está apagado. Enciéndelo en Ajustes → Caja.',
@@ -438,7 +450,7 @@ def vender_unidad(request, pk: int):
                 try:
                     cotizacion.cupon.marcar_usado()
                 except Exception:
-                    pass
+                    tragado()
             # Guarda pagos con forma estándar {fecha, monto, metodo, por} (como renta).
             # En venta normal, si no capturaron montos, cae al total completo. En un
             # apartado NUNCA se rellena el total: se guarda solo el anticipo.
@@ -456,7 +468,7 @@ def vender_unidad(request, pk: int):
                 ]
                 venta.save(update_fields=['pagos', 'metodo_pago'])
             except Exception:
-                pass
+                tragado()
             # El cobro entra al turno DENTRO de la misma transacción que la venta:
             # una venta registrada sin su movimiento dejaría el arqueo corto y
             # nadie se enteraría hasta el corte.
@@ -468,6 +480,9 @@ def vender_unidad(request, pk: int):
                     venta=venta,
                 )
         except ValueError as e:
+            # `return` dentro de un atomic() COMMITEA lo ya escrito: sin esto,
+            # una operación a medias se queda guardada y nadie se entera.
+            transaction.set_rollback(True)
             return Response({'detalle': str(e)}, status=400)
         try:
             from maquinaria.models import crear_notificacion
@@ -519,9 +534,9 @@ def vender_unidad(request, pk: int):
                         },
                     )
                 except Exception:
-                    pass
+                    tragado()
         except Exception:
-            pass
+            tragado()
 
         # Solicitud de factura (si el cliente la pedirá) → bandeja "por facturar".
         if datos.get('requiere_factura'):
@@ -802,7 +817,7 @@ def _avisar_avance_reparacion(orden):
                            ref=f'rep-{orden.id}-{orden.estado}', usuario=orden.usuario,
                            data={'folio': orden.folio})
     except Exception:
-        pass
+        tragado()
 
 
 # Etiquetas de cara al cliente (la liga pública y "Mis reparaciones").
@@ -870,6 +885,25 @@ def orden_reparacion_pdf_mia(request, pk):
 
 
 @api_view(['GET'])
+@permission_classes([PuedeReparar])
+def orden_reparacion_pdf(request, pk):
+    """Descarga del PDF desde el PANEL. Mismo documento que ve el cliente, con
+    dos diferencias que importan:
+
+    - No pasa por `_orden_lista_para_cliente`. Ese candado existe para que el
+      cliente no se baje una orden a la que todavía le falta el cargo de mano de
+      obra; a quien la está trabajando no le aplica, y de hecho necesita poder
+      imprimirla a medias (la hoja que firma el cliente al DEJAR el equipo).
+    - Se sirve por id, no por token ni por dueño: aquí manda el permiso del
+      panel (`PuedeReparar`), el mismo del detalle de la orden.
+    """
+    orden = _ORDEN_PDF_QS.filter(pk=pk).first()
+    if not orden:
+        return Response({'detalle': 'No encontramos esa reparación.'}, status=404)
+    return _orden_pdf_response(orden)
+
+
+@api_view(['GET'])
 @permission_classes([AllowAny])
 @throttle_classes([TokenPublicoThrottle])
 def orden_reparacion_pdf_publico(request, token):
@@ -918,8 +952,12 @@ def unidad_qr(request, codigo):
     r = (Renta.objects.filter(inventario=inv, estado__in=['activa', 'reservada'])
          .select_related('obra').order_by('-creado_en').first())
     if r:
-        pagado = sum((_D(str(p.get('monto', 0))) for p in (r.pagos or [])), _D('0'))
-        saldo = max((r.total or _D('0')) + (r.recargo or _D('0')) - pagado, _D('0'))
+        # La cuenta vive en el modelo. Aquí se repetía a mano y encima MAL: sumaba
+        # el recargo aparte cuando `recalcular_montos()` ya lo tiene dentro de
+        # `total`, así que lo cobraba dos veces. Es la séptima copia del cálculo
+        # que aparece; por eso ninguna vista debería volver a escribirlo.
+        pagado = r.pagado()
+        saldo = r.saldo_pendiente()
         datos['renta'] = {
             'id': r.id,
             'estado': r.estado,

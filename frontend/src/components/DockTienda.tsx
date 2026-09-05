@@ -8,6 +8,7 @@ import { useCart } from '../store/cart'
 import { useFavoritos } from '../store/favoritos'
 import { useConfigPublica } from '../lib/configPublica'
 import { waLink } from '../lib/whatsapp'
+import { useEsDelNegocio } from '../store/profile'
 
 /**
  * Dock de la tienda pública, para el pulgar en móvil.
@@ -27,6 +28,7 @@ export default function DockTienda() {
   const { user } = useProfile()
   const { state } = useCart()
   const { count: favoritos } = useFavoritos()
+  const delNegocio = useEsDelNegocio()
   const cfg = useConfigPublica()
 
   const enCotizacion = state.items.reduce((n, i) => n + i.qty, 0)
@@ -38,7 +40,9 @@ export default function DockTienda() {
   const items: DockItem[] = [
     { key: 'catalogo', label: 'Catálogo', to: '/equipos', activo: catalogoActivo, icon: <LayoutGrid className="h-[22px] w-[22px]" /> },
     { key: 'favoritos', label: 'Favoritos', to: '/favoritos', activo: ruta === '/favoritos', badge: favoritos, icon: <Heart className="h-[22px] w-[22px]" /> },
-    { key: 'cotizacion', label: 'Cotización', to: '/cotizacion', activo: ruta === '/cotizacion', badge: enCotizacion, icon: <ClipboardList className="h-[22px] w-[22px]" /> },
+    /* La cotización es del cliente: una cuenta del equipo no la arma
+       (ver `useEsDelNegocio`), así que su pestaña tampoco aparece. */
+    ...(delNegocio ? [] : [{ key: 'cotizacion', label: 'Cotización', to: '/cotizacion', activo: ruta === '/cotizacion', badge: enCotizacion, icon: <ClipboardList className="h-[22px] w-[22px]" /> }]),
     // WhatsApp directo al negocio: lo que un cliente de renta más repite
     // (preguntar disponibilidad, cerrar el trato). Abre el chat con un mensaje listo.
     { key: 'whatsapp', label: 'WhatsApp', 'data-onboarding': 'dock-whatsapp' as any, onClick: () => { const w = waLink(cfg.whatsapp_principal, 'Hola REMALI, quiero información sobre un equipo.'); if (w) window.open(w, '_blank', 'noopener') }, icon: <MessageCircle className="h-[22px] w-[22px]" /> },

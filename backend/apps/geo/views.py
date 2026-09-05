@@ -13,11 +13,12 @@ import logging
 import requests
 from django.core.cache import cache
 from rest_framework.decorators import api_view, permission_classes, throttle_classes
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
-from rest_framework.throttling import AnonRateThrottle
+from rest_framework.throttling import UserRateThrottle
 
 from .services import get_provider
+from server.rastro import tragado
 
 log = logging.getLogger(__name__)
 
@@ -27,22 +28,30 @@ MIN_QUERY_LEN = 3
 CACHE_TTL = 60 * 60 * 24
 
 
-# El autocompletado es público (lo usan invitados armando su cotización), pero
-# cada consulta nueva es una llamada de PAGO a Google Places. Sin techo sería un
-# grifo de costo abierto, así que se limita por IP anónima con dos capas: una
-# ráfaga por minuto (cubre el tecleo con debounce) y un techo por hora (acota el
-# gasto). `AnonRateThrottle` solo pesa a los anónimos: quien tiene sesión no se
-# ve afectado. La caché de 24 h además hace gratis cualquier consulta repetida.
-class _DireccionMinThrottle(AnonRateThrottle):
+# El autocompletado pide SESIÓN. Nació público —lo estrenaban invitados armando
+# su cotización— y eso era un grifo de costo abierto: cada consulta nueva es una
+# llamada de PAGO a Google Places, y cualquiera con la URL podía dejarla
+# corriendo. Ahora el armador solo se lo ofrece a quien tiene cuenta; el
+# invitado escribe su dirección a mano, como siempre.
+#
+# El techo sigue puesto igual, porque una cuenta también puede desbocarse (una
+# pestaña con un bucle, alguien probando). Dos capas: una ráfaga por minuto que
+# cubre el tecleo con debounce, y un techo por hora que acota el gasto.
+#
+# `UserRateThrottle` y ya no `AnonRateThrottle`: aquel solo pesaba a los
+# anónimos, así que al cerrar el endpoint habría dejado de contar a TODO el
+# mundo y el tope habría desaparecido justo al ponerle llave a la puerta.
+# La caché de 24 h además hace gratis cualquier consulta repetida.
+class _DireccionMinThrottle(UserRateThrottle):
     scope = 'direcciones_min'
 
 
-class _DireccionHoraThrottle(AnonRateThrottle):
+class _DireccionHoraThrottle(UserRateThrottle):
     scope = 'direcciones_hora'
 
 
 @api_view(['GET'])
-@permission_classes([AllowAny])
+@permission_classes([IsAuthenticated])
 @throttle_classes([_DireccionMinThrottle, _DireccionHoraThrottle])
 def address_search(request):
     q = (request.query_params.get('q') or '').strip()
@@ -79,12 +88,12 @@ def address_search(request):
     try:
         cache.set(cache_key, resultados, CACHE_TTL)
     except Exception:
-        pass  # guardar en caché es best-effort; su fallo no afecta la respuesta
+        tragado()  # guardar en caché es best-effort; su fallo no afecta la respuesta
     return Response(resultados)
 
 
 @api_view(['GET'])
-@permission_classes([AllowAny])
+@permission_classes([IsAuthenticated])
 @throttle_classes([_DireccionMinThrottle, _DireccionHoraThrottle])
 def address_autocomplete(request):
     """Predicciones EN VIVO (as-you-type). Se llaman por cada tecla: son baratas y
@@ -116,12 +125,12 @@ def address_autocomplete(request):
     try:
         cache.set(cache_key, preds, 60 * 30)  # 30 min: las predicciones cambian poco
     except Exception:
-        pass
+        tragado()
     return Response(preds)
 
 
 @api_view(['GET'])
-@permission_classes([AllowAny])
+@permission_classes([IsAuthenticated])
 @throttle_classes([_DireccionMinThrottle, _DireccionHoraThrottle])
 def address_details(request):
     """Resuelve un place_id (de `address_autocomplete`) a la dirección completa
@@ -152,5 +161,5 @@ def address_details(request):
     try:
         cache.set(cache_key, resultado, CACHE_TTL)  # 24 h: los detalles casi no cambian
     except Exception:
-        pass
+        tragado()
     return Response(resultado)

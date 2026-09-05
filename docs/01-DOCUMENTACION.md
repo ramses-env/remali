@@ -1,7 +1,7 @@
-# REMALI Admin — Documentación técnica
+# REMALI Admin: documentación técnica
 
-> Panel de operación para un negocio de **renta y venta de maquinaria** (y venta de refacciones).
-> Backend Django + DRF, frontend React/Vite, desplegado en Railway con imágenes en Cloudinary.
+> Panel de operación para un negocio de renta y venta de maquinaria, que también vende refacciones.
+> Backend Django con DRF, frontend React/Vite, desplegado en Railway con imágenes en Cloudinary.
 
 Última actualización: 2026-07-11
 
@@ -9,18 +9,18 @@
 
 ## 1. Visión general
 
-**REMALI Admin** administra:
+REMALI Admin administra:
 
-- **Catálogo** de equipos/modelos de maquinaria (`Equipo`).
-- **Inventario** físico: cada máquina real es una **unidad** (`Inventario`) con estado (disponible / rentado / mantenimiento / vendido).
-- **Rentas** de unidades por día/semana/mes.
-- **Ventas** de maquinaria (unidad única) y de **refacciones** (piezas con stock).
-- **Empresas y obras** (clientes B2B) — *módulo construido pero aún no conectado a rentas*.
-- **Notificaciones** internas y **mensajería de soporte** (chat cliente ↔ admin).
+- El catálogo de equipos y modelos de maquinaria (`Equipo`).
+- El inventario físico: cada máquina real es una unidad (`Inventario`) con estado (disponible, rentado, mantenimiento o vendido).
+- Rentas de unidades por día, semana o mes.
+- Ventas de maquinaria (unidad única) y de refacciones (piezas con stock).
+- Empresas y obras, o sea los clientes B2B. El módulo está construido pero todavía no se conecta a rentas.
+- Notificaciones internas y mensajería de soporte (chat cliente ↔ admin).
 
 Usuarios objetivo (según `PRODUCT.md`):
-- **Administración** (dueño/gerencia): métricas, catálogo, inventario, rentas y ventas.
-- **Operación** (mostrador/almacén): movimientos, disponibilidad, devoluciones, mantenimiento.
+- Administración (dueño y gerencia): métricas, catálogo, inventario, rentas y ventas.
+- Operación (mostrador y almacén): movimientos, disponibilidad, devoluciones, mantenimiento.
 
 ---
 
@@ -47,14 +47,14 @@ Usuarios objetivo (según `PRODUCT.md`):
 Remali/
 ├── backend/                 # Proyecto Django
 │   ├── manage.py
-│   ├── requirements.txt     # ⚠️ faltan reportlab y qrcode (ver auditoría)
+│   ├── requirements.txt     # ojo: faltan reportlab y qrcode (ver auditoría)
 │   ├── Procfile             # Arranque en Railway (gunicorn)
 │   ├── server/              # Configuración del proyecto
 │   │   ├── settings.py
 │   │   ├── urls.py          # Ruteo raíz + catch-all SPA
 │   │   ├── wsgi.py / asgi.py
 │   │   └── cloudinary_client.py
-│   └── apps/                # ⭐ Apps de negocio (añadidas a sys.path)
+│   └── apps/                # apps de negocio (añadidas a sys.path)
 │       ├── maquinaria/      # Catálogo + auth + notificaciones + soporte (app "grande")
 │       ├── inventario/      # Unidades físicas y su ciclo de vida
 │       ├── renta/           # Rentas + señales
@@ -76,7 +76,7 @@ Remali/
 └── Dockerfile
 ```
 
-> **Nota sobre `sys.path`:** en `settings.py` se hace `sys.path.insert(0, BASE_DIR/'apps')`, por eso los imports son `from maquinaria.models import ...` en lugar de `from apps.maquinaria...`. Funciona, pero no es la convención estándar de Django (ver auditoría §2).
+> Nota sobre `sys.path`: en `settings.py` se hace `sys.path.insert(0, BASE_DIR/'apps')`, por eso los imports son `from maquinaria.models import ...` en lugar de `from apps.maquinaria...`. Funciona, pero no es la convención estándar de Django (ver auditoría §2).
 
 ---
 
@@ -95,45 +95,45 @@ Marca ─────┴─< Equipo >─┤
                 │
 Venta >──< ItemVenta >── Refaccion          (venta de piezas con stock)
 
-Empresa >──< Obra                            (⚠ NO conectado a Renta todavía)
+Empresa >──< Obra                            (NO conectado a Renta todavía)
 
 User 1──1 PerfilUsuario
 Cupon · Notificacion · ConversacionSoporte 1──< MensajeSoporte   (viven en `maquinaria`)
 ```
 
-### 4.2 `maquinaria` — catálogo y utilidades
+### 4.2 `maquinaria`: catálogo y utilidades
 
-- **`Equipo`** — el *modelo/producto* del catálogo (no la máquina física).
+- `Equipo`: el *modelo o producto* del catálogo, no la máquina física.
   - Campos: `modelo`, `descripcion`, `imagen`, `categoria`, `tipo`, `marca`, `precio_venta`, `precio_dia`, `precio_semana`, `precio_mes`, `fecha_creacion`.
   - Propiedad `estado_resumen`: deriva "Disponible/Rentado/Vendido/Sin stock" mirando sus unidades.
-- **`Categoria`**, **`Tipo`**, **`Marca`** — catálogos simples (nombre único).
-- **`ImagenProducto`** — galería de imágenes por equipo.
-- **`Cupon`** — código + `descuento` (fracción 0–1, ej. `0.15` = 15 %).
-- **`Notificacion`** — feed interno (`tipo`, `titulo`, `mensaje`, `seccion`, `leida`, `ref` anti-duplicado, `data` JSON). Helper `crear_notificacion(...)`.
-- **`PerfilUsuario`** — 1–1 con el `User` de Django (avatar, teléfono, puesto, bio).
-- **`ConversacionSoporte`** + **`MensajeSoporte`** — chat de soporte cliente/admin.
+- `Categoria`, `Tipo` y `Marca`: catálogos simples de nombre único.
+- `ImagenProducto`: galería de imágenes por equipo.
+- `Cupon`: código y `descuento` (fracción de 0 a 1, por ejemplo `0.15` = 15 %).
+- `Notificacion`: feed interno (`tipo`, `titulo`, `mensaje`, `seccion`, `leida`, `ref` anti-duplicado, `data` JSON). Helper `crear_notificacion(...)`.
+- `PerfilUsuario`: uno a uno con el `User` de Django (avatar, teléfono, puesto, bio).
+- `ConversacionSoporte` y `MensajeSoporte`: el chat de soporte entre cliente y admin.
 
-### 4.3 `inventario` — unidades físicas ⭐
+### 4.3 `inventario`: unidades físicas
 
-**`Inventario`** = una máquina real concreta.
+`Inventario` es una máquina real concreta.
 
 | Campo | Descripción |
 |-------|-------------|
 | `equipo` (FK) | A qué modelo pertenece |
-| `codigo` | **Identificador interno automático** (ej. `TAL-0001`), único, no editable |
+| `codigo` | Identificador interno automático (ej. `TAL-0001`), único, no editable |
 | `numero_serie` | Serial del fabricante (opcional) |
 | `condicion` | `nueva` \| `seminueva` |
 | `estado` | `disponible` \| `rentado` \| `mantenimiento` \| `vendido` |
 | `ubicacion_actual` | "Bodega", "Taller", dirección de renta… |
 
-**Reglas de negocio (métodos del modelo):**
+Reglas de negocio (métodos del modelo):
 - `disponible_para_venta` → `estado == 'disponible'`.
-- `disponible_para_renta` → `condicion == 'seminueva'` **y** `estado == 'disponible'`. Las **nuevas no se rentan** (solo se venden).
-- `enviar_mantenimiento()` / `salir_mantenimiento()` — cambian estado y ubicación.
+- `disponible_para_renta` → `condicion == 'seminueva'` y `estado == 'disponible'`. Las nuevas no se rentan, solo se venden.
+- `enviar_mantenimiento()` y `salir_mantenimiento()` cambian estado y ubicación.
 - `marcar_vendido()`, `marcar_rentado()`.
-- `generar_codigo()` — prefijo de 3 letras del modelo + consecutivo (`PREF-0001`).
+- `generar_codigo()` arma el prefijo de 3 letras del modelo más el consecutivo (`PREF-0001`).
 
-**Máquina de estados de `estado`:**
+Máquina de estados de `estado`:
 
 ```
                  crear renta            devolver / finalizar
@@ -146,40 +146,40 @@ Cupon · Notificacion · ConversacionSoporte 1──< MensajeSoporte   (viven en
        └──── vender ──────────────► vendido   (estado terminal)
 ```
 
-### 4.4 `renta` — rentas
+### 4.4 `renta`: rentas
 
-> El detalle del flujo (estados, dinero, reservas, cancelación) está en **`03-FLUJO-RENTA-VENTA.md`**.
+> El detalle del flujo (estados, dinero, reservas, cancelación) está en `03-FLUJO-RENTA-VENTA.md`.
 
-**`Renta`** (FK a `Inventario`):
+`Renta` (FK a `Inventario`):
 - `modalidad` (`dia`/`semana`/`mes`), `duracion`, `fecha_inicio`, `fecha_fin` (autocalculada), `fecha_devolucion_real`.
 - Cliente: `empresa`/`obra` (FK opcional a `empresas`), o `cliente`/`telefono_cliente` (texto libre); `direccion`.
-- **Dinero:** `precio_unitario` (snapshot), `descuento`, `deposito`, `recargo`, `subtotal`, `total`.
+- Dinero: `precio_unitario` (snapshot), `descuento`, `deposito`, `recargo`, `subtotal`, `total`.
 - `estado`: `reservada` / `activa` / `finalizada` / `cancelada`.
-- `clean()` valida: unidad rentable (seminueva, no vendida/mantenimiento) y **sin traslape** de fechas.
-- `save()` (atómico): calcula `fecha_fin`, monta los importes, `full_clean()` y ocupa la unidad si es nueva y activa (vía `Inventario.ocupar_por_renta`, **fuente única**).
-- Métodos: `activar()` (reserva→activa), `finalizar()` (recargo por retraso + libera), `cancelar()`.
-- **`signals.py`** quedó **vacío a propósito** (la sincronización de estado vive ahora en el modelo).
+- `clean()` valida que la unidad sea rentable (seminueva, ni vendida ni en mantenimiento) y que no haya traslape de fechas.
+- `save()` (atómico): calcula `fecha_fin`, monta los importes, `full_clean()` y ocupa la unidad si es nueva y activa, vía `Inventario.ocupar_por_renta`, que es la fuente única.
+- Métodos: `activar()` (reserva→activa), `finalizar()` (cobra recargo por retraso y libera la unidad) y `cancelar()`.
+- `signals.py` quedó vacío a propósito: la sincronización de estado vive ahora en el modelo.
 
-### 4.5 `ventas` — ventas
+### 4.5 `ventas`: ventas
 
-- **`Venta`**: `nombre_cliente`, `telefono_cliente`, `empresa` (FK opcional), `metodo_pago`, `estado` (`activa`/`cancelada`), `fecha`, `usuario`, **`inventario`** (FK nullable → venta de una máquina) + `precio_maquina`.
-  - **Dinero:** `subtotal`, `iva`, `total` (los precios se capturan **con IVA incluido** y se desglosan).
+- `Venta`: `nombre_cliente`, `telefono_cliente`, `empresa` (FK opcional), `metodo_pago`, `estado` (`activa` o `cancelada`), `fecha`, `usuario`, `inventario` (FK nullable, la venta de una máquina) y `precio_maquina`.
+  - Dinero: `subtotal`, `iva`, `total`. Los precios se capturan con IVA incluido y el sistema los desglosa.
   - `save()` atómico: valida `puede_venderse()` y precio > 0, calcula IVA y marca la unidad `vendido` (vía `Inventario.marcar_vendido`).
-  - `recalcular_total()` suma máquina + `ItemVenta`. `cancelar()` repone stock y devuelve la máquina. `as_ticket_text()` incluye la máquina + desglose de IVA.
-- **`ItemVenta`**: `venta`, `refaccion` (FK), `cantidad`, `precio_unitario`, `subtotal`.
-  - `save()`: toma el precio de la refacción, **valida y descuenta stock**, recalcula el total de la venta.
+  - `recalcular_total()` suma la máquina y los `ItemVenta`. `cancelar()` repone stock y devuelve la máquina. `as_ticket_text()` incluye la línea de la máquina y el desglose de IVA.
+- `ItemVenta`: `venta`, `refaccion` (FK), `cantidad`, `precio_unitario`, `subtotal`.
+  - `save()` toma el precio de la refacción, valida y descuenta stock, y recalcula el total de la venta.
 
-### 4.6 `refacciones` — piezas (base para el futuro)
+### 4.6 `refacciones`: piezas (base para el futuro)
 
-**`Refaccion`**: `nombre`, `descripcion`, `precio_venta`, `stock`, `codigo_barras` (EAN/UPC único).
-- **Sin API pública** (su `urls.py` lo dice explícitamente). Solo se administra por el admin de Django y se vende vía `ItemVenta`.
-- **No está ligada a `Equipo`/`Marca`** (no se sabe qué pieza sirve para qué máquina). Ver roadmap en la auditoría §6.
+`Refaccion`: `nombre`, `descripcion`, `precio_venta`, `stock`, `codigo_barras` (EAN/UPC único).
+- No tiene API pública, y su `urls.py` lo dice explícitamente. Solo se administra por el admin de Django y se vende vía `ItemVenta`.
+- No está ligada a `Equipo` ni a `Marca`, así que no se sabe qué pieza sirve para qué máquina. Ver roadmap en la auditoría §6.
 
-### 4.7 `empresas` — clientes B2B
+### 4.7 `empresas`: clientes B2B
 
-- **`Empresa`**: `nombre`, `rfc`, `contacto`, `telefono`, `email`, `direccion`, `notas`, `activa`.
-- **`Obra`**: pertenece a una empresa; `nombre`, `ubicacion`, `responsable`, `estado` (`activa`/`pausada`/`finalizada`).
-- API CRUD solo-admin. **Aún no se enlaza con `Renta`** (la renta guarda `cliente` como texto).
+- `Empresa`: `nombre`, `rfc`, `contacto`, `telefono`, `email`, `direccion`, `notas`, `activa`.
+- `Obra`: pertenece a una empresa; `nombre`, `ubicacion`, `responsable`, `estado` (`activa`, `pausada` o `finalizada`).
+- API CRUD solo para admin. Todavía no se enlaza con `Renta`, que guarda `cliente` como texto.
 
 ---
 
@@ -192,7 +192,7 @@ Base: todas las rutas cuelgan de `/api/`. Autenticación por `Authorization: Bea
 | Método | Ruta | Permiso | Descripción |
 |--------|------|---------|-------------|
 | POST | `/api/auth/refresh/` | público | Refrescar access token (lee el refresh de la cookie httpOnly) |
-| POST | `/api/auth/login/` | público | Login flexible por username **o** email. Única puerta de entrada: freno de 10/min por IP, refresh en cookie httpOnly y candado de correo confirmado para clientes (403 `correo_sin_verificar`) |
+| POST | `/api/auth/login/` | público | Login flexible por username o por email. Única puerta de entrada: freno de 10/min por IP, refresh en cookie httpOnly y candado de correo confirmado para clientes (403 `correo_sin_verificar`) |
 | GET | `/api/auth/me/` | autenticado | Datos del usuario actual |
 | GET/PUT/PATCH | `/api/auth/perfil/` | autenticado | Ver/editar perfil (avatar incluido) |
 
@@ -200,7 +200,7 @@ Base: todas las rutas cuelgan de `/api/`. Autenticación por `Authorization: Bea
 
 | Método | Ruta | Permiso |
 |--------|------|---------|
-| GET | `/api/equipos/` | público (lectura) — filtros: `uso`, `category`, `brand`, `type`, `price_min/max`, `last_days`, `search`, `unit` |
+| GET | `/api/equipos/` | público (lectura). Filtros: `uso`, `category`, `brand`, `type`, `price_min/max`, `last_days`, `search`, `unit` |
 | POST | `/api/equipos/` | admin |
 | GET | `/api/equipos/<id>/` | público |
 | PUT/PATCH/DELETE | `/api/equipos/<id>/` | admin |
@@ -208,9 +208,9 @@ Base: todas las rutas cuelgan de `/api/`. Autenticación por `Authorization: Bea
 | GET/POST | `/api/categorias/`, `/api/tipos/`, `/api/marcas/` | lectura pública / escritura admin |
 | GET/PUT/DELETE | `/api/{categorias,tipos,marcas}/<id>/` | admin |
 | GET/POST | `/api/cupones/` | list autenticado / crear admin |
-| POST | `/api/cupones/aplicar/` | público — body `{code}` |
+| POST | `/api/cupones/aplicar/` | público, body `{code}` |
 
-### 5.3 Inventario (`inventario`) ⭐
+### 5.3 Inventario (`inventario`)
 
 | Método | Ruta | Permiso | Descripción |
 |--------|------|---------|-------------|
@@ -225,16 +225,16 @@ Base: todas las rutas cuelgan de `/api/`. Autenticación por `Authorization: Bea
 
 | Método | Ruta | Permiso |
 |--------|------|---------|
-| GET | `/api/rentas/` | autenticado — `?estado=activa\|finalizada\|cancelada` |
+| GET | `/api/rentas/` | autenticado, `?estado=activa\|finalizada\|cancelada` |
 | POST | `/api/rentas/crear/` | autenticado |
 | POST/PATCH | `/api/rentas/<pk>/devolver/` | autenticado |
-| GET | `/api/rentas/alertas/` | autenticado — rentas vencidas |
+| GET | `/api/rentas/alertas/` | autenticado, rentas vencidas |
 
 ### 5.5 Ventas (`ventas`)
 
 | Método | Ruta | Permiso |
 |--------|------|---------|
-| GET | `/api/ventas/lista/` | autenticado — `?maquinaria=1` para filtrar solo máquinas |
+| GET | `/api/ventas/lista/` | autenticado, `?maquinaria=1` para filtrar solo máquinas |
 
 ### 5.6 Empresas / obras (`empresas`)
 
@@ -254,7 +254,7 @@ Base: todas las rutas cuelgan de `/api/`. Autenticación por `Authorization: Bea
 | POST | `/api/mensajeria/contacto/` | público (formulario de contacto) |
 | GET | `/api/mensajeria/conversaciones/` · `/<pk>/` | admin |
 | POST | `/api/mensajeria/conversaciones/<pk>/{responder,cerrar,abrir}/` | admin |
-| GET | `/api/dashboard/metricas/` | público — **hoy devuelve valores fijos (ver auditoría)** |
+| GET | `/api/dashboard/metricas/` | público. Hoy devuelve valores fijos (ver auditoría) |
 
 ---
 
@@ -308,20 +308,98 @@ y falla si una capacidad configurable no tiene ni un gate real detrás.
 El inventario ruta por ruta —con la razón de cada decisión— está en
 `docs/superpowers/notas/2026-08-22-inventario-permisos.md`.
 
-### 6.3 El núcleo intocable
+### 6.2.1 Los puestos: nombre visible ≠ identidad interna
 
-Cinco capacidades que la pantalla muestra con candado y ninguna configuración
-reparte: `gestionar_usuarios`, `editar_datos_bancarios`, `borrar_catalogo`,
-`tener_codigo_propio` y `configurar_permisos`. Dar de alta gente, cambiar la
-cuenta donde caen los pagos, borrar del catálogo y tener NIP propio son las
-llaves; repartirlas desde una pantalla vaciaría el mecanismo. Candado no es
-apagado: la celda muestra su estado real.
+Un puesto es una fila de `Rol` (`clave`, `nombre`, `nivel`, `protegido`) más el
+GRUPO de Django del mismo nombre, que es lo que liga a la gente con su puesto.
+
+- **`clave`** es la identidad interna y no cambia nunca. Los permisos guardados
+  (`PermisoRol.rol`) y las reglas del código (`es_gestor`, `es_cajero`, los
+  ajustes por puesto) preguntan por ella.
+- **`nombre`** es solo lo que se lee. Renombrar un puesto no mueve un permiso ni
+  saca a nadie de su lugar: es el MISMO grupo, con otro nombre.
+
+Los cuatro base (`administrador`, `gestor`, `cajero`, `tecnico`) vienen con
+`protegido=True`: se renombran, no se borran, porque el código los nombra por
+escrito y borrarlos apagaría esas reglas en silencio.
+
+El dueño crea los que quiera desde la pantalla. **Un puesto nuevo nace en
+blanco**: nivel de operación (entra al panel) y TODAS las capacidades apagadas.
+Heredarle las de un puesto parecido sería cómodo y sería el error —se colarían
+permisos que nadie revisó—, así que lo que pueda hacer es exactamente lo que
+alguien le encendió a mano. Borrarlo pide el código de 6 dígitos y deja **sin
+acceso al panel** a quien lo tuviera, cosa que la pantalla advierte con el
+número de personas enfrente.
+
+`mapa_roles()` lee esa tabla en cada petición, sin caché en memoria: el panel
+corre en varios procesos y una copia vieja significaría gente que entra o no
+según qué worker le tocó.
+
+### 6.2.2 Equipo y Clientes: por qué son dos secciones y no tres
+
+El panel separa a las personas por **para qué sirve su cuenta**, no por si la
+tienen:
+
+- **Equipo** — las cuentas de trabajo: quién entra al panel y con qué puesto.
+- **Clientes** — el padrón: a quién le vendemos o rentamos, **con cuenta o sin
+  ella**. Si un contacto tiene cuenta, eso se ve DENTRO de su renglón (con qué
+  correo entra, si confirmó, cuándo entró) y ahí mismo se le quita o se le
+  devuelve el acceso.
+
+La tentación es partir por "tiene cuenta / no tiene cuenta", y es justo la línea
+equivocada: **es la única que la misma persona cruza sola**. Juan te renta tres
+años en mostrador, un día se registra en la tienda, y sin que cambie nada de
+quién es ni de lo que te debe se mudaría de pantalla. Eso es exactamente lo que
+la app `clientes` vino a terminar (ver el encabezado de su `models.py`: "el mismo
+señor podía existir de cuatro formas a la vez").
+
+Por eso no hay una sección de "usuarios con cuenta". Existió, mezclaba los dos
+mundos en pestañas, y su mitad de clientes ofrecía botones que la API rechaza
+(la contraseña la recupera el cliente, la verificación la hace él).
+
+**Pendiente de la fase 2:** `rentas_mias` filtra por `Renta.usuario`, y vincular
+un contacto al padrón NO rellena ese campo en los documentos viejos. Un cliente
+que rentó sin cuenta y luego se registra sigue sin ver esas rentas en la app; hoy
+se ligan una por una. Falta ofrecer "traerle su historial" al vincular.
+
+### 6.3 Las llaves del negocio (ya sin candado)
+
+Cinco capacidades vivían con candado y ninguna configuración las repartía:
+`gestionar_usuarios`, `editar_datos_bancarios`, `borrar_catalogo`,
+`tener_codigo_propio` y `configurar_permisos`.
+
+**El dueño las abrió (ago-2026):** él decide a quién se las da. `NUCLEO` quedó
+vacío —el mecanismo sigue escrito por si mañana hay que volver a cerrar alguna—
+y la pantalla ya no muestra candados.
+
+Lo que eso implica, escrito para que no se descubra tarde:
+
+- **`configurar_permisos` es la llave que reparte las demás.** A quien la reciba
+  se le puede conceder todo lo otro, incluida ella misma. El único freno que
+  queda es el código de 6 dígitos al guardar; y para el **Gestor** ese código es
+  el del **dueño** (`seguridad.verificar_codigo`), así que él no se autoriza solo.
+  Para un Administrador con la llave, en cambio, basta su propio NIP.
+- **Al dueño no se le puede cerrar ninguna.** Su nivel se las enciende y los
+  overrides solo aplican a puestos: no hay forma de encerrarlo fuera de su
+  sistema. Lo vigila `LasLlavesDelNegocioSeRepartenTest`.
+- Dos de ellas no se imponen desde `permission_classes` de una ruta:
+  `borrar_catalogo` vive en `ProtectedDestroyMixin.destroy` y
+  `editar_datos_bancarios` es un filtro de CAMPOS del serializer de
+  configuración. Van declaradas en `IMPUESTAS_EN_EL_CUERPO` con su lugar exacto,
+  para que la prueba que persigue interruptores decorativos no las cuente como
+  huérfanas ni se vuelva un colador.
 
 ### 6.4 La pantalla (Dashboard → Permisos)
 
-Sección gateada por `configurar_permisos`, o sea solo el dueño. Matriz de
-capacidades × los cuatro puestos editables, con cruz de lectura, contador vivo
-por puesto y punto dorado en lo que difiere de fábrica.
+Sección gateada por `configurar_permisos`, o sea solo el dueño. Dos vistas del
+mismo dato: **por puesto** (la lista, con su hoja de capacidades por áreas
+plegables) y **comparar puestos** (la matriz de capacidades × puestos, con cruz
+de lectura y contador vivo). En las dos, el punto dorado marca lo que difiere de
+fábrica.
+
+- `POST /api/roles/` — crea un puesto con el nombre que se le dé.
+- `PATCH /api/roles/<clave>/` — le cambia el nombre.
+- `DELETE /api/roles/<clave>/` — lo borra (pide código; los base se rechazan).
 
 - `GET /api/permisos/` — catálogo, roles, fábrica, efectivo y overrides.
 - `POST /api/permisos/` — recibe EL LOTE (`{cambios: [...], codigo}`) y lo aplica
@@ -343,11 +421,11 @@ El diseño completo, con lo que se decidió y lo que quedó fuera, está en
 
 ## 7. Configuración y despliegue
 
-- **Variables de entorno** (`.env.dev` local, Railway en prod): `SECRET_KEY`, `DEBUG`, `ALLOWED_HOSTS`, `MYSQL_URL`/`DB_*`, `CLOUDINARY_*`, `EMAIL_*`, `REDIS_URL`, `FRONTEND_URL`, `BACKEND_URL`.
-- **Base de datos:** usa `MYSQL_URL` → `DB_NAME` → `MYSQLDATABASE` → SQLite (en ese orden).
-- **Media:** Cloudinary si hay credenciales; si no, `media/` local.
-- **Frontend:** Django sirve `frontend/dist/index.html` como catch-all (SPA). El build se genera con `npm run build`.
-- **Comandos de management** (`maquinaria/management/commands/`): `init_roles`, `seed_demo`, `seed_maquinaria`, `purge_products`, `send_test_email`.
+- Variables de entorno (`.env.dev` en local, Railway en prod): `SECRET_KEY`, `DEBUG`, `ALLOWED_HOSTS`, `MYSQL_URL`/`DB_*`, `CLOUDINARY_*`, `EMAIL_*`, `REDIS_URL`, `FRONTEND_URL`, `BACKEND_URL`.
+- Base de datos: usa `MYSQL_URL` → `DB_NAME` → `MYSQLDATABASE` → SQLite, en ese orden.
+- Media: Cloudinary si hay credenciales; si no, `media/` local.
+- Frontend: Django sirve `frontend/dist/index.html` como catch-all de la SPA. El build se genera con `npm run build`.
+- Comandos de management (`maquinaria/management/commands/`): `init_roles`, `seed_demo`, `seed_maquinaria`, `purge_products`, `send_test_email`.
 
 ### 7.1 Correr en local
 
@@ -355,7 +433,7 @@ El diseño completo, con lo que se decidió y lo que quedó fuera, está en
 # Backend
 cd backend
 source ../env/bin/activate         # o tu venv
-pip install -r requirements.txt    # ⚠ instala también reportlab y qrcode (ver auditoría)
+pip install -r requirements.txt    # instala también reportlab y qrcode (ver auditoría)
 python manage.py migrate
 python manage.py runserver          # http://localhost:8000  (admin en /admin/)
 
@@ -371,9 +449,9 @@ npm run dev                         # http://localhost:5173
 
 - Cliente API en `src/lib/api.ts`: axios con `baseURL = VITE_API_URL || /api`, inyecta el JWT desde `localStorage`, y ante `401` limpia sesión y manda a `/login`.
 - Ruteo (`App.tsx`): público (`/`, `/equipos`) con Navbar/Footer; `/login` y `/dashboard` "bare"; `/dashboard` protegido por `RequireAdmin`.
-- **Base de plantilla:** `src/scenes/*` y `theme.js`/`mockData.js` provienen de una plantilla de admin de React. Varias páginas propias (`Cart`, `Checkout`, `Cotizacion`, `EquipoDetail`, `Profile`, `AdminDashboard`) existen pero **no están enganchadas** en `App.tsx` → conviene limpiar o cablear (ver auditoría §5).
+- Base de plantilla: `src/scenes/*`, `theme.js` y `mockData.js` vienen de una plantilla de admin de React. Varias páginas propias (`Cart`, `Checkout`, `Cotizacion`, `EquipoDetail`, `Profile`, `AdminDashboard`) existen pero no están enganchadas en `App.tsx`, así que conviene limpiarlas o cablearlas (ver auditoría §5).
 - Estado global por Context: `auth`, `cart`, `priceUnit`, `profile`, `theme`, `toast`.
 
 ---
 
-Ver **`02-AUDITORIA-Y-MEJORAS.md`** para el estado de la estructura frente a las convenciones de Django/DRF, bugs detectados, y el plan de mejoras (admin, inventario/máquinas y refacciones).
+Ver `02-AUDITORIA-Y-MEJORAS.md` para el estado de la estructura frente a las convenciones de Django/DRF, los bugs detectados y el plan de mejoras (admin, inventario y refacciones).

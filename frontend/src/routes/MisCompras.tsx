@@ -8,6 +8,7 @@ import Migas from '../components/Migas'
 import { formatMoney } from '../lib/utils'
 import { useAuth } from '../store/auth'
 import { useLatido } from '../lib/latido'
+import { anotarFallo } from '../lib/fallo'
 
 type Compra = {
   id: number
@@ -133,7 +134,7 @@ export default function MisCompras() {
     let vivo = true
     const cargar = () => api.get<{ compras: Compra[] }>('/ventas/mias/', { fondo: true } as never)
       .then(r => { if (vivo) setCompras(r.data.compras || []) })
-      .catch(() => {})
+      .catch(anotarFallo)
       .finally(() => { if (vivo) setCargando(false) })
     cargar()
     recargar.current = cargar

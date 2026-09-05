@@ -1,4 +1,3 @@
-import { motion, useReducedMotion } from 'framer-motion'
 import { useNavigate } from 'react-router-dom'
 import React from 'react'
 
@@ -72,7 +71,6 @@ const CFG: Record<ErrorType, Cfg> = {
 export default function ErrorPage({ type = '404' }: { type?: ErrorType }) {
   const cfg = CFG[type]
   const nav = useNavigate()
-  const reduce = useReducedMotion()
 
   const go = (to: string) => (to === '.' ? window.location.reload() : nav(to))
 
@@ -84,17 +82,12 @@ export default function ErrorPage({ type = '404' }: { type?: ErrorType }) {
   }
 
   return (
-    <main className="relative min-h-[78vh] overflow-hidden bg-app text-ink flex flex-col items-center justify-center px-6 py-12">
+    <main className="pantalla-mensaje relative overflow-hidden bg-app text-ink px-6 py-12">
       {/* Halo dorado tenue de fondo — atmósfera, no decoración chillona. */}
       <div aria-hidden className="pointer-events-none absolute left-1/2 top-[38%] -translate-x-1/2 -translate-y-1/2 h-[42rem] w-[42rem] rounded-full opacity-[0.5]"
         style={{ background: 'radial-gradient(closest-side, var(--c-gold-soft), transparent)' }} />
 
-      <motion.div
-        initial={reduce ? { opacity: 0 } : { opacity: 0, y: 16 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
-        className="relative flex w-full max-w-lg flex-col items-center text-center"
-      >
+      <div className="error-entra relative flex w-full max-w-lg flex-col items-center text-center">
         {/* Glifo de obra en placa dorada suave */}
         <div className="mb-7 grid h-16 w-16 sm:h-[72px] sm:w-[72px] place-items-center rounded-2xl bg-gold-soft text-gold-ink ring-1 ring-[color:var(--c-gold)]/20">
           {cfg.glyph}
@@ -106,12 +99,10 @@ export default function ErrorPage({ type = '404' }: { type?: ErrorType }) {
             {cfg.code}
           </span>
           {/* PIEZA-FIRMA: banda de precaución de obra */}
-          <motion.div
+          <div
             aria-hidden
-            className="mx-auto mt-2 h-3.5 w-[min(320px,86%)] overflow-hidden rounded-full ring-1 ring-black/10 dark:ring-white/10"
+            className="banda-obra mx-auto mt-2 h-3.5 w-[min(320px,86%)] overflow-hidden rounded-full ring-1 ring-black/10 dark:ring-white/10"
             style={bandStyle}
-            animate={reduce ? undefined : { backgroundPositionX: ['0px', '44px'] }}
-            transition={reduce ? undefined : { duration: 1.6, ease: 'linear', repeat: Infinity }}
           />
         </div>
 
@@ -140,7 +131,7 @@ export default function ErrorPage({ type = '404' }: { type?: ErrorType }) {
             </button>
           )}
         </div>
-      </motion.div>
+      </div>
 
       {/* Anclaje de marca/localidad — grounding, letra chica */}
       <p className="relative mt-14 text-[12px] font-medium tracking-wide text-mute">

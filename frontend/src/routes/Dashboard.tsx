@@ -1,186 +1,94 @@
-import { useEffect, useState, useCallback, useRef, useMemo } from 'react'
+import { useEffect, useState, useCallback, useRef, useMemo, useSyncExternalStore, lazy, Suspense } from 'react'
 import Modal from '../components/Modal'
 import CajaPOS from './CajaPOS'
 import { createPortal } from 'react-dom'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
 import QRCode from 'qrcode'
 import api from '../lib/api'
-import { formatMoney, soloTelefono } from '../lib/utils'
+import { cuandoLlego, formatMoney } from '../lib/utils'
 import DialogoHost, { confirmar, pedir, elegir } from '../components/Dialogo'
 
 import TicketModal from '../components/TicketModal'
 import VentaDetalleModal from '../components/VentaDetalleModal'
 import EtiquetaModal from '../components/EtiquetaModal'
-import OrdenCartaModal from '../components/OrdenCartaModal'
-import CotizacionCartaModal from '../components/CotizacionCartaModal'
 import FichaTecnicaModal from '../components/FichaTecnicaModal'
 import ClientesAdmin from '../components/ClientesAdmin'
-import BuscadorCliente, { SELECCION_VACIA, type SeleccionCliente } from '../components/BuscadorCliente'
 import Dock, { type DockItem } from '../components/ui/dock'
 import { REGIMEN_FISCAL, USO_CFDI } from '../lib/sat'
-import { usePrintSettings, charsPerLine, getNegocio } from '../lib/printSettings'
-import { invalidarConfigPublica, useConfigPublica } from '../lib/configPublica'
-import { AnimatePresence, motion } from 'framer-motion'
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import { useRecurso, invalidar, type Tema } from '../lib/realtime'
 import { useLatidoPanel } from '../lib/latido'
-import { conectarAvisos } from '../lib/avisos'
 import { CLAVE_JORNADA, recordarAcceso, ProveedorPermisos, usePuede, type Capacidades } from '../lib/acceso'
-import { buildTestTicket, buildTicket, layoutTicket, altoTicketMm, type Comprobante, type Zona } from '../lib/escpos'
-import TicketPaper, { paperCss } from '../components/TicketPaper'
-import { procesarLogo, reducirOriginal, anchoPuntos, medirLogo, analizarTinta } from '../lib/ticketLogo'
-import { METODOS, metodoSoportado, imprimirTermico, vincularMetodo, metodoVinculado, infoMetodo } from '../lib/printer'
 import { useAuth } from '../store/auth'
+import { useToast, type Notify } from '../store/toast'
 import ThemeToggle from '../components/ThemeToggle'
-import { KpiGrid } from '../components/ui/kpi-grid'
+import PieByRix from '../components/PieByRix'
+import { AvatarUsuario } from '../components/ui/avatar-usuario'
+import { KpiGrid, type KpiItem, type KpiTone } from '../components/ui/kpi-grid'
+import Paginador from '../components/ui/paginador'
+import { usePaginado } from '../components/ui/usar-paginado'
+import NumberFlow, { NumberFlowGroup } from '@number-flow/react'
+import { Monto, Numero } from '../components/ui/numero'
 import resolveMediaUrl from '../lib/resolveMediaUrl'
-import { descargarBlob } from '../lib/descargar'
 import LogoRemali from '../components/ui/logo-remali'
 import { waLink } from '../lib/whatsapp'
 import { useLang } from '../lib/i18n'
 
-/** Number laxo para métricas: null/''/basura → 0. */
-const num = (v: any) => Number(v) || 0
+import {
+  AbonoModal, type AdeudosDatos, BotonExportar, BuscarCuenta, Card, CardBarra, type Coupon, type CuentaCliente,
+  type DashMetrics, type Empresa, type Equipo, EstadoVacio, type Evidencia, FACTURA_VACIA,
+  type FacturaData, FacturaFields, FilasEsqueleto, FiltroChips, InputDinero, type Notif, type Option, type OrdenReparacion,
+  type Pedido, type PedidosDatos, type Refaccion, type RentaActiva, type RentaFull,
+  SECTION_META, type Section, Segmentado, SelectorPeriodo, type SolicitudFactura, type Unidad,
+  type UsuarioPanel, type Venta, abrirOrdenCartaPDF, descargarReporte, equipoFromUnit,
+  errorMsg, fijarCotEnCurso, fijarRentaAAbrir, fijarVentaAAbrir, input,
+  label, leerCotEnCurso, MenuFila, num, orMoney, pillCond, progresoCot, siguientePaso, suscribirCot,
+  pillEstado, seRenta, tomarLlegaDeTraspaso, tomarRentaAAbrir, tomarRentaEnVuelo,
+  tomarVentaAAbrir, validarFactura,
+} from './dashboard/comun'
 
-/* ─────────── Tipos ─────────── */
-type Option = { id: number; nombre: string }
-type Equipo = {
-  id?: number
-  modelo: string
-  descripcion?: string
-  precio_dia?: number | string | null
-  precio_semana?: number | string | null
-  precio_mes?: number | string | null
-  precio_venta?: number | string | null
-  /** Meses de garantía al comprador. 3 por defecto, ajustable por máquina. */
-  garantia_meses?: number | string | null
-  imagen?: string | null
-  ficha_tecnica?: string | null
-  especificaciones?: { etiqueta: string; valor: string }[]
-  que_incluye?: string[]
-  promo_pct?: number
-  categoria?: Option | null
-  tipo?: Option | null
-  marca?: Option | null
-  disponible_venta?: boolean
-  disponible_renta?: boolean
-  condiciones?: string[]
-  stock_disponible?: number
-  unidades_total?: number
-  unidades_rentadas?: number
-  dias_entrega_pedido?: number | string | null
-}
-type Coupon = { id?: number; codigo: string; descuento: number; activo?: boolean }
-type Refaccion = {
-  id: number; nombre: string; descripcion?: string | null; precio_venta: string
-  stock: number; stock_minimo: number; para_venta: boolean; ubicacion?: string
-  codigo_barras: string; bajo_stock: boolean; fecha_creacion?: string
-}
-type OrdenReparacionItem = {
-  id: number; origen: 'stock' | 'externa'; refaccion?: number | null; refaccion_nombre?: string
-  nombre: string; cantidad: number; costo_unitario: string; subtotal: string
-}
-type OrdenReparacion = {
-  id: number; folio: string; tipo: 'cliente' | 'interna'
-  estado: 'recibida' | 'proceso' | 'terminada' | 'entregada'
-  cliente_nombre: string; cliente_telefono: string; empresa?: number | null; empresa_nombre?: string
-  unidad?: number | null; unidad_codigo?: string; equipo_descripcion: string; numero_serie: string
-  diagnostico: string; trabajo_realizado: string; costo_mano_obra: string; notas: string
-  items: OrdenReparacionItem[]; total_refacciones: string; total: string
-  cliente_display: string; equipo_display: string; cuenta?: string | null
-  fecha_recibida: string; fecha_entrega?: string | null; actualizado_en?: string
-}
-type Venta = {
-  id: number
-  folio?: string | null
-  nombre_cliente?: string | null
-  empresa?: string | null
-  subtotal?: string
-  iva?: string
-  estado?: string
-  total: string
-  metodo_pago: string
-  fecha: string
-  /** Los abonos con su fecha: el ingreso se cuenta el día que entró el dinero. */
-  pagos?: { fecha: string; monto: string; metodo: string; por?: string }[]
-  vendedor?: string | null
-  telefono_cliente?: string | null
-  cuenta?: string | null
-  unidad?: { id: number; codigo: string; numero_serie?: string | null; equipo?: string | null } | null
-  /** Una entrada por máquina. `unidad` es la primera; esto son todas. */
-  maquinas?: { id: number; unidad_id: number | null; codigo: string | null; numero_serie?: string | null; equipo?: string | null; precio: string; entregada: boolean }[]
-  origen?: { folio: string; resumen: string } | null
-}
-type RentaActiva = {
-  id: number
-  inventario: { id: number; codigo?: string; numero_serie?: string | null; equipo?: string | null; equipo_id?: number | null }
-  modalidad: string
-  cliente?: string
-  telefono_cliente?: string
-  direccion: string
-  fecha_fin: string
-  dias_restantes: number
-  vencida: boolean
-}
-type Notif = {
-  id: number
-  tipo: 'renta' | 'venta' | 'alerta' | 'inventario' | 'sistema'
-  titulo: string
-  mensaje: string
-  seccion: string
-  leida: boolean
-  data?: Record<string, any>
-  creada: string
-}
-/** Una partida es de venta o de renta (día/semana/mes); una cotización puede mezclar ambas. */
-type Modalidad = 'venta' | 'dia' | 'semana' | 'mes'
-const MODALIDADES: { key: Modalidad; label: string; corto: string }[] = [
-  { key: 'venta', label: 'Venta', corto: 'Venta' },
-  { key: 'dia', label: 'Renta por día', corto: 'Día' },
-  { key: 'semana', label: 'Renta por semana', corto: 'Semana' },
-  { key: 'mes', label: 'Renta por mes', corto: 'Mes' },
-]
-const TIPO_COT_LABEL: Record<string, string> = { venta: 'Venta', renta: 'Renta', mixta: 'Venta y renta' }
+import { RentModal, SellModal, NuevoPedidoModal, RenovarRentaModal } from './dashboard/hojas'
+import GraficaIngresos, { SERIES_INGRESO } from './dashboard/grafica-ingresos'
+import BarrasApiladas from '../components/charts/barras-apiladas'
+import BarrasRanking from '../components/charts/barras-ranking'
+import Dona from '../components/charts/dona'
+import AreaOcupacion from '../components/charts/area'
+import { diaCorto, dinero } from '../components/charts/formato'
+import { anotarFallo } from '../lib/fallo'
 
-type CotizacionItem = { id: number; descripcion: string; cantidad: number; duracion?: number; precio_unitario: string; precio_lista?: string; equipo?: number | null; subtotal: string; modalidad: Modalidad; modalidad_label: string }
-type CotizacionFoto = { id: number; imagen: string; orden: number }
-type Cotizacion = {
-  id: number; folio: string | null; tipo: 'venta' | 'renta' | 'mixta'
-  estado: 'borrador' | 'enviada' | 'aceptada' | 'rechazada' | 'cancelada'
-  entrega_prometida?: string | null
-  cliente_nombre: string; cliente_telefono: string; cliente_email?: string; empresa?: number | null; empresa_nombre?: string
-  vigencia_dias: number; aplica_iva: boolean; notas: string
-  items: CotizacionItem[]; fotos?: CotizacionFoto[]; subtotal: string; subtotal_venta: string; subtotal_renta: string; base: string; iva: string; total: string
-  cliente_display: string; vigencia_hasta?: string | null; vencida?: boolean; creada: string
-  token_publico?: string
-  convertida?: boolean; venta_id?: number | null; renta_id?: number | null
-  usuario_nombre?: string | null
-  autorizada_por?: string | null
-  autorizada_en?: string | null
-  cancelacion_solicitada?: string | null
-  cancelacion_motivo?: string
-  usuario?: number | null
-  usuario_email?: string | null
-  origen?: 'admin' | 'cliente'
-  datos_solicitud?: { empresa?: string; obra?: { responsable?: string; direccion?: string; telefono?: string; email?: string } }
-  atendida_en?: string | null; atendida_por_nombre?: string | null; escalada_en?: string | null
+const MESES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
+
+/* Fuera del componente a propósito. Declarados dentro de su cuerpo, cada render
+   creaba funciones NUEVAS: para React son componentes distintos, así que tiraba
+   el subárbol y lo montaba de nuevo en vez de actualizarlo (se pierde estado,
+   foco y posición de scroll de lo que haya dentro). Ver la regla
+   rerender-no-inline-components. */
+function Field({ label, value, full, labelCls }: { label: string; value?: React.ReactNode; full?: boolean; labelCls?: string }) {
+  if (!value) return null
+  return (
+    <div className={full ? 'col-span-2' : ''}>
+      <p className={`text-[12px] ${labelCls || 'text-mute'}`}>{label}</p>
+      <p className="text-[13.5px] font-bold text-ink break-words leading-snug mt-0.5">{value}</p>
+    </div>
+  )
 }
 
-type SolicitudFactura = {
-  id: number; tipo: 'venta' | 'renta'; folio_origen: string
-  rfc: string; razon_social: string; codigo_postal: string; regimen_fiscal: string; uso_cfdi: string; email: string
-  subtotal: string; iva: string; total: string; forma_pago: string; concepto: string
-  estado: 'pendiente' | 'facturada' | 'cancelada'; uuid: string; fecha_timbrado?: string | null; notas: string
-  cliente_display: string; datos_completos: boolean; fecha_origen?: string | null; creada: string
+function Titulo({ children }: { children: React.ReactNode }) {
+  return <p className="text-[11px] font-extrabold tracking-[0.5px] text-gold-ink mb-3">{children}</p>
 }
 
-// Métricas autoritativas del dashboard (backend suma ventas + rentas, sin tope).
-type DashMetrics = {
-  ingresos_hoy?: number
-  ingresos_mes?: { ventas: number; rentas: number; total: number }
-  ingresos_por_mes?: { label: string; ventas: number; rentas: number; total: number }[]
-}
+const ReparacionesAdmin = lazy(() => import('./dashboard/reparaciones'))
 
+const UbicacionesAdmin = lazy(() => import('./dashboard/jornada'))
 
+const EquipoAdmin = lazy(() => import('./dashboard/equipo'))
+const PermisosAdmin = lazy(() => import('./dashboard/permisos'))
+
+const CotizacionesAdmin = lazy(() => import('./dashboard/cotizaciones'))
+
+/* Configuración es la sección más pesada y la que menos se abre: viaja aparte
+   y se descarga solo cuando alguien entra a ella. */
+const ConfiguracionAdmin = lazy(() => import('./dashboard/configuracion'))
 
 /**
  * Sección donde abre el panel. Administración empieza en el Resumen; el almacén
@@ -200,109 +108,6 @@ function seccionInicial(): Section {
   } catch {
     return 'resumen'
   }
-}
-
-/** Descarga la ORDEN CARTA en PDF de una venta/renta. Reemplaza al ticket
- *  térmico (que solo se usa al vender refacciones). Se descarga en vez de abrir
- *  en pestaña porque tras un `await` el navegador bloquea window.open. */
-async function abrirOrdenCartaPDF(base: 'ventas' | 'rentas', id: number) {
-  try {
-    const r = await api.get(`/${base}/${id}/ticket/`, { responseType: 'blob', fondo: true } as never)
-    descargarBlob(r.data as Blob, base === 'ventas' ? `orden-venta-${id}.pdf` : `orden-renta-${id}.pdf`)
-  } catch { /* el interceptor global ya avisa el error */ }
-}
-
-/** Descarga un reporte CSV (abre en Excel) respetando los filtros que se pasen. */
-async function descargarReporte(url: string, params: Record<string, string>, archivo: string, notify: (m: string, t?: 'ok' | 'err') => void) {
-  try {
-    const r = await api.get(url, { params, responseType: 'blob', fondo: true } as never)
-    descargarBlob(r.data as Blob, archivo)
-    notify('Reporte descargado')
-  } catch {
-    notify('No se pudo generar el reporte', 'err')
-  }
-}
-
-/** Botón de exportar, consistente en las vistas de dinero. */
-function BotonExportar({ onClick }: { onClick: () => void }) {
-  return (
-    <button onClick={onClick} title="Descargar reporte (CSV para Excel)"
-      className="inline-flex items-center gap-1.5 h-9 px-3.5 rounded-lg border border-edge text-[13px] font-semibold text-ink hover:bg-surface-2 transition-colors whitespace-nowrap">
-      <svg className="w-4 h-4 text-mute" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="M7 10l5 5 5-5" /><path d="M12 15V3" /></svg>
-      Exportar
-    </button>
-  )
-}
-
-type Section = 'resumen' | 'caja' | 'equipos' | 'inventario' | 'refacciones' | 'reparaciones' | 'cotizaciones' | 'catalogos' | 'clientes' | 'rentas' | 'ventas' | 'pedidos' | 'facturacion' | 'adeudos' | 'cupones' | 'notificaciones' | 'perfil' | 'ubicaciones' | 'usuarios' | 'configuracion'
-
-const SECTION_META: Record<Section, { title: string; subtitle: string }> = {
-  resumen: { title: 'Resumen', subtitle: 'Monitorea tus métricas y gestiona tu operación.' },
-  caja: { title: 'Caja', subtitle: 'Cobra en el mostrador: refacciones, y maquinaria o rentas si están encendidas.' },
-  equipos: { title: 'Productos', subtitle: 'Administra tu catálogo de maquinaria.' },
-  inventario: { title: 'Inventario', subtitle: 'Controla cada unidad física y su estado.' },
-  refacciones: { title: 'Refacciones', subtitle: 'Piezas para mantenimiento (y venta ocasional al público).' },
-  reparaciones: { title: 'Reparaciones', subtitle: 'Órdenes de servicio: recibe equipos, registra el trabajo y entrega la orden.' },
-  cotizaciones: { title: 'Cotizaciones', subtitle: 'Presupuestos para clientes: arma partidas, envía y da seguimiento.' },
-  catalogos: { title: 'Clasificación', subtitle: 'Organiza categorías, tipos y marcas.' },
-  rentas: { title: 'Rentas', subtitle: 'Gestiona rentas activas, reservas y devoluciones.' },
-  ventas: { title: 'Ventas', subtitle: 'Historial de ventas de maquinaria y refacciones.' },
-  pedidos: { title: 'Pedidos y apartados', subtitle: 'Ventas con anticipo: apartados y sobre pedidos. Cobra el saldo y entrega cuando llegue.' },
-  facturacion: { title: 'Por facturar', subtitle: 'Ventas y rentas que el cliente pidió facturar. Timbra aparte y márcalas.' },
-  adeudos: { title: 'Adeudos', subtitle: 'Rentas con saldo pendiente: quién debe, cuánto y desde cuándo. Registra abonos hasta liquidar.' },
-  cupones: { title: 'Cupones', subtitle: 'Crea y administra códigos de descuento.' },
-  notificaciones: { title: 'Notificaciones', subtitle: 'Eventos operativos y pendientes por resolver.' },
-  clientes: { title: 'Clientes', subtitle: 'El padrón: a quién le vendes y le rentas, tenga cuenta o no.' },
-  perfil: { title: 'Perfil', subtitle: 'Tu información de cuenta.' },
-  ubicaciones: { title: 'Mi jornada', subtitle: 'Dónde está cada máquina y qué espera en el taller.' },
-  usuarios: { title: 'Usuarios', subtitle: 'Quién entra al panel y qué puede hacer.' },
-  configuracion: { title: 'Configuración', subtitle: 'Tu cuenta, el negocio y cómo te avisamos.' },
-}
-
-type Domicilio = {
-  calle?: string; numero_exterior?: string; numero_interior?: string
-  colonia?: string; municipio?: string; ciudad?: string; entidad?: string
-  codigo_postal?: string; pais?: string; referencias?: string
-  latitud?: string | null; longitud?: string | null
-}
-type Obra = Domicilio & {
-  id: number; empresa?: number; empresa_nombre?: string; nombre: string
-  ubicacion?: string; responsable?: string; telefono?: string
-  estado: 'activa' | 'pausada' | 'finalizada'; notas?: string; creada?: string
-}
-type Empresa = Domicilio & {
-  id?: number; nombre: string; rfc?: string; contacto?: string; telefono?: string
-  email?: string; regimen_fiscal?: string; uso_cfdi?: string
-  direccion?: string; notas?: string; activa?: boolean
-  obras?: Obra[]; obras_count?: number; obras_activas?: number
-}
-/** Saca el mensaje REAL de un error de API. DRF manda errores por campo
- *  (`{"modelo": ["muy largo"]}`), no solo `detail`/`detalle`; leer solo `detail`
- *  hace que el usuario vea un genérico inútil y no sepa qué corregir. */
-function errorMsg(err: any, fallback = 'Ocurrió un error'): string {
-  const d = err?.response?.data
-  if (!d) return err?.message || fallback
-  if (typeof d === 'string') return d
-  if (d.detail || d.detalle) return d.detail || d.detalle
-  const partes: string[] = []
-  for (const [campo, val] of Object.entries(d)) {
-    const txt = Array.isArray(val) ? val.join(' ') : String(val)
-    partes.push(campo === 'non_field_errors' ? txt : `${campo}: ${txt}`)
-  }
-  return partes.length ? partes.join(' · ') : fallback
-}
-
-/** Una empresa desactivada conserva su historial pero no debe poder elegirse
- *  para operaciones nuevas (rentas, ventas, cotizaciones, órdenes). */
-const empresasActivas = (l: Empresa[]) => l.filter(e => e.activa !== false)
-
-/* ─────────── Helpers UI ─────────── */
-const input =
-  'w-full bg-surface-2 border border-edge rounded-xl px-4 py-2.5 text-sm text-ink placeholder-mute focus:outline-none focus:border-gold/50 transition-colors'
-const label = 'block text-[11px] font-medium text-mute mb-1.5 uppercase tracking-wide'
-
-function Card({ children, className = '' }: { children: React.ReactNode; className?: string }) {
-  return <div className={`bg-surface border border-edge rounded-xl shadow-[0_1px_3px_rgba(33,29,22,0.04)] ${className}`}>{children}</div>
 }
 
 /* ════════════════════════════════════════
@@ -398,6 +203,49 @@ function CommandPalette({ equipos, unidades, rentas, ventas, go, onClose }: {
 /* ════════════════════════════════════════
    DASHBOARD
 ════════════════════════════════════════ */
+/* Qué datos necesita cada sección. Lo que no aparezca aquí, no se pide: entrar
+   a Caja no tiene por qué bajar el historial de ventas ni el padrón entero.
+   'padron' es la lista de clientes que alimenta los selectores de los
+   formularios (no el conteo del globito, que va siempre y es de una cifra). */
+const RECURSOS_POR_SECCION: Record<Section, string[]> = {
+  resumen: ['metricas', 'equipos', 'unidades', 'rentas', 'ventas', 'cupones', 'adeudos', 'pedidos', 'facturacion', 'catalogos'],
+  caja: ['unidades', 'equipos'],
+  equipos: ['equipos', 'catalogos', 'unidades'],
+  inventario: ['unidades', 'equipos', 'rentas', 'refacciones'],
+  refacciones: ['refacciones'],
+  reparaciones: ['reparaciones', 'refacciones', 'unidades', 'padron'],
+  cotizaciones: ['padron'],
+  catalogos: ['catalogos', 'equipos'],
+  clientes: [],
+  rentas: ['rentas', 'unidades'],
+  ventas: [],                       // VentasAdmin pide su propia lista, paginada
+  pedidos: ['pedidos', 'equipos', 'padron'],
+  facturacion: ['facturacion'],
+  adeudos: ['adeudos', 'pedidos'],
+  cupones: ['cupones'],
+  perfil: [],
+  ubicaciones: ['unidades', 'padron', 'reparaciones'],
+  equipo: ['usuarios'],
+  permisos: ['permisos'],
+  configuracion: [],
+}
+
+/** En lo que busca ⌘K. Se cargan mientras la paleta está abierta. */
+const RECURSOS_PALETA = ['equipos', 'unidades', 'rentas', 'ventas']
+
+/** Los conteos quedan viejos con casi cualquier movimiento del negocio. */
+const TEMAS_CONTEOS: Tema[] = [
+  'equipos', 'unidades', 'catalogos', 'cupones', 'rentas', 'ventas',
+  'cotizaciones', 'refacciones', 'reparaciones', 'facturacion', 'clientes', 'usuarios',
+]
+
+/** Los números de los globitos del menú. Vienen de /dashboard/conteos/. */
+type Conteos = {
+  equipos: number; unidades: number; refacciones: number; catalogos: number
+  rentas_activas: number; ventas: number; pedidos: number; ordenes_abiertas: number
+  facturas_pendientes: number; adeudos: number; cupones: number; equipo_activos: number
+}
+
 export default function Dashboard() {
   const { logout } = useAuth()
   const nav = useNavigate()
@@ -412,6 +260,12 @@ export default function Dashboard() {
      sección, y todo eso funciona solo. */
   const location = useLocation()
   const slug = location.pathname.replace(/^\/dashboard\/?/, '').split('/')[0]
+  /* Un segundo tramo en la dirección (`/dashboard/cotizaciones/12`) significa
+     que la sección está enseñando UN REGISTRO, no su lista. Esa página trae su
+     propio encabezado —migas hasta el folio, y el folio de título—, así que el
+     genérico de aquí sobra: con los dos puestos salían dos títulos encimados,
+     el de arriba diciendo "Cotizaciones" sobre una cotización concreta. */
+  const enDetalle = location.pathname.replace(/^\/dashboard\/?/, '').split('/').filter(Boolean).length > 1
   const porDefecto = useRef<Section>(seccionInicial()).current
   const section: Section = (slug in SECTION_META ? slug : porDefecto) as Section
   const irASeccion = useCallback((s: Section, reemplazar = false) => {
@@ -428,6 +282,10 @@ export default function Dashboard() {
   const toggleColapsado = () => setColapsado(v => { const n = !v; try { localStorage.setItem('admin_sidebar_colapsado', n ? '1' : '0') } catch { /* modo privado */ } return n })
   const [me, setMe] = useState<{
     id?: number; username?: string; email?: string; avatar_url?: string | null
+    /** Segunda capa: el dibujo POR ROL que manda `/auth/me/`. Si la foto subida
+     *  se cae (Cloudinary borra el asset, la firma vence), el panel enseña el
+     *  del rol —lo mismo que la tienda— en vez de la inicial. */
+    avatar_url_rol?: string | null
     is_superuser?: boolean
     puede?: Capacidades
   } | null>(null)
@@ -457,12 +315,20 @@ export default function Dashboard() {
   const [adeudos, setAdeudos] = useState<AdeudosDatos>({ rentas: [], total: '0', clientes: 0 })
   const [pedidos, setPedidos] = useState<PedidosDatos>({ pedidos: [], total: '0', clientes: 0 })
   const [cotAbiertas, setCotAbiertas] = useState(0)
+  /* Los números de los globitos del menú, en UNA respuesta chica. Antes cada
+     globito costaba su lista completa: el panel bajaba productos, unidades,
+     ventas, refacciones, órdenes, usuarios y cupones —enteros— para escribir
+     siete cifras, y los volvía a bajar con cada latido. */
+  const [conteos, setConteos] = useState<Conteos | null>(null)
   const [ventas, setVentas] = useState<Venta[]>([])
   const [notifs, setNotifs] = useState<Notif[]>([])
+  /* Quien pidió menos movimiento no pierde el aviso, pierde el viaje: la fila
+     se desvanece en su sitio y el hueco se cierra sin FLIP. Descartar sigue
+     confirmándose. */
+  const menosMovimiento = useReducedMotion()
   const [noLeidas, setNoLeidas] = useState(0)
   const [empresas, setEmpresas] = useState<Empresa[]>([])
   const [clientesTotal, setClientesTotal] = useState(0)
-  const [toasts, setToasts] = useState<{ id: number; msg: string; type: 'ok' | 'err' | 'info' | 'warning' | 'primary' }[]>([])
 
   const notifBtnRef = useRef<HTMLButtonElement | null>(null)
   const notifPanelRef = useRef<HTMLDivElement | null>(null)
@@ -493,15 +359,11 @@ export default function Dashboard() {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
-  const notify = (msg: string, type: 'ok' | 'err' | 'info' | 'warning' | 'primary' = 'ok') => {
-    // Pila de alertas: las nuevas abajo, sin repetidos y con tope de 3.
-    const id = Date.now() + Math.floor(Math.random() * 1000)
-    setToasts(t => {
-      if (t.some(x => x.msg === msg)) return t
-      return [...t, { id, msg, type }].slice(-3)
-    })
-    setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 3200)
-  }
+  /* Las alertas del panel son las MISMAS que las de la tienda: un solo
+     proveedor (store/toast), un solo vocabulario de tipos y una sola duración
+     (lib/alertas). Antes el panel tenía su propia pila, su propio render y sus
+     3.2s a mano mientras la tienda usaba 5s. */
+  const { notify } = useToast()
 
   /* Cargas de DINERO que fallaron. Sin esto, un 500 o un token vencido se ve
      idéntico a "no hay ventas": el admin lee $0 y lo cree. El banner de arriba
@@ -517,88 +379,136 @@ export default function Dashboard() {
     })
   }, [])
 
+  /* Trae un pedazo del panel y DEJA CONSTANCIA si no llegó.
+
+     Todos los cargadores terminaban en un catch vacío. Con eso un 500 o un
+     token vencido se ve idéntico a "no hay nada": la lista queda vacía, el panel
+     no dice una palabra y la depuración arranca a ciegas —el "panel mudo" que ya
+     nos costó dos rondas—. Ahora ningún fallo se va sin línea en la consola.
+
+     `dinero: true` además lo sube al banner de arriba, porque leer $0 cuando en
+     realidad la petición falló es el error que de verdad se cree. Para un
+     catálogo o las notificaciones basta la consola: esos no engañan a nadie.
+
+     401/403 quedan fuera a propósito: no es "no cargó", es "no te toca" o la
+     sesión venció, y de eso avisa el guardia de sesión. Marcarlo aquí solo
+     taparía el motivo real con una alarma por sección. */
+  /* Qué recursos ya contestaron al menos una vez.
+
+     Sin esto, entrar a un módulo enseña su cartel de "todavía no hay nada"
+     mientras la lista viene en camino: un vacío que es MENTIRA y que además
+     parpadea al llegar los datos. Antes lo tapaba el overlay de pantalla
+     completa, que es justo el parpadeo que hubo que quitar. Se marca al
+     ASENTARSE (bien o mal): si la petición falló, el cartel de vacío es lo
+     honesto —el fallo lo cuenta el banner o la consola—, y quedarse en
+     "Cargando…" para siempre sería peor. */
+  const [cargados, setCargados] = useState<Set<string>>(() => new Set())
+  const marcarCargado = useCallback((nombre: string) => {
+    setCargados(prev => (prev.has(nombre) ? prev : new Set(prev).add(nombre)))
+  }, [])
+  /** ¿Este recurso ya llegó? Con `false`, la lista vacía es "aún no sé". */
+  const listo = useCallback((nombre: string) => cargados.has(nombre), [cargados])
+
+  const cargar = useCallback(<T,>(
+    nombre: string,
+    peticion: Promise<{ data: T }>,
+    aplicar: (d: T) => void,
+    dinero = false,
+  ) => peticion
+    .then(r => { aplicar(r.data); if (dinero) marcarCarga(nombre, true) })
+    .catch(err => {
+      const st = err?.response?.status
+      if (st === 401 || st === 403) return
+      if (dinero) marcarCarga(nombre, false)
+      console.error(`[panel] no se pudo cargar ${nombre}:`, st ? `HTTP ${st}` : err?.message || err)
+    })
+    .finally(() => marcarCargado(nombre)), [marcarCarga, marcarCargado])
+
+  const loadConteos = useCallback(() => {
+    cargar('conteos', api.get<Conteos>('/dashboard/conteos/', { fondo: true }), d => setConteos(d || null))
+  }, [cargar])
   const loadUsuarios = useCallback(() => {
-    api.get<{ usuarios: UsuarioPanel[] }>('/usuarios/').then(r => setUsuarios(r.data?.usuarios || [])).catch(() => {})
-  }, [])
+    cargar('usuarios', api.get<{ usuarios: UsuarioPanel[] }>('/usuarios/', { fondo: true }), d => setUsuarios(d?.usuarios || []))
+  }, [cargar])
   const loadMetrics = useCallback(() => {
-    api.get<DashMetrics>('/dashboard/metricas/').then(r => { setMetrics(r.data || null); marcarCarga('métricas', true) }).catch(err => { const st = err?.response?.status; if (st !== 401 && st !== 403) marcarCarga('métricas', false) })
-  }, [marcarCarga])
+    cargar('métricas', api.get<DashMetrics>('/dashboard/metricas/', { fondo: true }), d => setMetrics(d || null), true)
+  }, [cargar])
   const loadEquipos = useCallback(() => {
-    api.get<Equipo[]>('/equipos/').then(r => setEquipos(r.data || [])).catch(() => {})
-  }, [])
+    cargar('equipos', api.get<Equipo[]>('/equipos/', { fondo: true }), d => setEquipos(d || []))
+  }, [cargar])
   const loadCatalogos = useCallback(() => {
-    api.get<Option[]>('/categorias/').then(r => setCategorias(r.data || [])).catch(() => {})
-    api.get<Option[]>('/tipos/').then(r => setTipos(r.data || [])).catch(() => {})
-    api.get<Option[]>('/marcas/').then(r => setMarcas(r.data || [])).catch(() => {})
-  }, [])
+    cargar('categorías', api.get<Option[]>('/categorias/', { fondo: true }), d => setCategorias(d || []))
+    cargar('tipos', api.get<Option[]>('/tipos/', { fondo: true }), d => setTipos(d || []))
+    cargar('marcas', api.get<Option[]>('/marcas/', { fondo: true }), d => setMarcas(d || []))
+  }, [cargar])
   const loadCoupons = useCallback(() => {
-    api.get<Coupon[]>('/cupones/').then(r => setCoupons(r.data || [])).catch(() => {})
-  }, [])
+    cargar('cupones', api.get<Coupon[]>('/cupones/', { fondo: true }), d => setCoupons(d || []))
+  }, [cargar])
   const loadRentas = useCallback(() => {
-    api.get<{ rentas: RentaActiva[] }>('/rentas/?estado=activa').then(r => { setRentas(r.data?.rentas || []); marcarCarga('rentas activas', true) }).catch(err => { const st = err?.response?.status; if (st !== 401 && st !== 403) marcarCarga('rentas activas', false) })
-  }, [marcarCarga])
+    cargar('rentas activas', api.get<{ rentas: RentaActiva[] }>('/rentas/?estado=activa', { fondo: true }), d => setRentas(d?.rentas || []), true)
+  }, [cargar])
   const loadUnidades = useCallback(() => {
-    api.get<Unidad[]>('/unidades/').then(r => setUnidades(r.data || [])).catch(() => {})
-  }, [])
+    cargar('unidades', api.get<Unidad[]>('/unidades/', { fondo: true }), d => setUnidades(d || []))
+  }, [cargar])
   const loadRefacciones = useCallback(() => {
-    api.get<Refaccion[]>('/refacciones/').then(r => setRefacciones(r.data || [])).catch(() => {})
-  }, [])
+    cargar('refacciones', api.get<Refaccion[]>('/refacciones/', { fondo: true }), d => setRefacciones(d || []))
+  }, [cargar])
   const loadOrdenes = useCallback(() => {
-    api.get<OrdenReparacion[]>('/reparaciones/').then(r => setOrdenes(r.data || [])).catch(() => {})
-  }, [])
+    cargar('reparaciones', api.get<OrdenReparacion[]>('/reparaciones/', { fondo: true }), d => setOrdenes(d || []))
+  }, [cargar])
   const loadFacturacion = useCallback(() => {
-    api.get<SolicitudFactura[]>('/facturacion/solicitudes/').then(r => { setSolicitudes(r.data || []); marcarCarga('facturación', true) }).catch(err => { const st = err?.response?.status; if (st !== 401 && st !== 403) marcarCarga('facturación', false) })
-  }, [marcarCarga])
+    cargar('facturación', api.get<SolicitudFactura[]>('/facturacion/solicitudes/', { fondo: true }), d => setSolicitudes(d || []), true)
+  }, [cargar])
+  // Adeudos y pedidos SON dinero (cuentas por cobrar): iban con catch mudo, así
+  // que un fallo se leía como "nadie debe nada". Ahora van al banner.
   const loadAdeudos = useCallback(() => {
-    api.get<AdeudosDatos>('/rentas/adeudos/').then(r => setAdeudos(r.data || { rentas: [], total: '0', clientes: 0 })).catch(() => {})
-  }, [])
+    cargar('adeudos', api.get<AdeudosDatos>('/rentas/adeudos/', { fondo: true }), d => setAdeudos(d || { rentas: [], total: '0', clientes: 0 }), true)
+  }, [cargar])
   // Apartados/pedidos con saldo (cuentas por cobrar de VENTA). Junto con las rentas
   // forman las "cuentas por cobrar unificadas" de Adeudos.
   const loadPedidos = useCallback(() => {
-    api.get<PedidosDatos>('/ventas/pedidos/').then(r => setPedidos(r.data || { pedidos: [], total: '0', clientes: 0 })).catch(() => {})
-  }, [])
+    cargar('pedidos', api.get<PedidosDatos>('/ventas/pedidos/', { fondo: true }), d => setPedidos(d || { pedidos: [], total: '0', clientes: 0 }), true)
+  }, [cargar])
   // Solo el conteo de "abiertas" para el badge del menú: la lista completa la
   // pagina el propio módulo de cotizaciones, no el padre.
   const loadCotizaciones = useCallback(() => {
-    api.get<{ abiertas: number }>('/cotizaciones/stats/').then(r => { setCotAbiertas(r.data?.abiertas || 0); marcarCarga('cotizaciones', true) }).catch(err => { const st = err?.response?.status; if (st !== 401 && st !== 403) marcarCarga('cotizaciones', false) })
-  }, [marcarCarga])
+    cargar('cotizaciones', api.get<{ abiertas: number }>('/cotizaciones/stats/', { fondo: true }), d => setCotAbiertas(d?.abiertas || 0), true)
+  }, [cargar])
   const loadVentas = useCallback(() => {
-    api.get<{ ventas: Venta[] }>('/ventas/lista/').then(r => { setVentas(r.data?.ventas || []); marcarCarga('ventas', true) }).catch(err => { const st = err?.response?.status; if (st !== 401 && st !== 403) marcarCarga('ventas', false) })
-  }, [marcarCarga])
+    cargar('ventas', api.get<{ ventas: Venta[] }>('/ventas/lista/', { fondo: true }), d => setVentas(d?.ventas || []), true)
+  }, [cargar])
   // Solo el CONTADOR para el badge del menú: la lista la trae ClientesAdmin
   // paginada. Pedir el padrón entero aquí sería justo lo que no debe hacerse.
   const loadClientesTotal = useCallback(() => {
-    api.get<{ total: number }>('/clientes/?limite=1')
-      .then(r => setClientesTotal(r.data?.total || 0)).catch(() => {})
-  }, [])
+    cargar('total de clientes', api.get<{ total: number }>('/clientes/?limite=1', { fondo: true }), d => setClientesTotal(d?.total || 0))
+  }, [cargar])
 
   const loadEmpresas = useCallback(() => {
     // El padrón sustituyó a /empresas/. Se piden solo los activos y se
     // adaptan a la forma que ya esperan los selectores, para no reescribir
     // cinco formularios en el mismo movimiento.
-    api.get<{ clientes: { id: number; nombre: string; activo: boolean }[] }>('/clientes/?limite=100')
-      .then(r => setEmpresas((r.data?.clientes || []).map(c => ({ id: c.id, nombre: c.nombre, activa: c.activo }))))
-      .catch(() => {})
-  }, [])
+    cargar('padrón de clientes',
+      api.get<{ clientes: { id: number; nombre: string; activo: boolean }[] }>('/clientes/?limite=100', { fondo: true }),
+      d => setEmpresas((d?.clientes || []).map(c => ({ id: c.id, nombre: c.nombre, activa: c.activo }))))
+  }, [cargar])
   const loadNotifs = useCallback(() => {
-    api.get<{ notificaciones: Notif[]; no_leidas: number }>('/notificaciones/')
-      .then(r => {
-        const items = (r.data?.notificaciones || []) as Notif[]
-        setNotifs(items)
-        setNoLeidas(r.data?.no_leidas || 0)
-        const maxId = items.reduce((m, n) => Math.max(m, Number(n.id) || 0), 0)
-        if (notifMaxIdRef.current && maxId > notifMaxIdRef.current) {
-          setNotifPulse(true)
-          window.setTimeout(() => setNotifPulse(false), 900)
-          // La notificación recién llegada también se asoma como alerta
-          // "primary" (campanita gris), sin esperar a abrir el panel.
-          const nueva = items.find(n => Number(n.id) === maxId)
-          if (nueva) notify(nueva.titulo || 'Nueva notificación', 'primary')
-        }
-        notifMaxIdRef.current = maxId
-      })
-      .catch(() => {})
-  }, [])
+    cargar('notificaciones', api.get<{ notificaciones: Notif[]; no_leidas: number }>('/notificaciones/', { fondo: true }), d => {
+      const items = (d?.notificaciones || []) as Notif[]
+      setNotifs(items)
+      setNoLeidas(d?.no_leidas || 0)
+      const maxId = items.reduce((m, n) => Math.max(m, Number(n.id) || 0), 0)
+      if (notifMaxIdRef.current && maxId > notifMaxIdRef.current) {
+        setNotifPulse(true)
+        window.setTimeout(() => setNotifPulse(false), 900)
+        // La notificación recién llegada también se asoma como alerta, sin
+        // esperar a abrir el panel: es INFORMATIVA (nadie logró nada), con la
+        // campana como dibujo.
+        const nueva = items.find(n => Number(n.id) === maxId)
+        if (nueva) notify(nueva.titulo || 'Nueva notificación', 'info', 'campana')
+      }
+      notifMaxIdRef.current = maxId
+    })
+  }, [cargar, notify])
 
 
   useEffect(() => {
@@ -610,28 +520,49 @@ export default function Dashboard() {
     return () => mql.removeEventListener?.('change', apply)
   }, [])
 
-  useEffect(() => {
+  const cargarPerfil = useCallback(() => {
     api.get('/auth/perfil/').then(r => {
       setMe(r.data)
       recordarAcceso(r.data)   // acento y sección para la próxima carga
-    }).catch(() => {})
+    }).catch(anotarFallo)
   }, [])
+  // Si el dueño mueve permisos —desde esta pantalla o desde otra computadora—,
+  // el panel se entera por el latido y vuelve a preguntar QUÉ PUEDE esta cuenta.
+  // Sin esto, apagarle la caja a un cajero no le quitaba la sección hasta que
+  // cerrara sesión: seguía viendo un botón que la API ya le negaba.
+  useRecurso(['permisos'], cargarPerfil)
 
 
   // Cada conjunto de datos se suscribe a los temas que lo dejan viejo. Cuando
   // una mutación toca uno de esos temas, esto se vuelve a pedir solo: ya no hay
   // que recargar la página para ver los KPIs, el stock o las listas al día.
-  useRecurso(['metricas'], loadMetrics)
-  useRecurso(['usuarios'], loadUsuarios)
-  useRecurso(['equipos'], loadEquipos)
-  useRecurso(['catalogos'], loadCatalogos)
-  useRecurso(['cupones'], loadCoupons)
-  useRecurso(['rentas'], loadRentas)
-  useRecurso(['unidades'], loadUnidades)
-  useRecurso(['refacciones'], loadRefacciones)
-  useRecurso(['reparaciones'], loadOrdenes)
-  useRecurso(['facturacion'], loadFacturacion)
-  useRecurso(['rentas'], loadAdeudos)   // los abonos tocan Renta: el saldo baja solo
+  /* Cada lista se pide SOLO donde se usa. Antes el panel pedía las dieciséis al
+     entrar —productos, unidades, ventas, refacciones, órdenes, rentas, cupones,
+     el padrón…— sin importar a qué sección ibas, y el latido las volvía a pedir
+     todas cada vez que alguien tocaba algo. Un cajero que abre la caja bajaba el
+     historial de ventas entero.
+
+     Los globitos del menú NO dependen de esto: sus números vienen de
+     /dashboard/conteos/, que es una sola respuesta chica y sí va siempre.
+     Y ⌘K busca en productos, unidades, rentas y ventas: mientras la paleta está
+     abierta esos cuatro cuentan como necesarios, se abra donde se abra. */
+  const necesita = useCallback((r: string) => {
+    if ((RECURSOS_POR_SECCION[section] || []).includes(r)) return true
+    return paletteOpen && RECURSOS_PALETA.includes(r)
+  }, [section, paletteOpen])
+
+  useRecurso(TEMAS_CONTEOS, loadConteos)
+  useRecurso(['metricas'], loadMetrics, necesita('metricas'))
+  useRecurso(['usuarios'], loadUsuarios, necesita('usuarios'))
+  useRecurso(['equipos'], loadEquipos, necesita('equipos'))
+  useRecurso(['catalogos'], loadCatalogos, necesita('catalogos'))
+  useRecurso(['cupones'], loadCoupons, necesita('cupones'))
+  useRecurso(['rentas'], loadRentas, necesita('rentas'))
+  useRecurso(['unidades'], loadUnidades, necesita('unidades'))
+  useRecurso(['refacciones'], loadRefacciones, necesita('refacciones'))
+  useRecurso(['reparaciones'], loadOrdenes, necesita('reparaciones'))
+  useRecurso(['facturacion'], loadFacturacion, necesita('facturacion'))
+  useRecurso(['rentas'], loadAdeudos, necesita('adeudos'))   // los abonos tocan Renta: el saldo baja solo
   useRecurso(['notificaciones'], loadNotifs)
   useRecurso(['cotizaciones'], loadCotizaciones)
 
@@ -642,17 +573,15 @@ export default function Dashboard() {
   useEffect(() => {
     api.get<{ caja_vende_maquinaria: boolean; caja_renta_maquinaria: boolean }>('/config/')
       .then(r => setCajaCfg({ vende: !!r.data?.caja_vende_maquinaria, renta: !!r.data?.caja_renta_maquinaria }))
-      .catch(() => { /* sin permisos de configuración o red caída: quedan apagados */ })
+      .catch(anotarFallo)
   }, [])
   // Latido del panel: lo que capturan OTROS (un cliente envía su cotización,
   // otro admin edita un producto o registra una renta) llega solo en ~2 s,
   // y solo se recarga el tema que de verdad cambió.
   useLatidoPanel('/latido/', 2_000, temas => invalidar(...(temas as Tema[])))
-  // Errores globales del interceptor (red, 500, permisos) → la pila de alertas.
-  useEffect(() => conectarAvisos(m => notify(m, 'err')), [])  // eslint-disable-line react-hooks/exhaustive-deps
-  useRecurso(['ventas'], loadVentas)
-  useRecurso(['ventas'], loadPedidos)   // los apartados son ventas: abonos/entregas los refrescan
-  useRecurso(['clientes'], loadEmpresas)
+  useRecurso(['ventas'], loadVentas, necesita('ventas'))
+  useRecurso(['ventas'], loadPedidos, necesita('pedidos'))   // los apartados son ventas: abonos/entregas los refrescan
+  useRecurso(['clientes'], loadEmpresas, necesita('padron'))
   useRecurso(['clientes'], loadClientesTotal)
 
   useEffect(() => {
@@ -724,7 +653,8 @@ export default function Dashboard() {
     // hacia arriba desde el nivel 1: por eso el admin la veía completa, con
     // botones de entregar y de subir fotos que no le tocan.
     ubicaciones: ['jornada_campo', 'ver_jornada'],
-    usuarios: 'gestionar_usuarios',
+    equipo: 'gestionar_usuarios',
+    permisos: 'configurar_permisos',
   }
   const seccionPermitida = (s: Section) => {
     const cap = REQUIERE[s]
@@ -737,8 +667,24 @@ export default function Dashboard() {
   /** Clave de textos de una sección. Solo "Mi jornada" cambia de nombre según
    *  quién mira: para el técnico es la suya, para administración es la de otro. */
   const claveSec = (s: Section) => (s === 'ubicaciones' && !jornadaPropia ? 'jornada_sup' : s)
-  const ordenesAbiertas = ordenes.filter(o => o.estado !== 'entregada').length
-  const facturasPendientes = solicitudes.filter(s => s.estado === 'pendiente').length
+  /* Los globitos: la cifra del servidor manda, y la lista cargada es el respaldo
+     mientras llega (o si /conteos/ falla). Así el menú no se queda en blanco ni
+     obliga a bajar la lista completa de cada sección para poder contarla. */
+  const pedidosConSaldo = pedidos.pedidos.filter(p => Number(p.saldo || 0) > 0).length
+  const cuenta = {
+    equipos: conteos?.equipos ?? equipos.length,
+    unidades: conteos?.unidades ?? unidades.length,
+    refacciones: conteos?.refacciones ?? refacciones.length,
+    catalogos: conteos?.catalogos ?? catalogosCount,
+    rentas: conteos?.rentas_activas ?? rentasActivas,
+    ventas: conteos?.ventas ?? ventas.length,
+    pedidos: conteos?.pedidos ?? pedidosConSaldo,
+    cupones: conteos?.cupones ?? coupons.length,
+    equipo: conteos?.equipo_activos ?? usuariosActivos,
+    adeudos: (conteos?.adeudos ?? adeudos.rentas.length) + (conteos?.pedidos ?? pedidosConSaldo),
+  }
+  const ordenesAbiertas = conteos?.ordenes_abiertas ?? ordenes.filter(o => o.estado !== 'entregada').length
+  const facturasPendientes = conteos?.facturas_pendientes ?? solicitudes.filter(s => s.estado === 'pendiente').length
   const cotizacionesAbiertas = cotAbiertas
   const navGroupsTodos: { title?: string; items: { key: Section; label: string; badge?: number; icon: React.ReactNode }[] }[] = [
     {
@@ -750,25 +696,24 @@ export default function Dashboard() {
     {
       title: 'navgroup.catalogo',
       items: [
-        { key: 'equipos', label: 'Productos', badge: equipos.length, icon: <><path d="M12 3.5l8 4.5-8 4.5-8-4.5z" /><path d="M4 8v9l8 4.5 8-4.5V8" /><path d="M12 12.5v9" /></> },
-        { key: 'inventario', label: 'Inventario', badge: unidades.length, icon: <><rect x="4.5" y="4.5" width="6.5" height="6.5" rx="1.2" /><rect x="13" y="4.5" width="6.5" height="6.5" rx="1.2" /><rect x="4.5" y="13" width="6.5" height="6.5" rx="1.2" /><rect x="13" y="13" width="6.5" height="6.5" rx="1.2" /></> },
-        { key: 'refacciones', label: 'Refacciones', badge: refacciones.length, icon: <><path d="M14.7 6.3a4 4 0 0 0-5.6 5.6l-6 6v3h3l6-6a4 4 0 0 0 5.6-5.6l-2.5 2.5-2.1-2.1z" /></> },
-        { key: 'catalogos', label: 'Clasificación', badge: catalogosCount, icon: <><path d="M7 6.5h12a1.5 1.5 0 0 1 1.5 1.5v12A1.5 1.5 0 0 1 19 21.5H7A1.5 1.5 0 0 1 5.5 20V8A1.5 1.5 0 0 1 7 6.5z" /><path d="M9 11h8M9 15h8M9 19h5" /></> },
+        { key: 'equipos', label: 'Productos', badge: cuenta.equipos, icon: <><path d="M12 3.5l8 4.5-8 4.5-8-4.5z" /><path d="M4 8v9l8 4.5 8-4.5V8" /><path d="M12 12.5v9" /></> },
+        { key: 'inventario', label: 'Inventario', badge: cuenta.unidades, icon: <><rect x="4.5" y="4.5" width="6.5" height="6.5" rx="1.2" /><rect x="13" y="4.5" width="6.5" height="6.5" rx="1.2" /><rect x="4.5" y="13" width="6.5" height="6.5" rx="1.2" /><rect x="13" y="13" width="6.5" height="6.5" rx="1.2" /></> },
+        { key: 'refacciones', label: 'Refacciones', badge: cuenta.refacciones, icon: <><path d="M14.7 6.3a4 4 0 0 0-5.6 5.6l-6 6v3h3l6-6a4 4 0 0 0 5.6-5.6l-2.5 2.5-2.1-2.1z" /></> },
+        { key: 'catalogos', label: 'Clasificación', badge: cuenta.catalogos, icon: <><path d="M7 6.5h12a1.5 1.5 0 0 1 1.5 1.5v12A1.5 1.5 0 0 1 19 21.5H7A1.5 1.5 0 0 1 5.5 20V8A1.5 1.5 0 0 1 7 6.5z" /><path d="M9 11h8M9 15h8M9 19h5" /></> },
       ],
     },
     {
       title: 'navgroup.operacion',
       items: [
         { key: 'ubicaciones', label: 'Mi jornada', icon: <><path d="M12 21s7-5.5 7-11a7 7 0 1 0-14 0c0 5.5 7 11 7 11z" /><circle cx="12" cy="10" r="2.5" /></> },
-        { key: 'rentas', label: 'Rentas', badge: rentasActivas, icon: <><path d="M7 4.5v2.5M17 4.5v2.5" /><path d="M5.5 8h13" /><path d="M6.5 7.5h11a2 2 0 0 1 2 2v9.5a2 2 0 0 1-2 2h-11a2 2 0 0 1-2-2V9.5a2 2 0 0 1 2-2z" /><path d="M12 13v3l2 1" /></> },
-        { key: 'ventas', label: 'Ventas', badge: ventas.length, icon: <><path d="M6.5 9.5h15l-1.6 8.2a2 2 0 0 1-2 1.6H9.2a2 2 0 0 1-2-1.6z" /><path d="M6.5 9.5l-1.2-5h-3" /><path d="M10 21a1 1 0 1 0 0-2 1 1 0 0 0 0 2zM18 21a1 1 0 1 0 0-2 1 1 0 0 0 0 2z" /></> },
-        { key: 'pedidos', label: 'Pedidos', badge: pedidos.pedidos.filter(p => Number(p.saldo || 0) > 0).length, icon: <><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z" /><path d="M4 7.5l8 4.5 8-4.5" /><path d="M12 12v9" /></> },
+        { key: 'rentas', label: 'Rentas', badge: cuenta.rentas, icon: <><path d="M7 4.5v2.5M17 4.5v2.5" /><path d="M5.5 8h13" /><path d="M6.5 7.5h11a2 2 0 0 1 2 2v9.5a2 2 0 0 1-2 2h-11a2 2 0 0 1-2-2V9.5a2 2 0 0 1 2-2z" /><path d="M12 13v3l2 1" /></> },
+        { key: 'ventas', label: 'Ventas', badge: cuenta.ventas, icon: <><path d="M6.5 9.5h15l-1.6 8.2a2 2 0 0 1-2 1.6H9.2a2 2 0 0 1-2-1.6z" /><path d="M6.5 9.5l-1.2-5h-3" /><path d="M10 21a1 1 0 1 0 0-2 1 1 0 0 0 0 2zM18 21a1 1 0 1 0 0-2 1 1 0 0 0 0 2z" /></> },
+        { key: 'pedidos', label: 'Pedidos', badge: cuenta.pedidos, icon: <><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z" /><path d="M4 7.5l8 4.5 8-4.5" /><path d="M12 12v9" /></> },
         { key: 'reparaciones', label: 'Reparaciones', badge: ordenesAbiertas, icon: <><path d="M14.7 6.3a4 4 0 0 0-5.6 5.6l-6 6v3h3l6-6a4 4 0 0 0 5.6-5.6l-2.5 2.5-2.1-2.1z" /><path d="M14 14l6 6" /></> },
         { key: 'cotizaciones', label: 'Cotizaciones', badge: cotizacionesAbiertas, icon: <><path d="M6 3.5h9l3.5 3.5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4.5a1 1 0 0 1 1-1z" /><path d="M14 3.5V8h4.5" /><path d="M8.5 12h7M8.5 15.5h7M8.5 18.5h4" /></> },
         { key: 'facturacion', label: 'Por facturar', badge: facturasPendientes, icon: <><path d="M6 3.5h9l3.5 3.5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4.5a1 1 0 0 1 1-1z" /><path d="M14 3.5V8h4.5" /><path d="M8.5 13h7M8.5 16.5h7" /></> },
-        { key: 'adeudos', label: 'Adeudos', badge: adeudos.rentas.length + pedidos.pedidos.filter(p => Number(p.saldo || 0) > 0).length, icon: <><circle cx="12" cy="12" r="8.5" /><path d="M12 7.5v9M14.8 9.2c-.6-.8-1.6-1.2-2.8-1.2-1.7 0-3 .9-3 2.2 0 2.8 6 1.6 6 4.3 0 1.3-1.3 2.2-3 2.2-1.2 0-2.2-.4-2.8-1.2" /></> },
-        { key: 'notificaciones', label: 'Notificaciones', badge: noLeidas, icon: <><path d="M15 17h5l-1.3-1.3A2 2 0 0 1 18.1 14V11a6.1 6.1 0 1 0-12.2 0v3a2 2 0 0 1-.6 1.4L4 17h5" /><path d="M9.2 17v.8a2.8 2.8 0 0 0 5.6 0V17" /></> },
-        { key: 'cupones', label: 'Cupones', badge: coupons.length, icon: <><path d="M7.5 6.5h9a2 2 0 0 1 2 2V10a1.8 1.8 0 0 0 0 4v1.5a2 2 0 0 1-2 2h-9a2 2 0 0 1-2-2V14a1.8 1.8 0 0 0 0-4V8.5a2 2 0 0 1 2-2z" /><path d="M12 8.8v6.4" /></> },
+        { key: 'adeudos', label: 'Adeudos', badge: cuenta.adeudos, icon: <><circle cx="12" cy="12" r="8.5" /><path d="M12 7.5v9M14.8 9.2c-.6-.8-1.6-1.2-2.8-1.2-1.7 0-3 .9-3 2.2 0 2.8 6 1.6 6 4.3 0 1.3-1.3 2.2-3 2.2-1.2 0-2.2-.4-2.8-1.2" /></> },
+        { key: 'cupones', label: 'Cupones', badge: cuenta.cupones, icon: <><path d="M7.5 6.5h9a2 2 0 0 1 2 2V10a1.8 1.8 0 0 0 0 4v1.5a2 2 0 0 1-2 2h-9a2 2 0 0 1-2-2V14a1.8 1.8 0 0 0 0-4V8.5a2 2 0 0 1 2-2z" /><path d="M12 8.8v6.4" /></> },
       ],
     },
     {
@@ -780,7 +725,8 @@ export default function Dashboard() {
     {
       title: 'navgroup.cuenta',
       items: [
-        { key: 'usuarios', label: 'Usuarios', badge: usuariosActivos, icon: <><circle cx="9" cy="8" r="3.2" /><path d="M3.5 20a5.5 5.5 0 0 1 11 0" /><path d="M16 5.2a3.2 3.2 0 0 1 0 6.2M17.5 20a5.4 5.4 0 0 0-2-4.2" /></> },
+        { key: 'equipo', label: 'Equipo', badge: cuenta.equipo, icon: <><circle cx="9" cy="8" r="3.2" /><path d="M3.5 20a5.5 5.5 0 0 1 11 0" /><path d="M16 5.2a3.2 3.2 0 0 1 0 6.2M17.5 20a5.4 5.4 0 0 0-2-4.2" /></> },
+        { key: 'permisos', label: 'Permisos', icon: <><rect x="4" y="11" width="16" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></> },
         { key: 'configuracion', label: 'Configuración', icon: <><path d="M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4z" /><path d="M19.4 13a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-2.9 1.2v.2a2 2 0 1 1-4 0v-.1A1.7 1.7 0 0 0 7 17.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0-1.2-2.9H2.8a2 2 0 1 1 0-4h.1A1.7 1.7 0 0 0 4.7 7l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9.5a1.7 1.7 0 0 0 1-1.6v-.2a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 2.9 1.2l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9v.1a1.7 1.7 0 0 0 1.6 1h.2a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.6 1z" /></> },
       ],
     },
@@ -817,7 +763,7 @@ export default function Dashboard() {
   }
 
   function openFromNotif(n: Notif) {
-    if (!n.leida) api.post(`/notificaciones/${n.id}/leer/`).then(loadNotifs).catch(() => {})
+    if (!n.leida) api.post(`/notificaciones/${n.id}/leer/`).then(loadNotifs).catch(anotarFallo)
     closeNotifPanel()
 
     // A dónde puede ir esta cuenta. El técnico no entra a Inventario/Productos
@@ -866,8 +812,20 @@ export default function Dashboard() {
     else openNotifPanel()
   }
 
+  /* Quitar UNA notificación de la lista.
+     Optimista: desaparece al tocarla y la petición va detrás. Descartar un
+     aviso es el gesto más barato que hay —si falla, lo peor que pasa es que
+     reaparezca al recargar— y esperar medio segundo a que el servidor conteste
+     para que se mueva un renglón se siente roto. */
+  function quitarNotif(id: number) {
+    setNotifs(prev => prev.filter(x => x.id !== id))
+    api.post(`/notificaciones/${id}/eliminar/`, {}, { fondo: true } as never)
+      .then(r => { if (typeof r.data?.no_leidas === 'number') setNoLeidas(r.data.no_leidas) })
+      .catch(anotarFallo)
+  }
+
   function marcarTodasNotifs() {
-    api.post('/notificaciones/leer-todas/').then(loadNotifs).catch(() => {})
+    api.post('/notificaciones/leer-todas/').then(loadNotifs).catch(anotarFallo)
   }
 
   useEffect(() => {
@@ -895,9 +853,12 @@ export default function Dashboard() {
     }
   }, [notifMounted, reduceMotion])
 
+  /* Eran 6 porque abajo había un "Ver todas" que llevaba a la sección. Sin esa
+     sección, la campana ES el historial: se muestran las 30 más recientes y el
+     panelito ya scrollea (el servidor manda hasta 100). */
   const notifsRecientes = [...notifs]
     .sort((a, b) => new Date(b.creada).getTime() - new Date(a.creada).getTime())
-    .slice(0, 6)
+    .slice(0, 30)
 
   return (
     // El acento negro del dueño lo pone `tema-dueno` en <html> (ver index.html y
@@ -972,30 +933,63 @@ export default function Dashboard() {
                         <p className="text-sm text-mute">No tienes notificaciones.</p>
                       </div>
                     )}
+                    {/* ── DESCARTAR ──
+                        Se va HACIA LA DERECHA, que es de donde vino el gesto: la
+                        ✕ está a ese lado y el aviso sale por donde lo empujaste.
+                        Es la gramática de deslizar para descartar, y sin ella el
+                        renglón simplemente se esfumaba: no había acuse de que
+                        TÚ lo hiciste, ni forma de distinguirlo de un aviso que
+                        se cayó solo.
+
+                        El hueco lo cierra `layout` con FLIP —transform, no
+                        `height`—, así las de abajo suben sin salto. Antes la
+                        lista pegaba un brinco de 80px y quien iba leyendo la
+                        tercera perdía su sitio.
+
+                        160 ms sin rebote: la casa ya lo tiene escrito —salir
+                        dura ~60% de entrar—. Irse rápido se siente responsivo;
+                        irse con gracia se siente lento cuando vas a descartar
+                        cinco seguidos. */}
+                    <AnimatePresence initial={false}>
                     {notifsRecientes.map((n, i) => (
-                      <div
+                      <motion.div
                         key={n.id}
-                        style={notifOpen ? { animationDelay: `${i * 45}ms` } : undefined}
-                        className={`${notifOpen ? 'stagger-item' : ''} flex gap-2.5 px-5 py-4 border-b border-edge/60 last:border-b-0 ${!n.leida ? 'bg-gold-soft/30' : ''}`}
+                        layout={menosMovimiento ? false : 'position'}
+                        initial={menosMovimiento ? { opacity: 0 } : { opacity: 0, y: 6 }}
+                        animate={{ opacity: 1, y: 0, transition: { duration: 0.26, ease: [0.23, 1, 0.32, 1], delay: notifOpen ? Math.min(i, 6) * 0.045 : 0 } }}
+                        exit={menosMovimiento
+                          ? { opacity: 0, transition: { duration: 0.14 } }
+                          : { opacity: 0, x: 40, transition: { duration: 0.16, ease: [0.4, 0, 1, 1] } }}
+                        transition={{ layout: { duration: 0.22, ease: [0.23, 1, 0.32, 1] } }}
+                        className={`flex gap-2.5 px-5 py-4 border-b border-edge/60 last:border-b-0 ${!n.leida ? 'bg-gold-soft/30' : ''}`}
                       >
                         <span className="w-[7px] h-[7px] rounded-full shrink-0 mt-[7px]" style={{ background: !n.leida ? 'var(--c-gold)' : 'var(--c-mute)' }} />
                         <button onClick={() => openFromNotif(n)} className="flex-1 min-w-0 text-left">
                           <div className="font-extrabold text-[14.5px] text-ink">{n.titulo}</div>
                           {n.mensaje && <div className="text-[13.5px] text-mute mt-1 leading-snug line-clamp-2">{n.mensaje}</div>}
-                          <div className="text-[12.5px] text-mute mt-1.5">{tiempoRelativo(n.creada)}</div>
+                          <div className="text-[12.5px] text-mute mt-1.5">{cuandoLlego(n.creada)}</div>
                         </button>
                         <div className="flex gap-1 shrink-0">
                           {!n.leida && (
-                            <button onClick={() => { api.post(`/notificaciones/${n.id}/leer/`).then(loadNotifs).catch(() => {}) }} title="Marcar leída" className="w-[26px] h-[26px] rounded-full bg-surface-2 hover:bg-emerald-500/15 text-emerald-600 flex items-center justify-center text-xs font-bold transition-colors">✓</button>
+                            <button onClick={() => { api.post(`/notificaciones/${n.id}/leer/`).then(loadNotifs).catch(anotarFallo) }} title="Marcar leída" className="w-[26px] h-[26px] rounded-full bg-surface-2 hover:bg-emerald-500/15 text-emerald-600 flex items-center justify-center text-xs font-bold transition-colors">✓</button>
                           )}
-                          <button onClick={() => openFromNotif(n)} title="Abrir" className="w-[26px] h-[26px] rounded-full bg-surface-2 hover:bg-surface text-mute flex items-center justify-center text-xs transition-colors">✕</button>
+                          {/* Una ✕ QUITA. Esta llamaba a `openFromNotif`, o sea
+                              abría la notificación y te sacaba del panel a otra
+                              sección: el gesto universal de descartar hacía lo
+                              contrario de lo que dibuja. El endpoint del
+                              personal ya existía; simplemente nadie lo llamaba.
+                              La campana del cliente sí lo hacía bien, y de ahí
+                              venía el "en las del cliente sí me agarra". */}
+                          {/* El acuse del toque: se hunde un pelo al presionar.
+                              Sin él, en el instante entre el clic y que la fila
+                              empiece a salir no pasa nada y el dedo repite. */}
+                          <button onClick={() => quitarNotif(n.id)} title="Quitar de la lista" aria-label={`Quitar "${n.titulo}"`}
+                            className="w-[26px] h-[26px] rounded-full bg-surface-2 hover:bg-surface text-mute hover:text-ink flex items-center justify-center text-xs transition-[color,background-color,transform] duration-150 active:scale-90 motion-reduce:active:scale-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40">✕</button>
                         </div>
-                      </div>
+                      </motion.div>
                     ))}
+                    </AnimatePresence>
                   </div>
-                  <button onClick={() => { closeNotifPanel(); go('notificaciones') }} className="w-full flex items-center justify-center gap-1.5 py-4 text-[13.5px] font-bold text-mute hover:bg-surface-2 hover:text-ink transition-colors border-t border-edge">
-                    <span className="w-3.5 h-3.5 rounded-full border-[1.6px] border-current" /> Ver todas las notificaciones
-                  </button>
                 </div>
                 </>
               )}
@@ -1025,7 +1019,11 @@ export default function Dashboard() {
             {/* Cuenta */}
             <div className="relative">
               <button onClick={() => setAccountOpen(o => !o)} className="flex items-center gap-2 pl-1.5 pr-2 sm:pr-3 py-1.5 rounded-lg border border-edge hover:bg-surface-2 transition-colors">
-                <span className="w-7 h-7 rounded-full bg-surface-2 text-mute font-extrabold text-[11px] flex items-center justify-center shrink-0">{(me?.username?.[0] || 'A').toUpperCase()}</span>
+                <AvatarUsuario
+                  nombre={me?.username} correo={me?.email}
+                  avatarUrl={me?.avatar_url} fallbackUrl={me?.avatar_url_rol}
+                  tamano="sm" className="w-7 h-7"
+                />
                 <span className="text-[13.5px] font-bold hidden sm:block">{me?.username || 'Admin'}</span>
                 <span className="text-[10px] text-mute hidden sm:block">▾</span>
               </button>
@@ -1034,7 +1032,14 @@ export default function Dashboard() {
                   <div className="fixed inset-0 z-[55]" onClick={() => setAccountOpen(false)} />
                   <div className="absolute right-0 top-full mt-2 w-[250px] bg-surface border border-edge rounded-2xl shadow-[0_20px_50px_rgba(17,24,39,0.18)] z-[56] overflow-hidden">
                     <div className="flex items-center gap-3 p-4">
-                      <span className={`w-[42px] h-[42px] rounded-full font-extrabold text-sm flex items-center justify-center shrink-0 ${esDueno ? 'bg-ink text-app' : puede?.nivel ? 'bg-yellow text-[#111827]' : 'bg-surface-2 text-mute'}`}>{(me?.username?.[0] || 'A').toUpperCase()}</span>
+                      {/* El aro dorado es lo que queda de la marca del dueño:
+                          antes el fondo del círculo lo distinguía, y con foto ya
+                          no había dónde ponerlo. */}
+                      <AvatarUsuario
+                        nombre={me?.username} correo={me?.email}
+                        avatarUrl={me?.avatar_url} fallbackUrl={me?.avatar_url_rol}
+                        className={`w-[42px] h-[42px] ${esDueno ? 'ring-2 ring-gold' : ''}`}
+                      />
                       <div className="min-w-0">
                         <div className="text-[15px] font-extrabold text-ink truncate">{me?.username || 'Admin'}</div>
                         <div className="text-[12.5px] text-mute truncate">{me?.email || 'admin@gmail.com'}</div>
@@ -1086,7 +1091,6 @@ export default function Dashboard() {
                   <div className="flex flex-col gap-0.5">
                     {g.items.map(it => {
                       const active = section === it.key
-                      const showBadge = (it.badge ?? 0) > 0
                       return (
                         <button
                           key={it.key}
@@ -1100,13 +1104,6 @@ export default function Dashboard() {
                             {it.icon}
                           </svg>
                           <span className={`flex-1 text-left ${colapsado ? 'lg:hidden' : ''}`}>{t(`sec.${claveSec(it.key)}.title`)}</span>
-                          {showBadge && it.key === 'notificaciones' && (<>
-                            <span className={`min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[11px] font-bold flex items-center justify-center ${colapsado ? 'lg:hidden' : ''}`}>
-                              {it.badge! > 9 ? '9+' : it.badge}
-                            </span>
-                            {/* Colapsado: puntito rojo sobre el icono en lugar del número. */}
-                            <span className={`absolute top-1.5 right-2 w-2.5 h-2.5 rounded-full bg-red-500 ring-2 ring-surface hidden ${colapsado ? 'lg:block' : ''}`} />
-                          </>)}
                         </button>
                       )
                     })}
@@ -1116,7 +1113,11 @@ export default function Dashboard() {
             </nav>
             <div className="border-t border-edge pt-3.5 mt-2">
               <div className={`flex items-center gap-2 px-1 mb-1.5 ${colapsado ? 'lg:justify-center' : ''}`}>
-                <img alt="profile-user" src={resolveMediaUrl(me?.avatar_url) || '/assets/user.png'} className="w-8 h-8 rounded-full object-cover bg-surface-2 shrink-0" />
+                <AvatarUsuario
+                  nombre={me?.username} correo={me?.email}
+                  avatarUrl={me?.avatar_url} fallbackUrl={me?.avatar_url_rol}
+                  className="w-8 h-8"
+                />
                 <div className={`min-w-0 ${colapsado ? 'lg:hidden' : ''}`}>
                   <p className="text-[13px] font-bold text-ink truncate">{me?.username || 'admin'}</p>
                   <p className="text-[11px] text-mute truncate">{me?.email}</p>
@@ -1133,36 +1134,51 @@ export default function Dashboard() {
         {/* MAIN */}
         {/* pb en móvil solo para el técnico: es a quien le sale el dock, y sin
             este respiro el dock taparía el final del contenido. */}
-        <main className={`flex-1 overflow-auto min-w-0 ${puede?.nivel === 1 ? 'pb-24 md:pb-0' : ''}`}>
+        {/* El scroll del panel vive AQUÍ, no en la ventana (el marco es h-screen).
+            La marca le dice a <ScrollAlTope> cuál subir al cambiar de sección:
+            sin ella, saltar de Rentas a Ventas te dejaba a media página. */}
+        {/* `relative` no es decorativo: este <main> es el contenedor que scrollea
+            el panel. Sin posicionarlo, cualquier hijo `position: absolute` —y
+            `sr-only` lo es— toma como referencia el DOCUMENTO en vez de este
+            panel: se escapa de su recorte y estira la página entera. Las tablas
+            accesibles de las gráficas hacían justo eso y dejaban ~650 px de
+            negro por debajo del contenido, con dos barras de scroll peleando. */}
+        <main data-scroll-top className={`relative flex-1 overflow-auto min-w-0 ${puede?.nivel === 1 ? 'pb-24 md:pb-0' : ''}`}>
           <div className="p-3 sm:p-4 lg:p-5">
           {/* Encabezado de página: breadcrumb + título + subtítulo */}
+          {!enDetalle && (
           <div className="mb-5">
             <nav className="flex items-center gap-2 text-[13px] font-semibold text-mute mb-3">
               <button onClick={() => go('resumen')} className="hover:text-ink transition-colors" title="Inicio" aria-label="Inicio">
                 <svg className="w-[18px] h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.7"><path strokeLinecap="round" strokeLinejoin="round" d="M3 11.4L12 4l9 7.4" /><path strokeLinecap="round" strokeLinejoin="round" d="M5.5 9.8V19a1.2 1.2 0 0 0 1.2 1.2h10.6A1.2 1.2 0 0 0 18.5 19V9.8" /></svg>
               </button>
-              <span className="text-edge">›</span>
+              <span aria-hidden="true" className="text-mute/70">›</span>
               <span className="text-ink font-bold">{t(`sec.${claveSec(section)}.title`)}</span>
             </nav>
             <h1 className="text-[26px] sm:text-[28px] font-extrabold tracking-tight text-ink leading-tight">{t(`sec.${claveSec(section)}.title`)}</h1>
             <p className="text-[15px] text-mute mt-1.5">{t(`sec.${claveSec(section)}.sub`)}</p>
           </div>
+          )}
 
           {/* Cargas de dinero que fallaron: sin este aviso, los totales en $0
               parecen reales. Reintentar relanza solo los loaders afectados. */}
           {cargasFallidas.length > 0 && (
             <div className="mb-5 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-[13.5px]">
-              <svg className="w-[18px] h-[18px] text-amber-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v4m0 4h.01M10.3 4.3L2.6 18a2 2 0 001.7 3h15.4a2 2 0 001.7-3L13.7 4.3a2 2 0 00-3.4 0z" /></svg>
+              <svg className="w-[18px] h-[18px] text-taller-ink shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v4m0 4h.01M10.3 4.3L2.6 18a2 2 0 001.7 3h15.4a2 2 0 001.7-3L13.7 4.3a2 2 0 00-3.4 0z" /></svg>
               <span className="text-ink font-semibold">No se pudo cargar: {cargasFallidas.join(', ')}.</span>
               <span className="text-mute">Los totales pueden verse en $0 sin serlo.</span>
               <button
                 onClick={() => { loadMetrics(); loadVentas(); loadRentas(); loadFacturacion(); loadCotizaciones() }}
-                className="ml-auto px-3.5 py-1.5 rounded-lg bg-amber-500/20 text-amber-700 dark:text-amber-400 font-bold hover:bg-amber-500/30 transition-colors"
+                className="ml-auto px-3.5 py-1.5 rounded-lg bg-amber-500/20 text-taller-ink font-bold hover:bg-amber-500/30 transition-colors"
               >
                 Reintentar
               </button>
             </div>
           )}
+          {/* Las secciones grandes viajan en su propio archivo y se descargan al
+              abrirlas. Mientras baja el archivo se ve este spinner —el mismo de
+              las rutas— en vez de un hueco en blanco. */}
+          <Suspense fallback={<div className="min-h-[50vh] grid place-items-center"><div className="w-8 h-8 rounded-full border-2 border-gold border-t-transparent animate-spin" role="status" aria-label="Cargando sección" /></div>}>
           {section === 'resumen' && (
             <Resumen
               equipos={equipos} categorias={categorias}
@@ -1175,15 +1191,23 @@ export default function Dashboard() {
             <EquiposAdmin
               equipos={equipos} categorias={categorias} tipos={tipos} marcas={marcas}
               reload={() => { loadEquipos(); loadUnidades() }} notify={notify}
+              cargando={!listo('equipos')}
             />
           )}
           {section === 'inventario' && (
             <InventarioGlobal
               unidades={unidades} equipos={equipos}
               reload={() => { loadUnidades(); loadRentas(); loadRefacciones() }} notify={notify}
-              onEnviarTaller={abrirReparacion}
+              onEnviarTaller={abrirReparacion} cargando={!listo('unidades')}
             />
           )}
+          {/* La caja pide DOS cosas para ofrecer maquinaria o rentas: el
+              interruptor del NEGOCIO (Ajustes → Caja) y la capacidad de quien
+              está en el mostrador. Desde que la caja es del puesto de mostrador,
+              al cajero le viene apagado «Rentar» de fábrica: sin la segunda
+              condición el botón saldría solo para responder 403. Si el negocio
+              enciende la renta en caja, el dueño le enciende «Rentar» al puesto
+              desde Permisos y el botón aparece. */}
           {section === 'caja' && (
             <CajaPOS
               notify={notify}
@@ -1192,33 +1216,38 @@ export default function Dashboard() {
                 equipo_modelo: u.equipo_modelo,
                 puede_venderse: u.puede_venderse, puede_rentarse: u.puede_rentarse,
               }))}
-              puedeVenderMaquina={cajaCfg.vende}
-              puedeRentarMaquina={cajaCfg.renta}
+              puedeVenderMaquina={cajaCfg.vende && puedeVer('vender')}
+              puedeRentarMaquina={cajaCfg.renta && puedeVer('rentar')}
               onVenderMaquina={u => { const real = unidades.find(x => x.id === u.id); if (real) setCajaVender(real) }}
               onRentarMaquina={u => { const real = unidades.find(x => x.id === u.id); if (real) setCajaRentar(real) }}
             />
           )}
           {section === 'refacciones' && (
-            <RefaccionesAdmin refacciones={refacciones} reload={loadRefacciones} notify={notify} />
+            <RefaccionesAdmin refacciones={refacciones} reload={loadRefacciones} notify={notify}
+              cargando={!listo('refacciones')} />
           )}
           {section === 'reparaciones' && (
             <ReparacionesAdmin
               ordenes={ordenes} refacciones={refacciones} unidades={unidades} empresas={empresas}
               reload={() => { loadOrdenes(); loadRefacciones(); loadUnidades() }} notify={notify}
               abrirId={ordenAbrir} onAbierto={() => setOrdenAbrir(null)}
+              cargando={!listo('reparaciones')}
             />
           )}
           {section === 'facturacion' && (
-            <FacturacionAdmin solicitudes={solicitudes} reload={loadFacturacion} notify={notify} />
+            <FacturacionAdmin solicitudes={solicitudes} reload={loadFacturacion} notify={notify}
+              cargando={!listo('facturación')} />
           )}
           {section === 'adeudos' && (
-            <AdeudosAdmin datos={adeudos} pedidos={pedidos} reload={loadAdeudos} reloadApartados={loadPedidos} notify={notify} />
+            <AdeudosAdmin datos={adeudos} pedidos={pedidos} reload={loadAdeudos} reloadApartados={loadPedidos} notify={notify}
+              cargando={!listo('adeudos')} />
           )}
           {section === 'pedidos' && (
-            <PedidosAdmin datos={pedidos} reload={loadPedidos} equipos={equipos} empresas={empresas} notify={notify} />
+            <PedidosAdmin datos={pedidos} reload={loadPedidos} equipos={equipos} empresas={empresas} notify={notify}
+              cargando={!listo('pedidos')} />
           )}
           {section === 'cotizaciones' && (
-            <CotizacionesAdmin empresas={empresas} notify={notify} irAInventario={() => go('inventario')} irARentas={(id) => { fijarRentaAAbrir(id); go('rentas') }} />
+            <CotizacionesAdmin empresas={empresas} notify={notify} irAInventario={() => go('inventario')} irARentas={(id) => { fijarRentaAAbrir(id); go('rentas') }} irAVentas={(id) => { fijarVentaAAbrir(id); go('ventas') }} />
           )}
           {section === 'catalogos' && (
             <CatalogosAdmin
@@ -1227,19 +1256,18 @@ export default function Dashboard() {
             />
           )}
           {section === 'rentas' && (
-            <RentasAdmin reload={() => { loadRentas(); loadUnidades() }} notify={notify} />
+            <div className="space-y-4">
+              {/* Arriba de la lista a propósito: lo primero al entrar a Rentas
+                  es a quién hay que insistirle hoy, no el histórico. */}
+              <RecordatoriosRentas />
+              <RentasAdmin reload={() => { loadRentas(); loadUnidades() }} notify={notify} />
+            </div>
           )}
           {section === 'ventas' && (
             <VentasAdmin notify={notify} />
           )}
-          {section === 'notificaciones' && (
-            <NotificacionesAdmin
-              notifs={notifs} reload={loadNotifs} go={go}
-              onOpen={openFromNotif}
-            />
-          )}
           {section === 'cupones' && (
-            <CuponesAdmin coupons={coupons} reload={loadCoupons} notify={notify} />
+            <CuponesAdmin coupons={coupons} reload={loadCoupons} notify={notify} cargando={!listo('cupones')} />
           )}
           {section === 'clientes' && (
             <ClientesAdmin puede={puede} notify={notify} reloadBadge={loadClientesTotal} />
@@ -1250,8 +1278,13 @@ export default function Dashboard() {
               onOrdenCreada={() => { loadOrdenes(); loadUnidades() }}
             />
           )}
-          {section === 'usuarios' && <UsuariosAdmin usuarios={usuarios} reload={loadUsuarios} notify={notify} yoId={me?.id} />}
+          {section === 'equipo' && <EquipoAdmin usuarios={usuarios} reload={loadUsuarios} notify={notify} yoId={me?.id} cargando={!listo('usuarios')} />}
+          {section === 'permisos' && <PermisosAdmin notify={notify} />}
           {section === 'configuracion' && <ConfiguracionAdmin notify={notify} lang={lang} onLang={cambiarIdioma} />}
+          </Suspense>
+
+          {/* Firma del sistema: cierra el panel como cierra la tienda. */}
+          <PieByRix className="mt-6" />
           </div>
         </main>
       </div>
@@ -1265,9 +1298,9 @@ export default function Dashboard() {
         <Dock
           items={navGroups.flatMap(g => g.items).map<DockItem>(it => ({
             key: it.key,
-            // Etiqueta corta: "Notificaciones"/"Configuración" no caben bajo un
-            // icono de dock. La larga se queda en el cajón lateral.
-            label: ({ ubicaciones: 'Jornada', notificaciones: 'Avisos', configuracion: 'Ajustes' } as Record<string, string>)[it.key] ?? it.label,
+            // Etiqueta corta: "Configuración" no cabe bajo un icono de dock.
+            // La larga se queda en el cajón lateral.
+            label: ({ ubicaciones: 'Jornada', configuracion: 'Ajustes' } as Record<string, string>)[it.key] ?? it.label,
             badge: it.badge,
             activo: section === it.key,
             onClick: () => go(it.key),
@@ -1281,46 +1314,6 @@ export default function Dashboard() {
       )}
 
       <DialogoHost />
-
-      {/* ─── ALERTAS: pila (las nuevas abajo), círculo por tipo y barra de vida ───
-          `notify()` es el ÚNICO canal de todo lo que el panel le dice al usuario:
-          venta registrada, error al guardar, permiso denegado, red caída. Los
-          toasts se van solos a los 3.2s, así que quien usa lector de pantalla no
-          tiene una segunda oportunidad de enterarse. De ahí las dos regiones:
-
-          • El contenedor va montado SIEMPRE (aunque esté vacío) porque una región
-            live que aparece junto con su contenido no se anuncia: el lector tiene
-            que estar observándola de antes.
-          • Los errores además se espejean en una región `alert` (assertive) para
-            que interrumpan lo que el lector esté diciendo. Un "no se guardó" que
-            espera turno detrás de otra frase llega tarde. */}
-      <div className="sr-only" role="alert" aria-live="assertive">
-        {toasts.filter(t => t.type === 'err').slice(-1).map(t => <span key={t.id}>{t.msg}</span>)}
-      </div>
-      <div
-        className="fixed top-[76px] right-3 sm:right-5 z-[130] flex flex-col items-end gap-2.5 max-w-[calc(100vw-1.5rem)]"
-        role="status"
-        aria-live="polite"
-      >
-        {toasts.map(t => (
-            <div key={t.id} className="toast-in relative overflow-hidden flex items-center gap-3 pl-3 pr-2.5 py-2.5 rounded-2xl border border-edge bg-alert shadow-[0_18px_50px_rgba(0,0,0,0.35)]">
-              <span className={`w-7 h-7 rounded-full grid place-items-center shrink-0 ${({ ok: 'bg-emerald-500', err: 'bg-red-500', info: 'bg-violet-500', warning: 'bg-amber-500', primary: 'bg-neutral-400' } as Record<string, string>)[t.type]}`}>
-                {t.type === 'ok' && <svg viewBox="0 0 24 24" className="w-4 h-4 stroke-white fill-none" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round"><path d="M5 13l4 4L19 7" /></svg>}
-                {(t.type === 'err' || t.type === 'info') && <svg viewBox="0 0 24 24" className="w-4 h-4 stroke-white fill-none" strokeWidth="2.4" strokeLinecap="round"><path d="M12 7v6" /><circle cx="12" cy="17" r="0.5" className="fill-white" /></svg>}
-                {t.type === 'warning' && <svg viewBox="0 0 24 24" className="w-4 h-4 stroke-white fill-none" strokeWidth="2.6" strokeLinecap="round"><path d="M8 12h8" /></svg>}
-                {t.type === 'primary' && <svg viewBox="0 0 24 24" className="w-4 h-4 stroke-white fill-none" strokeWidth="2"><path d="M15 17h5l-1.3-1.3A2 2 0 0 1 18.1 14V11a6.1 6.1 0 1 0-12.2 0v3a2 2 0 0 1-.6 1.4L4 17h5" /><path d="M9.2 17v.8a2.8 2.8 0 0 0 5.6 0V17" /></svg>}
-              </span>
-              <span className="text-sm font-bold text-ink pr-1">{t.msg}</span>
-              <button onClick={() => setToasts(ts => ts.filter(x => x.id !== t.id))} aria-label="Cerrar" className="w-7 h-7 grid place-items-center rounded-full text-mute hover:text-ink hover:bg-surface transition-colors shrink-0">
-                <svg viewBox="0 0 24 24" className="w-3.5 h-3.5 stroke-current fill-none" strokeWidth="2" strokeLinecap="round"><path d="M6 6l12 12M18 6L6 18" /></svg>
-              </button>
-              <span
-                className={`absolute left-0 bottom-0 h-[3px] rounded-full ${({ ok: 'bg-emerald-500', err: 'bg-red-500', info: 'bg-violet-500', warning: 'bg-amber-500', primary: 'bg-neutral-400' } as Record<string, string>)[t.type]}`}
-                style={{ animation: 'toast-avance 3.2s linear forwards' }}
-              />
-          </div>
-        ))}
-      </div>
 
       {invEquipo && <InventoryModal equipo={invEquipo} onClose={() => setInvEquipo(null)} notify={notify} />}
 
@@ -1359,6 +1352,9 @@ export default function Dashboard() {
 ════════════════════════════════════════ */
 /* (AreaChart eliminado: el Resumen usa los widgets del comp de Claude Design) */
 
+/** Los minutos SIEMPRE de dos dígitos: "1:04", nunca "1:4". */
+const FORMATO_MINUTOS = { minimumIntegerDigits: 2 } as const
+
 /** Reloj del resumen con dígitos de marcador: cada dígito que cambia RUEDA
  *  (el viejo sale hacia arriba, el nuevo entra desde abajo). Los que no
  *  cambian no se mueven — al cambiar de minuto solo giran los necesarios.
@@ -1372,33 +1368,33 @@ function RelojVivo() {
   useEffect(() => { const t = setInterval(() => setNow(new Date()), 1000); return () => clearInterval(t) }, [])
   let h = now.getHours() % 12
   if (h === 0) h = 12
-  const chars = [...`${h}:${String(now.getMinutes()).padStart(2, '0')}`]
   const ampm = now.getHours() < 12 ? 'AM' : 'PM'
   // Helvetica/Arial: su "1" es un trazo simple y recto, sin la patita/serif
   // que tenían la monoespaciada y el sans black (que no gustaban).
   const fuenteNum = "'Helvetica Neue', Helvetica, Arial, sans-serif"
   return (
     <div className="flex items-baseline gap-2 mt-5">
-      <div className="flex text-[46px] leading-none font-bold tracking-[-0.02em] text-ink tabular-nums" style={{ fontFamily: fuenteNum }}>
-        {chars.map((c, i) => c === ':' ? (
-          <span key={`sep-${i}`} className="mx-[3px] -translate-y-[3px]">:</span>
-        ) : (
-          <span key={`pos-${i}`} className="relative inline-flex overflow-hidden" style={{ height: '1em' }}>
-            <AnimatePresence mode="popLayout" initial={false}>
-              <motion.span
-                key={c}
-                initial={{ y: '100%', opacity: 0 }}
-                animate={{ y: 0, opacity: 1 }}
-                exit={{ y: '-100%', opacity: 0 }}
-                transition={{ duration: 0.5, ease: [0.23, 1, 0.32, 1] }}
-                className="inline-block"
-              >
-                {c}
-              </motion.span>
-            </AnimatePresence>
-          </span>
-        ))}
-      </div>
+      {/* El rodado de los dígitos lo hace NumberFlow, igual que las cifras de
+          dinero del panel: antes era un AnimatePresence a mano que montaba y
+          desmontaba un <span> por carácter.
+
+          `trend={1}` no es adorno: sin él, al pasar de :59 a :00 NumberFlow ve
+          que el número BAJÓ y gira los dígitos hacia atrás, como si el reloj se
+          regresara. Fijado en 1, siempre avanzan hacia arriba.
+
+          El grupo sincroniza el tiempo de las dos animaciones; sin él, la hora
+          y los minutos ruedan cada quien por su lado en los cambios de hora. */}
+      <NumberFlowGroup>
+        <div className="flex items-baseline text-[46px] leading-none font-bold tracking-[-0.02em] text-ink tabular-nums" style={{ fontFamily: fuenteNum }}>
+          {/* Los dos puntos van como `suffix` de la hora, NO como un <span>
+              hermano. De hermano quedaban flotando arriba: NumberFlow trae su
+              propia caja y el flex estiraba el span a esa altura, dejando el
+              glifo pegado al techo. Dentro del número, los pinta NumberFlow
+              sobre la misma línea base que los dígitos y el problema no existe. */}
+          <NumberFlow value={h} trend={1} suffix=":" />
+          <NumberFlow value={now.getMinutes()} trend={1} format={FORMATO_MINUTOS} />
+        </div>
+      </NumberFlowGroup>
       <span className="text-[16px] font-bold text-mute" style={{ fontFamily: fuenteNum }}>{ampm}</span>
     </div>
   )
@@ -1411,7 +1407,10 @@ function Resumen({ equipos, rentas, unidades, ventas, me, go, metrics, adeudos, 
   metrics: DashMetrics | null
   adeudos: AdeudosDatos; pedidos: PedidosDatos; solicitudes: SolicitudFactura[]
 }) {
-  const money0 = (n: number) => '$' + Math.round(n).toLocaleString('en-US')
+  // Pesos redondos. Es el mismo `dinero` de las gráficas: los centavos en una
+  // cifra de tablero son ruido, y las dos formas de escribirlos no pueden
+  // separarse o el Resumen se contradice consigo mismo.
+  const money0 = dinero
 
   // Reloj en vivo
   // El resumen solo necesita saber QUÉ DÍA es, no qué segundo: la hora la lleva
@@ -1456,30 +1455,38 @@ function Resumen({ equipos, rentas, unidades, ventas, me, go, metrics, adeudos, 
   const ingresosHoy = metrics?.ingresos_hoy ?? ventasActivas.reduce((a, v) => a + cobradoEn(v, hoyStr), 0)
 
   // Ingresos por mes (últimos 6): del backend (ventas + rentas, sin tope). Respaldo cliente.
-  const MESES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
+  // Se conserva la MEZCLA (cuánto fue renta y cuánto venta): el dato siempre
+  // vino separado y la gráfica lo tiraba para pintar seis barras de un color.
+  // El respaldo del navegador solo sabe de ventas, y lo dice en vez de fingir.
   const revByMonth = metrics?.ingresos_por_mes
-    ? metrics.ingresos_por_mes.map(m => ({ label: m.label, total: m.total }))
+    ? metrics.ingresos_por_mes.map(m => ({ label: m.label, ventas: m.ventas, rentas: m.rentas, total: m.total }))
     : Array.from({ length: 6 }, (_, i) => {
       const d = new Date(y, mo - (5 - i), 1)
       const key = `${d.getFullYear()}-${pad(d.getMonth() + 1)}`
       const t = ventasActivas.reduce((a, v) => a + cobradoEn(v, key), 0)
-      return { label: MESES[d.getMonth()], total: t }
+      return { label: MESES[d.getMonth()], ventas: t, rentas: 0, total: t }
     })
   const maxRev = Math.max(1, ...revByMonth.map(r => r.total))
   const ingresosTotales = revByMonth.reduce((a, r) => a + r.total, 0)
   const mesesPositivos = revByMonth.filter(r => r.total > 0).length
 
   // Movimientos recientes (rentas + ventas)
+  /* Las insignias iban con seis hex a mano, todos calculados para fondo claro:
+     en tema oscuro esos rosas y azules pálidos deslumbraban sobre el panel
+     negro. Ahora salen de los tokens, que ya saben voltearse solos, y el fondo
+     se deriva del mismo color con color-mix — un solo dato, no dos que se
+     pueden desincronizar. */
+  const tinte = (token: string) => `color-mix(in oklab, ${token} 14%, transparent)`
   const moves = [
-    ...rentas.map(r => ({ name: r.inventario.equipo || 'Equipo', code: r.inventario.codigo || '', status: r.vencida ? 'Vencida' : 'Rentado', color: r.vencida ? '#C23B3B' : '#2B5FAD', bg: r.vencida ? '#FCE9E9' : '#E7EFFB', ts: r.fecha_fin || '' })),
-    ...ventas.map(v => ({ name: v.unidad?.equipo || 'Venta mostrador', code: v.unidad?.codigo || '', status: v.estado === 'cancelada' ? 'Cancelada' : 'Vendido', color: v.estado === 'cancelada' ? '#C23B3B' : '#8A631E', bg: v.estado === 'cancelada' ? '#FCE9E9' : '#F7ECD9', ts: v.fecha || '' })),
+    ...rentas.map(r => ({ esRenta: true, name: r.inventario.equipo || 'Equipo', code: r.inventario.codigo || '', status: r.vencida ? 'Vencida' : 'Rentado', color: r.vencida ? 'var(--c-vencida)' : 'var(--c-renta)', bg: tinte(r.vencida ? 'var(--c-vencida)' : 'var(--c-renta)'), ts: r.fecha_fin || '' })),
+    ...ventas.map(v => ({ esRenta: false, name: v.unidad?.equipo || 'Venta mostrador', code: v.unidad?.codigo || '', status: v.estado === 'cancelada' ? 'Cancelada' : 'Vendido', color: v.estado === 'cancelada' ? 'var(--c-vencida)' : 'var(--chart-venta)', bg: tinte(v.estado === 'cancelada' ? 'var(--c-vencida)' : 'var(--chart-venta)'), ts: v.fecha || '' })),
   ].sort((a, b) => (b.ts || '').localeCompare(a.ts || '')).slice(0, 4)
 
-  const overviewStats = [
-    { label: 'Ingreso potencial/día', value: money0(ingresoDia), icon: <><path d="M12 1v22" /><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" /></> },
-    { label: 'Unidades disponibles', value: String(disp), icon: <><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" /><path d="M3.3 7 12 12l8.7-5M12 22V12" /></> },
-    { label: 'Rentas activas', value: String(rentas.length), icon: <><rect x="3" y="4.5" width="18" height="16" rx="2" /><path d="M3 9h18M8 3v3m8-3v3" /><path d="M12 13v3l2 1" /></> },
-    { label: 'Ventas del catálogo', value: String(ventasActivas.length), icon: <><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z" /><path d="M3 6h18" /><path d="M16 10a4 4 0 0 1-8 0" /></> },
+  const overviewStats: KpiItem[] = [
+    { label: 'Potencial por día', value: <Monto valor={ingresoDia} decimales={0} />, helper: 'con la flota entera rentada', icon: <><path d="M12 1v22" /><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" /></> },
+    { label: 'Unidades disponibles', value: <Numero valor={disp} />, helper: `${availabilityPct}% de la flota operativa`, progreso: operativas ? disp / operativas : 0, icon: <><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" /><path d="M3.3 7 12 12l8.7-5M12 22V12" /></> },
+    { label: 'Rentas activas', value: <Numero valor={rentas.length} />, helper: rent ? `${rent} unidad${rent === 1 ? '' : 'es'} en obra` : 'nada en obra', icon: <><rect x="3" y="4.5" width="18" height="16" rx="2" /><path d="M3 9h18M8 3v3m8-3v3" /><path d="M12 13v3l2 1" /></> },
+    { label: 'Ventas', value: <Numero valor={ventasActivas.length} />, helper: 'sin contar las canceladas', icon: <><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z" /><path d="M3 6h18" /><path d="M16 10a4 4 0 0 1-8 0" /></> },
   ]
 
   // ── Requiere tu atención: los pendientes de dinero/operación de un vistazo,
@@ -1494,12 +1501,16 @@ function Resumen({ equipos, rentas, unidades, ventas, me, go, metrics, adeudos, 
   const pedidosPorEntregar = (pedidos?.pedidos || []).filter(p => Number(p.saldo || 0) <= 0 && (!p.sobre_pedido || p.pedido_fase === 'en_sucursal')).length
   const porFacturar = solicitudes.filter(s => s.estado === 'pendiente').length
   const rentasVencidas = rentas.filter(r => r.vencida).length
-  const pendientes: { label: string; value: string; sub: string; urgente: boolean; ir: Section }[] = [
-    { label: 'Por cobrar', value: money0(porCobrar), sub: clientesDeben ? `${clientesDeben} cliente${clientesDeben === 1 ? '' : 's'}` : 'al corriente', urgente: porCobrar > 0, ir: 'adeudos' },
-    { label: 'Pedidos abiertos', value: String(pedidosAbiertos), sub: pedidosPorEntregar ? `${pedidosPorEntregar} por entregar` : (pedidosAbiertos ? 'con anticipo' : 'ninguno'), urgente: pedidosPorEntregar > 0, ir: 'pedidos' },
-    { label: 'Por facturar', value: String(porFacturar), sub: porFacturar ? 'sin timbrar' : 'nada pendiente', urgente: porFacturar > 0, ir: 'facturacion' },
-    { label: 'Rentas vencidas', value: String(rentasVencidas), sub: rentasVencidas ? 'por recoger' : 'ninguna', urgente: rentasVencidas > 0, ir: 'rentas' },
-    { label: 'En taller', value: String(mant), sub: mant ? 'en mantenimiento' : 'sin equipos', urgente: false, ir: 'inventario' },
+  /* El TONO dice de qué habla cada cifra y el ÉNFASIS si hoy importa; son dos
+     datos distintos y por eso van separados. "Rentas vencidas: 0" con tono rojo
+     pero sin énfasis sale en gris: el color solo enciende cuando de verdad hay
+     algo que atender. */
+  const pendientes: { label: string; value: React.ReactNode; sub: string; urgente: boolean; ir: Section; tono: KpiTone; icon: React.ReactNode }[] = [
+    { label: 'Por cobrar', value: <Monto valor={porCobrar} decimales={0} />, sub: clientesDeben ? `${clientesDeben} cliente${clientesDeben === 1 ? '' : 's'}` : 'al corriente', urgente: porCobrar > 0, ir: 'adeudos', tono: 'gold', icon: <><path d="M12 1v22" /><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" /></> },
+    { label: 'Pedidos abiertos', value: <Numero valor={pedidosAbiertos} />, sub: pedidosPorEntregar ? `${pedidosPorEntregar} por entregar` : (pedidosAbiertos ? 'con anticipo' : 'ninguno'), urgente: pedidosPorEntregar > 0, ir: 'pedidos', tono: 'info', icon: <><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z" /><path d="M3 6h18" /><path d="M16 10a4 4 0 0 1-8 0" /></> },
+    { label: 'Por facturar', value: <Numero valor={porFacturar} />, sub: porFacturar ? 'sin timbrar' : 'nada pendiente', urgente: porFacturar > 0, ir: 'facturacion', tono: 'warning', icon: <><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5M9 13h6M9 17h4" /></> },
+    { label: 'Rentas vencidas', value: <Numero valor={rentasVencidas} />, sub: rentasVencidas ? 'por recoger' : 'ninguna', urgente: rentasVencidas > 0, ir: 'rentas', tono: 'danger', icon: <><path d="M10.3 4.3 2.6 18a2 2 0 0 0 1.7 3h15.4a2 2 0 0 0 1.7-3L13.7 4.3a2 2 0 0 0-3.4 0z" /><path d="M12 9v4m0 4h.01" /></> },
+    { label: 'En taller', value: <Numero valor={mant} />, sub: mant ? 'en mantenimiento' : 'sin equipos', urgente: false, ir: 'inventario', tono: 'warning', icon: <><path d="M14.7 6.3a4 4 0 0 0-5.6 5.6L3 18v3h3l6.1-6.1a4 4 0 0 0 5.6-5.6l-2.5 2.5-2.1-2.1z" /></> },
   ]
 
   // Paleta SUAVE solo para la gráfica: la dona y esta leyenda comparten los
@@ -1507,145 +1518,217 @@ function Resumen({ equipos, rentas, unidades, ventas, me, go, metrics, adeudos, 
   // de las tablas siguen con los tokens fuertes (necesitan contraste), por eso
   // los colores de chart van aparte.
   const indicators = [
-    { label: 'Disponibles', sub: 'Listas para operar', value: String(disp), color: 'var(--chart-green)' },
-    { label: 'Rentadas', sub: 'En obra', value: String(rent), color: 'var(--chart-blue)' },
-    { label: 'Mantenimiento', sub: 'En taller', value: String(mant), color: 'var(--chart-gray)' },
+    { label: 'Disponibles', sub: 'Listas para operar', value: <Numero valor={disp} />, color: 'var(--chart-libre)' },
+    { label: 'Rentadas', sub: 'En obra', value: <Numero valor={rent} />, color: 'var(--chart-renta)' },
+    { label: 'Mantenimiento', sub: 'En taller', value: <Numero valor={mant} />, color: 'var(--chart-taller)' },
   ]
 
-  /** Dona repartida por estado. Sin unidades queda un anillo gris, no un hueco. */
-  const donaGradiente = (() => {
-    const total = disp + rent + mant
-    if (!total) return 'conic-gradient(var(--c-surface-2) 0deg 360deg)'
-    const gLibre = (disp / total) * 360
-    const gRenta = gLibre + (rent / total) * 360
-    return `conic-gradient(var(--chart-green) 0deg ${gLibre}deg, var(--chart-blue) ${gLibre}deg ${gRenta}deg, var(--chart-gray) ${gRenta}deg 360deg)`
+  /** Reparto de la flota por estado, para la dona. El orden NO se ordena por
+   *  tamaño: cada estado tiene su color y su lugar fijo, así el ojo no tiene que
+   *  releer la leyenda cada vez que cambia el inventario. */
+  const tramosFlota = [
+    { clave: 'disponibles', etiqueta: 'Disponibles', valor: disp, color: 'var(--chart-libre)' },
+    { clave: 'rentadas', etiqueta: 'Rentadas', valor: rent, color: 'var(--chart-renta)' },
+    { clave: 'taller', etiqueta: 'En taller', valor: mant, color: 'var(--chart-taller)' },
+  ]
+
+  /* Ocupación: cuánta máquina estuvo trabajando cada día del tramo. La flota va
+     por día (`techoDia`) y no como una sola cifra de hoy, porque una unidad dada
+     de alta la semana pasada no estaba en la flota el mes pasado. */
+  const ocupacion = (metrics?.ocupacion_por_dia || []).map(o => ({
+    fecha: o.fecha, valor: o.rentadas, techoDia: o.flota,
+  }))
+  const ocupHoy = metrics?.ocupacion_por_dia?.[metrics.ocupacion_por_dia.length - 1]
+  const ocupPct = ocupHoy && ocupHoy.flota ? Math.round((ocupHoy.rentadas / ocupHoy.flota) * 100) : 0
+  const topEquipos = metrics?.top_equipos || []
+
+  /* ── Cartera: el dinero que falta entrar, por ANTIGÜEDAD ──
+     Sustituye a "Inventario por estado", que repetía las mismas tres cifras de
+     la dona de arriba con otro dibujo. Esto es lo que el Resumen no decía por
+     ningún lado: cuánto se debe y desde cuándo. El globito de "Adeudos" de
+     arriba solo dice CUÁNTOS, y un adeudo de tres días no es uno de tres meses.
+
+     Qué se considera vencido: la renta, cuando pasó su fecha de fin; el
+     apartado, cuando pasó su fecha estimada de entrega. Un apartado sin fecha
+     estimada NO se cuenta como vencido —nadie se comprometió a una— y va en
+     vigente. Lo mismo la renta que todavía está en obra. */
+  const cartera = (() => {
+    const hoyMs = new Date(y, mo, now.getDate()).getTime()
+    const dias = (iso?: string | null) => {
+      if (!iso) return 0
+      const d = new Date(`${String(iso).slice(0, 10)}T00:00:00`).getTime()
+      return Number.isNaN(d) ? 0 : Math.floor((hoyMs - d) / 86_400_000)
+    }
+    const tramos = { vigente: 0, reciente: 0, viejo: 0 }
+    const cuenta = { vigente: 0, reciente: 0, viejo: 0 }
+    const sumar = (monto: number, vencidoHace: number) => {
+      if (monto <= 0) return
+      const donde = vencidoHace <= 0 ? 'vigente' : vencidoHace <= 30 ? 'reciente' : 'viejo'
+      tramos[donde] += monto
+      cuenta[donde] += 1
+    }
+    let deRentas = 0, deApartados = 0, masViejo = 0
+    // Con `?? []`, no `.rentas` a secas: el resto de este componente ya lee
+    // `(pedidos?.pedidos || [])`, y aquí un 200 con el cuerpo incompleto haría
+    // `for (const r of undefined)` — un TypeError que se lleva el Resumen entero
+    // al ErrorBoundary, o sea la pantalla "500" del panel por un campo que faltó.
+    for (const r of adeudos?.rentas ?? []) {
+      const saldo = num(r.saldo)
+      if (saldo <= 0) continue
+      deRentas += saldo
+      const atraso = dias(r.fecha_fin)
+      masViejo = Math.max(masViejo, atraso)
+      sumar(saldo, atraso)
+    }
+    for (const p of pedidos?.pedidos ?? []) {
+      const saldo = num(p.saldo)
+      if (saldo <= 0) continue
+      deApartados += saldo
+      const atraso = p.fecha_estimada_entrega ? dias(p.fecha_estimada_entrega) : 0
+      masViejo = Math.max(masViejo, atraso)
+      sumar(saldo, atraso)
+    }
+    return { tramos, cuenta, deRentas, deApartados, masViejo, total: deRentas + deApartados }
   })()
+  const TRAMOS_CARTERA = [
+    { clave: 'vigente' as const, etiqueta: 'Al corriente', color: 'var(--chart-renta)' },
+    { clave: 'reciente' as const, etiqueta: 'Vencido, ≤30 días', color: 'var(--chart-taller)' },
+    { clave: 'viejo' as const, etiqueta: 'Vencido, +30 días', color: 'var(--c-vencida)' },
+  ]
 
-  // Tareas rápidas (persisten en el navegador)
-  const [tasks, setTasks] = useState<{ id: number; text: string; done: boolean }[]>(() => {
-    try { return JSON.parse(localStorage.getItem('remali_tasks') || '[]') } catch { return [] }
-  })
-  const [taskTab, setTaskTab] = useState<'pend' | 'done'>('pend')
-  const [taskInput, setTaskInput] = useState('')
-  useEffect(() => { localStorage.setItem('remali_tasks', JSON.stringify(tasks)) }, [tasks])
-  const addTask = () => { const t = taskInput.trim(); if (!t) return; setTasks(p => [...p, { id: Date.now(), text: t, done: false }]); setTaskInput('') }
-  const toggleTask = (id: number) => setTasks(p => p.map(t => t.id === id ? { ...t, done: !t.done } : t))
-  const delTask = (id: number) => setTasks(p => p.filter(t => t.id !== id))
-  const visibleTasks = tasks.filter(t => taskTab === 'pend' ? !t.done : t.done)
-
-  // Calendario del mes actual
-  const firstDow = new Date(y, mo, 1).getDay()
-  const daysInMonth = new Date(y, mo + 1, 0).getDate()
-  const today = now.getDate()
-  const calCells: (number | null)[] = [...Array(firstDow).fill(null), ...Array.from({ length: daysInMonth }, (_, i) => i + 1)]
-  const monthLabel = now.toLocaleDateString('es-MX', { month: 'long', year: 'numeric' })
   const panel = 'bg-surface border border-edge rounded-xl shadow-[0_1px_3px_rgba(33,29,22,0.04)]'
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-[2fr_1fr] gap-2.5 items-start">
       {/* ── Columna izquierda ── */}
       <div className="flex flex-col gap-2.5 min-w-0">
-        {/* Hero — gradiente y textos con tokens de tema (antes eran fijos en
-            claro y el hero se quedaba blanco en modo oscuro). */}
-        <div className="rounded-2xl px-8 py-7 flex items-center justify-between gap-4 bg-[linear-gradient(120deg,#FFFFFF,#DCE9FB)] dark:bg-[linear-gradient(120deg,#161822,#1e2a44)]">
+        {/* Encabezado. Antes esto era un degradado AZUL con los hex a mano, en un
+            producto que tiene UN acento y es dorado: un color que no significaba
+            nada, ocupando el lugar más visible de la pantalla.
+
+            Y la jerarquía estaba al revés. "Bienvenido, admin" era el texto más
+            grande del panel; el cajero ya sabe cómo se llama. Lo que viene a ver
+            —de pie, con un cliente enfrente— es CUÁNTO ENTRÓ HOY. Ese número es
+            ahora el punto focal y gana por tamaño, peso y aire, no por color. */}
+        <div className={`${panel} px-8 py-7 flex items-end justify-between gap-6 flex-wrap`}>
           <div className="min-w-0">
-            <div className="text-[26px] font-extrabold text-ink">Bienvenido, {nombre}</div>
-            <div className="text-[14.5px] text-mute mt-1.5">Listo para gestionar tu inventario hoy.</div>
-            <RelojVivo />
-            <div className="text-[13.5px] text-mute mt-1 capitalize">{dateStr}</div>
+            <div className="text-[11px] font-bold uppercase tracking-[0.08em] text-mute">Ingresos de hoy</div>
+            <div className="text-[44px] leading-none font-extrabold text-ink mt-2.5 tabular-nums"><Monto valor={ingresosHoy} decimales={0} /></div>
+            <div className="text-[13px] text-mute mt-2.5 first-letter:uppercase">{dateStr}</div>
           </div>
-          <div className="text-right shrink-0">
-            <div className="text-[12.5px] font-bold tracking-wide text-gold-ink">INGRESOS HOY</div>
-            <div className="text-[30px] font-extrabold text-ink mt-2 tabular-nums">{money0(ingresosHoy)}</div>
-            <div className="text-[13px] font-bold text-libre mt-1">{ventasActivas.length} ventas totales</div>
+          {/* El saludo y el reloj bajan a su lugar: contexto, no titular. */}
+          <div className="text-right shrink-0 ml-auto">
+            <div className="text-[13.5px] font-bold text-ink">Hola, {nombre}</div>
+            <RelojVivo />
+            <div className="text-[12.5px] text-mute mt-1 tabular-nums">{ventasActivas.length} ventas registradas</div>
           </div>
         </div>
 
-        {/* 4 tarjetas de stats */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-          {overviewStats.map((s, i) => (
-            <div key={i} className={`${panel} px-4 py-4`}>
-              <div className="flex items-center justify-between mb-3.5">
-                <div className="w-[34px] h-[34px] rounded-[9px] bg-app flex items-center justify-center text-gold-ink">
-                  <svg className="w-[18px] h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">{s.icon}</svg>
-                </div>
-                <div className="flex gap-0.5">
-                  <span className="w-[3px] h-[3px] rounded-full bg-[#D1D5DB]" /><span className="w-[3px] h-[3px] rounded-full bg-[#D1D5DB]" /><span className="w-[3px] h-[3px] rounded-full bg-[#D1D5DB]" />
-                </div>
-              </div>
-              <div className="text-[12.5px] font-semibold text-mute mb-1.5">{s.label}</div>
-              <div className="text-[22px] font-extrabold text-ink">{s.value}</div>
-            </div>
-          ))}
-        </div>
+        {/* El Resumen tenía TRES dibujos distintos de "tarjeta con un número"
+            —estas cuatro, las cinco de abajo y las de cada sección— en la misma
+            pantalla. Ahora las tres son la misma pieza (`KpiGrid`): cambiar el
+            aspecto de una cifra se hace en un solo lugar y ninguna se queda
+            atrás. Lo que cambia entre filas es el DATO, no el dibujo. */}
+        <KpiGrid items={overviewStats} />
 
         {/* Requiere tu atención: dinero y operación pendientes; cada tarjeta lleva a su módulo */}
         <div>
           <div className="flex items-center gap-2 mb-2 px-0.5">
             <span className="text-[11px] font-bold uppercase tracking-[0.08em] text-mute">Requiere tu atención</span>
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-2">
-            {pendientes.map((p, i) => (
-              <button key={i} onClick={() => go(p.ir)}
-                className={`${panel} px-4 py-4 text-left transition-all hover:shadow-[0_4px_14px_rgba(33,29,22,0.10)] hover:-translate-y-0.5 active:translate-y-0 ${p.urgente ? '!border-red-500/40 bg-red-500/[0.04]' : ''}`}>
-                <div className="flex items-center justify-between mb-2.5">
-                  <div className="text-[12.5px] font-semibold text-mute">{p.label}</div>
-                  <svg className={`w-3.5 h-3.5 ${p.urgente ? 'text-red-500' : 'text-mute'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M9 6l6 6-6 6" /></svg>
+          <KpiGrid
+            items={pendientes.map(p => ({
+              label: p.label, value: p.value, helper: p.sub,
+              tone: p.tono, emphasis: p.urgente,
+              icon: p.icon, onClick: () => go(p.ir), accion: `Ir a ${p.label.toLowerCase()}`,
+            }))}
+          />
+        </div>
+
+        {/* La gráfica que reemplazó a las tareas y al calendario: ninguno de
+            los dos decía nada del negocio —uno era una libreta que solo vivía en
+            ese navegador, el otro un calendario sin un solo evento—. Este espacio
+            ahora contesta "¿cómo vamos este mes y de dónde viene el dinero?". */}
+        <GraficaIngresos
+          dias={metrics?.ingresos_por_dia || []}
+          previo={metrics?.ingresos_periodo_previo || 0}
+          panel={panel}
+        />
+
+        {/* ── Qué produce el dinero ──
+            La serie de arriba dice CUÁNTO entró; esta dice DE QUÉ. Son los seis
+            modelos que más dejaron en el mismo tramo de 30 días, con su mezcla:
+            un modelo que produce $80,000 rentándose no es el mismo negocio que
+            uno que produce $80,000 vendiéndose una vez —el primero lo vuelve a
+            hacer el mes que entra—. Es la tarjeta que contesta qué conviene
+            comprar. */}
+        <div className={`${panel} p-5`}>
+          <div className="flex items-start justify-between gap-3 flex-wrap mb-4">
+            <div>
+              <div className="text-base font-extrabold text-ink">Qué produce el dinero</div>
+              <div className="text-[13px] text-mute mt-1">Los que más dejaron en 30 días, y de dónde vino</div>
+            </div>
+            <div className="flex items-center gap-3">
+              {SERIES_INGRESO.map(s => (
+                <div key={s.clave} className="flex items-center gap-1.5">
+                  <span className="w-2.5 h-2.5 rounded-[3px] shrink-0" style={{ background: s.color }} />
+                  <span className="text-[12.5px] text-mute">{s.etiqueta}</span>
                 </div>
-                <div className={`text-[22px] font-extrabold ${p.urgente ? 'text-red-600 dark:text-red-400' : 'text-ink'}`}>{p.value}</div>
-                <div className="text-[11.5px] text-mute mt-0.5">{p.sub}</div>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Tareas rápidas + Calendario */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
-          <div className={`${panel} p-5`}>
-            <div className="text-base font-extrabold text-ink">Tareas rápidas</div>
-            <div className="text-[13px] text-mute mt-1 mb-4">Gestiona tus pendientes del día</div>
-            <div className="flex border border-edge rounded-[9px] overflow-hidden mb-4">
-              {(['pend', 'done'] as const).map(t => (
-                <button key={t} onClick={() => setTaskTab(t)} className={`flex-1 py-2.5 text-[13px] font-bold transition-colors ${taskTab === t ? 'bg-gold text-gold-on' : 'text-mute hover:bg-surface-2'}`}>
-                  {t === 'pend' ? 'Pendientes' : 'Completadas'}
-                </button>
               ))}
             </div>
-            <div className="flex gap-1.5 mb-4">
-              <input aria-label="Agregar una tarea" value={taskInput} onChange={e => setTaskInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && addTask()} placeholder="Agregar una tarea..." className="flex-1 border border-edge rounded-lg px-3 py-2.5 text-[13.5px] bg-app text-ink placeholder-mute focus:outline-none focus:border-gold/50" />
-              <button onClick={addTask} className="w-10 h-10 rounded-lg bg-gold text-gold-on flex items-center justify-center text-lg font-bold hover:opacity-90 shrink-0">+</button>
-            </div>
-            {visibleTasks.length === 0 ? (
-              <div className="text-center py-6 text-mute text-[13.5px]">No hay tareas {taskTab === 'pend' ? 'pendientes' : 'completadas'}</div>
-            ) : (
-              <div className="space-y-1">
-                {visibleTasks.map(t => (
-                  <div key={t.id} className="flex items-center gap-2.5 px-2 py-2 rounded-lg hover:bg-surface-2 group">
-                    <button onClick={() => toggleTask(t.id)} className={`w-5 h-5 rounded-md border flex items-center justify-center shrink-0 text-[11px] ${t.done ? 'bg-gold border-gold text-white' : 'border-edge'}`}>{t.done ? '✓' : ''}</button>
-                    <span className={`flex-1 text-[13.5px] ${t.done ? 'line-through text-mute' : 'text-ink'}`}>{t.text}</span>
-                    <button onClick={() => delTask(t.id)} className="text-mute opacity-0 group-hover:opacity-100 hover:text-red-500 text-xs">✕</button>
-                  </div>
-                ))}
+          </div>
+          {topEquipos.length ? (
+            <BarrasRanking
+              datos={topEquipos.map(e => ({
+                clave: e.modelo, etiqueta: e.modelo,
+                valores: { rentas: e.rentas, ventas: e.ventas },
+              }))}
+              series={SERIES_INGRESO}
+              resumen={`Los ${topEquipos.length} equipos que más ingresos dejaron en los últimos 30 días`}
+              tituloTabla="Ingresos por equipo, últimos 30 días"
+            />
+          ) : (
+            <div className="py-10 grid place-items-center text-center border border-dashed border-edge rounded-xl">
+              <div>
+                <div className="text-[14px] font-bold text-ink">Todavía no hay con qué armar el ranking</div>
+                <div className="text-[12.5px] text-mute mt-1">Aparece en cuanto se cobre una renta o una venta.</div>
               </div>
-            )}
-          </div>
-
-          <div className={`${panel} p-5`}>
-            <div className="mb-4">
-              <div className="text-base font-extrabold text-ink">Calendario</div>
-              <div className="text-[13px] text-mute mt-1 capitalize">{dateStr}</div>
             </div>
-            <div className="text-center text-sm font-bold capitalize mb-3">{monthLabel}</div>
-            <div className="grid grid-cols-7 gap-0.5 text-[11px] font-bold text-mute text-center mb-1.5">
-              {['D', 'L', 'M', 'M', 'J', 'V', 'S'].map((d, i) => <div key={i}>{d}</div>)}
-            </div>
-            <div className="grid grid-cols-7 gap-0.5">
-              {calCells.map((d, i) => (
-                <div key={i} className={`text-center py-1.5 rounded-md text-[13px] font-semibold ${d === today ? 'bg-gold text-gold-on' : d ? 'text-ink hover:bg-surface-2' : ''}`}>{d || ''}</div>
-              ))}
-            </div>
-          </div>
+          )}
         </div>
+
+        {/* ── Máquina trabajando ──
+            El inventario de la derecha dice cómo está la flota HOY; esto dice
+            cómo estuvo. Aquí sí va curva y no columnas: la ocupación es un
+            estado continuo —una máquina que salió el lunes y volvió el viernes
+            estuvo rentada los cinco días—, así que la línea entre dos puntos
+            existe de verdad. En los ingresos no. */}
+        {ocupacion.length > 0 && (
+          <div className={`${panel} p-5`}>
+            <div className="flex items-start justify-between gap-3 flex-wrap mb-4">
+              <div>
+                <div className="text-base font-extrabold text-ink">Máquina trabajando</div>
+                <div className="text-[13px] text-mute mt-1">Unidades en obra, día por día</div>
+              </div>
+              <div className="text-right">
+                <div className="text-[22px] font-extrabold text-ink leading-none tabular-nums">{ocupPct}%</div>
+                <div className="text-[11.5px] text-mute mt-1">
+                  {ocupHoy?.rentadas ?? 0} de {ocupHoy?.flota ?? 0} hoy
+                </div>
+              </div>
+            </div>
+            <AreaOcupacion
+              datos={ocupacion}
+              color="var(--chart-renta)"
+              etiquetaSerie="En obra"
+              alto={140}
+              formato={n => `${n} ${n === 1 ? 'unidad' : 'unidades'}`}
+              formatoEjeX={diaCorto}
+              resumen={`Unidades rentadas por día en los últimos ${ocupacion.length} días. Hoy ${ocupHoy?.rentadas ?? 0} de ${ocupHoy?.flota ?? 0}.`}
+              tituloTabla="Unidades rentadas por día, últimos 30 días"
+            />
+          </div>
+        )}
 
         {/* Movimientos recientes */}
         <div className={`${panel} overflow-hidden`}>
@@ -1662,7 +1745,18 @@ function Resumen({ equipos, rentas, unidades, ventas, me, go, metrics, adeudos, 
           {moves.map((m, i) => (
             <div key={i} className="grid grid-cols-[1.6fr_auto] sm:grid-cols-[1.6fr_1fr_1.1fr] gap-2 items-center px-4 sm:px-5 py-3.5 border-b border-edge hover:bg-surface-2">
               <div className="flex items-center gap-2.5 font-bold text-sm text-ink min-w-0">
-                <div className="w-[30px] h-[30px] rounded-lg bg-surface-2 shrink-0" />
+                {/* Aquí había un cuadro gris vacío de 30px: un hueco esperando
+                    una foto que nunca llegó. Ahora lleva el dibujo del
+                    movimiento —renta o venta— con SU color, que es el mismo de
+                    la insignia de la derecha: el ojo empareja los dos extremos
+                    del renglón sin leer. */}
+                <div className="w-[30px] h-[30px] rounded-lg shrink-0 grid place-items-center" style={{ background: m.bg, color: m.color }}>
+                  <svg className="w-[15px] h-[15px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+                    {m.esRenta
+                      ? <><rect x="3" y="4.5" width="18" height="16" rx="2" /><path d="M3 9h18M8 3v3m8-3v3" /></>
+                      : <><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z" /><path d="M3 6h18" /><path d="M16 10a4 4 0 0 1-8 0" /></>}
+                  </svg>
+                </div>
                 <div className="min-w-0">
                   <span className="block truncate">{m.name} <span className="font-mono text-[11px] text-mute font-normal">{m.code}</span></span>
                   <span className="sm:hidden block text-[11px] text-mute font-mono font-normal">{(m.ts || '').slice(0, 10) || '—'}</span>
@@ -1684,16 +1778,15 @@ function Resumen({ equipos, rentas, unidades, ventas, me, go, metrics, adeudos, 
           {/* La dona reparte las unidades en sus tres estados, con el mismo color
               que la leyenda de abajo. Antes pintaba "disponibles" de dorado, que
               es el color de mantenimiento: el color contradecía el dato. */}
-          <div className="flex justify-center mb-5">
-            <div className="w-[150px] h-[150px] rounded-full flex items-center justify-center"
-              style={{ background: donaGradiente }}
-              role="img"
-              aria-label={`${availabilityPct}% disponibles: ${disp} disponibles, ${rent} rentadas, ${mant} en mantenimiento`}>
-              <div className="w-[110px] h-[110px] rounded-full bg-surface flex flex-col items-center justify-center">
-                <span className="text-[26px] font-extrabold text-ink leading-none">{availabilityPct}%</span>
-                <span className="text-[10.5px] text-mute mt-1">disponible</span>
-              </div>
-            </div>
+          <div className="mb-5">
+            <Dona
+              datos={tramosFlota}
+              centroValor={`${availabilityPct}%`}
+              centroEtiqueta="disponible"
+              formato={n => `${n} ${n === 1 ? 'unidad' : 'unidades'}`}
+              tamano={168}
+              resumen={`${availabilityPct}% disponibles: ${disp} disponibles, ${rent} rentadas, ${mant} en mantenimiento`}
+            />
           </div>
           <div className="flex flex-col gap-2">
             {indicators.map((ind, i) => (
@@ -1705,9 +1798,17 @@ function Resumen({ equipos, rentas, unidades, ventas, me, go, metrics, adeudos, 
                     <div className="text-[11.5px] text-mute">{ind.sub}</div>
                   </div>
                 </div>
-                <div className="text-[13.5px] font-extrabold" style={{ color: ind.color }}>{ind.value}</div>
+                {/* El número va en tinta, no en el color de la serie: el ocre
+                    como TEXTO da 3.4:1 y no pasa. La identidad la carga el
+                    punto de al lado, que para eso está. */}
+                <div className="text-[13.5px] font-extrabold text-ink tabular-nums">{ind.value}</div>
               </div>
             ))}
+          </div>
+          {/* El tamaño de la flota vivía en la tarjeta de abajo, que se retiró
+              por repetir esta misma dona. Es una cifra, y su lugar es aquí. */}
+          <div className="border-t border-edge mt-4 pt-3.5 text-[12px] text-mute">
+            {total} {total === 1 ? 'unidad' : 'unidades'} en la flota
           </div>
         </div>
 
@@ -1715,49 +1816,102 @@ function Resumen({ equipos, rentas, unidades, ventas, me, go, metrics, adeudos, 
         <div className={`${panel} p-5`}>
           <div className="text-base font-extrabold text-ink">Ingresos por mes</div>
           <div className="text-[13px] text-mute mt-1 mb-4">Últimos 6 meses</div>
-          <div className="flex items-end gap-1.5 h-[120px] mb-4">
-            {revByMonth.map((b, i) => (
-              <div key={i} className="flex-1 flex flex-col items-center gap-1 h-full justify-end">
-                {/* El mes en curso lleva el acento del tema; los anteriores, el
-                    mismo color atenuado. Así las barras siguen al panel del dueño. */}
-                <div className="w-full rounded-t-md transition-all"
-                  style={{
-                    height: `${Math.max(4, (b.total / maxRev) * 100)}%`,
-                    backgroundColor: 'var(--chart-blue)',
-                    opacity: i === revByMonth.length - 1 ? 1 : 0.34,
-                  }} />
-                <div className="text-[11px] text-mute font-semibold">{b.label}</div>
-              </div>
-            ))}
+          {/* Antes eran seis barras mudas de un solo color: sin eje, sin cifras
+              e ignorando que el dato ya venía separado en renta y venta. Ahora
+              es la misma gráfica de los 30 días —mismo eje, mismo globito,
+              mismos colores—, solo que con seis columnas en vez de treinta. */}
+          <div className="mb-4">
+            <BarrasApiladas
+              datos={revByMonth.map(b => ({
+                clave: b.label, etiquetaX: b.label, titulo: b.label,
+                valores: { rentas: b.rentas, ventas: b.ventas },
+              }))}
+              series={SERIES_INGRESO}
+              alto={120}
+              anchoMaxBarra={34}
+              resumen={`Ingresos de los últimos seis meses. Mejor mes: ${money0(maxRev)}.`}
+              tituloTabla="Ingresos por mes, últimos seis meses"
+            />
           </div>
-          <div className="grid grid-cols-3 gap-1.5 border-t border-edge pt-4">
-            <div><div className="text-[19px] font-extrabold text-ink">{money0(ingresosTotales)}</div><div className="text-[11.5px] text-mute mt-1">Ingresos totales</div></div>
-            <div><div className="text-[19px] font-extrabold text-[#1F7A4D]">{mesesPositivos}/6</div><div className="text-[11.5px] text-mute mt-1">Meses con ingresos</div></div>
-            <div><div className="text-[19px] font-extrabold text-ink">{money0(maxRev)}</div><div className="text-[11.5px] text-mute mt-1">Mejor mes</div></div>
+          {/* gap-3 y 17px: a 19px con gap-1.5, "$436,000" y "6/6" se tocaban
+              y la etiqueta de en medio se partía encima de la vecina. */}
+          <div className="grid grid-cols-3 gap-3 border-t border-edge pt-4">
+            <div className="min-w-0"><div className="text-[17px] font-extrabold text-ink tabular-nums">{money0(ingresosTotales)}</div><div className="text-[11.5px] text-mute mt-1 leading-snug">Ingresos totales</div></div>
+            <div className="min-w-0"><div className="text-[17px] font-extrabold text-libre tabular-nums">{mesesPositivos}/6</div><div className="text-[11.5px] text-mute mt-1 leading-snug">Meses con ingresos</div></div>
+            <div className="min-w-0"><div className="text-[17px] font-extrabold text-ink tabular-nums">{money0(maxRev)}</div><div className="text-[11.5px] text-mute mt-1 leading-snug">Mejor mes</div></div>
           </div>
         </div>
 
-        {/* Inventario por estado */}
+        {/* ── Dinero por cobrar ──
+            Aquí vivía "Inventario por estado": las mismas tres cifras de la dona
+            de arriba dibujadas otra vez, en barras. Dos veces el mismo dato es
+            una tarjeta desperdiciada en la única columna angosta del Resumen.
+
+            Lo que ocupa su lugar es lo que en ningún lado se decía: cuánto se
+            debe y DESDE CUÁNDO. El globito de "Adeudos" solo dice cuántos, y un
+            adeudo de tres días no es uno de tres meses. */}
         <div className={`${panel} p-5`}>
-          <div className="text-base font-extrabold text-ink">Inventario por estado</div>
-          <div className="text-[13px] text-mute mt-1 mb-5">Distribución actual</div>
-          <div className="flex items-end gap-1 h-[110px] mb-3.5">
-            {/* Paleta SUAVE (misma que la dona y las gráficas): pasteles --chart-*,
-                y un ámbar suave para mantenimiento. */}
-            {[{ l: 'Disp.', v: disp, c: 'var(--chart-green)' }, { l: 'Rent.', v: rent, c: 'var(--chart-blue)' }, { l: 'Mant.', v: mant, c: '#E0B457' }, { l: 'Vend.', v: vend, c: 'var(--chart-gray)' }].map((b, i) => {
-              const mx = Math.max(1, disp, rent, mant, vend)
-              return (
-                <div key={i} className="flex-1 flex flex-col items-center gap-1 h-full justify-end">
-                  <div className="w-full rounded-t-md" style={{ height: `${Math.max(6, (b.v / mx) * 100)}%`, background: b.c }} />
-                  <div className="text-[10.5px] text-mute font-semibold">{b.l}</div>
-                </div>
-              )
-            })}
+          <div className="text-base font-extrabold text-ink">Dinero por cobrar</div>
+          <div className="text-[13px] text-mute mt-1 mb-4">Lo que falta entrar, por antigüedad</div>
+
+          <div className="flex items-end gap-2.5 flex-wrap mb-4">
+            <div className="text-[30px] font-extrabold text-ink leading-none tabular-nums">{money0(cartera.total)}</div>
+            {cartera.masViejo > 0 && (
+              <div className="text-[12.5px] font-bold mb-0.5" style={{ color: 'var(--c-vencida)' }}>
+                lo más viejo, {cartera.masViejo} {cartera.masViejo === 1 ? 'día' : 'días'}
+              </div>
+            )}
           </div>
-          <div className="grid grid-cols-3 gap-1.5 border-t border-edge pt-4">
-            <div><div className="text-[19px] font-extrabold text-ink">{availabilityPct}%</div><div className="text-[11.5px] text-mute mt-1">Disponibilidad</div></div>
-            <div><div className="text-[19px] font-extrabold text-ink">{total}</div><div className="text-[11.5px] text-mute mt-1">Total unidades</div></div>
-            <div><div className="text-[19px] font-extrabold text-ink">{rentas.length}</div><div className="text-[11.5px] text-mute mt-1">En renta</div></div>
+
+          {cartera.total > 0 ? (
+            <>
+              {/* Una sola barra repartida: la proporción se lee de un golpe y no
+                  hay que comparar tres alturas. */}
+              <div className="flex h-2.5 rounded-full overflow-hidden bg-surface-2 mb-3.5" role="img"
+                aria-label={TRAMOS_CARTERA.map(t => `${t.etiqueta}: ${money0(cartera.tramos[t.clave])}`).join('; ')}>
+                {TRAMOS_CARTERA.map(t => cartera.tramos[t.clave] > 0 && (
+                  <div key={t.clave}
+                    className="h-full barra-crece first:rounded-l-full last:rounded-r-full"
+                    style={{
+                      width: `${(cartera.tramos[t.clave] / cartera.total) * 100}%`,
+                      background: `linear-gradient(to bottom, color-mix(in srgb, ${t.color} 88%, white), ${t.color})`,
+                      boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.30)',
+                    }} />
+                ))}
+              </div>
+              <div className="flex flex-col gap-2.5">
+                {TRAMOS_CARTERA.map(t => (
+                  <div key={t.clave} className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-[3px] shrink-0" style={{ background: t.color }} />
+                    <span className="text-[13px] text-ink">{t.etiqueta}</span>
+                    <span className="text-[11.5px] text-mute">
+                      {cartera.cuenta[t.clave] || 0}
+                    </span>
+                    <span className="ml-auto text-[13.5px] font-extrabold text-ink tabular-nums">
+                      {money0(cartera.tramos[t.clave])}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </>
+          ) : (
+            <div className="py-8 text-center border border-dashed border-edge rounded-xl">
+              <div className="text-[14px] font-bold text-ink">Nadie debe nada</div>
+              <div className="text-[12.5px] text-mute mt-1">Todo lo entregado está pagado.</div>
+            </div>
+          )}
+
+          {/* De dónde viene ese dinero. Va abajo y en texto: es el segundo dato,
+              no el que se busca al abrir la tarjeta. */}
+          <div className="grid grid-cols-2 gap-3 border-t border-edge pt-4 mt-4">
+            <button onClick={() => go('adeudos')} className="text-left">
+              <div className="text-[17px] font-extrabold text-ink tabular-nums">{money0(cartera.deRentas)}</div>
+              <div className="text-[11.5px] text-mute mt-1 leading-snug">De rentas</div>
+            </button>
+            <button onClick={() => go('pedidos')} className="text-left">
+              <div className="text-[17px] font-extrabold text-ink tabular-nums">{money0(cartera.deApartados)}</div>
+              <div className="text-[11.5px] text-mute mt-1 leading-snug">De apartados</div>
+            </button>
           </div>
         </div>
       </div>
@@ -1768,9 +1922,11 @@ function Resumen({ equipos, rentas, unidades, ventas, me, go, metrics, adeudos, 
 /* ════════════════════════════════════════
    EQUIPOS CRUD
 ════════════════════════════════════════ */
-function EquiposAdmin({ equipos, categorias, tipos, marcas, reload, notify }: {
+function EquiposAdmin({ equipos, categorias, tipos, marcas, reload, notify, cargando }: {
   equipos: Equipo[]; categorias: Option[]; tipos: Option[]; marcas: Option[]
-  reload: () => void; notify: (m: string, t?: 'ok' | 'err') => void
+  reload: () => void; notify: Notify
+  /** La lista todavía viene en camino: el vacío no es un vacío de verdad. */
+  cargando?: boolean
 }) {
 
   // Clasificación exprés desde la lista: tres toques (categoría → tipo → marca)
@@ -1826,6 +1982,9 @@ function EquiposAdmin({ equipos, categorias, tipos, marcas, reload, notify }: {
     const t = `${e.modelo} ${e.categoria?.nombre || ''} ${e.marca?.nombre || ''} ${e.tipo?.nombre || ''}`.toLowerCase()
     return t.includes(q.trim().toLowerCase())
   })
+  // El catálogo de modelos también crece: se pagina la tabla y los indicadores
+  // de arriba siguen sumando sobre TODO el catálogo.
+  const { enPantalla, ancla, props: pagProps } = usePaginado(filtrados, undefined, [q])
   const totalDisponibles = equipos.reduce((a, e) => a + (e.stock_disponible ?? 0), 0)
   const sinPrecio = equipos.filter(e => !num(e.precio_dia) && !num(e.precio_venta)).length
 
@@ -1840,6 +1999,17 @@ function EquiposAdmin({ equipos, categorias, tipos, marcas, reload, notify }: {
     // Venta exige al menos una característica (con ella se arma la ficha del cliente).
     if (cond === 'nueva' && !(form.especificaciones || []).some(s => s.etiqueta.trim() && s.valor.trim())) {
       notify('Un equipo de venta necesita al menos una característica', 'err'); return
+    }
+    /* Ninguna máquina sale del patio gratis. El servidor lo impone igual (la
+       regla vive en el modelo), pero avisar aquí evita el viaje y dice
+       exactamente qué falta según el modo: una de venta necesita su precio; una
+       de renta, al menos una tarifa. */
+    const precioBueno = (v: unknown) => Number(v) > 0
+    if (cond === 'nueva' && !precioBueno(form.precio_venta)) {
+      notify('Ponle el precio de venta: tiene que ser mayor a 0', 'err'); return
+    }
+    if (cond !== 'nueva' && !['precio_dia', 'precio_semana', 'precio_mes'].some(k => precioBueno(form[k as keyof typeof form]))) {
+      notify('Ponle al menos una tarifa de renta (día, semana o mes) mayor a 0', 'err'); return
     }
     setSaving(true)
     const fd = new FormData()
@@ -1895,12 +2065,12 @@ function EquiposAdmin({ equipos, categorias, tipos, marcas, reload, notify }: {
             notify(`Producto creado · ${creadas} unidad${creadas > 1 ? 'es' : ''} en inventario`)
           } catch {
             // El producto sí se creó; fallaron las unidades. Se dice la verdad.
-            notify('Producto creado, pero no se pudieron generar las unidades. Agrégalas desde Inventario.', 'err')
+            notify('Producto creado, pero sin unidades. Agrégalas desde Inventario.', 'err')
           }
         } else if (equipoId && cond === 'nueva') {
           // Sin unidades y de venta: nace como SOBRE PEDIDO (se ordena al proveedor;
           // la unidad se asigna al llegar). Al dar de alta stock, pasa a venta inmediata.
-          notify('Producto creado como sobre pedido (sin stock). Se ofrece para pedir; agrega unidades cuando lleguen.')
+          notify('Producto creado sobre pedido, sin stock. Agrega unidades cuando lleguen.', 'warning')
         } else {
           notify('Producto creado')
         }
@@ -1918,7 +2088,7 @@ function EquiposAdmin({ equipos, categorias, tipos, marcas, reload, notify }: {
   async function del(id?: number) {
     if (!id || !await confirmar({ titulo: '¿Eliminar este producto?', mensaje: 'Se borra del catálogo. No se puede deshacer.', aceptar: 'Eliminar', tono: 'peligro' })) return
     api.delete(`/equipos/${id}/`)
-      .then(() => { notify('Producto eliminado'); reload() })
+      .then(() => { notify('Producto eliminado', 'neutro'); reload() })
       .catch(err => notify(err?.response?.data?.detail || 'Error al eliminar', 'err'))
   }
 
@@ -1952,24 +2122,23 @@ function EquiposAdmin({ equipos, categorias, tipos, marcas, reload, notify }: {
       />
 
       {/* Tabla de productos */}
-      <Card className="overflow-hidden">
+      <Card ref={ancla} className="overflow-hidden scroll-mt-24">
         {/* Toolbar */}
-        <div className="px-5 py-4 border-b border-edge flex flex-col sm:flex-row sm:items-center gap-3">
-          <h2 className="font-bold text-ink shrink-0">Productos <span className="text-mute font-normal">({filtrados.length})</span></h2>
+        <CardBarra titulo="Productos" cuenta={filtrados.length}>
           <div className="flex-1 flex items-center gap-3 sm:justify-end">
             <div className="relative flex-1 sm:max-w-xs">
-              <svg className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-mute pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><circle cx="9" cy="9" r="6" /><path d="M15 15l3 3" strokeLinecap="round" /></svg>
+              <svg className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-mute pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><circle cx="9" cy="9" r="6" /><path d="M15 15l3 3" strokeLinecap="round" /></svg>
               <input aria-label="Buscar producto" value={q} onChange={e => setQ(e.target.value)} placeholder="Buscar producto..."
-                className="w-full bg-surface-2 border border-edge rounded-full pl-9 pr-3 py-2 text-sm text-ink placeholder-mute focus:outline-none focus:border-gold/50 transition-colors" />
+                className="campo campo-sm pl-10" />
             </div>
             {puedeEditar && (
-              <button onClick={openNew} className="shrink-0 inline-flex items-center gap-2 px-4 py-2 rounded-full bg-gold text-black text-sm font-bold hover:opacity-90 transition-opacity">
+              <button onClick={openNew} className="btn-acento shrink-0 inline-flex items-center gap-2 h-10 px-4 rounded-full text-[13.5px] font-bold">
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5"><path strokeLinecap="round" d="M12 5v14M5 12h14" /></svg>
                 <span className="hidden sm:inline">Nuevo producto</span>
               </button>
             )}
           </div>
-        </div>
+        </CardBarra>
 
         {/* Tabla */}
         <div className="overflow-x-auto">
@@ -1986,7 +2155,7 @@ function EquiposAdmin({ equipos, categorias, tipos, marcas, reload, notify }: {
               </tr>
             </thead>
             <tbody className="divide-y divide-edge">
-              {filtrados.map(e => {
+              {enPantalla.map(e => {
                 const disp = e.stock_disponible ?? 0
                 const total = e.unidades_total ?? disp
                 return (
@@ -2065,13 +2234,18 @@ function EquiposAdmin({ equipos, categorias, tipos, marcas, reload, notify }: {
               })}
             </tbody>
           </table>
-          {filtrados.length === 0 && (
-            <div className="py-16 text-center">
-              <p className="text-sm text-mute">{q ? 'Sin resultados para tu búsqueda.' : 'Aún no hay productos.'}</p>
-              {!q && puedeEditar && <button onClick={openNew} className="mt-3 text-sm font-semibold text-gold-ink hover:opacity-80">+ Crear el primero</button>}
-            </div>
-          )}
+          {filtrados.length === 0 && (cargando ? <FilasEsqueleto filas={5} columnas={4} /> : (
+            <EstadoVacio
+              titulo={q ? 'Nada coincide con tu búsqueda' : 'Tu catálogo está vacío'}
+              mensaje={q
+                ? 'Prueba con el modelo, la marca o parte del código.'
+                : 'Los productos son las fichas que ve el cliente en la tienda. De cada una cuelgan después las unidades físicas.'}
+              icono={<><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" /><path d="M3.3 7 12 12l8.7-5M12 22V12" /></>}
+              accion={!q && puedeEditar ? <button onClick={openNew} className="btn-acento h-9 px-4 rounded-full text-[13px] font-bold">Crear el primero</button> : undefined}
+            />
+          ))}
         </div>
+        <Paginador {...pagProps} nombre="productos" />
       </Card>
 
       {/* Panel lateral de formulario (crear/editar): se desliza desde la derecha
@@ -2096,7 +2270,7 @@ function EquiposAdmin({ equipos, categorias, tipos, marcas, reload, notify }: {
               </div>
               <div>
                 <label className={label}>Descripción</label>
-                <textarea aria-label="Descripción" className={`${input} resize-none`} rows={2} value={form.descripcion || ''} onChange={e => setForm({ ...form, descripcion: e.target.value })} placeholder="Características del equipo" />
+                <textarea aria-label="Descripción" className={`${input} campo-area`} rows={2} value={form.descripcion || ''} onChange={e => setForm({ ...form, descripcion: e.target.value })} placeholder="Características del equipo" />
               </div>
               {/* Al crear: la condición define qué precios aplican (nueva = solo venta) */}
               <div className="rounded-2xl border border-gold/20 bg-gold-soft/50 p-4">
@@ -2157,13 +2331,13 @@ function EquiposAdmin({ equipos, categorias, tipos, marcas, reload, notify }: {
                   de venta de un equipo de RENTA es interno (el público no lo ve). */}
               <div className="grid grid-cols-2 gap-3">
                 {cond === 'seminueva' && (<>
-                  <div><label className={label}>Precio / día</label><input aria-label="Precio / día" type="number" className={input} value={form.precio_dia ?? ''} onChange={e => setForm({ ...form, precio_dia: e.target.value })} placeholder="0.00" /></div>
-                  <div><label className={label}>Precio / semana</label><input aria-label="Precio / semana" type="number" className={input} value={form.precio_semana ?? ''} onChange={e => setForm({ ...form, precio_semana: e.target.value })} placeholder="0.00" /></div>
-                  <div><label className={label}>Precio / mes</label><input aria-label="Precio / mes" type="number" className={input} value={form.precio_mes ?? ''} onChange={e => setForm({ ...form, precio_mes: e.target.value })} placeholder="0.00" /></div>
+                  <div><label className={label}>Precio / día</label><InputDinero etiqueta="Precio / día" valor={String(form.precio_dia ?? '')} onValor={(v: string) => setForm({ ...form, precio_dia: v })} /></div>
+                  <div><label className={label}>Precio / semana</label><InputDinero etiqueta="Precio / semana" valor={String(form.precio_semana ?? '')} onValor={(v: string) => setForm({ ...form, precio_semana: v })} /></div>
+                  <div><label className={label}>Precio / mes</label><InputDinero etiqueta="Precio / mes" valor={String(form.precio_mes ?? '')} onValor={(v: string) => setForm({ ...form, precio_mes: v })} /></div>
                 </>)}
                 <div className={cond === 'seminueva' ? '' : 'col-span-2'}>
                   <label className={label}>Precio venta{cond === 'seminueva' ? ' (interno)' : ''}</label>
-                  <input aria-label="Precio de venta" type="number" className={input} value={form.precio_venta ?? ''} onChange={e => setForm({ ...form, precio_venta: e.target.value })} placeholder="0.00" />
+                  <InputDinero etiqueta="Precio de venta" valor={String(form.precio_venta ?? '')} onValor={(v: string) => setForm({ ...form, precio_venta: v })} />
                 </div>
                 {/* Los meses son POR MÁQUINA: 3 es lo normal, no una regla fija. */}
                 <div className="col-span-2">
@@ -2282,7 +2456,7 @@ function EquiposAdmin({ equipos, categorias, tipos, marcas, reload, notify }: {
                   <label className={`${label} !mb-0`}>Qué incluye</label>
                   <span className="text-[11px] text-mute">Una línea por punto · "Título: detalle"</span>
                 </div>
-                <textarea aria-label="Qué incluye" rows={4} className={`${input} mt-2 resize-y`} value={(form.que_incluye || []).join('\n')}
+                <textarea aria-label="Qué incluye" rows={4} className={`${input} campo-area mt-2`} value={(form.que_incluye || []).join('\n')}
                   onChange={e => setForm(f => ({ ...f, que_incluye: e.target.value.split('\n') }))}
                   placeholder={'Punta y cincel plano: encastre hex 1-1/8\"\nMaletín metálico: con espacio para accesorios'} />
               </div>
@@ -2310,104 +2484,62 @@ function EquiposAdmin({ equipos, categorias, tipos, marcas, reload, notify }: {
   )
 }
 
-/* ════════════════════════════════════════
-   GESTIÓN DE INVENTARIO (unidades + QR + renta/venta)
-════════════════════════════════════════ */
-type Unidad = {
-  id: number
-  codigo: string
-  numero_serie: string | null
-  condicion: 'nueva' | 'seminueva'
-  estado: 'disponible' | 'rentado' | 'mantenimiento' | 'vendido'
-  ubicacion_actual: string
-  puede_rentarse: boolean
-  puede_venderse: boolean
-  equipo?: number
-  equipo_modelo?: string
-  equipo_info?: {
-    id: number; modelo: string; imagen: string | null
-    precio_dia: string | null; precio_semana: string | null; precio_mes: string | null; precio_venta: string | null
-    condicion?: 'nueva' | 'seminueva'; modo?: 'venta' | 'renta'
-  } | null
-  renta_activa: null | {
-    id: number; cliente: string; telefono_cliente: string; direccion: string
-    modalidad: string; fecha_fin: string; dias_restantes: number; vencida: boolean
-  }
-}
-
-// Construye un objeto Equipo ligero desde la info que trae la unidad (vista global)
-function equipoFromUnit(u: Unidad): Equipo {
-  const e = u.equipo_info
-  return {
-    id: e?.id ?? u.equipo,
-    modelo: e?.modelo || u.equipo_modelo || 'Equipo',
-    imagen: e?.imagen ?? null,
-    precio_dia: e?.precio_dia ?? null,
-    precio_semana: e?.precio_semana ?? null,
-    precio_mes: e?.precio_mes ?? null,
-    precio_venta: e?.precio_venta ?? null,
-  }
-}
-
-const pillBase = 'inline-flex items-center gap-2 h-5 px-2 rounded-full border bg-surface text-[10px] font-semibold tracking-tight'
-const pillTones = {
-  emerald: { wrap: 'border-emerald-500/25 text-emerald-600 dark:text-emerald-400', dot: 'bg-emerald-500' },
-  blue: { wrap: 'border-blue-500/25 text-blue-600 dark:text-blue-400', dot: 'bg-blue-500' },
-  amber: { wrap: 'border-amber-500/25 text-amber-700 dark:text-amber-400', dot: 'bg-amber-500' },
-  neutral: { wrap: 'border-edge text-mute', dot: 'bg-mute' },
-} as const
-
-function Pill({ tone, label }: { tone: keyof typeof pillTones; label: string }) {
-  const t = pillTones[tone]
-  return (
-    <span className={`${pillBase} ${t.wrap}`}>
-      <span className={`w-1.5 h-1.5 rounded-full ${t.dot}`} />
-      <span className="leading-none">{label}</span>
-    </span>
-  )
-}
-
-function estadoLabel(v: Unidad['estado']) {
-  if (v === 'disponible') return 'Disponible'
-  if (v === 'rentado') return 'Rentado'
-  if (v === 'mantenimiento') return 'Mantenimiento'
-  if (v === 'vendido') return 'Vendido'
-  return v
-}
-
-function condLabel(v: Unidad['condicion']) {
-  return v === 'nueva' ? 'Nueva' : 'Seminueva'
-}
-
-function pillEstado(v: Unidad['estado']) {
-  if (v === 'disponible') return <Pill tone="emerald" label={estadoLabel(v)} />
-  if (v === 'rentado') return <Pill tone="blue" label={estadoLabel(v)} />
-  if (v === 'mantenimiento') return <Pill tone="amber" label={estadoLabel(v)} />
-  return <Pill tone="neutral" label={estadoLabel(v)} />
-}
-
-function pillCond(v: Unidad['condicion']) {
-  return v === 'nueva' ? <Pill tone="emerald" label={condLabel(v)} /> : <Pill tone="blue" label={condLabel(v)} />
-}
-
+/* El letrero de "estoy concretando una cotización". Sirve a renta y a venta:
+   cambia el verbo y el color, porque el resto del panel ya usa el azul de renta
+   y el dorado de venta y aquí conviene que el color diga a qué viniste. */
 function BannerConcretando({ inset = true }: { inset?: boolean }) {
-  const [p, setP] = useState(leerCotParaRenta())
+  /* Suscrito, no leído al montar: el puente avanza solo al cerrar cada renta y
+     el letrero tiene que decir la máquina que toca AHORA. */
+  const p = useSyncExternalStore(suscribirCot, leerCotEnCurso, leerCotEnCurso)
   if (!p) return null
+  const avance = progresoCot(p)
+  // Sin unidades libres de ESTE equipo: se dice antes de que el admin se ponga
+  // a buscar en una lista donde no va a encontrar nada.
+  const agotado = p.libres === 0
+  const quedan = (p.cola?.length ?? 0) - ((p.paso ?? 0) + 1)
+  const venta = p.proposito === 'venta'
+  const verbo = venta ? 'Vender' : 'Rentar'
+  const tono = venta
+    ? 'border-gold/40 bg-gold/10 text-gold-ink'
+    : 'border-[color:var(--c-renta)]/40 bg-[color:var(--c-renta)]/10 text-[color:var(--c-renta)]'
+  const periodo = p.modalidad
+    ? ` (${({ dia: 'por día', semana: 'por semana', mes: 'por mes' } as Record<string, string>)[p.modalidad]}${p.duracion ? ` × ${p.duracion}` : ''})`
+    : ''
   return (
-    <div className={`${inset ? 'mx-6 mt-3' : ''} flex items-center justify-between gap-3 px-3.5 py-2.5 rounded-xl border border-[color:var(--c-renta)]/40 bg-[color:var(--c-renta)]/10 text-[color:var(--c-renta)] text-[12.5px] font-bold`}>
+    <div className={`${inset ? 'mx-6 mt-3' : ''} flex items-center justify-between gap-3 px-3.5 py-2.5 rounded-xl border ${tono} text-[12.5px] font-bold`}>
       <span>
+        {/* Con varias máquinas, el contador va PRIMERO: es lo que dice cuánto
+            falta de la cotización, y sin él la segunda vuelta se ve idéntica a
+            la primera y uno no sabe si ya terminó. */}
+        {avance && <span className="opacity-80">[{avance.actual}/{avance.total}] </span>}
         Concretando {p.folio || 'cotización'} · {p.cliente || 'cliente'}
         {p.equipo_nombre
-          ? <> — el cliente pidió <b>{p.equipo_nombre}</b>{p.modalidad ? ` (${({ dia: 'por día', semana: 'por semana', mes: 'por mes' } as Record<string, string>)[p.modalidad]}${p.duracion ? ` × ${p.duracion}` : ''})` : ''}. Elige la unidad y tócale Rentar.</>
-          : ' — elige la unidad y tócale Rentar'}
+          ? <> — {avance ? 'ahora toca' : 'el cliente pidió'} <b>{p.equipo_nombre}</b>{venta ? '' : periodo}.{' '}
+              {agotado
+                ? <span className="text-taller-ink">No hay unidades libres{quedan > 0 ? ' — puedes saltarla y seguir con las demás.' : '. El cliente ya recibió el aviso y se le notificará al liberarse.'}</span>
+                : <>Elige la unidad y tócale {verbo}.</>}
+            </>
+          : ` — elige la unidad y tócale ${verbo}`}
       </span>
-      <button onClick={() => { fijarCotParaRenta(null); setP(null) }} aria-label="Cancelar vínculo" className="hover:opacity-70 shrink-0">✕</button>
+      <div className="flex items-center gap-2 shrink-0">
+        {/* Saltar: la máquina que no hay no puede parar a las que sí. Sin esto,
+            un demoledor todo rentado dejaba el recorrido muerto ahí mismo. */}
+        {agotado && quedan > 0 && (
+          <button onClick={() => fijarCotEnCurso(siguientePaso(p))}
+            className="h-7 px-2.5 rounded-full border border-current/30 text-[11.5px] font-bold hover:bg-current/10 transition-colors whitespace-nowrap">
+            Saltar esta
+          </button>
+        )}
+        {/* La ✕ suelta la cotización ENTERA, no solo el paso: si el cliente ya no
+            se lleva nada, insistir con las que faltan es peor que soltarlas. */}
+        <button onClick={() => fijarCotEnCurso(null)} aria-label="Dejar la cotización para después" title="Dejar para después" className="hover:opacity-70">✕</button>
+      </div>
     </div>
   )
 }
 
 function InventoryModal({ equipo, onClose, notify }: {
-  equipo: Equipo; onClose: () => void; notify: (m: string, t?: 'ok' | 'err') => void
+  equipo: Equipo; onClose: () => void; notify: Notify
 }) {
   const puede = usePuede()
   const [unidades, setUnidades] = useState<Unidad[]>([])
@@ -2422,6 +2554,7 @@ function InventoryModal({ equipo, onClose, notify }: {
   const [menu, setMenu] = useState<{ id: number; top: number; right: number } | null>(null)
   const [proximoCodigo, setProximoCodigo] = useState('')
   const [confirmando, setConfirmando] = useState(false)
+  const { devolver: devolverRenta, modalCobro } = useDevolverRenta(notify)
 
   const load = useCallback(() => {
     setLoading(true)
@@ -2453,15 +2586,13 @@ function InventoryModal({ equipo, onClose, notify }: {
   async function delUnit(u: Unidad) {
     if (!await confirmar({ titulo: `¿Eliminar la unidad ${u.codigo}?`, mensaje: 'Se borra del inventario. No se puede deshacer.', aceptar: 'Eliminar', tono: 'peligro' })) return
     api.delete(`/unidades/${u.id}/`)
-      .then(() => { notify('Unidad eliminada'); load() })
+      .then(() => { notify('Unidad eliminada', 'neutro'); load() })
       .catch(err => notify(err?.response?.data?.detail || err?.response?.data?.[0] || 'No se puede eliminar', 'err'))
   }
 
   function devolver(u: Unidad) {
     if (!u.renta_activa) return
-    api.post(`/rentas/${u.renta_activa.id}/devolver/`)
-      .then(() => { notify('Equipo devuelto'); load() })
-      .catch(() => notify('Error al devolver', 'err'))
+    devolverRenta(u.renta_activa.id, load)
   }
 
   const counts = {
@@ -2540,7 +2671,7 @@ function InventoryModal({ equipo, onClose, notify }: {
             </button>
           </div>
           {newCond === 'nueva' && !num(equipo.precio_venta) && (
-            <p className="mt-2.5 text-[12px] text-amber-600 dark:text-amber-400 bg-amber-500/[0.08] border border-amber-500/25 rounded-lg px-3 py-2">
+            <p className="mt-2.5 text-[12px] text-taller-ink bg-amber-500/[0.08] border border-amber-500/25 rounded-lg px-3 py-2">
               Este producto no tiene <b>precio de venta</b>: la unidad nueva no saldrá en el catálogo de venta hasta que le pongas uno (edita el producto → <b>Precio venta</b>).
             </p>
           )}
@@ -2673,6 +2804,7 @@ function InventoryModal({ equipo, onClose, notify }: {
       {qrUnit && <QRModal unit={qrUnit} equipo={equipo} onClose={() => setQrUnit(null)} />}
       {rentUnit && <RentModal unit={rentUnit} equipo={equipo} onClose={() => setRentUnit(null)} onDone={() => { setRentUnit(null); load() }} notify={notify} />}
       {sellUnit && <SellModal unit={sellUnit} equipo={equipo} onClose={() => setSellUnit(null)} onDone={() => { setSellUnit(null); load() }} notify={notify} />}
+      {modalCobro}
     </Modal>
   )
 }
@@ -2712,523 +2844,46 @@ function QRModal({ unit, equipo, onClose }: { unit: Unidad; equipo: Equipo; onCl
   )
 }
 
-/* ── Captura fiscal reutilizable (para "El cliente pedirá factura") ── */
-type FacturaData = { rfc: string; razon_social: string; codigo_postal: string; regimen_fiscal: string; uso_cfdi: string; email: string }
-const FACTURA_VACIA: FacturaData = { rfc: '', razon_social: '', codigo_postal: '', regimen_fiscal: '', uso_cfdi: '', email: '' }
-
-function FacturaFields({ requiere, onRequiere, empresaNombre }: {
-  requiere: boolean; onRequiere: (v: boolean) => void
-  // Se reciben por compatibilidad con los 3 usos, pero ya NO se editan aquí:
-  // los datos fiscales se capturan al timbrar (en "Por facturar"), no al crear.
-  factura: FacturaData; onFactura: (f: FacturaData) => void
-  empresaNombre?: string
-}) {
-  return (
-    <div className="rounded-xl border border-edge bg-surface p-4">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <p className="text-[13.5px] font-bold text-ink">El cliente pedirá factura</p>
-          <p className="text-[12px] text-mute mt-0.5">Se guarda en “Por facturar” para timbrarla aparte.</p>
-        </div>
-        <button
-          type="button" role="switch" aria-checked={requiere} onClick={() => onRequiere(!requiere)}
-          className={`relative w-10 h-[22px] rounded-full flex-none transition-colors ${requiere ? 'bg-[#2B6CF6]' : 'bg-ink/15'}`}
-          aria-label="El cliente pedirá factura"
-        >
-          <span className={`absolute top-[2px] w-[18px] h-[18px] rounded-full bg-white shadow-[0_1px_2px_rgba(0,0,0,0.2)] transition-all ${requiere ? 'left-[20px]' : 'left-[2px]'}`} />
-        </button>
-      </div>
-      {requiere && (
-        <div className="border-t border-edge mt-3.5 pt-3.5">
-          {empresaNombre ? (
-            <p className="text-[12px] text-emerald-600 bg-emerald-500/10 border border-emerald-500/20 rounded-lg px-3 py-2.5">Se usarán los datos fiscales guardados de <b>{empresaNombre}</b>.</p>
-          ) : (
-            <p className="text-[12px] text-mute bg-surface-2 border border-edge rounded-lg px-3 py-2.5 leading-relaxed">
-              Se marcará como <b className="text-ink">Por facturar</b>. Los datos fiscales (RFC, razón social, uso de CFDI…) se capturan al timbrarla en <b className="text-ink">Facturación</b>.
-            </p>
-          )}
-        </div>
-      )}
-    </div>
-  )
-}
-
-// Valida los datos fiscales de mostrador; devuelve mensaje de error o null.
-// Los datos fiscales YA NO se piden al crear la renta/venta: al activar el switch
-// la solicitud se guarda en "Por facturar" (datos_completos=false) y se completan
-// al timbrarla en Facturación. Se conserva la firma para no tocar los 3 usos; ya
-// nunca bloquea el registro.
-function validarFactura(_requiere: boolean, _empresaId: string, _f: FacturaData): string | null {
-  return null
-}
-
-/* ── Registrar renta ── */
-function RentModal({ unit, equipo, onClose, onDone, notify, desdeCaja = false }: {
-  unit: Unidad; equipo: Equipo; onClose: () => void; onDone: () => void; notify: (m: string, t?: 'ok' | 'err') => void
-  /** Levantada/vendida desde la caja: el cobro entra al turno del mostrador. */
-  desdeCaja?: boolean
-}) {
-  const hoy = new Date().toISOString().slice(0, 10)
-  const [sel, setSel] = useState<SeleccionCliente>(SELECCION_VACIA)
-  const [direccion, setDireccion] = useState('')
-  const [modalidad, setModalidad] = useState<'dia' | 'semana' | 'mes'>('dia')
-  const [duracion, setDuracion] = useState('1')
-  const [fechaInicio, setFechaInicio] = useState(hoy)
-  const [descuento, setDescuento] = useState('')
-  const [deposito, setDeposito] = useState('')
-  const [obraId, setObraId] = useState('')
-  const [requiereFactura, setRequiereFactura] = useState(false)
-  const [factura, setFactura] = useState<FacturaData>(FACTURA_VACIA)
-  const [clientes, setClientes] = useState<{ id: number; nombre: string; empresa?: string }[]>([])
-  const [usuarioId, setUsuarioId] = useState('')
-  // ¿Venimos de "Concretar renta" de una cotización? Precarga y liga.
-  const [deCot, setDeCot] = useState(leerCotParaRenta())
-  // Cobro inicial de la renta: un método, o pago dividido en dos (efectivo + tarjeta…).
-  const [metodo, setMetodo] = useState<'efectivo' | 'tarjeta' | 'transferencia'>('efectivo')
-  const [splitPago, setSplitPago] = useState(false)
-  const [metodo2, setMetodo2] = useState<'efectivo' | 'tarjeta' | 'transferencia'>('tarjeta')
-  const [monto1, setMonto1] = useState('')
-  const [monto2, setMonto2] = useState('')
-  const [busy, setBusy] = useState(false)
-
-  // "Sucio" = el operador ya invirtió trabajo aquí. Los valores que nacen con
-  // contenido (fecha de hoy, duración 1, método efectivo) no cuentan.
-  const sucio = Boolean(
-    sel.nombre.trim() || sel.telefono.trim() || sel.cliente || direccion.trim() ||
-    descuento.trim() || deposito.trim() || obraId || usuarioId || requiereFactura ||
-    duracion !== '1' || modalidad !== 'dia' || splitPago || monto1.trim() || monto2.trim(),
-  )
-
-  /* Cerrar con un clic afuera borraba catorce campos sin preguntar, y esto se
-     llena con el cliente enfrente. Solo estorba si de verdad hay algo escrito:
-     una hoja intacta se cierra de inmediato, como antes. */
-  async function cerrarConAviso() {
-    if (!sucio) { onClose(); return }
-    if (await confirmar({
-      titulo: '¿Descartar lo que llevas?',
-      mensaje: 'Cerraste la hoja sin registrar. Lo capturado se pierde.',
-      aceptar: 'Descartar', cancelar: 'Seguir aquí', tono: 'peligro',
-    })) onClose()
-  }
-
-  useEffect(() => {
-    // Cuentas de cliente, para vincular la renta a su panel ("Tus rentas").
-    api.get<{ clientes: { id: number; nombre: string; empresa?: string }[] }>('/clientes-lookup/').then(r => setClientes(r.data.clientes || [])).catch(() => {})
-    // Datos de la cotización que se está concretando (si aplica).
-    const puente = leerCotParaRenta()
-    if (puente) {
-      // La cotización trae nombre y teléfono como TEXTO: se precargan en el
-      // buscador para que el vendedor confirme de quién se trata, no se dan
-      // por buenos sin más.
-      if (puente.cliente || puente.telefono) {
-        setSel(v => ({ ...v, nombre: puente.cliente || v.nombre, telefono: soloTelefono(puente.telefono || v.telefono) }))
-      }
-      if (puente.direccion) setDireccion(puente.direccion)
-      if (puente.usuario_id) setUsuarioId(String(puente.usuario_id))
-      if (puente.modalidad) setModalidad(puente.modalidad)
-      if (puente.duracion) setDuracion(String(puente.duracion))
-    }
-  }, [])
-  useEffect(() => {
-    /* las obras llegan con el cliente que devuelve el buscador */
-  }, [])
-
-  function elegirCliente(v: SeleccionCliente) {
-    setSel(v)
-    if (!v.cliente) { setObraId(''); return }
-    // Con una sola obra se propone sola: es lo que pasa casi siempre y
-    // ahorra un clic con el cliente enfrente.
-    const unica = v.cliente.obras.length === 1 ? v.cliente.obras[0] : null
-    setObraId(unica ? String(unica.id) : '')
-    if (unica?.ubicacion) setDireccion(unica.ubicacion)
-  }
-  // Al elegir obra: la dirección de la renta es la de esa obra.
-  function elegirObra(id: string) {
-    setObraId(id)
-    const o = sel.cliente?.obras.find(ob => String(ob.id) === id)
-    if (o?.ubicacion) setDireccion(o.ubicacion)
-  }
-
-  const precio = modalidad === 'dia' ? equipo.precio_dia : modalidad === 'semana' ? equipo.precio_semana : equipo.precio_mes
-  const total = Math.max(0, (Number(precio) || 0) * (Number(duracion) || 1) - (Number(descuento) || 0))
-  const ivaRenta = requiereFactura ? Math.round(total * 0.16 * 100) / 100 : 0
-  const totalConIva = total + ivaRenta
-  const esReserva = fechaInicio > hoy
-
-  function submit() {
-    if ((!sel.nombre.trim() && !sel.cliente) || !direccion.trim()) { notify('Cliente y dirección son obligatorios', 'err'); return }
-    const errFactura = validarFactura(requiereFactura, sel.cliente ? String(sel.cliente.id) : '', factura)
-    if (errFactura) { notify(errFactura, 'err'); return }
-    let pagos: { metodo: string; monto: number }[] | undefined
-    if (splitPago) {
-      const m1 = Number(monto1) || 0, m2 = Number(monto2) || 0
-      if (metodo === metodo2) { notify('Elige dos métodos distintos para dividir el pago', 'err'); return }
-      if (m1 <= 0 || m2 <= 0) { notify('Con pago dividido, ambos montos deben ser mayores a 0', 'err'); return }
-      if (Math.round((m1 + m2) * 100) / 100 !== Math.round(totalConIva * 100) / 100) {
-        notify(`Los dos montos deben sumar el total (${formatMoney(totalConIva)})`, 'err'); return
-      }
-      pagos = [{ metodo, monto: m1 }, { metodo: metodo2, monto: m2 }]
-    }
-    setBusy(true)
-    api.post('/rentas/crear/', {
-      // Levantada desde la caja: el cobro y el depósito entran al turno del
-      // mostrador. Sin esta bandera el backend no toca la caja para nada.
-      desde_caja: desdeCaja || undefined,
-      inventario_id: unit.id, modalidad, duracion: Number(duracion) || 1,
-      cliente: sel.nombre.trim(), telefono_cliente: sel.telefono, direccion: direccion.trim(),
-      fecha_inicio: fechaInicio || undefined,
-      cliente_id: sel.cliente?.id || undefined, obra_id: obraId || undefined, usuario_id: usuarioId || undefined,
-      cotizacion_id: deCot?.id || undefined,
-      descuento: Number(descuento) || 0, deposito: Number(deposito) || 0,
-      metodo_pago: metodo, pagos,
-      requiere_factura: requiereFactura, factura,
-    })
-      .then(res => {
-        // Igual que en la venta: si el backend abrió el turno solo, hay que
-        // decirlo, porque el fondo inicial quedó en $0.
-        if (res.data?.turno_abierto) {
-          notify('Se abrió tu turno de caja con fondo $0. Ajústalo en el arqueo.')
-        }
-        const est = res.data?.renta?.estado
-        fijarCotParaRenta(null)   // puente consumido: la renta quedó ligada
-        notify(est === 'reservada' ? 'Reserva registrada' : 'Renta registrada')
-        const id = res.data?.renta?.id
-        if (id) abrirOrdenCartaPDF('rentas', id)   // orden carta en PDF (ya no ticket térmico)
-        onDone()
-      })
-      .catch(err => {
-        const d = err?.response?.data
-        // El servidor dice que esa cotización ya se concretó. El puente traía
-        // una cotización quemada (pestaña vieja, o alguien más la concretó):
-        // se suelta, o el admin se queda reintentando contra el mismo error.
-        if (d?.codigo === 'ya_concretada') {
-          fijarCotParaRenta(null)
-          setDeCot(null)
-        }
-        notify(d?.detalle || 'Error al rentar', 'err')
-      })
-      .finally(() => setBusy(false))
-  }
-
-  return (
-    <Modal className="fixed inset-0 z-[70] bg-black/40 backdrop-blur-[2px]" onClose={cerrarConAviso} label={`${esReserva ? 'Reservar' : 'Rentar'} ${unit.codigo}`}>
-      <motion.div
-        initial={{ x: '100%' }} animate={{ x: 0 }} transition={{ duration: 0.3, ease: [0.23, 1, 0.32, 1] }}
-        onClick={e => e.stopPropagation()}
-        className="fixed inset-y-0 right-0 w-full sm:max-w-[560px] bg-surface border-l border-edge shadow-[-24px_0_60px_rgba(33,29,22,0.22)] flex flex-col"
-      >
-        <div className="px-6 py-4 border-b border-edge flex items-start justify-between gap-3 shrink-0">
-          <div className="min-w-0">
-            <h3 className="font-black text-ink">{esReserva ? 'Reservar' : 'Rentar'} {unit.codigo}</h3>
-            <p className="text-xs text-mute mt-0.5">{equipo.modelo}</p>
-            {deCot && (
-              <p className="mt-1.5 inline-flex items-center gap-1.5 text-[11px] font-bold px-2 py-1 rounded-full bg-[color:var(--c-renta)]/10 text-[color:var(--c-renta)]">
-                Concretando {deCot.folio || 'cotización'} · {deCot.cliente || 'cliente'}
-                <button onClick={() => { fijarCotParaRenta(null); setDeCot(null) }} aria-label="Quitar vínculo" className="hover:opacity-70">✕</button>
-              </p>
-            )}
-          </div>
-          <button onClick={onClose} className="w-8 h-8 rounded-[9px] flex items-center justify-center text-mute hover:text-ink hover:bg-surface-2 transition-colors shrink-0" aria-label="Cerrar"><svg className="w-[18px] h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" d="M6 6l12 12M18 6L6 18" /></svg></button>
-        </div>
-        <div className="p-6 flex-1 overflow-y-auto">
-        <div className="space-y-3">
-          {/* Se teclea el teléfono y, si ya está en el padrón, aparece con su
-              historial para confirmarlo. El sistema sugiere; quien atiende decide. */}
-          <BuscadorCliente valor={sel} onChange={elegirCliente} autoFocus />
-          {sel.cliente && sel.cliente.obras.length > 0 && (
-            <div>
-              <label className={label}>Obra</label>
-              <select aria-label="Obra" className={input} value={obraId} onChange={e => elegirObra(e.target.value)}>
-                <option value="" className="bg-surface">— Sin obra —</option>
-                {sel.cliente.obras.map(o => <option key={o.id} value={o.id} className="bg-surface">{o.nombre}</option>)}
-              </select>
-            </div>
-          )}
-          {clientes.length > 0 && (
-            <div>
-              <label className={label}>Cuenta del cliente <span className="text-mute font-normal normal-case">(opcional — para que la vea en "Tus rentas")</span></label>
-              <select aria-label="Cuenta del cliente" className={input} value={usuarioId} onChange={e => setUsuarioId(e.target.value)}>
-                <option value="" className="bg-surface">— Sin vincular —</option>
-                {clientes.map(c => <option key={c.id} value={c.id} className="bg-surface">{c.nombre}{c.empresa ? ` — ${c.empresa}` : ''}</option>)}
-              </select>
-            </div>
-          )}
-          <div><label className={label}>Dirección / ubicación de obra *</label><input aria-label="Dirección / ubicación de obra" aria-required="true" className={input} value={direccion} onChange={e => setDireccion(e.target.value)} placeholder="Dónde estará el equipo" /></div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className={label}>Modalidad</label>
-              <select aria-label="Modalidad" className={input} value={modalidad} onChange={e => setModalidad(e.target.value as any)}>
-                <option value="dia" className="bg-surface">Por día</option>
-                <option value="semana" className="bg-surface">Por semana</option>
-                <option value="mes" className="bg-surface">Por mes</option>
-              </select>
-            </div>
-            <div><label className={label}>Duración</label><input aria-label="Duración" type="number" min={1} className={input} value={duracion} onChange={e => setDuracion(e.target.value)} /></div>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div><label className={label}>Fecha de inicio</label><input aria-label="Fecha de inicio" type="date" min={hoy} className={input} value={fechaInicio} onChange={e => setFechaInicio(e.target.value)} /></div>
-            <div><label className={label}>Descuento</label><InputDinero valor={descuento} onValor={setDescuento} /></div>
-          </div>
-          <div><label className={label}>Depósito / garantía</label><InputDinero valor={deposito} onValor={setDeposito} /></div>
-          <div>
-            <div className="flex items-center justify-between mb-1.5">
-              <label className={`${label} mb-0`}>Método de pago</label>
-              <button type="button" onClick={() => setSplitPago(s => !s)} className="text-[11px] font-bold text-gold-ink hover:underline">
-                {splitPago ? 'Un solo método' : 'Dividir en 2 métodos'}
-              </button>
-            </div>
-            {!splitPago ? (
-              <select aria-label="Método de pago" className={input} value={metodo} onChange={e => setMetodo(e.target.value as any)}>
-                <option value="efectivo" className="bg-surface">Efectivo</option>
-                <option value="tarjeta" className="bg-surface">Tarjeta</option>
-                <option value="transferencia" className="bg-surface">Transferencia</option>
-              </select>
-            ) : (
-              <div className="space-y-2">
-                <div className="flex gap-2">
-                  <select aria-label="Método de pago 1" className={`${input} flex-1`} value={metodo} onChange={e => setMetodo(e.target.value as any)}>
-                    <option value="efectivo" className="bg-surface">Efectivo</option>
-                    <option value="tarjeta" className="bg-surface">Tarjeta</option>
-                    <option value="transferencia" className="bg-surface">Transferencia</option>
-                  </select>
-                  <div className="w-[44%]"><InputDinero valor={monto1} onValor={setMonto1} placeholder="Monto" /></div>
-                </div>
-                <div className="flex gap-2">
-                  <select aria-label="Método de pago 2" className={`${input} flex-1`} value={metodo2} onChange={e => setMetodo2(e.target.value as any)}>
-                    <option value="efectivo" className="bg-surface">Efectivo</option>
-                    <option value="tarjeta" className="bg-surface">Tarjeta</option>
-                    <option value="transferencia" className="bg-surface">Transferencia</option>
-                  </select>
-                  <div className="w-[44%] flex gap-1">
-                    <InputDinero valor={monto2} onValor={setMonto2} placeholder="Resto" className="flex-1" />
-                    <button type="button" onClick={() => { const m1 = Number(monto1) || 0; setMonto2(String(Math.max(0, Number((totalConIva - m1).toFixed(2))))) }}
-                      className="px-2 rounded-lg border border-edge text-[11px] font-semibold text-mute hover:text-ink shrink-0 whitespace-nowrap">Resto</button>
-                  </div>
-                </div>
-                {(() => {
-                  const s = (Number(monto1) || 0) + (Number(monto2) || 0)
-                  const ok = Math.round(s * 100) / 100 === Math.round(totalConIva * 100) / 100
-                  return <p className={`text-[11px] ${ok ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}`}>{ok ? '✓ Los montos suman el total' : `Deben sumar ${formatMoney(totalConIva)} · llevas ${formatMoney(s)}`}</p>
-                })()}
-              </div>
-            )}
-          </div>
-          <FacturaFields requiere={requiereFactura} onRequiere={setRequiereFactura} factura={factura} onFactura={setFactura} empresaNombre={sel.cliente?.rfc ? sel.cliente.nombre : undefined} />
-          {Number(precio) <= 0 && (
-            <p className="text-[11px] text-amber-600 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2">
-              Este equipo no tiene precio {modalidad === 'dia' ? 'por día' : modalidad === 'semana' ? 'por semana' : 'por mes'} configurado: el total sale en $0. Cárgalo en el producto o elige otra modalidad.
-            </p>
-          )}
-          {esReserva && <p className="text-[11px] text-blue-400 bg-blue-500/10 border border-blue-500/20 rounded-lg px-3 py-2">Inicia el {fechaInicio}: se guarda como <b>reserva</b> y no ocupa la unidad hasta esa fecha.</p>}
-          <div className="px-4 py-3 rounded-xl bg-surface-2 space-y-1">
-            {requiereFactura ? (<>
-              <div className="flex items-center justify-between text-xs text-mute"><span>Renta{Number(descuento) > 0 ? ' (con descuento)' : ''} sin IVA</span><span>${total.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span></div>
-              <div className="flex items-center justify-between text-xs text-mute"><span>IVA (16%)</span><span>${ivaRenta.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span></div>
-              <div className="flex items-center justify-between pt-1 border-t border-edge"><span className="text-sm text-ink font-semibold">Total con IVA</span><span className="text-lg font-black text-price">${totalConIva.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span></div>
-            </>) : (
-              <div className="flex items-center justify-between"><span className="text-sm text-mute">Total{Number(descuento) > 0 ? ' (con descuento)' : ''}</span><span className="text-lg font-black text-price">${total.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span></div>
-            )}
-          </div>
-        </div>
-        </div>
-        <div className="px-6 py-4 border-t border-edge flex justify-end gap-3 shrink-0">
-          <button onClick={onClose} className="px-6 py-2.5 rounded-full border border-edge text-mute text-sm font-medium hover:text-ink transition-colors">Cancelar</button>
-          <button onClick={submit} disabled={busy} className="btn-renta px-7 py-2.5 rounded-full text-sm font-bold">{esReserva ? 'Reservar' : 'Registrar renta'}</button>
-        </div>
-      </motion.div>
-    </Modal>
-  )
-}
-
-/* ── Registrar venta ── */
-function SellModal({ unit, equipo, onClose, onDone, notify, desdeCaja = false }: {
-  unit: Unidad; equipo: Equipo; onClose: () => void; onDone: () => void; notify: (m: string, t?: 'ok' | 'err') => void
-  /** Levantada/vendida desde la caja: el cobro entra al turno del mostrador. */
-  desdeCaja?: boolean
-}) {
-  const [metodo, setMetodo] = useState<'efectivo' | 'tarjeta' | 'transferencia'>('efectivo')
-  // Pago dividido: dos métodos que reparten el total con IVA (p. ej. efectivo + tarjeta).
-  const [splitPago, setSplitPago] = useState(false)
-  const [metodo2, setMetodo2] = useState<'efectivo' | 'tarjeta' | 'transferencia'>('tarjeta')
-  const [monto1, setMonto1] = useState('')
-  const [monto2, setMonto2] = useState('')
-  const [total, setTotal] = useState(String(equipo.precio_venta ?? ''))
-  const [sel, setSel] = useState<SeleccionCliente>(SELECCION_VACIA)
-  const [requiereFactura, setRequiereFactura] = useState(false)
-  const [factura, setFactura] = useState<FacturaData>(FACTURA_VACIA)
-  const [busy, setBusy] = useState(false)
-
-  // "Sucio" = ya hay trabajo capturado. El precio arranca con el de catálogo,
-  // así que solo cuenta si lo cambiaron a mano.
-  const sucio = Boolean(
-    sel.nombre.trim() || sel.telefono.trim() || sel.cliente || requiereFactura ||
-    splitPago || monto1.trim() || monto2.trim() ||
-    total !== String(equipo.precio_venta ?? ''),
-  )
-
-  /* Cerrar con un clic afuera borraba catorce campos sin preguntar, y esto se
-     llena con el cliente enfrente. Solo estorba si de verdad hay algo escrito:
-     una hoja intacta se cierra de inmediato, como antes. */
-  async function cerrarConAviso() {
-    if (!sucio) { onClose(); return }
-    if (await confirmar({
-      titulo: '¿Descartar lo que llevas?',
-      mensaje: 'Cerraste la hoja sin registrar. Lo capturado se pierde.',
-      aceptar: 'Descartar', cancelar: 'Seguir aquí', tono: 'peligro',
-    })) onClose()
-  }
-
-  // En VENTAS el precio de catálogo YA INCLUYE IVA: es el precio al público y no
-  // se le suma nada encima. El IVA se DESGLOSA del total (total / 1.16), igual que
-  // hace el backend en Venta.recalcular_total() y que el POS y la cotización de
-  // venta. La renta es el caso contrario: ahí el IVA sí se suma si hay factura.
-  const precioNum = Number(total) || 0
-  const baseNum = Math.round((precioNum / 1.16) * 100) / 100
-  const ivaNum = Math.round((precioNum - baseNum) * 100) / 100
-
-  function submit() {
-    if (precioNum <= 0) { notify('El precio debe ser mayor a 0', 'err'); return }
-    const errFactura = validarFactura(requiereFactura, sel.cliente ? String(sel.cliente.id) : '', factura)
-    if (errFactura) { notify(errFactura, 'err'); return }
-    let pagos: { metodo: string; monto: number }[] | undefined
-    if (splitPago) {
-      const m1 = Number(monto1) || 0, m2 = Number(monto2) || 0
-      if (metodo === metodo2) { notify('Elige dos métodos distintos para dividir el pago', 'err'); return }
-      if (m1 <= 0 || m2 <= 0) { notify('Con pago dividido, ambos montos deben ser mayores a 0', 'err'); return }
-      if (Math.round((m1 + m2) * 100) / 100 !== Math.round(precioNum * 100) / 100) {
-        notify(`Los dos montos deben sumar el total (${formatMoney(precioNum)})`, 'err'); return
-      }
-      pagos = [{ metodo, monto: m1 }, { metodo: metodo2, monto: m2 }]
-    }
-    setBusy(true)
-    api.post(`/unidades/${unit.id}/vender/`, {
-      // Vendida desde la caja: el cobro entra al turno del mostrador.
-      desde_caja: desdeCaja || undefined,
-      nombre_cliente: sel.nombre.trim(), telefono_cliente: sel.telefono,
-      metodo_pago: metodo, cliente_id: sel.cliente?.id || undefined, total: precioNum,
-      pagos,
-      requiere_factura: requiereFactura, factura,
-    })
-      .then(res => {
-        notify('Venta registrada')
-        // El backend abre el turno solo si hacía falta, para no detener al
-        // mostrador con el cliente enfrente. Se avisa porque el fondo inicial
-        // quedó en $0 y hay que corregirlo al cerrar, o el arqueo saldrá alto.
-        if (res.data?.turno_abierto) {
-          notify('Se abrió tu turno de caja con fondo $0. Ajústalo en el arqueo.')
-        }
-        const id = res.data?.venta?.id
-        if (id) abrirOrdenCartaPDF('ventas', id)   // orden carta en PDF (ya no ticket térmico)
-        onDone()
-      })
-      .catch(err => notify(err?.response?.data?.detalle || 'Error al vender', 'err'))
-      .finally(() => setBusy(false))
-  }
-
-  return (
-    <Modal className="fixed inset-0 z-[70] bg-black/40 backdrop-blur-[2px]" onClose={cerrarConAviso} label={`Vender ${unit.codigo}`}>
-      <motion.div
-        initial={{ x: '100%' }} animate={{ x: 0 }} transition={{ duration: 0.3, ease: [0.23, 1, 0.32, 1] }}
-        onClick={e => e.stopPropagation()}
-        className="fixed inset-y-0 right-0 w-full sm:max-w-[560px] bg-surface border-l border-edge shadow-[-24px_0_60px_rgba(33,29,22,0.22)] flex flex-col"
-      >
-        <div className="px-6 py-4 border-b border-edge flex items-start justify-between gap-3 shrink-0">
-          <div className="min-w-0">
-            <h3 className="font-black text-ink">Vender {unit.codigo}</h3>
-            <p className="text-xs text-mute mt-0.5">{equipo.modelo} · {unit.condicion}</p>
-          </div>
-          <button onClick={onClose} className="w-8 h-8 rounded-[9px] flex items-center justify-center text-mute hover:text-ink hover:bg-surface-2 transition-colors shrink-0" aria-label="Cerrar"><svg className="w-[18px] h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" d="M6 6l12 12M18 6L6 18" /></svg></button>
-        </div>
-        <div className="p-6 flex-1 overflow-y-auto">
-        <div className="space-y-3">
-          {/* Una máquina no se vende a un desconocido: el teléfono trae su
-              ficha con lo que ya nos compró, antes de cerrar. */}
-          <BuscadorCliente valor={sel} onChange={setSel} autoFocus />
-          <div>
-            <div className="flex items-center justify-between mb-1.5">
-              <label className={`${label} mb-0`}>Método de pago</label>
-              <button type="button" onClick={() => setSplitPago(s => !s)} className="text-[11px] font-bold text-gold-ink hover:underline">
-                {splitPago ? 'Un solo método' : 'Dividir en 2 métodos'}
-              </button>
-            </div>
-            {!splitPago ? (
-              <select aria-label="Método de pago" className={input} value={metodo} onChange={e => setMetodo(e.target.value as any)}>
-                <option value="efectivo" className="bg-surface">Efectivo</option>
-                <option value="tarjeta" className="bg-surface">Tarjeta</option>
-                <option value="transferencia" className="bg-surface">Transferencia</option>
-              </select>
-            ) : (
-              <div className="space-y-2">
-                <div className="flex gap-2">
-                  <select aria-label="Método de pago 1" className={`${input} flex-1`} value={metodo} onChange={e => setMetodo(e.target.value as any)}>
-                    <option value="efectivo" className="bg-surface">Efectivo</option>
-                    <option value="tarjeta" className="bg-surface">Tarjeta</option>
-                    <option value="transferencia" className="bg-surface">Transferencia</option>
-                  </select>
-                  <div className="w-[44%]"><InputDinero valor={monto1} onValor={setMonto1} placeholder="Monto" /></div>
-                </div>
-                <div className="flex gap-2">
-                  <select aria-label="Método de pago 2" className={`${input} flex-1`} value={metodo2} onChange={e => setMetodo2(e.target.value as any)}>
-                    <option value="efectivo" className="bg-surface">Efectivo</option>
-                    <option value="tarjeta" className="bg-surface">Tarjeta</option>
-                    <option value="transferencia" className="bg-surface">Transferencia</option>
-                  </select>
-                  <div className="w-[44%] flex gap-1">
-                    <InputDinero valor={monto2} onValor={setMonto2} placeholder="Resto" className="flex-1" />
-                    <button type="button" onClick={() => { const m1 = Number(monto1) || 0; setMonto2(String(Math.max(0, Number((precioNum - m1).toFixed(2))))) }}
-                      className="px-2 rounded-lg border border-edge text-[11px] font-semibold text-mute hover:text-ink shrink-0 whitespace-nowrap">Resto</button>
-                  </div>
-                </div>
-                {(() => {
-                  const s = (Number(monto1) || 0) + (Number(monto2) || 0)
-                  const ok = Math.round(s * 100) / 100 === Math.round(precioNum * 100) / 100
-                  return <p className={`text-[11px] ${ok ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}`}>{ok ? '✓ Los montos suman el total' : `Deben sumar ${formatMoney(precioNum)} · llevas ${formatMoney(s)}`}</p>
-                })()}
-              </div>
-            )}
-          </div>
-          <div>
-            <label className={label}>Precio de venta (IVA incluido)</label>
-            <InputDinero valor={total} onValor={setTotal} placeholder="16,500" />
-            <p className="text-[11px] text-mute mt-1">Es el precio al público. El IVA ya va dentro; abajo se desglosa para la factura.</p>
-          </div>
-          <div className="px-4 py-3 rounded-xl bg-surface-2 space-y-1">
-            <div className="flex items-center justify-between text-xs text-mute"><span>Subtotal (sin IVA)</span><span>${baseNum.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
-            <div className="flex items-center justify-between text-xs text-mute"><span>IVA (16%)</span><span>${ivaNum.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
-            <div className="flex items-center justify-between pt-1 border-t border-edge"><span className="text-sm text-ink font-semibold">Total a cobrar</span><span className="text-lg font-black text-price">${precioNum.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span></div>
-          </div>
-          <FacturaFields requiere={requiereFactura} onRequiere={setRequiereFactura} factura={factura} onFactura={setFactura} empresaNombre={sel.cliente?.rfc ? sel.cliente.nombre : undefined} />
-        </div>
-        </div>
-        <div className="px-6 py-4 border-t border-edge flex justify-end gap-3 shrink-0">
-          <button onClick={onClose} className="px-6 py-2.5 rounded-full border border-edge text-mute text-sm font-medium hover:text-ink transition-colors">Cancelar</button>
-          <button onClick={submit} disabled={busy} className="px-7 py-2.5 rounded-full bg-gold text-black text-sm font-bold hover:opacity-90 transition-opacity disabled:opacity-50">Registrar venta</button>
-        </div>
-      </motion.div>
-    </Modal>
-  )
-}
-
 /* ════════════════════════════════════════
    MÓDULO INVENTARIO (vista global de unidades)
 ════════════════════════════════════════ */
-function InventarioGlobal({ unidades, equipos, reload, notify, onEnviarTaller }: {
-  unidades: Unidad[]; equipos: Equipo[]; reload: () => void; notify: (m: string, t?: 'ok' | 'err') => void
+function InventarioGlobal({ unidades, equipos, reload, notify, onEnviarTaller, cargando }: {
+  unidades: Unidad[]; equipos: Equipo[]; reload: () => void; notify: Notify
   onEnviarTaller: (ordenId: number) => void
+  /** La lista todavía viene en camino: el vacío no es un vacío de verdad. */
+  cargando?: boolean
 }) {
-  // Si venimos de "Concretar renta", arrancamos filtrados al equipo que pidió
-  // el cliente y a las unidades disponibles: cae directo en lo que hay que rentar.
-  const puente = leerCotParaRenta()
+  // Si venimos de "Concretar" una cotización —a rentar o a vender— arrancamos
+  // filtrados al equipo que pidió el cliente y a las unidades disponibles: cae
+  // directo en lo que hay que entregar.
+  const puente = leerCotEnCurso()
   const [estado, setEstado] = useState<'' | 'disponible' | 'rentado' | 'mantenimiento' | 'vendido'>(puente?.equipo_id ? 'disponible' : '')
   const [equipoFiltro, setEquipoFiltro] = useState<string>(puente?.equipo_id ? String(puente.equipo_id) : '')
+  /* Vienes a RENTAR: las unidades que solo se venden estorban. Se filtra por
+     `puede_rentarse` y no por condición "seminueva" a propósito — una unidad
+     NUEVA autorizada para renta (sustitución, demanda extraordinaria) sí se
+     puede rentar, y filtrar por condición la escondería justo cuando hace falta.
+     Es visible y se puede apagar: un filtro invisible parecería inventario
+     perdido.
+
+     Vienes a VENDER: NO se enciende. Cualquier máquina se vende, y la que más
+     se vende es la NUEVA — que es justo la que este filtro esconde. Encenderlo
+     por venir de una cotización dejaría la pantalla vacía con el inventario
+     lleno. El equipo cotizado y "disponible" ya acotan lo suficiente. */
+  const [soloRentables, setSoloRentables] = useState<boolean>(puente?.proposito === 'renta')
   const [search, setSearch] = useState('')
+  const { devolver: devolverRenta, modalCobro } = useDevolverRenta(notify)
   const [labelUnit, setLabelUnit] = useState<Unidad | null>(null)
   const [rentUnit, setRentUnit] = useState<Unidad | null>(null)
   const [sellUnit, setSellUnit] = useState<Unidad | null>(null)
   const [mantUnit, setMantUnit] = useState<Unidad | null>(null)
 
-  const filtered = unidades.filter(u => {
-    if (estado && u.estado !== estado) return false
+  /* Todo lo filtrado MENOS el estado. De aquí salen los números de las
+     pestañas: cada una dice cuántas te quedarían si la tocas, ya con el producto
+     y la búsqueda aplicados. Si el estado entrara aquí, tocar "Disponibles"
+     pondría las otras cuatro en cero y las pestañas no servirían de nada. */
+  const enFoco = unidades.filter(u => {
+    if (soloRentables && !seRenta(u)) return false
     if (equipoFiltro && String(u.equipo) !== equipoFiltro) return false
     if (search.trim()) {
       const q = search.trim().toLowerCase()
@@ -3238,17 +2893,35 @@ function InventarioGlobal({ unidades, equipos, reload, notify, onEnviarTaller }:
     return true
   })
 
-  const counts = {
-    total: unidades.length,
-    disponible: unidades.filter(u => u.estado === 'disponible').length,
-    rentado: unidades.filter(u => u.estado === 'rentado').length,
-    mantenimiento: unidades.filter(u => u.estado === 'mantenimiento').length,
-    vendido: unidades.filter(u => u.estado === 'vendido').length,
-  }
+  const filtered = enFoco.filter(u => {
+    if (estado && u.estado !== estado) return false
+    return true
+  })
+  // La flota solo crece. Las pestañas de estado siguen contando sobre `enFoco`
+  // —el total con los filtros de arriba—, así que paginar no le quita a nadie la
+  // respuesta de "cuántas hay".
+  const { enPantalla, ancla, props: pagProps } = usePaginado(filtered, undefined,
+    [estado, equipoFiltro, soloRentables, search])
+
+  const porEstado = (lista: Unidad[]) => ({
+    total: lista.length,
+    disponible: lista.filter(u => u.estado === 'disponible').length,
+    rentado: lista.filter(u => u.estado === 'rentado').length,
+    mantenimiento: lista.filter(u => u.estado === 'mantenimiento').length,
+    vendido: lista.filter(u => u.estado === 'vendido').length,
+  })
+  /* Dos cuentas distintas, a propósito:
+       · Las TARJETAS de arriba son la foto de la bodega completa. Es un resumen;
+         que se moviera al escribir en el buscador no diría nada de tu negocio.
+       · Las PESTAÑAS son controles de la tabla que tienen debajo, así que cuentan
+         lo que de verdad vas a ver. Antes decían "Disponibles 9" con tres
+         renglones en pantalla y no había forma de saber a qué se refería el 9. */
+  const counts = porEstado(unidades)
+  const countsFiltrados = porEstado(enFoco)
 
   function devolver(u: Unidad) {
     if (!u.renta_activa) return
-    api.post(`/rentas/${u.renta_activa.id}/devolver/`).then(() => { notify('Equipo devuelto'); reload() }).catch(() => notify('Error', 'err'))
+    devolverRenta(u.renta_activa.id, reload)
   }
 
   function liberarMant(u: Unidad) {
@@ -3257,39 +2930,71 @@ function InventarioGlobal({ unidades, equipos, reload, notify, onEnviarTaller }:
       .catch(() => notify('Error', 'err'))
   }
 
-  const chip = (val: typeof estado, lbl: string, n: number) => (
-    <button onClick={() => setEstado(val)} className={`px-3.5 py-2 rounded-full text-xs font-semibold transition-colors flex items-center gap-2 ${estado === val ? 'bg-gold text-black' : 'bg-surface-2 text-mute hover:text-ink'}`}>
-      {lbl}<span className={`px-1.5 rounded ${estado === val ? 'bg-black/15' : 'bg-edge'}`}>{n}</span>
-    </button>
-  )
-
   return (
     <div className="space-y-5">
-      {/* Si venimos de "Concretar renta", recuerda qué pidió el cliente. */}
+      {/* Si venimos de concretar una cotización —a rentar o a vender—, recuerda
+          qué pidió el cliente y con qué verbo se cierra. */}
       <BannerConcretando inset={false} />
       {/* KPIs */}
+      {/* Las cifras se leen CONTRA la flota operativa (total menos vendidas):
+          "9 disponibles" no dice nada sin saber de cuántas. La barrita es el
+          mismo porcentaje en forma de longitud, para verlo desde el mostrador. */}
       <KpiGrid
-        gridClassName="grid-cols-2 sm:grid-cols-3 lg:grid-cols-5"
-        items={[
-          { label: 'Total unidades', value: counts.total, tone: 'default' },
-          { label: 'Disponibles', value: counts.disponible, tone: 'success' },
-          { label: 'Rentadas', value: counts.rentado, tone: 'info' },
-          { label: 'Mantenimiento', value: counts.mantenimiento, tone: 'warning' },
-          { label: 'Vendidas', value: counts.vendido, tone: 'muted' },
-        ]}
+        items={(() => {
+          const operativas = Math.max(counts.total - counts.vendido, 0)
+          const pct = (n: number) => (operativas ? Math.round((n / operativas) * 100) : 0)
+          return [
+            {
+              label: 'Total unidades', value: counts.total, tone: 'default' as const,
+              helper: `${operativas} en la flota · ${counts.vendido} fuera`,
+              icon: <><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /><rect x="14" y="14" width="7" height="7" rx="1.5" /></>,
+            },
+            {
+              label: 'Disponibles', value: counts.disponible, tone: 'success' as const,
+              helper: `${pct(counts.disponible)}% de la flota, lista para salir`, progreso: operativas ? counts.disponible / operativas : 0,
+              icon: <><circle cx="12" cy="12" r="9" /><path d="m8.4 12 2.4 2.4 4.8-5" /></>,
+            },
+            {
+              label: 'Rentadas', value: counts.rentado, tone: 'info' as const,
+              helper: `${pct(counts.rentado)}% en obra ahora mismo`, progreso: operativas ? counts.rentado / operativas : 0,
+              icon: <><rect x="3" y="4.5" width="18" height="16" rx="2" /><path d="M3 9h18M8 3v3m8-3v3" /></>,
+            },
+            {
+              label: 'Mantenimiento', value: counts.mantenimiento, tone: 'warning' as const, emphasis: counts.mantenimiento > 0,
+              helper: counts.mantenimiento ? 'no facturan mientras estén en el taller' : 'nada detenido',
+              icon: <><path d="M14.7 6.3a4 4 0 0 0-5.6 5.6L3 18v3h3l6.1-6.1a4 4 0 0 0 5.6-5.6l-2.5 2.5-2.1-2.1z" /></>,
+            },
+            {
+              label: 'Vendidas', value: counts.vendido, tone: 'muted' as const,
+              helper: 'ya no cuentan como flota',
+              icon: <><path d="M20.6 13.4 12 22l-9-9V3h10z" /><circle cx="7.5" cy="7.5" r="1.3" /></>,
+            },
+          ]
+        })()}
       />
 
-      <Card className="overflow-hidden">
+      <Card ref={ancla} className="overflow-hidden scroll-mt-24">
         {/* Filtros / toolbar */}
         <div className="px-5 py-4 border-b border-edge flex flex-col lg:flex-row lg:items-center gap-3">
-          <div className="flex gap-2 flex-wrap">
-            {chip('', 'Todas', counts.total)}
-            {chip('disponible', 'Disponibles', counts.disponible)}
-            {chip('rentado', 'Rentadas', counts.rentado)}
-            {chip('mantenimiento', 'Mantenimiento', counts.mantenimiento)}
-            {chip('vendido', 'Vendidas', counts.vendido)}
-          </div>
-          <div className="flex gap-2 flex-1 lg:justify-end">
+          <FiltroChips
+            valor={estado}
+            onChange={k => setEstado(k as typeof estado)}
+            opciones={[
+              { valor: '', label: 'Todas', cuenta: countsFiltrados.total },
+              { valor: 'disponible', label: 'Disponibles', cuenta: countsFiltrados.disponible },
+              { valor: 'rentado', label: 'Rentadas', cuenta: countsFiltrados.rentado },
+              { valor: 'mantenimiento', label: 'Mantenimiento', cuenta: countsFiltrados.mantenimiento },
+              { valor: 'vendido', label: 'Vendidas', cuenta: countsFiltrados.vendido },
+            ]}
+          />
+          <div className="flex gap-2 flex-1 lg:justify-end items-center">
+            <button onClick={() => setSoloRentables(v => !v)} aria-pressed={soloRentables}
+              title="Oculta las unidades que solo se pueden vender"
+              className={`h-10 px-3.5 rounded-xl border text-[12.5px] font-bold whitespace-nowrap transition-colors ${soloRentables
+                ? 'btn-renta border-transparent'
+                : 'border-edge text-mute hover:text-ink hover:bg-surface-2'}`}>
+              Solo rentables
+            </button>
             <select aria-label="Filtrar por producto" value={equipoFiltro} onChange={e => setEquipoFiltro(e.target.value)} className={`${input} sm:w-48`}>
               <option value="" className="bg-surface">Todos los productos</option>
               {equipos.map(e => <option key={e.id} value={e.id} className="bg-surface">{e.modelo}</option>)}
@@ -3312,7 +3017,7 @@ function InventarioGlobal({ unidades, equipos, reload, notify, onEnviarTaller }:
               </tr>
             </thead>
             <tbody className="divide-y divide-edge">
-              {filtered.map(u => (
+              {enPantalla.map(u => (
                 <tr key={u.id} className={`hover:bg-surface-2 transition-colors ${u.renta_activa?.vencida ? 'bg-red-500/5' : ''}`}>
                   {/* Código */}
                   <td className="px-5 py-3">
@@ -3330,7 +3035,25 @@ function InventarioGlobal({ unidades, equipos, reload, notify, onEnviarTaller }:
                   </td>
                   {/* Condición */}
                   <td data-col="Condición" className="px-3 py-3">
-                    {pillCond(u.condicion)}
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      {pillCond(u.condicion)}
+                      {/* Una máquina NUEVA saliendo a renta es una excepción que
+                          alguien autorizó. El rastro se guardaba desde siempre y
+                          no salía por ningún lado: para saber quién lo decidió
+                          había que entrar a la base de datos. Aquí se ve, y al
+                          pasar encima dice quién, cuándo y por qué. */}
+                      {u.condicion === 'nueva' && u.autorizada_para_renta && (
+                        <span
+                          title={u.autorizacion_renta
+                            ? `Autorizada por ${u.autorizacion_renta.por || 'alguien del equipo'} el ${new Date(u.autorizacion_renta.en).toLocaleDateString('es-MX')}${u.autorizacion_renta.nota ? ` · ${u.autorizacion_renta.nota}` : ''}`
+                            : 'Autorizada para renta (sin rastro registrado)'}
+                          className="inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded border border-[color-mix(in_oklab,var(--c-taller)_34%,transparent)] bg-[color-mix(in_oklab,var(--c-taller)_10%,transparent)] text-taller-ink cursor-help"
+                        >
+                          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.2" strokeLinecap="round"><path d="M12 3l7.5 3.5v5c0 4.3-3.1 7.6-7.5 9-4.4-1.4-7.5-4.7-7.5-9v-5z" /></svg>
+                          Renta autorizada
+                        </span>
+                      )}
+                    </div>
                   </td>
                   {/* Estado */}
                   <td data-col="Estado" className="px-3 py-3">
@@ -3358,9 +3081,9 @@ function InventarioGlobal({ unidades, equipos, reload, notify, onEnviarTaller }:
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.8"><path strokeLinecap="round" strokeLinejoin="round" d="M6 9V2h12v7M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2M6 14h12v8H6z" /></svg>
                       </button>
                       {u.estado === 'rentado' && <button onClick={() => devolver(u)} className="px-3 h-8 rounded-lg border border-blue-500/30 text-blue-500 text-xs font-semibold hover:bg-blue-500/10 transition-colors">Devolver</button>}
-                      {u.estado === 'mantenimiento' && <button onClick={() => liberarMant(u)} title="Liberar manualmente (sin orden)" className="px-3 h-8 rounded-lg border border-amber-500/40 text-amber-500 text-xs font-semibold hover:bg-amber-500/10 transition-colors">Liberar</button>}
+                      {u.estado === 'mantenimiento' && <button onClick={() => liberarMant(u)} title="Liberar manualmente (sin orden)" className="px-3 h-8 rounded-lg border border-amber-500/40 text-taller-ink text-xs font-semibold hover:bg-amber-500/10 transition-colors">Liberar</button>}
                       {u.estado === 'disponible' && (
-                        <button onClick={() => setMantUnit(u)} title="Enviar a taller (crea orden de reparación)" className="w-8 h-8 rounded-lg border border-edge text-mute hover:text-amber-500 hover:border-amber-500/40 transition-colors flex items-center justify-center">
+                        <button onClick={() => setMantUnit(u)} title="Enviar a taller (crea orden de reparación)" className="w-8 h-8 rounded-lg border border-edge text-mute hover:text-taller-ink hover:border-amber-500/40 transition-colors flex items-center justify-center">
                           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.8"><path strokeLinecap="round" strokeLinejoin="round" d="M14.7 6.3a4 4 0 00-5.6 5.6L3 18v3h3l6.1-6.1a4 4 0 005.6-5.6l-2.5 2.5-2.1-2.1 2.5-2.5z" /></svg>
                         </button>
                       )}
@@ -3372,14 +3095,22 @@ function InventarioGlobal({ unidades, equipos, reload, notify, onEnviarTaller }:
               ))}
             </tbody>
           </table>
-          {filtered.length === 0 && <p className="text-sm text-mute py-14 text-center">No hay unidades con estos filtros.</p>}
+          {filtered.length === 0 && (cargando ? <FilasEsqueleto filas={6} columnas={4} /> : (
+            <EstadoVacio
+              titulo="Ninguna unidad con estos filtros"
+              mensaje="Cada unidad es una máquina física con su código y su estado. Afloja los filtros o da de alta la primera desde su producto."
+              icono={<><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /><rect x="14" y="14" width="7" height="7" rx="1.5" /></>}
+            />
+          ))}
         </div>
+        <Paginador {...pagProps} nombre="unidades" />
       </Card>
 
       {labelUnit && <LabelModal unit={labelUnit} onClose={() => setLabelUnit(null)} />}
       {rentUnit && <RentModal unit={rentUnit} equipo={equipoFromUnit(rentUnit)} onClose={() => setRentUnit(null)} onDone={() => { setRentUnit(null); reload() }} notify={notify} />}
       {sellUnit && <SellModal unit={sellUnit} equipo={equipoFromUnit(sellUnit)} onClose={() => setSellUnit(null)} onDone={() => { setSellUnit(null); reload() }} notify={notify} />}
       {mantUnit && <EnviarTallerModal unit={mantUnit} onClose={() => setMantUnit(null)} onCreated={(id) => { setMantUnit(null); reload(); onEnviarTaller(id) }} notify={notify} />}
+      {modalCobro}
     </div>
   )
 }
@@ -3388,7 +3119,7 @@ function InventarioGlobal({ unidades, equipos, reload, notify, onEnviarTaller }:
    ENVIAR A TALLER (crea orden de reparación interna)
 ════════════════════════════════════════ */
 function EnviarTallerModal({ unit, onClose, onCreated, notify }: {
-  unit: Unidad; onClose: () => void; onCreated: (ordenId: number) => void; notify: (m: string, t?: 'ok' | 'err') => void
+  unit: Unidad; onClose: () => void; onCreated: (ordenId: number) => void; notify: Notify
 }) {
   const [diag, setDiag] = useState('')
   const [busy, setBusy] = useState(false)
@@ -3423,7 +3154,7 @@ function EnviarTallerModal({ unit, onClose, onCreated, notify }: {
           <div className="w-px h-[30px] bg-edge shrink-0" />
           <div className="flex-1 min-w-0">
             <div className="text-[10.5px] font-bold tracking-[0.5px] text-mute mb-1">ESTADO</div>
-            <div className="text-[14px] font-bold text-ink">Disponible <span className="text-edge">→</span> <span className="text-gold-ink">Mantenimiento</span></div>
+            <div className="text-[14px] font-bold text-ink">Disponible <span aria-hidden="true" className="text-mute/70">→</span> <span className="text-gold-ink">Mantenimiento</span></div>
           </div>
         </div>
 
@@ -3431,7 +3162,7 @@ function EnviarTallerModal({ unit, onClose, onCreated, notify }: {
         <div className="px-[26px] pt-5 pb-1.5">
           <div className="text-[10.5px] font-bold tracking-[0.5px] text-mute mb-2">FALLA / MOTIVO (OPCIONAL)</div>
           <textarea aria-label="Falla reportada" value={diag} onChange={e => setDiag(e.target.value)} placeholder="Ej. No arranca, fuga de aceite, servicio preventivo…" autoFocus
-            className="w-full min-h-[76px] border border-edge rounded-[9px] px-3.5 py-3 text-[13.5px] bg-surface-2 text-ink placeholder-mute resize-y focus:outline-none focus:border-gold focus:bg-surface transition-colors" />
+            className="campo campo-area" />
         </div>
 
         {/* Acciones */}
@@ -3531,36 +3262,124 @@ function LabelModal({ unit, onClose }: { unit: Unidad; onClose: () => void }) {
   )
 }
 
-/* ════════════════════════════════════════
-   MÓDULO RENTAS
-════════════════════════════════════════ */
-type MovimientoRenta = { entregada?: boolean; recogida?: boolean; en?: string | null; por?: string | null }
-
-type RentaFull = RentaActiva & {
-  entrega?: MovimientoRenta; recoleccion?: MovimientoRenta
-  cuenta?: string | null
-  usuario_id?: number | null
-  pagos?: { fecha: string; monto: string; metodo: string; por?: string }[]
-  pagado?: string; saldo?: string
-  factura_estado?: string | null
-  estado?: string; modalidad: string; duracion?: number
-  fecha_inicio?: string; fecha_devolucion_real?: string | null
-  total?: string; subtotal?: string; precio_unitario?: string; descuento?: string; deposito?: string; recargo?: string
-  cliente_nombre?: string
-  empresa?: { id: number; nombre: string } | null
-  obra?: { id: number; nombre: string; responsable?: string; telefono?: string; ubicacion?: string } | null
-  creado_en?: string
+type FilaRecordatorio = {
+  renta_id: number; equipo: string; codigo: string; cliente: string
+  telefono: string; fecha_fin: string; dias: number
+  tiene_cuenta: boolean; saldo: string
 }
-function RentasAdmin({ reload, notify }: { reload: () => void; notify: (m: string, t?: 'ok' | 'err') => void }) {
+
+/* A quién hay que recordarle HOY que traiga la máquina.
+
+   Esto es lo que sustituye al recargo por retraso. REMALI no cobra por tardarse,
+   así que lo que devuelve la máquina al patio no es un cargo —solo infla una
+   deuda que nadie va a cobrar— sino insistir a tiempo.
+
+   El comando `recordar_rentas` avisa DENTRO de la app, pero solo alcanza a
+   clientes con cuenta; la mayoría de las rentas de mostrador se levantan con un
+   nombre y un teléfono. Para ésos existe esta lista, con el WhatsApp ya escrito.
+
+   Y resuelve algo que el buzón no podía: el aviso de "Renta vencida" se creaba
+   UNA vez por renta (`ref='vencida-{id}'`) y no volvía a salir nunca, así que
+   una máquina con veinte días afuera se anunciaba el primer día y luego nada.
+   Una lista no se "marca como leída": mientras la máquina no vuelva, ahí sigue. */
+function RecordatoriosRentas() {
+  const [datos, setDatos] = useState<{ vencidas: FilaRecordatorio[]; por_vencer: FilaRecordatorio[]; total: number } | null>(null)
+  const [abierto, setAbierto] = useState(false)
+
+  const load = useCallback(() => {
+    api.get<{ vencidas: FilaRecordatorio[]; por_vencer: FilaRecordatorio[]; total: number }>(
+      '/rentas/recordatorios/', { fondo: true })
+      .then(r => setDatos(r.data)).catch(anotarFallo)
+  }, [])
+  useRecurso(['rentas'], load)
+
+  if (!datos || datos.total === 0) return null
+
+  const texto = (f: FilaRecordatorio) =>
+    f.dias < 0
+      ? `Hola${f.cliente ? ' ' + f.cliente : ''}, te escribimos de REMALI. La renta de ${f.equipo} venció hace ${Math.abs(f.dias)} día${Math.abs(f.dias) > 1 ? 's' : ''}. ¿La traes tú o pasamos por ella? También podemos extenderla si la sigues necesitando.`
+      : f.dias === 0
+        ? `Hola${f.cliente ? ' ' + f.cliente : ''}, te escribimos de REMALI. Hoy termina la renta de ${f.equipo}. ¿La traes tú o pasamos por ella?`
+        : `Hola${f.cliente ? ' ' + f.cliente : ''}, te escribimos de REMALI. Mañana termina la renta de ${f.equipo}. Si necesitas más días, con gusto la extendemos.`
+
+  const etiqueta = (d: number) =>
+    d < 0 ? `${Math.abs(d)} día${Math.abs(d) > 1 ? 's' : ''} de retraso` : d === 0 ? 'Vence hoy' : 'Vence mañana'
+
+  const filas = [...datos.vencidas, ...datos.por_vencer]
+
+  return (
+    <Card className="p-0 overflow-hidden">
+      <button onClick={() => setAbierto(a => !a)}
+        className="w-full px-5 py-4 flex items-center justify-between gap-3 text-left hover:bg-surface-2 transition-colors">
+        <div className="min-w-0">
+          <p className="text-[13.5px] font-black text-ink">A quién recordarle</p>
+          <p className="text-[12px] text-mute mt-0.5">
+            {datos.vencidas.length > 0 && <span className="text-red-500 font-bold">{datos.vencidas.length} vencida{datos.vencidas.length > 1 ? 's' : ''}</span>}
+            {datos.vencidas.length > 0 && datos.por_vencer.length > 0 && ' · '}
+            {datos.por_vencer.length > 0 && `${datos.por_vencer.length} por vencer`}
+          </p>
+        </div>
+        <span className={`text-mute transition-transform ${abierto ? 'rotate-180' : ''}`} aria-hidden>▾</span>
+      </button>
+
+      {abierto && (
+        <ul className="border-t border-edge divide-y divide-edge">
+          {filas.map(f => {
+            const wa = waLink(f.telefono, texto(f))
+            return (
+              <li key={f.renta_id} className="px-5 py-3 flex items-center gap-3 flex-wrap">
+                <div className="min-w-0 flex-1">
+                  <p className="text-[13px] font-bold text-ink truncate">{f.cliente || 'Cliente sin nombre'}</p>
+                  <p className="text-[11.5px] text-mute truncate">
+                    {f.equipo} · {f.codigo} ·{' '}
+                    <span className={f.dias < 0 ? 'text-red-500 font-semibold' : ''}>{etiqueta(f.dias)}</span>
+                  </p>
+                </div>
+                {/* Quien ya recibió el aviso en su cuenta no necesita llamada:
+                    así la insistencia se gasta donde de verdad hace falta. */}
+                {f.tiene_cuenta && (
+                  <span className="text-[10.5px] font-bold px-2 py-0.5 rounded bg-surface-2 text-mute shrink-0">Ya se le avisó en la app</span>
+                )}
+                {wa ? (
+                  /* Verde de WhatsApp, no el dorado. Dos razones:
+                     · El color es DATO: el verde dice por qué canal se va a
+                       escribir, y este renglón ya tiene una acción de sistema
+                       al lado ("+ Abono" en otras listas) que sí es dorada.
+                     · El dorado es el acento de la ACCIÓN PRIMARIA, y aquí no
+                       lo es: la primaria de esta tarjeta es enterarse de a
+                       quién hay que insistirle, no escribirle a uno.
+                     Las medidas y el tinte son los del botón de WhatsApp que ya
+                     existe en el armador (Cotizacion.tsx): mismo canal, mismo
+                     botón en todo el sistema. */
+                  <a href={wa} target="_blank" rel="noopener noreferrer"
+                    className="h-8 px-3 shrink-0 inline-flex items-center rounded-lg bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 text-[12px] font-bold hover:bg-emerald-500/25 transition-colors">
+                    WhatsApp
+                  </a>
+                ) : (
+                  <span className="text-[11.5px] text-mute shrink-0">Sin teléfono</span>
+                )}
+              </li>
+            )
+          })}
+        </ul>
+      )}
+    </Card>
+  )
+}
+
+function RentasAdmin({ reload, notify }: { reload: () => void; notify: Notify }) {
   const [estado, setEstado] = useState<'reservada' | 'activa' | 'finalizada' | 'cancelada'>('activa')
   const [rentas, setRentas] = useState<RentaFull[]>([])
   const [loading, setLoading] = useState(true)
   const [verRenta, setVerRenta] = useState<RentaFull | null>(null)
+  /** La renta que se está renovando desde el menú de la fila, sin abrir su detalle. */
+  const [renovarRenta, setRenovarRenta] = useState<RentaFull | null>(null)
   const [entradaAvance, setEntradaAvance] = useState(false)
+  const { devolver: devolverRenta, modalCobro } = useDevolverRenta(notify)
 
   const load = useCallback(() => {
     setLoading(true)
-    api.get<{ rentas: RentaFull[] }>(`/rentas/?estado=${estado}`).then(r => setRentas(r.data?.rentas || [])).catch(() => setRentas([])).finally(() => setLoading(false))
+    api.get<{ rentas: RentaFull[] }>(`/rentas/?estado=${estado}`, { fondo: true }).then(r => setRentas(r.data?.rentas || [])).catch(() => setRentas([])).finally(() => setLoading(false))
   }, [estado])
   useEffect(() => { load() }, [load])
 
@@ -3574,8 +3393,7 @@ function RentasAdmin({ reload, notify }: { reload: () => void; notify: (m: strin
       ?? api.get<{ rentas: RentaFull[] }>('/rentas/?estado=todas')
         .then(r => (r.data?.rentas || []).find(x => x.id === id) ?? null)
         .catch(() => null)
-    const avance = llegaDeTraspaso
-    llegaDeTraspaso = false
+    const avance = tomarLlegaDeTraspaso()
     enVuelo.then(renta => {
       if (renta) { setEntradaAvance(avance); setVerRenta(renta) }
       else notify(`No encontramos la renta #${id}`, 'err')
@@ -3585,49 +3403,83 @@ function RentasAdmin({ reload, notify }: { reload: () => void; notify: (m: strin
   }, [])
 
   async function devolver(r: RentaFull) {
-    if (!await confirmar({ titulo: `¿Marcar como devuelto el equipo de ${r.cliente_nombre || r.cliente || 'cliente'}?`, mensaje: 'La renta se cierra y la unidad vuelve a quedar disponible.', aceptar: 'Marcar devuelto' })) return
-    api.post(`/rentas/${r.id}/devolver/`).then(() => { notify('Equipo devuelto'); load(); reload() }).catch(e => notify(e?.response?.data?.detalle || 'Error', 'err'))
+    if (!await confirmar({ titulo: `¿Marcar como devuelto el equipo de ${r.cliente_nombre || r.cliente || 'cliente'}?`, mensaje: 'La renta se cierra y la unidad vuelve a quedar disponible. Si trae saldo, se cobra antes de cerrar.', aceptar: 'Marcar devuelto' })) return
+    devolverRenta(r.id, () => { load(); reload() })
   }
 
   async function cancelar(r: RentaFull) {
     if (!await confirmar({ titulo: `¿Cancelar esta ${r.estado === 'reservada' ? 'reserva' : 'renta'}?`, mensaje: 'Se liberará la unidad.', aceptar: 'Cancelar', cancelar: 'Volver', tono: 'peligro' })) return
-    api.post(`/rentas/${r.id}/cancelar/`).then(() => { notify('Renta cancelada'); load(); reload() }).catch(e => notify(e?.response?.data?.detalle || 'Error', 'err'))
+    api.post(`/rentas/${r.id}/cancelar/`).then(() => { notify('Renta cancelada', 'neutro'); load(); reload() }).catch(e => notify(e?.response?.data?.detalle || 'Error', 'err'))
   }
 
   const vencidas = rentas.filter(r => r.vencida).length
-  const porVencer = rentas.filter(r => !r.vencida && (r.dias_restantes ?? 99) <= 2).length
+  /* El umbral lo pone el servidor (`por_vencer`), que lo calcula proporcional a
+     la duración. El `?? false` es el respaldo mientras un backend viejo no mande
+     el campo: antes que enseñar una alarma equivocada, no se enseña ninguna. */
+  const porVencer = rentas.filter(r => !r.vencida && (r.por_vencer ?? false)).length
+  const enTiempo = Math.max(rentas.length - vencidas - porVencer, 0)
+  // "Finalizadas" es un historial que solo crece: se pagina. Las cifras de
+  // arriba (vencidas, por vencer) siguen mirando la lista completa del estado.
+  const { enPantalla, ancla, props: pagProps } = usePaginado(rentas, undefined, [estado])
 
   return (
     <div className="space-y-5">
+      {renovarRenta && (
+        <RenovarRentaModal
+          renta={renovarRenta} notify={notify}
+          onClose={() => setRenovarRenta(null)}
+          onHecho={() => { setRenovarRenta(null); load(); reload() }}
+        />
+      )}
       {verRenta && <RentaDetalleModal renta={verRenta} avance={entradaAvance} onClose={() => { setVerRenta(null); setEntradaAvance(false) }} onOrdenCarta={() => abrirOrdenCartaPDF('rentas', verRenta.id)} notify={notify} onChanged={() => { load(); reload() }} />}
+      {modalCobro}
       {/* KPIs */}
       <KpiGrid
         items={[
-          { label: estado === 'activa' ? 'Rentas activas' : estado === 'reservada' ? 'Reservas' : estado === 'cancelada' ? 'Canceladas' : 'Finalizadas', value: rentas.length, tone: 'default' },
-          { label: 'Por vencer (≤2d)', value: porVencer, tone: 'warning', emphasis: porVencer > 0 },
-          { label: 'Vencidas', value: vencidas, tone: 'danger', emphasis: vencidas > 0 },
+          {
+            label: estado === 'activa' ? 'Rentas activas' : estado === 'reservada' ? 'Reservas' : estado === 'cancelada' ? 'Canceladas' : 'Finalizadas',
+            value: rentas.length, tone: 'info',
+            /* La cifra sola no dice nada: "3" puede ser toda la operación o una
+               tercera parte parada. El helper la pone contra la flota. */
+            helper: estado === 'activa' ? (rentas.length ? `${enTiempo} en tiempo · ${porVencer + vencidas} por atender` : 'nada en obra ahora mismo') : undefined,
+            icon: <><rect x="3" y="4.5" width="18" height="16" rx="2" /><path d="M3 9h18M8 3v3m8-3v3" /><path d="M12 13v3l2 1" /></>,
+          },
+          {
+            label: 'Por vencer (≤2d)', value: porVencer, tone: 'warning', emphasis: porVencer > 0,
+            helper: porVencer ? 'avisa al cliente antes de que se pase' : 'nada se vence esta semana',
+            icon: <><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></>,
+          },
+          {
+            label: 'Vencidas', value: vencidas, tone: 'danger', emphasis: vencidas > 0,
+            helper: vencidas ? 'la unidad sigue fuera: hay que recogerla' : 'todo devuelto a tiempo',
+            icon: <><path d="M10.3 4.3 2.6 18a2 2 0 0 0 1.7 3h15.4a2 2 0 0 0 1.7-3L13.7 4.3a2 2 0 0 0-3.4 0z" /><path d="M12 9v4m0 4h.01" /></>,
+          },
         ]}
       />
 
-      <Card className="overflow-hidden">
+      <Card ref={ancla} className="overflow-hidden scroll-mt-24">
         {/* Toolbar */}
-        <div className="px-5 py-4 border-b border-edge flex items-center justify-between flex-wrap gap-3">
-          <div className="flex p-1 rounded-full border border-edge bg-surface-2 flex-wrap">
-            {(['activa', 'reservada', 'finalizada', 'cancelada'] as const).map(s => (
-              <button key={s} onClick={() => setEstado(s)} className={`px-3.5 py-2 rounded-full text-xs font-semibold transition-colors ${estado === s ? 'bg-gold text-black' : 'text-mute hover:text-ink'}`}>
-                {s === 'activa' ? 'Activas' : s === 'reservada' ? 'Reservas' : s === 'finalizada' ? 'Finalizadas' : 'Canceladas'}
-              </button>
-            ))}
-          </div>
+        <CardBarra>
+          <Segmentado
+            forma="pastilla"
+            valor={estado}
+            onChange={k => setEstado(k as typeof estado)}
+            opciones={[
+              { key: 'activa', label: 'Activas' },
+              { key: 'reservada', label: 'Reservas' },
+              { key: 'finalizada', label: 'Finalizadas' },
+              { key: 'cancelada', label: 'Canceladas' },
+            ]}
+          />
           <div className="flex items-center gap-2 flex-wrap">
             {estado === 'activa' && vencidas > 0 && (
-              <span className="px-3 py-1.5 rounded-full bg-red-500/10 text-red-500 text-xs font-semibold flex items-center gap-1.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />{vencidas} vencida{vencidas > 1 ? 's' : ''} por recoger
+              <span className="px-3 py-1.5 rounded-full border border-[color-mix(in_oklab,var(--c-vencida)_34%,transparent)] bg-[color-mix(in_oklab,var(--c-vencida)_10%,transparent)] text-[var(--c-vencida)] text-[11.5px] font-bold flex items-center gap-1.5 tabular-nums">
+                <span className="w-1.5 h-1.5 rounded-full bg-[var(--c-vencida)] animate-pulse motion-reduce:animate-none" />{vencidas} vencida{vencidas > 1 ? 's' : ''} por recoger
               </span>
             )}
             <BotonExportar onClick={() => descargarReporte('/rentas/export/', { estado }, `reporte_rentas_${estado}.csv`, notify)} />
           </div>
-        </div>
+        </CardBarra>
 
         {/* Tabla */}
         <div className="overflow-x-auto">
@@ -3638,12 +3490,13 @@ function RentasAdmin({ reload, notify }: { reload: () => void; notify: (m: strin
                 <th className="font-semibold px-3 py-3">Cliente</th>
                 <th className="font-semibold px-3 py-3">Ubicación</th>
                 <th className="font-semibold px-3 py-3">Periodo</th>
+                <th className="font-semibold px-3 py-3 text-right">Total</th>
                 <th className="font-semibold px-3 py-3">Vencimiento</th>
-                <th className="font-semibold px-5 py-3 text-right">Acción</th>
+                <th className="font-semibold px-5 py-3 text-right">Acciones</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-edge">
-              {rentas.map(r => (
+              {enPantalla.map(r => (
                 <tr key={r.id} className={`hover:bg-surface-2 transition-colors ${r.vencida ? 'bg-red-500/5' : ''}`}>
                   <td className="px-5 py-3">
                     <p className="text-sm font-semibold text-ink truncate">{r.inventario.equipo}</p>
@@ -3657,17 +3510,36 @@ function RentasAdmin({ reload, notify }: { reload: () => void; notify: (m: strin
                     </p>
                   </td>
                   <td data-col="Ubicación" className="px-3 py-3 max-w-[200px]"><p className="text-xs text-mute truncate">{r.direccion}</p></td>
+                  {/* Tres renglones apilados hacían esta fila casi el doble de
+                      alta que la de Reparaciones, y el importe metido aquí no se
+                      podía comparar de un vistazo con el de arriba y el de
+                      abajo. Ahora: una línea, y el dinero en su propia columna
+                      alineado a la derecha, que es como se leen las cifras. */}
                   <td data-col="Periodo" className="px-3 py-3 whitespace-nowrap">
-                    <div>
-                      <p className="text-xs text-ink capitalize">{r.modalidad}</p>
-                      <p className="text-[11px] text-mute font-mono">{r.fecha_inicio || ''} → {r.fecha_fin}</p>
-                      {r.total && <p className="text-[11px] text-price font-semibold">${Number(r.total).toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>}
-                    </div>
+                    <p className="text-[13px] text-ink capitalize">{r.modalidad}</p>
+                    <p className="text-[11px] text-mute font-mono">{r.fecha_inicio || ''} → {r.fecha_fin}</p>
+                  </td>
+                  <td data-col="Total" className="px-3 py-3 text-sm font-bold text-price text-right whitespace-nowrap">
+                    <span>{r.total ? `$${Number(r.total).toLocaleString('en-US', { minimumFractionDigits: 2 })}` : '—'}</span>
                   </td>
                   <td data-col="Vencimiento" className="px-3 py-3 whitespace-nowrap">
-                    {estado === 'activa' ? (
-                      <span className={`text-xs font-bold ${r.vencida ? 'text-red-500' : (r.dias_restantes ?? 9) <= 2 ? 'text-amber-500' : 'text-mute'}`}>
-                        {r.vencida ? '⚠ Vencida' : `${r.dias_restantes}d restantes`}
+                    {estado === 'activa' && (r.fase === 'por_entregar' || r.fase === 'en_camino') ? (
+                      /* Todavía no sale o va en camino: contar "días restantes"
+                         de una máquina que sigue en bodega no significa nada.
+                         Lo que importa aquí es que aún no se entrega. */
+                      <span className={`text-xs font-bold ${r.fase === 'en_camino' ? 'text-renta' : 'text-mute'}`}>
+                        {r.fase === 'en_camino' ? '→ En camino' : '○ Por entregar'}
+                      </span>
+                    ) : estado === 'activa' ? (
+                      <span className={`text-xs font-bold ${r.vencida ? 'text-red-500' : r.por_vencer ? 'text-taller-ink' : 'text-mute'}`}>
+                        {/* Con menos de un día por delante la cuenta pasa a
+                            HORAS: "0d restantes" no dice si quedan diez horas o
+                            diez minutos, que es justo lo que hay que saber para
+                            salir a recogerla. */}
+                        {r.vencida ? '⚠ Vencida'
+                          : (r.horas_restantes !== undefined && r.horas_restantes < 24)
+                            ? `${Math.max(1, Math.round(r.horas_restantes))} h restantes`
+                            : `${r.dias_restantes}d restantes`}
                       </span>
                     ) : (
                       <span className="text-[10px] px-2 py-0.5 rounded-md bg-surface-2 text-mute font-semibold uppercase">
@@ -3675,44 +3547,57 @@ function RentasAdmin({ reload, notify }: { reload: () => void; notify: (m: strin
                       </span>
                     )}
                   </td>
-                  <td className="px-5 py-3 text-right">
-                    <div className="flex flex-wrap items-center justify-end gap-2">
-                      <button onClick={() => setVerRenta(r)} title="Ver detalle de la renta" className="inline-flex items-center gap-1.5 px-2.5 h-8 rounded-lg border border-edge text-mute text-xs font-semibold hover:text-ink hover:border-ink/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/20 transition-colors">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
-                        Ver
-                      </button>
-                      <button onClick={() => abrirOrdenCartaPDF('rentas', r.id)} title="Descargar orden carta (PDF)" className="inline-flex items-center gap-1.5 px-2.5 h-8 rounded-lg border border-edge text-mute text-xs font-semibold hover:text-ink hover:border-ink/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/20 transition-colors">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>
-                        Orden PDF
-                      </button>
-                      {estado === 'activa' && (
-                        <button onClick={() => devolver(r)} title="Marcar la renta como devuelta" className="inline-flex items-center gap-1.5 px-2.5 h-8 rounded-lg border border-renta/30 text-renta text-xs font-semibold hover:bg-renta/10 hover:border-renta/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-renta/30 transition-colors">
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 14 4 9 9 4"/><path d="M20 20v-7a4 4 0 0 0-4-4H4"/></svg>
-                          Marcar devuelto
-                        </button>
-                      )}
-                      {(estado === 'activa' || estado === 'reservada') && (
-                        <button onClick={() => cancelar(r)} title="Cancelar la renta" className="inline-flex items-center gap-1.5 px-2.5 h-8 rounded-lg border border-red-500/30 text-red-600 dark:text-red-400 text-xs font-semibold hover:bg-red-500/10 hover:border-red-500/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/30 transition-colors">
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-                          Cancelar
-                        </button>
-                      )}
+                  {/* Cuatro botones con texto y `flex-wrap`: en cuanto la
+                      columna se estrechaba se partían en dos renglones y la fila
+                      crecía el doble. Reparaciones ya resolvía esto con el menú
+                      de la casa —una sola línea, siempre— y aquí se usa el
+                      mismo. Nada se pierde: las acciones son las mismas, y con
+                      su nombre completo en vez de un ícono a adivinar. */}
+                  <td className="px-5 py-3 text-right" onClick={e => e.stopPropagation()}>
+                    <div className="flex items-center justify-end">
+                      <MenuFila
+                        etiqueta="Acciones"
+                        opciones={[
+                          { label: 'Ver detalle', onClick: () => setVerRenta(r), icono: <svg className="w-[17px] h-[17px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z" /><circle cx="12" cy="12" r="2.6" /></svg> },
+                          { label: 'Orden en carta (PDF)', onClick: () => abrirOrdenCartaPDF('rentas', r.id), icono: <svg className="w-[17px] h-[17px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5" /></svg> },
+                          ...((estado === 'activa' || estado === 'finalizada') ? [{
+                            label: estado === 'activa' ? 'Renovar' : 'Volver a rentar',
+                            onClick: () => setRenovarRenta(r),
+                            icono: <svg className="w-[17px] h-[17px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4" /><path d="M21 4v5h-5" /></svg>,
+                          }] : []),
+                          ...(estado === 'activa' ? [{
+                            label: 'Marcar devuelto', onClick: () => devolver(r),
+                            icono: <svg className="w-[17px] h-[17px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 14 4 9 9 4" /><path d="M20 20v-7a4 4 0 0 0-4-4H4" /></svg>,
+                          }] : []),
+                          ...((estado === 'activa' || estado === 'reservada') ? [{
+                            label: estado === 'reservada' ? 'Cancelar reserva' : 'Cancelar renta',
+                            onClick: () => cancelar(r), peligro: true,
+                            icono: <svg className="w-[17px] h-[17px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>,
+                          }] : []),
+                        ]}
+                      />
                     </div>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
-          {loading && <p className="text-sm text-mute py-14 text-center">Cargando…</p>}
-          {!loading && rentas.length === 0 && <p className="text-sm text-mute py-14 text-center">Sin rentas {estado === 'activa' ? 'activas' : 'en el historial'}.</p>}
+          {loading && <FilasEsqueleto filas={5} columnas={4} />}
+          {!loading && rentas.length === 0 && (
+            <EstadoVacio
+              titulo={estado === 'activa' ? 'Ninguna máquina está en obra' : estado === 'reservada' ? 'Sin reservas' : estado === 'cancelada' ? 'Sin rentas canceladas' : 'Todavía no hay historial'}
+              mensaje={estado === 'activa'
+                ? 'Cuando rentes una unidad aparecerá aquí con su fecha de devolución.'
+                : 'Aquí se irán guardando las rentas conforme cambien de estado.'}
+              icono={<><rect x="3" y="4.5" width="18" height="16" rx="2" /><path d="M3 9h18M8 3v3m8-3v3" /><path d="M12 13v3l2 1" /></>}
+            />
+          )}
         </div>
+        <Paginador {...pagProps} nombre="rentas" />
       </Card>
     </div>
   )
 }
-
-/* ─── Modal: detalle de renta (ventana "Ver") ─── */
-type Evidencia = { id: number; momento: 'entrega' | 'devolucion'; momento_label: string; imagen: string; nota: string; subida_por: string | null; creada: string }
 
 /** Fotos del equipo al entregarlo y al recibirlo, agrupadas por momento. */
 function EvidenciasRenta({ rentaId }: { rentaId: number }) {
@@ -3724,7 +3609,7 @@ function EvidenciasRenta({ rentaId }: { rentaId: number }) {
 
   const cargar = useCallback(() => {
     api.get<{ evidencias: Evidencia[] }>(`/rentas/${rentaId}/evidencias/`)
-      .then(r => setFotos(r.data?.evidencias || [])).catch(() => {})
+      .then(r => setFotos(r.data?.evidencias || [])).catch(anotarFallo)
   }, [rentaId])
   useEffect(() => { cargar() }, [cargar])
 
@@ -3805,100 +3690,61 @@ function EvidenciasRenta({ rentaId }: { rentaId: number }) {
   )
 }
 
-/** Dinero mientras se escribe: "2000" se ve "2,000" (y "$" fijo a la
- *  izquierda). Solo acepta dígitos y UN punto decimal; el valor que guarda
- *  es crudo ("2000.50") para que las cuentas no carguen comas. Pieza de la
- *  casa: úsala en todo campo de cantidades. */
-function formatearDinero(crudo: string) {
-  if (!crudo) return ''
-  const [ent, dec] = crudo.split('.')
-  const entFmt = ent ? Number(ent).toLocaleString('en-US') : ''
-  return dec !== undefined ? `${entFmt}.${dec.slice(0, 2)}` : entFmt
-}
-function InputDinero({ valor, onValor, placeholder = '0', autoFocus, className = '', disabled }: {
-  valor: string; onValor: (v: string) => void; placeholder?: string; autoFocus?: boolean; className?: string; disabled?: boolean
-}) {
-  return (
-    <div className={`relative ${className}`}>
-      <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-mute font-bold text-sm pointer-events-none">$</span>
-      <input aria-label={placeholder || 'Monto'}
-        value={formatearDinero(valor)} autoFocus={autoFocus} disabled={disabled}
-        inputMode="decimal" placeholder={placeholder}
-        onChange={e => {
-          let limpio = e.target.value.replace(/[^\d.]/g, '')
-          const i = limpio.indexOf('.')
-          if (i !== -1) limpio = limpio.slice(0, i + 1) + limpio.slice(i + 1).replace(/\./g, '').slice(0, 2)
-          onValor(limpio)
-        }}
-        className="w-full bg-surface-2 border border-edge rounded-xl pl-8 pr-3.5 py-2.5 text-sm font-bold text-ink tabular-nums placeholder-mute focus:outline-none focus:border-gold/50 transition-colors disabled:opacity-60"
-      />
-    </div>
-  )
+/* Recoger la máquina.
+
+   Ya no hay cobro forzado en la puerta. El backend cierra la devolución SIEMPRE
+   —el piso de liquidación es meta de cobranza, no candado— y lo que quede se va
+   a Adeudos, con aviso a administración el mismo día.
+
+   El cobro en la puerta desapareció porque la razón de existir era el bloqueo, y
+   el bloqueo estaba mal por tres motivos:
+
+     · El recargo por retraso NACE al cerrar la devolución. Rechazarla revertía
+       la transacción y con ella el recargo, así que la pantalla pedía cobrar un
+       saldo que en la base valía cero: "Saldo actual: $10,800" arriba y "el
+       abono es mayor al saldo ($0.00)" abajo. No se podía pagar lo que no
+       existía, ni existir sin pagarlo.
+     · No recoger subía el recargo al día siguiente, y con él el propio piso: el
+       faltante crecía más rápido de lo que se podía cobrar.
+     · Al final de una renta la empresa quiere su máquina de vuelta; retenerla
+       castiga más a quien la presta que a quien debe.
+
+   Quien quiera cobrar antes de cerrar tiene el botón de siempre: "Registrar
+   abono" en el detalle de la renta, y "Registrar cobro" en la hoja del técnico.
+   La palanca de cobro vive ahora al LEVANTAR la siguiente renta, donde sí hay un
+   administrador presente (ver `crear_renta`). */
+function useDevolverRenta(notify: Notify) {
+  async function devolver(rentaId: number, alTerminar: () => void) {
+    try {
+      const r = await api.post(`/rentas/${rentaId}/devolver/`)
+      const d = r.data?.detalle || 'Equipo devuelto'
+      // Con saldo vivo el aviso va en ámbar: la máquina volvió, pero el cobro no
+      // terminó y eso no puede leerse como un cierre limpio.
+      notify(d, Number(r.data?.renta?.saldo || 0) > 0 ? 'warning' : 'ok')
+      alTerminar()
+      return true
+    } catch (err) {
+      const d = (err as { response?: { data?: { detalle?: string } } })?.response?.data
+      notify(d?.detalle || 'Error al devolver', 'err')
+      return false
+    }
+  }
+
+  // `modalCobro` se conserva en la firma para no tocar los cinco lugares que lo
+  // pintan; ya no hay nada que mostrar.
+  return { devolver, modalCobro: null }
 }
 
-/** Registrar abono: TODO en un solo modal — monto (con comas), método y fecha. */
-function AbonoModal({ saldo, onClose, onRegistrar }: {
-  saldo: number; onClose: () => void
-  onRegistrar: (monto: number, metodo: string, fecha: string) => Promise<void>
-}) {
+function RentaDetalleModal({ renta: r, onClose, onOrdenCarta, notify, onChanged, avance = false }: { renta: RentaFull; onClose: () => void; onOrdenCarta: () => void; notify?: Notify; onChanged?: () => void; avance?: boolean }) {
   const money = formatMoney
-  const hoyISO = new Date().toLocaleDateString('sv-SE')
-  const [monto, setMonto] = useState('')
-  const [metodo, setMetodo] = useState('efectivo')
-  const [fecha, setFecha] = useState(hoyISO)
-  const [guardando, setGuardando] = useState(false)
-  const n = Number(monto) || 0
-
-  return createPortal(
-    <Modal className="modal-in fixed inset-0 z-[130] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClose={onClose} label="Registrar abono">
-      <div onClick={e => e.stopPropagation()} className="w-full max-w-sm bg-surface border border-edge rounded-2xl shadow-[0_24px_60px_rgba(0,0,0,0.3)] p-6">
-        <h3 className="font-black text-ink">Registrar abono</h3>
-        <p className="text-[12.5px] text-mute mt-1">Saldo actual: <b className="text-ink">{money(saldo)}</b></p>
-
-        <label className="block text-[12px] font-semibold text-mute mt-4 mb-1.5">¿Cuánto entrega?</label>
-        <InputDinero valor={monto} onValor={setMonto} autoFocus placeholder="2,000" />
-        {n > saldo && (
-          <p className="text-[12px] text-red-500 font-semibold mt-1.5">El abono no puede ser mayor al saldo ({money(saldo)}).</p>
-        )}
-
-        <label className="block text-[12px] font-semibold text-mute mt-4 mb-1.5">Método</label>
-        <div className="grid grid-cols-3 gap-2">
-          {(['efectivo', 'tarjeta', 'transferencia'] as const).map(m => (
-            <button key={m} onClick={() => setMetodo(m)}
-              className={`h-10 rounded-xl border text-[12.5px] font-bold capitalize transition-colors ${metodo === m ? 'bg-ink text-app border-ink' : 'border-edge text-mute hover:text-ink hover:bg-surface-2'}`}>
-              {m}
-            </button>
-          ))}
-        </div>
-
-        <label className="block text-[12px] font-semibold text-mute mt-4 mb-1.5">Fecha del abono</label>
-        <input aria-label="Fecha del abono" type="date" value={fecha} max={hoyISO} onChange={e => setFecha(e.target.value)}
-          className="w-full bg-surface-2 border border-edge rounded-xl px-3.5 py-2.5 text-sm text-ink focus:outline-none focus:border-gold/50 transition-colors" />
-        <p className="text-[11px] text-mute mt-1">Cámbiala si se te pasó registrarlo ese día; no puede ser futura.</p>
-
-        <div className="mt-5 flex justify-end gap-2.5">
-          <button onClick={onClose} className="px-5 py-2.5 rounded-full border border-edge text-ink text-sm font-semibold hover:bg-surface-2 transition-colors">Cancelar</button>
-          <button disabled={n <= 0 || n > saldo || guardando}
-            onClick={async () => { setGuardando(true); try { await onRegistrar(n, metodo, fecha) } finally { setGuardando(false) } }}
-            className="px-6 py-2.5 rounded-full bg-gold text-black text-sm font-bold hover:opacity-90 transition-opacity disabled:opacity-40">
-            {guardando ? 'Guardando…' : n > 0 ? `Registrar ${money(n)}` : 'Registrar'}
-          </button>
-        </div>
-      </div>
-    </Modal>,
-    document.body,
-  )
-}
-
-function RentaDetalleModal({ renta: r, onClose, onOrdenCarta, notify, onChanged, avance = false }: { renta: RentaFull; onClose: () => void; onOrdenCarta: () => void; notify?: (m: string, t?: 'ok' | 'err') => void; onChanged?: () => void; avance?: boolean }) {
-  const money = formatMoney
+  const [renovando, setRenovando] = useState(false)
   // Sustituir la máquina por avería: la actual entra a mantenimiento y una de
   // repuesto (del mismo equipo, disponible) toma la renta sin cambiar términos.
   async function sustituirPorAveria() {
     const equipoId = r.inventario.equipo_id
     if (!equipoId) { notify?.('No se pudo identificar el equipo', 'err'); return }
     try {
-      const resp = await api.get<Unidad[]>(`/equipos/${equipoId}/unidades/`, { fondo: true } as never)
+      const resp = await api.get<Unidad[]>(`/equipos/${equipoId}/unidades/`, { fondo: true })
       const libres = (resp.data || []).filter(u => u.estado === 'disponible' && u.id !== r.inventario.id)
       if (!libres.length) {
         await confirmar({ titulo: 'Sin repuesto disponible', mensaje: `No hay otra unidad de ${r.inventario.equipo || 'este equipo'} disponible. Libera o registra una para poder sustituir.`, aceptar: 'Entendido' })
@@ -3928,14 +3774,17 @@ function RentaDetalleModal({ renta: r, onClose, onOrdenCarta, notify, onChanged,
   const [pagado, setPagado] = useState(Number(r.pagado || 0))
   const [saldo, setSaldo] = useState(Number(r.saldo ?? r.total ?? 0))
   const [abonando, setAbonando] = useState(false)
+  /* Sin `catch`: el rechazo tiene que llegarle al AbonoModal, que lo pinta
+     junto al campo que hay que corregir y se queda abierto con lo capturado.
+     Tragárselo aquí —"el interceptor avisa"— era la mentira que dejaba el botón
+     volviendo a su sitio sin una palabra: el interceptor solo avisa de red
+     caída y de 5xx, y estos endpoints rechazan con 400 y 403. */
   async function guardarAbono(monto: number, metodo: string, fecha: string) {
-    try {
-      const resp = await api.post<{ renta: RentaFull }>(`/rentas/${r.id}/abonos/`, { monto, metodo, fecha: fecha || undefined })
-      setPagos(resp.data.renta.pagos || [])
-      setPagado(Number(resp.data.renta.pagado || 0))
-      setSaldo(Number(resp.data.renta.saldo || 0))
-      setAbonando(false)
-    } catch { /* el interceptor avisa */ }
+    const resp = await api.post<{ renta: RentaFull }>(`/rentas/${r.id}/abonos/`, { monto, metodo, fecha: fecha || undefined })
+    setPagos(resp.data.renta.pagos || [])
+    setPagado(Number(resp.data.renta.pagado || 0))
+    setSaldo(Number(resp.data.renta.saldo || 0))
+    setAbonando(false)
   }
   // Bandeja de facturación: el timbrado es externo; desde aquí solo se manda.
   const [factura, setFactura] = useState<string | null>(r.factura_estado ?? null)
@@ -3952,26 +3801,22 @@ function RentaDetalleModal({ renta: r, onClose, onOrdenCarta, notify, onChanged,
   }
   const [liga, setLiga] = useState('')
   const [genLiga, setGenLiga] = useState(false)
+  const [buscandoCuenta, setBuscandoCuenta] = useState(false)
   const [copiado, setCopiado] = useState(false)
   async function generarLiga() {
     setGenLiga(true)
     try {
-      const res = await api.post<{ ruta: string }>(`/rentas/${r.id}/vinculo/`, {}, { fondo: true } as never)
+      const res = await api.post<{ ruta: string }>(`/rentas/${r.id}/vinculo/`, {}, { fondo: true })
       setLiga(`${window.location.origin}${res.data.ruta}`)
     } catch { /* el interceptor ya avisa */ } finally { setGenLiga(false) }
   }
-  async function vincularCuenta() {
+  /* Se busca, no se elige de una lista. Antes se bajaban TODAS las cuentas y se
+     pintaban en el diálogo: con cuatrocientos clientes eso es una tira infinita
+     con alguien esperando enfrente. */
+  async function vincularCuenta(c: CuentaCliente) {
+    setBuscandoCuenta(false)
     try {
-      const rc = await api.get<{ clientes: { id: number; nombre: string; empresa?: string }[] }>('/clientes-lookup/')
-      const lista = rc.data.clientes || []
-      if (!lista.length) { await confirmar({ titulo: 'Sin cuentas', mensaje: 'Aún no hay cuentas de cliente registradas en el sistema.', aceptar: 'Entendido' }); return }
-      const sel = await elegir({
-        titulo: 'Vincular a una cuenta',
-        mensaje: 'La renta aparecerá en "Tus rentas" del cliente que elijas.',
-        opciones: lista.map(c => ({ valor: String(c.id), label: c.nombre, detalle: c.empresa || undefined })),
-      })
-      if (!sel || !sel[0]) return
-      const res = await api.post<{ cuenta: string | null }>(`/rentas/${r.id}/vincular/`, { usuario_id: Number(sel[0]) })
+      const res = await api.post<{ cuenta: string | null }>(`/rentas/${r.id}/vincular/`, { usuario_id: c.id })
       setCuenta(res.data?.cuenta || null)
     } catch { /* el interceptor ya avisa el error */ }
   }
@@ -3995,18 +3840,6 @@ function RentaDetalleModal({ renta: r, onClose, onOrdenCarta, notify, onChanged,
         cancelada: { label: 'CANCELADA', cls: 'bg-red-500/10 text-red-500' },
       } as Record<string, { label: string; cls: string }>)[r.estado || 'activa'] || { label: (r.estado || '—').toUpperCase(), cls: 'bg-surface-2 text-mute' })
 
-  const Field = ({ label, value, full, labelCls }: { label: string; value?: React.ReactNode; full?: boolean; labelCls?: string }) => (
-    value ? (
-      <div className={full ? 'col-span-2' : ''}>
-        <p className={`text-[12px] ${labelCls || 'text-mute'}`}>{label}</p>
-        <p className="text-[13.5px] font-bold text-ink break-words leading-snug mt-0.5">{value}</p>
-      </div>
-    ) : null
-  )
-  const Titulo = ({ children }: { children: React.ReactNode }) => (
-    <p className="text-[11px] font-extrabold tracking-[0.5px] text-gold-ink mb-3">{children}</p>
-  )
-
   return createPortal(
     <Modal className={`fixed inset-0 z-[60] bg-[rgba(33,29,22,0.4)] backdrop-blur-[2px] flex items-start justify-center p-0 sm:p-6 overflow-y-auto ${avance ? 'modal-avance' : 'modal-in'}`} onClose={onClose} label="Detalle de la renta">
       <div onClick={(e: React.MouseEvent) => e.stopPropagation()} className="w-full sm:max-w-[720px] bg-surface rounded-none sm:rounded-[16px] shadow-[0_24px_60px_rgba(33,29,22,0.2)] min-h-screen sm:min-h-0 sm:my-auto sm:max-h-[92vh] flex flex-col overflow-hidden border-0 sm:border border-edge">
@@ -4017,7 +3850,7 @@ function RentaDetalleModal({ renta: r, onClose, onOrdenCarta, notify, onChanged,
               <span className="text-[10.5px] font-bold tracking-[0.5px] text-mute">DETALLE DE RENTA</span>
               <span className={`text-[10.5px] px-2.5 py-[3px] rounded-md font-bold ${chip.cls}`}>{chip.label}</span>
               {factura && (
-                <span className={`text-[10.5px] px-2.5 py-[3px] rounded-md font-bold ${factura === 'facturada' ? 'bg-violet-500/10 text-violet-600' : 'bg-amber-500/10 text-amber-600'}`}>
+                <span className={`text-[10.5px] px-2.5 py-[3px] rounded-md font-bold ${factura === 'facturada' ? 'bg-violet-500/10 text-violet-600' : 'bg-amber-500/10 text-taller-ink'}`}>
                   {factura === 'facturada' ? 'FACTURADA' : 'POR FACTURAR'}
                 </span>
               )}
@@ -4029,6 +3862,15 @@ function RentaDetalleModal({ renta: r, onClose, onOrdenCarta, notify, onChanged,
         </div>
 
         <div className="overflow-y-auto flex-1">
+          {buscandoCuenta && (
+            <BuscarCuenta
+              titulo="Vincular a una cuenta"
+              mensaje='La renta aparecerá en "Tus rentas" del cliente que elijas.'
+              onElegir={vincularCuenta}
+              onCancelar={() => setBuscandoCuenta(false)}
+            />
+          )}
+
           {/* CLIENTE */}
           <div className="px-6 sm:px-[26px] py-[18px] border-b border-edge">
             <Titulo>CLIENTE</Titulo>
@@ -4045,9 +3887,22 @@ function RentaDetalleModal({ renta: r, onClose, onOrdenCarta, notify, onChanged,
                     <p className="text-[12px] text-mute">Cuenta en el sistema</p>
                     <p className={`text-[13.5px] font-bold mt-0.5 truncate ${cuenta ? 'text-ink' : 'text-mute'}`}>{cuenta || 'Sin vincular'}</p>
                   </div>
-                  <button onClick={vincularCuenta} className="shrink-0 px-3.5 py-2 rounded-[9px] border border-edge text-[12px] font-bold text-ink hover:border-gold/50 hover:text-gold-ink transition-colors">
-                    {cuenta ? 'Cambiar' : 'Vincular cuenta'}
-                  </button>
+                  {/* Ya vinculada: no hay botón de cambiar. Mover una renta de
+                      una cuenta a otra se la quita del historial a una persona y
+                      se la cuelga a otra, sin que ninguna se entere. Si el
+                      cliente resultó tener dos cuentas, se funden sus fichas
+                      desde Clientes: ahí la operación arrastra todo junto y
+                      queda anotada. */}
+                  {cuenta ? (
+                    <span className="shrink-0 inline-flex items-center gap-1.5 text-[11.5px] font-semibold text-mute" title="Para corregirlo, funde las fichas del cliente desde la sección Clientes">
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round"><rect x="4" y="10.5" width="16" height="10" rx="2" /><path d="M8 10.5V7a4 4 0 0 1 8 0v3.5" /></svg>
+                      Vinculada
+                    </span>
+                  ) : (
+                    <button onClick={() => setBuscandoCuenta(true)} className="shrink-0 px-3.5 py-2 rounded-[9px] border border-edge text-[12px] font-bold text-ink hover:border-gold/50 hover:text-gold-ink transition-colors">
+                      Vincular cuenta
+                    </button>
+                  )}
                 </div>
                 {/* Liga: el cliente la abre y liga la renta a SU cuenta (un solo
                     uso, 30 días). Con cuenta YA vinculada no hay nada que ligar:
@@ -4081,7 +3936,10 @@ function RentaDetalleModal({ renta: r, onClose, onOrdenCarta, notify, onChanged,
               <Field label="Inicio" value={r.fecha_inicio || '—'} />
               <Field label={r.estado === 'activa' && !r.vencida ? 'Vencimiento' : 'Vencimiento'} value={r.fecha_fin} />
               {r.estado === 'activa' && (
-                <Field label="Estado" value={r.vencida ? 'Vencida' : `${r.dias_restantes} día(s) restantes`} labelCls={r.vencida ? 'text-red-500' : 'text-mute'} />
+                <Field label="Estado" value={r.vencida ? 'Vencida'
+                  : (r.horas_restantes !== undefined && r.horas_restantes < 24)
+                    ? `${Math.max(1, Math.round(r.horas_restantes))} hora(s) restantes`
+                    : `${r.dias_restantes} día(s) restantes`} labelCls={r.vencida ? 'text-red-500' : 'text-mute'} />
               )}
               {r.fecha_devolucion_real && <Field label="Devolución real" value={r.fecha_devolucion_real} labelCls="text-emerald-600" />}
             </div>
@@ -4092,7 +3950,7 @@ function RentaDetalleModal({ renta: r, onClose, onOrdenCarta, notify, onChanged,
                 <Field label="Entrega"
                   value={r.entrega?.entregada
                     ? <>{new Date(r.entrega.en!).toLocaleString('es-MX', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}{r.entrega.por ? <span className="text-mute font-normal"> · {r.entrega.por}</span> : null}</>
-                    : <span className="text-amber-600 dark:text-amber-500">Sin confirmar</span>} />
+                    : <span className="text-taller-ink dark:text-taller-ink">Sin confirmar</span>} />
                 <Field label="Recolección"
                   value={r.recoleccion?.recogida
                     ? <>{new Date(r.recoleccion.en!).toLocaleString('es-MX', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}{r.recoleccion.por ? <span className="text-mute font-normal"> · {r.recoleccion.por}</span> : null}</>
@@ -4109,7 +3967,7 @@ function RentaDetalleModal({ renta: r, onClose, onOrdenCarta, notify, onChanged,
               {desc > 0 && <div className="flex justify-between"><span className="text-mute">Descuento</span><span className="text-red-500 font-semibold">− {money(desc)}</span></div>}
               {(iva > 0 || rec > 0) && <div className="flex justify-between"><span className="text-mute">Subtotal</span><span className="text-ink font-semibold">{money(sub)}</span></div>}
               {iva > 0 && <div className="flex justify-between"><span className="text-mute">IVA (16%)</span><span className="text-ink font-semibold">{money(iva)}</span></div>}
-              {rec > 0 && <div className="flex justify-between"><span className="text-mute">Recargo por retraso</span><span className="text-amber-600 font-semibold">{money(rec)}</span></div>}
+              {rec > 0 && <div className="flex justify-between"><span className="text-mute">Recargo por retraso</span><span className="text-taller-ink font-semibold">{money(rec)}</span></div>}
               <div className="flex justify-between pt-2.5 mt-1.5 border-t border-edge text-[16px] font-extrabold"><span className="text-ink">Total</span><span className="text-price">{money(tot)}</span></div>
               {dep > 0 && <div className="flex justify-between pt-1"><span className="text-mute text-[12px]">Depósito en garantía</span><span className="text-mute text-[12px]">{money(dep)}</span></div>}
             </div>
@@ -4121,7 +3979,7 @@ function RentaDetalleModal({ renta: r, onClose, onOrdenCarta, notify, onChanged,
                 {saldo <= 0 && tot > 0 ? (
                   <span className="inline-flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-600"><svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="3"><path d="M5 13l4 4L19 7" /></svg>Pagada</span>
                 ) : (
-                  <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-amber-500/10 text-amber-600 whitespace-nowrap">Por cobrar {money(saldo)}</span>
+                  <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-amber-500/10 text-taller-ink whitespace-nowrap">Por cobrar {money(saldo)}</span>
                 )}
               </div>
               {pagos.length > 0 && (
@@ -4163,7 +4021,7 @@ function RentaDetalleModal({ renta: r, onClose, onOrdenCarta, notify, onChanged,
               </div>
               {!factura && r.estado !== 'cancelada' && (
                 <button onClick={mandarPorFacturar} disabled={mandandoFactura}
-                  className="px-3.5 py-2 rounded-[9px] border border-amber-500/40 bg-amber-500/10 text-[12px] font-bold text-amber-700 dark:text-amber-500 hover:bg-amber-500/20 transition-colors whitespace-nowrap disabled:opacity-50">
+                  className="px-3.5 py-2 rounded-[9px] border border-amber-500/40 bg-amber-500/10 text-[12px] font-bold text-taller-ink hover:bg-amber-500/20 transition-colors whitespace-nowrap disabled:opacity-50">
                   {mandandoFactura ? 'Mandando…' : 'Mandar a Por facturar'}
                 </button>
               )}
@@ -4186,7 +4044,7 @@ function RentaDetalleModal({ renta: r, onClose, onOrdenCarta, notify, onChanged,
         {r.estado === 'activa' && (
           <div className="px-6 sm:px-[26px] pt-4 -mb-1">
             <button onClick={sustituirPorAveria}
-              className="w-full flex items-center justify-center gap-2 h-10 rounded-[9px] border border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-500 text-[13px] font-bold hover:bg-amber-500/20 transition-colors">
+              className="w-full flex items-center justify-center gap-2 h-10 rounded-[9px] border border-amber-500/40 bg-amber-500/10 text-taller-ink text-[13px] font-bold hover:bg-amber-500/20 transition-colors">
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M14.7 6.3a4 4 0 0 0-5.6 5.6l-6 6v3h3l6-6a4 4 0 0 0 5.6-5.6l-2.5 2.5-2.1-2.1z" /></svg>
               Se averió — sustituir por una de repuesto
             </button>
@@ -4195,57 +4053,118 @@ function RentaDetalleModal({ renta: r, onClose, onOrdenCarta, notify, onChanged,
 
         {/* Footer */}
         <div className="px-6 sm:px-[26px] py-5 border-t border-edge flex items-center gap-2.5 shrink-0">
-          <button onClick={onClose} className="flex-1 h-11 rounded-[9px] border border-edge text-ink text-[13.5px] font-bold hover:bg-surface-2 transition-colors">Cerrar</button>
+          <button onClick={onClose} className="h-11 px-4 rounded-[9px] border border-edge text-ink text-[13.5px] font-bold hover:bg-surface-2 transition-colors">Cerrar</button>
+          {/* "Me la quedo otra semana" es de las cosas que más se piden en el
+              mostrador y no tenía botón: había que cerrar la renta a mano y
+              levantar otra desde cero. Va aquí, en el detalle, que es donde
+              estás cuando el cliente llama a pedirlo. */}
+          {(r.estado === 'activa' || r.estado === 'finalizada') && (
+            <button onClick={() => setRenovando(true)} className="flex-1 h-11 rounded-[9px] border border-renta/40 text-renta text-[13.5px] font-bold hover:bg-renta/10 transition-colors">
+              {r.estado === 'activa' ? 'Renovar' : 'Volver a rentar'}
+            </button>
+          )}
           <button onClick={onOrdenCarta} className="flex-1 h-11 rounded-[9px] bg-gold text-black text-[13.5px] font-bold hover:brightness-95 transition-all">Orden carta (PDF)</button>
         </div>
+        {renovando && (
+          <RenovarRentaModal
+            renta={r} notify={notify || (() => {})}
+            onClose={() => setRenovando(false)}
+            onHecho={() => { setRenovando(false); onChanged?.(); onClose() }}
+          />
+        )}
       </div>
     </Modal>,
     document.body
   )
 }
 
-/* ════════════════════════════════════════
-   MÓDULO VENTAS
-════════════════════════════════════════ */
-const MESES_PERIODO = ['Todo el año', 'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre']
+/** Los KPIs del periodo, calculados en la BD. El dinero puede NO venir: a quien
+ *  no lo puede ver se le omiten esos campos en vez de mandarlos en cero. */
+type VentaStats = {
+  total: number; activas: number; apartadas: number; canceladas: number; maquinaria: number
+  total_vendido?: string; ticket?: string
+}
+type PaginaVentas = { ventas: Venta[]; total: number; pagina: number; paginas: number }
+/** Lo que devuelve `/ventas/lista/` por página cuando no se le pide otra cosa
+ *  (ver `page_size` en ventas/views.py). El pie lo necesita para escribir
+ *  "mostrando 26 a 50". */
+const PAGINA_VENTAS = 50
 
-/** Selector de periodo (mes + año) para acotar los listados por ejercicio.
- *  Manda el filtro al servidor: nunca se trae más de un año a la vez. */
-function SelectorPeriodo({ anio, mes, onAnio, onMes, className = '' }: {
-  anio: number; mes: number; onAnio: (a: number) => void; onMes: (m: number) => void; className?: string
-}) {
-  const actual = new Date().getFullYear()
-  const anios = Array.from({ length: 5 }, (_, i) => actual - i)
-  const sel = 'h-9 rounded-lg border border-edge bg-surface-2 text-ink text-[13px] font-semibold px-2.5 focus:outline-none focus:border-gold/50 transition-colors cursor-pointer'
-  return (
-    <div className={`flex items-center gap-2 shrink-0 ${className}`}>
-      <select value={mes} onChange={e => onMes(Number(e.target.value))} className={sel} aria-label="Mes">
-        {MESES_PERIODO.map((m, i) => <option key={i} value={i}>{m}</option>)}
-      </select>
-      <select value={anio} onChange={e => onAnio(Number(e.target.value))} className={sel} aria-label="Año">
-        {anios.map(a => <option key={a} value={a}>{a}</option>)}
-      </select>
-    </div>
-  )
+/** Por qué no se pudo cargar, en palabras que digan qué hacer. */
+function motivoDeCarga(err: any): string {
+  const status = err?.response?.status
+  if (status === 403) return 'Tu sesión no tiene permiso para ver las ventas. Vuelve a entrar con tu cuenta del panel.'
+  if (!err?.response) return 'Sin conexión con el servidor. Revisa tu internet.'
+  if (status >= 500) return 'El servidor falló al traer las ventas.'
+  return 'No se pudieron cargar las ventas.'
 }
 
-function VentasAdmin({ notify }: { notify: (m: string, t?: 'ok' | 'err') => void }) {
+function VentasAdmin({ notify }: { notify: Notify }) {
   const [q, setQ] = useState('')
+  const [qDebounced, setQDebounced] = useState('')
   const [anio, setAnio] = useState<number>(new Date().getFullYear())
   const [mes, setMes] = useState<number>(0)
   const [ventas, setVentas] = useState<Venta[]>([])
+  const [stats, setStats] = useState<VentaStats | null>(null)
+  const [pagina, setPagina] = useState(1)
+  const [paginas, setPaginas] = useState(1)
+  const [totalPeriodo, setTotalPeriodo] = useState(0)
+  const anclaVentas = useRef<HTMLDivElement | null>(null)
+  const [falloVentas, setFalloVentas] = useState<string | null>(null)
   const [cargando, setCargando] = useState(false)
   const [detalle, setDetalle] = useState<Venta | null>(null)
 
-  const cargar = useCallback(() => {
-    setCargando(true)
+  // Se teclea y se espera un poco antes de ir al servidor; al buscar o cambiar
+  // de periodo se vuelve a la página 1, o te quedas mirando una página 4 vacía.
+  useEffect(() => {
+    const t = setTimeout(() => { setQDebounced(q); setPagina(1) }, 350)
+    return () => clearTimeout(t)
+  }, [q])
+  useEffect(() => { setPagina(1) }, [anio, mes])
+
+  /* Acabas de registrar una venta y la sección abrió para enseñártela: se abre su
+     detalle en cuanto llega la lista (la venta es de hoy, así que cae en el
+     periodo que abre por defecto). De un solo uso: si por lo que sea no viene en
+     la lista, no se persigue —te quedas en la sección, que ya es a donde ibas. */
+  const ventaAAbrir = useRef<number | null>(tomarVentaAAbrir())
+
+  /* Los KPIs ya NO se calculan sumando la lista: con la lista paginada, sumar
+     lo que llegó daría un "Monto total" que cambia al pasar de página. Vienen
+     de `/ventas/stats/`, que los saca en SQL sobre todo el periodo. Y el
+     dinero puede no venir: a quien no lo puede ver se le OMITEN esos campos
+     (un cero se leería como "$0.00 vendido", que es falso). */
+  const cargarStats = useCallback(() => {
     const params = new URLSearchParams({ anio: String(anio) })
     if (mes) params.set('mes', String(mes))
-    api.get<{ ventas: Venta[] }>(`/ventas/lista/?${params.toString()}`)
-      .then(r => setVentas(r.data?.ventas || [])).catch(() => {}).finally(() => setCargando(false))
+    api.get<VentaStats>(`/ventas/stats/?${params.toString()}`, { fondo: true })
+      .then(r => { setStats(r.data); setFalloVentas(null) })
+      .catch(err => setFalloVentas(motivoDeCarga(err)))
   }, [anio, mes])
+
+  const cargar = useCallback(() => {
+    setCargando(true)
+    const params = new URLSearchParams({ anio: String(anio), page: String(pagina) })
+    if (mes) params.set('mes', String(mes))
+    if (qDebounced.trim()) params.set('q', qDebounced.trim())
+    api.get<PaginaVentas>(`/ventas/lista/?${params.toString()}`, { fondo: true })
+      .then(r => {
+        const lista = r.data?.ventas || []
+        setVentas(lista)
+        setPaginas(r.data?.paginas || 1)
+        setTotalPeriodo(r.data?.total || 0)
+        setFalloVentas(null)
+        if (ventaAAbrir.current !== null) {
+          const v = lista.find(x => x.id === ventaAAbrir.current)
+          ventaAAbrir.current = null
+          if (v) setDetalle(v)
+        }
+      })
+      .catch(err => setFalloVentas(motivoDeCarga(err)))
+      .finally(() => setCargando(false))
+  }, [anio, mes, pagina, qDebounced])
   useEffect(() => { cargar() }, [cargar])
   useRecurso(['ventas'], cargar)   // realtime: si otro registra o cancela una venta
+  useRecurso(['ventas'], cargarStats)   // y los KPIs con ella: viven en el servidor
 
   /* Cancelar una venta es de las acciones más delicadas del panel: devuelve la
      máquina a inventario, repone stock y genera un movimiento inverso de caja.
@@ -4278,7 +4197,7 @@ function VentasAdmin({ notify }: { notify: (m: string, t?: 'ok' | 'err') => void
     if (codigo === null) return
 
     api.post(`/ventas/${v.id}/cancelar/`, { motivo: motivo.trim(), codigo_seguridad: codigo.trim() })
-      .then(() => { notify('Venta cancelada'); cargar() })
+      .then(() => { notify('Venta cancelada', 'neutro'); cargar() })
       .catch(e => notify(e?.response?.data?.detalle || 'No se pudo cancelar la venta', 'err'))
   }
   /** Sacar UNA máquina de una venta de varias: vuelve al inventario y el total
@@ -4300,22 +4219,16 @@ function VentasAdmin({ notify }: { notify: (m: string, t?: 'ok' | 'err') => void
     if (codigo === null) return
     try {
       await api.post(`/ventas/${v.id}/maquinas/${maquinaId}/quitar/`, { motivo: motivo.trim(), codigo_seguridad: codigo.trim() })
-      notify('Máquina devuelta al inventario')
+      notify('Máquina devuelta al inventario', 'neutro')
       setDetalle(null)
       cargar()
     } catch (e: unknown) {
       notify((e as { response?: { data?: { detalle?: string } } })?.response?.data?.detalle || 'No se pudo quitar la máquina', 'err')
     }
   }
-  const totalVendido = ventas.reduce((a, v) => a + (Number(v.total) || 0), 0)
-  const maquinaria = ventas.filter(v => v.unidad)
-  const ticket = ventas.length ? totalVendido / ventas.length : 0
-
-  const filtradas = ventas.filter(v => {
-    if (!q.trim()) return true
-    const t = `${v.folio || ''} ${v.nombre_cliente || ''} ${v.unidad?.equipo || ''} ${v.unidad?.codigo || ''}`.toLowerCase()
-    return t.includes(q.trim().toLowerCase())
-  })
+  // La búsqueda la resuelve el servidor: si se filtrara aquí, solo miraría la
+  // página visible y una venta de hace ocho meses no aparecería nunca.
+  const filtradas = ventas
 
   const metodoStyle: Record<string, string> = {
     efectivo: 'bg-emerald-500/10 text-emerald-500',
@@ -4328,24 +4241,39 @@ function VentasAdmin({ notify }: { notify: (m: string, t?: 'ok' | 'err') => void
       {detalle && <VentaDetalleModal venta={detalle} onClose={() => setDetalle(null)} onChanged={cargar} notify={notify} onQuitarMaquina={(id) => quitarMaquina(detalle, id)} />}
       {/* KPIs */}
       <KpiGrid
-        gridClassName="grid-cols-2 lg:grid-cols-4"
         items={[
-          { label: 'Ventas del periodo', value: String(ventas.length), tone: 'default' },
-          { label: 'De maquinaria', value: String(maquinaria.length), tone: 'muted' },
-          { label: 'Monto total', value: `$${totalVendido.toLocaleString('en-US', { minimumFractionDigits: 2 })}`, tone: 'gold' },
-          { label: 'Ticket promedio', value: `$${ticket.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, tone: 'default' },
+          {
+            label: 'Ventas del periodo', value: stats ? stats.total : '—', tone: 'default',
+            helper: stats ? `${stats.maquinaria} de maquinaria · ${stats.total - stats.maquinaria} de mostrador` : undefined,
+            icon: <><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z" /><path d="M3 6h18" /><path d="M16 10a4 4 0 0 1-8 0" /></>,
+          },
+          { label: 'De maquinaria', value: stats ? stats.maquinaria : '—', tone: 'muted', helper: 'salieron del inventario', icon: <><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" /><path d="M3.3 7 12 12l8.7-5M12 22V12" /></> },
+          // El rótulo dice "sin cancelar" porque ahora es verdad: antes se
+          // sumaban también las canceladas y el monto decía tener un dinero
+          // que nunca entró.
+          {
+            label: 'Monto vendido', value: stats?.total_vendido !== undefined ? <Monto valor={stats.total_vendido} /> : '—', tone: 'gold',
+            helper: 'sin canceladas · IVA incluido', icon: <><path d="M12 1v22" /><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" /></>,
+          },
+          { label: 'Ticket promedio', value: stats?.ticket !== undefined ? <Monto valor={stats.ticket} /> : '—', tone: 'default', helper: 'por venta del periodo', icon: <><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></> },
         ]}
       />
 
-      <Card className="overflow-hidden">
+      {falloVentas && (
+        <div role="alert" className="flex items-center gap-3 rounded-2xl border border-red-500/40 bg-red-500/10 px-4 py-3">
+          <span className="text-sm text-ink flex-1">{falloVentas}</span>
+          <button onClick={() => { cargar(); cargarStats() }} className="shrink-0 text-sm font-bold text-gold hover:underline">Reintentar</button>
+        </div>
+      )}
+
+      <Card ref={anclaVentas} className="overflow-hidden scroll-mt-24">
         {/* Toolbar */}
-        <div className="px-5 py-4 border-b border-edge flex items-center gap-3 flex-wrap">
-          <h3 className="font-bold text-ink shrink-0">Historial de ventas <span className="text-mute font-normal">({filtradas.length})</span></h3>
+        <CardBarra titulo="Historial de ventas" cuenta={totalPeriodo}>
           <SelectorPeriodo anio={anio} mes={mes} onAnio={setAnio} onMes={setMes} className="sm:ml-auto" />
           <div className="relative flex-1 sm:max-w-xs">
-            <svg className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-mute pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><circle cx="9" cy="9" r="6" /><path d="M15 15l3 3" strokeLinecap="round" /></svg>
+            <svg className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-mute pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><circle cx="9" cy="9" r="6" /><path d="M15 15l3 3" strokeLinecap="round" /></svg>
             <input aria-label="Buscar folio, cliente o equipo" value={q} onChange={e => setQ(e.target.value)} placeholder="Buscar folio, cliente o equipo..."
-              className="w-full bg-surface-2 border border-edge rounded-full pl-9 pr-3 py-2 text-sm text-ink placeholder-mute focus:outline-none focus:border-gold/50 transition-colors" />
+              className="campo campo-sm pl-10" />
           </div>
           <button onClick={cargar} className="text-xs text-mute hover:text-gold-ink transition-colors shrink-0">Actualizar</button>
           <BotonExportar onClick={() => {
@@ -4356,7 +4284,7 @@ function VentasAdmin({ notify }: { notify: (m: string, t?: 'ok' | 'err') => void
               : { desde: `${anio}-01-01`, hasta: `${anio}-12-31` }
             descargarReporte('/ventas/export/', p, `reporte_ventas_${anio}${mes ? '-' + mm : ''}.csv`, notify)
           }} />
-        </div>
+        </CardBarra>
 
         {/* Tabla */}
         <div className="overflow-x-auto">
@@ -4434,258 +4362,44 @@ function VentasAdmin({ notify }: { notify: (m: string, t?: 'ok' | 'err') => void
               ))}
             </tbody>
           </table>
-          {filtradas.length === 0 && <p className="text-sm text-mute py-14 text-center">{cargando ? 'Cargando…' : (q ? 'Sin resultados.' : 'Sin ventas en el periodo.')}</p>}
+          {filtradas.length === 0 && (cargando ? <FilasEsqueleto filas={6} columnas={4} /> : (
+            <EstadoVacio
+              titulo={falloVentas ? 'No se pudo cargar la lista' : q ? 'Sin resultados' : 'Sin ventas en el periodo'}
+              mensaje={falloVentas
+                ? 'La petición no llegó al servidor. Vuelve a intentarlo; si sigue igual, revisa la conexión.'
+                : q ? 'Busca por folio, cliente o modelo.' : 'Cambia el periodo de arriba para ver otro tramo de tiempo.'}
+              icono={falloVentas
+                ? <><circle cx="12" cy="12" r="9" /><path d="M12 8v5m0 3h.01" /></>
+                : <><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z" /><path d="M3 6h18" /><path d="M16 10a4 4 0 0 1-8 0" /></>}
+            />
+          ))}
         </div>
+
+        {/* La lista la pagina el SERVIDOR (`/ventas/` devuelve pagina/paginas):
+            aquí solo se dice en cuál va y se pide la siguiente. */}
+        <Paginador pagina={pagina} paginas={paginas} total={totalPeriodo}
+          porPagina={PAGINA_VENTAS} onIr={setPagina} ancla={anclaVentas}
+          cargando={cargando} nombre="ventas" />
       </Card>
     </div>
   )
 }
 
 /* ════════════════════════════════════════
-   MÓDULO NOTIFICACIONES
+   LA CAMPANA
 ════════════════════════════════════════ */
-const notifMeta: Record<Notif['tipo'], { color: string; icon: React.ReactNode }> = {
-  alerta: { color: 'text-red-500 bg-red-500/10', icon: <><path d="M12 4.2l9 16.3H3z" /><path d="M12 9v4" /><path d="M12 16.9h.01" /></> },
-  renta: { color: 'text-blue-500 bg-blue-500/10', icon: <><path d="M7 4.5v2.5M17 4.5v2.5" /><path d="M5.5 8h13" /><path d="M6.5 7.5h11a2 2 0 0 1 2 2v9.5a2 2 0 0 1-2 2h-11a2 2 0 0 1-2-2V9.5a2 2 0 0 1 2-2z" /><path d="M12 13v3l2 1" /></> },
-  venta: { color: 'text-gold-ink bg-gold-soft', icon: <><path d="M6.5 9.5h15l-1.6 8.2a2 2 0 0 1-2 1.6H9.2a2 2 0 0 1-2-1.6z" /><path d="M6.5 9.5l-1.2-5h-3" /></> },
-  inventario: { color: 'text-mute bg-surface-2', icon: <><rect x="5" y="5" width="6.25" height="6.25" rx="1.1" /><rect x="12.75" y="5" width="6.25" height="6.25" rx="1.1" /><rect x="5" y="12.75" width="6.25" height="6.25" rx="1.1" /><rect x="12.75" y="12.75" width="6.25" height="6.25" rx="1.1" /></> },
-  sistema: { color: 'text-mute bg-surface-2', icon: <><path d="M12 7.5v5l3 1.8" /><path d="M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z" /></> },
-}
-
-function notifVisual(n: Notif) {
-  const base = notifMeta[n.tipo] || notifMeta.sistema
-  if (n.tipo === 'inventario') {
-    const t = (n.titulo || '').toLowerCase()
-    if (t.includes('mantenimiento')) {
-      return {
-        color: 'text-amber-500 bg-amber-500/10',
-        icon: <><path d="M14.7 6.3a4 4 0 0 0-5.6 5.6L3 18v3h3l6.1-6.1a4 4 0 0 0 5.6-5.6l-2.5 2.5-2.1-2.1z" /></>,
-      }
-    }
-    if (t.includes('finalizado') || t.includes('disponible')) {
-      return {
-        color: 'text-emerald-500 bg-emerald-500/10',
-        icon: <><path d="M5.2 12.8l3.2 3.2L18.8 5.6" /></>,
-      }
-    }
-  }
-  return base
-}
-
-function tiempoRelativo(iso: string) {
-  const diff = Date.now() - new Date(iso).getTime()
-  const min = Math.floor(diff / 60000)
-  if (min < 1) return 'ahora'
-  if (min < 60) return `hace ${min} min`
-  const h = Math.floor(min / 60)
-  if (h < 24) return `hace ${h} h`
-  const d = Math.floor(h / 24)
-  return `hace ${d} d`
-}
-
-function NotificacionesAdmin({ notifs, reload, go, onOpen }: {
-  notifs: Notif[]; reload: () => void; go: (s: Section) => void; onOpen?: (n: Notif) => void
-}) {
-  const [tab, setTab] = useState<'todas' | 'sin_leer'>('todas')
-  const [q, setQ] = useState('')
-  const [tipo, setTipo] = useState<Notif['tipo'] | 'todas'>('todas')
-  const [selectedId, setSelectedId] = useState<number | null>(null)
-
-  const counts = (['alerta', 'renta', 'venta', 'inventario', 'sistema'] as const).reduce((acc, t) => {
-    acc[t] = notifs.filter(n => n.tipo === t).length
-    return acc
-  }, {} as Record<Notif['tipo'], number>)
-
-  const noLeidas = notifs.filter(n => !n.leida).length
-
-  const visibles = notifs
-    .filter(n => (tab === 'sin_leer' ? !n.leida : true))
-    .filter(n => (tipo === 'todas' ? true : n.tipo === tipo))
-    .filter(n => {
-      const needle = q.trim().toLowerCase()
-      if (!needle) return true
-      return `${n.titulo || ''} ${n.mensaje || ''}`.toLowerCase().includes(needle)
-    })
-
-  // En el timeline, selectedId = fila expandida (se alterna al hacer clic)
-  const dotColor: Record<Notif['tipo'], string> = {
-    alerta: '#C23B3B', renta: '#2B5FAD', venta: '#B8872E', inventario: '#6B7280', sistema: '#9CA3AF',
-  }
-
-  const typeLabel: Record<Notif['tipo'], string> = {
-    alerta: 'Alerta',
-    renta: 'Renta',
-    venta: 'Venta',
-    inventario: 'Inventario',
-    sistema: 'Sistema',
-  }
-
-  const typePill: Record<Notif['tipo'], string> = {
-    alerta: 'bg-red-500/10 text-red-500',
-    renta: 'bg-blue-500/10 text-blue-500',
-    venta: 'bg-gold-soft text-gold-ink',
-    inventario: 'bg-surface-2 text-mute',
-    sistema: 'bg-surface-2 text-mute',
-  }
-
-  const marcarTodas = () => {
-    api.post('/notificaciones/leer-todas/').then(reload).catch(() => {})
-  }
-
-  const marcarLeida = (n: Notif) => {
-    if (n.leida) return
-    api.post(`/notificaciones/${n.id}/leer/`).then(reload).catch(() => {})
-  }
-
-  const abrir = (n: Notif) => {
-    marcarLeida(n)
-    if (onOpen) onOpen(n)
-    else if (n.seccion) go(n.seccion as Section)
-  }
-
-  return (
-    <div className="max-w-6xl mx-auto space-y-4">
-      {/* El eyebrow "Centro de actividad" y su descripción se quitaron: la sección
-          ya tiene su título y subtítulo arriba, repetirlo era relleno. Quedan las
-          acciones, alineadas a la derecha. */}
-      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-end gap-3">
-        <div className="flex items-center gap-2.5 shrink-0">
-          <button
-            onClick={reload}
-            className="h-10 px-4 rounded-xl border border-edge bg-surface-2 text-sm font-semibold text-ink hover:border-gold/40 hover:text-gold-ink transition-colors active:scale-[0.98]"
-          >
-            Actualizar
-          </button>
-          {noLeidas > 0 && (
-            <button
-              onClick={marcarTodas}
-              className="h-10 px-4 rounded-xl bg-gold text-black text-sm font-black hover:opacity-90 transition-[transform,opacity] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] active:scale-[0.98]"
-            >
-              Marcar todas
-            </button>
-          )}
-        </div>
-      </div>
-
-      <Card className="overflow-hidden">
-        <div className="px-5 py-4 border-b border-edge">
-          <div className="flex flex-col lg:flex-row lg:items-center gap-3">
-            <div className="flex items-center gap-3 flex-wrap">
-              <div className="flex p-1 rounded-full border border-edge bg-surface-2">
-                <button
-                  onClick={() => setTab('todas')}
-                  className={`px-4 py-2 rounded-full text-xs font-semibold transition-colors ${tab === 'todas' ? 'bg-surface text-ink' : 'text-mute hover:text-ink'}`}
-                >
-                  Todas <span className="ml-1 text-mute">{notifs.length}</span>
-                </button>
-                <button
-                  onClick={() => setTab('sin_leer')}
-                  className={`px-4 py-2 rounded-full text-xs font-semibold transition-colors ${tab === 'sin_leer' ? 'bg-surface text-ink' : 'text-mute hover:text-ink'}`}
-                >
-                  Sin leer <span className="ml-1 text-mute">{noLeidas}</span>
-                </button>
-              </div>
-              <div className="relative w-full sm:w-[320px]">
-                <svg className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-mute pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><circle cx="11" cy="11" r="7" /><path d="M20 20l-3-3" strokeLinecap="round" /></svg>
-                <input aria-label="Buscar notificaciones"
-                  value={q}
-                  onChange={e => setQ(e.target.value)}
-                  placeholder="Buscar notificaciones…"
-                  className="w-full bg-surface-2 border border-edge rounded-xl pl-9 pr-3 py-2.5 text-sm text-ink placeholder-mute focus:outline-none focus:border-gold/50 transition-colors"
-                />
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2 flex-wrap lg:ml-auto">
-              {(['todas', 'alerta', 'renta', 'venta', 'inventario', 'sistema'] as const).map((t) => {
-                const active = tipo === t
-                const pill = t === 'todas' ? 'bg-surface-2 text-ink' : typePill[t]
-                const count = t === 'todas' ? notifs.length : counts[t]
-                return (
-                  <button
-                    key={t}
-                    onClick={() => setTipo(t as any)}
-                    className={`h-9 px-3 rounded-full border text-xs font-semibold transition-colors active:scale-[0.98] ${
-                      active ? 'border-gold/40 text-ink bg-surface' : 'border-edge hover:border-gold/25'
-                    }`}
-                  >
-                    <span className={`px-2 py-0.5 rounded-full ${pill}`}>{t === 'todas' ? 'Todas' : typeLabel[t]}</span>
-                    <span className="ml-2 text-mute tabular-nums">{count}</span>
-                  </button>
-                )
-              })}
-            </div>
-          </div>
-        </div>
-
-        <div className="p-4 sm:p-5">
-          {visibles.length === 0 && (
-            <div className="py-16 text-center px-6">
-              <div className="w-14 h-14 rounded-full bg-surface-2 flex items-center justify-center mx-auto mb-3 text-mute">
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.5"><path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.4-1.4A2 2 0 0118 14.2V11a6 6 0 10-12 0v3.2c0 .5-.2 1-.6 1.4L4 17h5" /></svg>
-              </div>
-              <p className="text-sm text-mute">{tab === 'sin_leer' ? 'No tienes notificaciones sin leer.' : 'No tienes notificaciones.'}</p>
-            </div>
-          )}
-
-          {visibles.map((n, i) => {
-            const meta = notifVisual(n)
-            const expanded = n.id === selectedId
-            const unread = !n.leida
-            const isLast = i === visibles.length - 1
-            return (
-              <div key={n.id} className="flex gap-2">
-                {/* Riel del timeline */}
-                <div className="flex flex-col items-center w-3.5 shrink-0">
-                  <span className="w-3 h-3 rounded-full shrink-0 mt-[22px]" style={{ background: dotColor[n.tipo] }} />
-                  {!isLast && <span className="w-0.5 flex-1 bg-edge" />}
-                </div>
-                <div className="flex-1 min-w-0 pb-1.5">
-                  <button
-                    onClick={() => setSelectedId(expanded ? n.id * -1 : n.id)}
-                    className={`w-full flex items-center gap-2.5 px-4 py-3.5 rounded-xl text-left transition-colors ${unread ? 'bg-gold-soft/30 hover:bg-gold-soft/50' : 'hover:bg-surface-2'}`}
-                  >
-                    <span className={`w-[38px] h-[38px] rounded-[9px] border border-edge/50 flex items-center justify-center shrink-0 ${meta.color}`}>
-                      <svg className="w-[18px] h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">{meta.icon}</svg>
-                    </span>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-1.5">
-                        <span className={`text-[14.5px] truncate ${unread ? 'font-extrabold text-ink' : 'font-semibold text-ink'}`}>{n.titulo}</span>
-                        {unread && <span className="w-[7px] h-[7px] rounded-full bg-gold shrink-0" />}
-                      </div>
-                      <div className="text-[13px] text-mute mt-0.5">{typeLabel[n.tipo]} · {tiempoRelativo(n.creada)}</div>
-                    </div>
-                    <span className="text-[13px] font-semibold text-mute shrink-0">{expanded ? 'Cerrar' : 'Ver'}</span>
-                  </button>
-                  {expanded && (
-                    <div className="mx-1 mt-1.5 p-5 bg-surface border border-edge rounded-xl">
-                      <div className="flex items-center justify-between mb-3">
-                        {!n.leida ? <span className="text-[11px] font-bold text-gold-ink bg-gold-soft px-2 py-0.5 rounded-md uppercase">Nuevo</span> : <span />}
-                        <span className="text-[12.5px] text-mute font-mono">{new Date(n.creada).toLocaleString('es-MX', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
-                      </div>
-                      {n.mensaje && <div className="text-[14.5px] leading-relaxed text-ink mb-4 whitespace-pre-wrap">{n.mensaje}</div>}
-                      <div className="flex gap-1.5">
-                        {!n.leida && <button onClick={() => marcarLeida(n)} className="flex-1 py-2.5 rounded-[9px] border border-edge font-bold text-[13px] hover:bg-surface-2 transition-colors">Marcar leído</button>}
-                        {n.seccion && <button onClick={() => abrir(n)} className="flex-1 py-2.5 rounded-[9px] bg-gold text-gold-on font-bold text-[13px] hover:opacity-90 transition-opacity">Abrir</button>}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )
-          })}
-        </div>
-      </Card>
-    </div>
-  )
-}
+/* La SECCIÓN "Notificaciones" se retiró (ago-2026): duplicaba la campana de
+   arriba, que es donde la gente las lee. El fechado de cada renglón lo pone
+   ahora `cuandoLlego` (lib/utils), compartido con la campana del cliente: aquí
+   vivía una segunda copia que se quedaba en "hace 3 d", sin hora y sin fecha.
+   Nadie puede cotejar un abono contra una llamada con eso. */
 
 /* ════════════════════════════════════════
    CATÁLOGOS CRUD (Categorías / Tipos / Marcas)
 ════════════════════════════════════════ */
 function CatalogosAdmin({ categorias, tipos, marcas, equipos, reload, notify, go }: {
   categorias: Option[]; tipos: Option[]; marcas: Option[]; equipos: Equipo[]
-  reload: () => void; notify: (m: string, t?: 'ok' | 'err') => void; go: (s: Section) => void
+  reload: () => void; notify: Notify; go: (s: Section) => void
 }) {
   const [activeIdx, setActiveIdx] = useState(0)
   const [verSinClasificar, setVerSinClasificar] = useState(false)
@@ -4795,7 +4509,7 @@ function CatalogosAdmin({ categorias, tipos, marcas, equipos, reload, notify, go
 
 function CatalogBlock({ title, singular, endpoint, data, uso, accent, icon, reload, notify }: {
   title: string; singular: string; endpoint: string; data: Option[]; uso: Map<number, number>; accent: string; icon: React.ReactNode
-  reload: () => void; notify: (m: string, t?: 'ok' | 'err') => void
+  reload: () => void; notify: Notify
 }) {
   const [nombre, setNombre] = useState('')
   const [search, setSearch] = useState('')
@@ -4829,7 +4543,7 @@ function CatalogBlock({ title, singular, endpoint, data, uso, accent, icon, relo
     if (n > 0) { notify(`"${o.nombre}" está en uso por ${n} producto${n > 1 ? 's' : ''}`, 'err'); return }
     if (!await confirmar({ titulo: `¿Eliminar "${o.nombre}"?`, aceptar: 'Eliminar', tono: 'peligro' })) return
     api.delete(`${endpoint}${o.id}/`)
-      .then(() => { notify('Eliminado'); reload() })
+      .then(() => { notify('Eliminado', 'neutro'); reload() })
       .catch(err => notify(err?.response?.data?.detail || 'No se puede eliminar (en uso)', 'err'))
   }
 
@@ -4903,11 +4617,15 @@ function CatalogBlock({ title, singular, endpoint, data, uso, accent, icon, relo
 /* ════════════════════════════════════════
    CUPONES CRUD
 ════════════════════════════════════════ */
-function CuponesAdmin({ coupons, reload, notify }: {
-  coupons: Coupon[]; reload: () => void; notify: (m: string, t?: 'ok' | 'err') => void
+function CuponesAdmin({ coupons, reload, notify, cargando }: {
+  coupons: Coupon[]; reload: () => void; notify: Notify; cargando?: boolean
 }) {
   const [codigo, setCodigo] = useState('')
   const [percent, setPercent] = useState('')
+  /* Opcional a propósito: una promoción de temporada tiene fecha de fin, pero
+     un código permanente de la empresa no, y obligar a poner una haría que se
+     tecleara cualquier cosa. Vacío = no vence, y se apaga con `activo`. */
+  const [vence, setVence] = useState('')
   const [busy, setBusy] = useState(false)
 
   function add() {
@@ -4915,15 +4633,20 @@ function CuponesAdmin({ coupons, reload, notify }: {
     const pct = Math.max(0, Math.min(100, Number(percent) || 0))
     if (!code) { notify('Código obligatorio', 'err'); return }
     setBusy(true)
-    api.post('/cupones/', { codigo: code, descuento: pct / 100, activo: true })
-      .then(() => { notify('Cupón creado'); setCodigo(''); setPercent(''); reload() })
+    /* Hasta el FINAL del día elegido: quien pone "vence el 31 de diciembre"
+       quiere que sirva ese 31, no que muera a la medianoche que lo estrena. */
+    api.post('/cupones/', {
+      codigo: code, descuento: pct / 100, activo: true,
+      expira: vence ? `${vence}T23:59:59` : null,
+    })
+      .then(() => { notify('Cupón creado'); setCodigo(''); setPercent(''); setVence(''); reload() })
       .catch(err => notify(err?.response?.data?.codigo?.[0] || 'Error al crear', 'err'))
       .finally(() => setBusy(false))
   }
 
   async function del(id?: number) {
     if (!id || !await confirmar({ titulo: '¿Eliminar cupón?', aceptar: 'Eliminar', tono: 'peligro' })) return
-    api.delete(`/cupones/${id}/`).then(() => { notify('Cupón eliminado'); reload() }).catch(() => notify('Error', 'err'))
+    api.delete(`/cupones/${id}/`).then(() => { notify('Cupón eliminado', 'neutro'); reload() }).catch(() => notify('Error', 'err'))
   }
 
   return (
@@ -4938,6 +4661,11 @@ function CuponesAdmin({ coupons, reload, notify }: {
           <div>
             <label className={label}>Descuento (%)</label>
             <input aria-label="Descuento (%)" type="number" min={0} max={100} className={input} value={percent} onChange={e => setPercent(e.target.value)} placeholder="15" />
+          </div>
+          <div>
+            <label className={label}>Vence (opcional)</label>
+            <input aria-label="Vence" type="date" className={input} value={vence} onChange={e => setVence(e.target.value)} />
+            <p className="mt-1.5 text-xs text-mute">Vacío = no vence. El de bienvenida dura 3 meses y lo pone el sistema.</p>
           </div>
           <button onClick={add} disabled={busy}
             className="w-full py-3 rounded-full bg-gold text-black font-bold text-sm hover:opacity-90 transition-colors disabled:opacity-50">
@@ -4958,11 +4686,25 @@ function CuponesAdmin({ coupons, reload, notify }: {
                   <span className="px-3 py-1.5 rounded-lg bg-gold-soft text-gold-ink font-mono font-bold text-sm">{c.codigo}</span>
                   <span className="text-sm text-mute">{Math.round((c.descuento || 0) * 100)}% descuento</span>
                   {c.activo === false && <span className="text-xs text-mute">(inactivo)</span>}
+                  {c.expira && (
+                    /* Vencido en rojo y no como un "(inactivo)" más: para el
+                       admin son cosas distintas —uno lo apagó él, el otro se
+                       apagó solo— y de eso depende si tiene algo que arreglar. */
+                    <span className={`text-xs ${new Date(c.expira) <= new Date() ? 'text-red-400' : 'text-mute'}`}>
+                      {new Date(c.expira) <= new Date() ? 'venció' : 'vence'} {new Date(c.expira).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' })}
+                    </span>
+                  )}
                 </div>
                 <button onClick={() => del(c.id)} className="px-3 py-1.5 rounded-lg border border-red-500/20 text-xs text-red-400 hover:bg-red-500/10 opacity-0 group-hover:opacity-100 transition-all">Eliminar</button>
               </div>
             ))}
-            {coupons.length === 0 && <p className="text-sm text-mute py-16 text-center">Sin cupones aún.</p>}
+            {coupons.length === 0 && (cargando ? <FilasEsqueleto filas={3} columnas={2} /> : (
+              <EstadoVacio
+                titulo="Sin cupones"
+                mensaje="Un cupón es un código con descuento que el cliente escribe al comprar en la tienda."
+                icono={<><path d="M3 9V7a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v2a2 2 0 0 0 0 4v2a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-2a2 2 0 0 0 0-4z" /><path d="M9 9.5h.01M15 14.5h.01M15 9l-6 6" /></>}
+              />
+            ))}
           </div>
         </Card>
       </div>
@@ -4971,27 +4713,10 @@ function CuponesAdmin({ coupons, reload, notify }: {
 }
 
 /* ════════════════════════════════════════
-   PERFIL DE USUARIO
-════════════════════════════════════════ */
-type Perfil = {
-  username?: string
-  email?: string
-  first_name?: string
-  last_name?: string
-  is_staff?: boolean
-  groups?: string[]
-  puede?: Capacidades
-  telefono?: string
-  puesto?: string
-  bio?: string
-  avatar_url?: string | null
-}
-
-/* ════════════════════════════════════════
    REFACCIONES
 ════════════════════════════════════════ */
 function VenderRefaccionModal({ refaccion, notify, onClose, onSold }: {
-  refaccion: Refaccion; notify: (m: string, t?: 'ok' | 'err') => void; onClose: () => void; onSold: (ventaId: number) => void
+  refaccion: Refaccion; notify: Notify; onClose: () => void; onSold: (ventaId: number) => void
 }) {
   const [cant, setCant] = useState('1')
   const [cliente, setCliente] = useState('')
@@ -5050,8 +4775,8 @@ function VenderRefaccionModal({ refaccion, notify, onClose, onSold }: {
   )
 }
 
-function RefaccionesAdmin({ refacciones, reload, notify }: {
-  refacciones: Refaccion[]; reload: () => void; notify: (m: string, t?: 'ok' | 'err') => void
+function RefaccionesAdmin({ refacciones, reload, notify, cargando }: {
+  refacciones: Refaccion[]; reload: () => void; notify: Notify; cargando?: boolean
 }) {
   const puede = usePuede()
   const empty = { nombre: '', descripcion: '', precio_venta: '', stock: '0', stock_minimo: '0', para_venta: true, ubicacion: '', codigo_barras: '' }
@@ -5069,6 +4794,9 @@ function RefaccionesAdmin({ refacciones, reload, notify }: {
     if (!t) return true
     return `${r.nombre} ${r.codigo_barras} ${r.descripcion || ''}`.toLowerCase().includes(t)
   })
+  // El catálogo de refacciones crece con los años y nadie da de baja un filtro:
+  // la tabla se pagina y los indicadores de arriba siguen mirando el total.
+  const { enPantalla, ancla, props: pagProps } = usePaginado(filtradas, undefined, [q])
   const bajoStock = refacciones.filter(r => r.bajo_stock).length
   const paraVenta = refacciones.filter(r => r.para_venta).length
   const valorInv = refacciones.reduce((a, r) => a + num(r.precio_venta) * num(r.stock), 0)
@@ -5098,35 +4826,36 @@ function RefaccionesAdmin({ refacciones, reload, notify }: {
   async function del(r: Refaccion) {
     if (!await confirmar({ titulo: `¿Eliminar "${r.nombre}"?`, aceptar: 'Eliminar', tono: 'peligro' })) return
     api.delete(`/refacciones/${r.id}/`)
-      .then(() => { notify('Refacción eliminada'); reload() })
+      .then(() => { notify('Refacción eliminada', 'neutro'); reload() })
       .catch(err => notify(err?.response?.data?.detail || 'No se pudo eliminar (¿en una venta?)', 'err'))
   }
 
   return (
     <div className="space-y-4">
       <KpiGrid
-        gridClassName="grid-cols-2 lg:grid-cols-4"
         items={[
-          { label: 'Refacciones', value: String(refacciones.length), tone: 'default' },
-          { label: 'Bajo stock', value: String(bajoStock), tone: 'danger', emphasis: bajoStock > 0 },
-          { label: 'Para venta', value: String(paraVenta), tone: 'gold' },
-          { label: 'Valor inventario', value: `$${valorInv.toLocaleString('en-US', { minimumFractionDigits: 2 })}`, tone: 'default' },
+          { label: 'Refacciones', value: refacciones.length, tone: 'default', helper: 'piezas distintas dadas de alta', icon: <><path d="M14.7 6.3a4 4 0 0 0-5.6 5.6L3 18v3h3l6.1-6.1a4 4 0 0 0 5.6-5.6l-2.5 2.5-2.1-2.1z" /></> },
+          {
+            label: 'Bajo stock', value: bajoStock, tone: 'danger', emphasis: bajoStock > 0,
+            helper: bajoStock ? 'pide antes de quedarte sin la pieza' : 'ninguna en el mínimo',
+            icon: <><path d="M10.3 4.3 2.6 18a2 2 0 0 0 1.7 3h15.4a2 2 0 0 0 1.7-3L13.7 4.3a2 2 0 0 0-3.4 0z" /><path d="M12 9v4m0 4h.01" /></>,
+          },
+          { label: 'Para venta', value: paraVenta, tone: 'gold', helper: 'se pueden cobrar en la caja', icon: <><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z" /><path d="M3 6h18" /><path d="M16 10a4 4 0 0 1-8 0" /></> },
+          { label: 'Valor inventario', value: <Monto valor={valorInv} />, tone: 'default', helper: 'a precio de costo', icon: <><path d="M12 1v22" /><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" /></> },
         ]}
       />
 
-      <Card className="overflow-hidden">
-        <div className="flex items-center gap-3 p-4 border-b border-edge flex-wrap">
-          <h3 className="font-bold text-ink shrink-0">Refacciones <span className="text-mute font-normal">({filtradas.length})</span></h3>
-          <div className="flex-1" />
+      <Card ref={ancla} className="overflow-hidden scroll-mt-24">
+        <CardBarra titulo="Refacciones" cuenta={filtradas.length}>
           <div className="relative w-full sm:w-64">
-            <svg className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-mute pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><circle cx="9" cy="9" r="6" /><path d="M15 15l3 3" strokeLinecap="round" /></svg>
-            <input aria-label="Buscar nombre o código" value={q} onChange={e => setQ(e.target.value)} placeholder="Buscar nombre o código…" className="w-full bg-surface-2 border border-edge rounded-full pl-9 pr-3 py-2 text-sm text-ink placeholder-mute focus:outline-none focus:border-gold/50 transition-colors" />
+            <svg className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-mute pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><circle cx="9" cy="9" r="6" /><path d="M15 15l3 3" strokeLinecap="round" /></svg>
+            <input aria-label="Buscar nombre o código" value={q} onChange={e => setQ(e.target.value)} placeholder="Buscar nombre o código…" className="campo campo-sm pl-10" />
           </div>
-          <button onClick={openNew} className="shrink-0 inline-flex items-center gap-2 px-4 py-2 rounded-full bg-gold text-black text-sm font-bold hover:opacity-90 transition-opacity">
+          <button onClick={openNew} className="btn-acento shrink-0 inline-flex items-center gap-2 h-10 px-4 rounded-full text-[13.5px] font-bold">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.2"><path strokeLinecap="round" d="M12 5v14M5 12h14" /></svg>
             <span className="hidden sm:inline">Nueva refacción</span>
           </button>
-        </div>
+        </CardBarra>
 
         <div className="overflow-x-auto">
           <table className="tabla-panel w-full min-w-[760px] text-left">
@@ -5140,7 +4869,7 @@ function RefaccionesAdmin({ refacciones, reload, notify }: {
               </tr>
             </thead>
             <tbody className="divide-y divide-edge">
-              {filtradas.map(r => (
+              {enPantalla.map(r => (
                 <tr key={r.id} className="hover:bg-surface-2 transition-colors">
                   <td className="px-5 py-3">
                     <p className="text-sm font-semibold text-ink">{r.nombre}</p>
@@ -5180,8 +4909,17 @@ function RefaccionesAdmin({ refacciones, reload, notify }: {
               ))}
             </tbody>
           </table>
-          {filtradas.length === 0 && <p className="text-sm text-mute py-14 text-center">{q ? 'Sin resultados.' : 'Sin refacciones. Agrega la primera con “Nueva refacción”.'}</p>}
+          {filtradas.length === 0 && (cargando ? <FilasEsqueleto filas={6} columnas={4} /> : (
+            <EstadoVacio
+              titulo={q ? 'Sin resultados' : 'Sin refacciones'}
+              mensaje={q
+                ? 'Busca por nombre, número de parte o marca.'
+                : 'Las piezas de mantenimiento se dan de alta aquí y se cobran desde la caja.'}
+              icono={<><path d="M14.7 6.3a4 4 0 0 0-5.6 5.6L3 18v3h3l6.1-6.1a4 4 0 0 0 5.6-5.6l-2.5 2.5-2.1-2.1z" /></>}
+            />
+          ))}
         </div>
+        <Paginador {...pagProps} nombre="refacciones" />
       </Card>
 
       {formOpen && (
@@ -5199,9 +4937,9 @@ function RefaccionesAdmin({ refacciones, reload, notify }: {
             </div>
             <div className="p-6 space-y-4 flex-1 overflow-y-auto">
               <div><label className={label}>Nombre *</label><input aria-label="Nombre" aria-required="true" className={input} value={form.nombre} onChange={e => setForm({ ...form, nombre: e.target.value })} placeholder="Ej. Filtro de aceite" autoFocus /></div>
-              <div><label className={label}>Descripción</label><textarea aria-label="Descripción" className={`${input} resize-none`} rows={2} value={form.descripcion} onChange={e => setForm({ ...form, descripcion: e.target.value })} placeholder="Detalle / compatibilidad" /></div>
+              <div><label className={label}>Descripción</label><textarea aria-label="Descripción" className={`${input} campo-area`} rows={2} value={form.descripcion} onChange={e => setForm({ ...form, descripcion: e.target.value })} placeholder="Detalle / compatibilidad" /></div>
               <div className="grid grid-cols-2 gap-3">
-                <div><label className={label}>Precio de venta{(form as any).condicion === 'seminueva' && <span className="text-mute font-normal"> · interno, el cliente NO lo ve</span>}</label><input aria-label="Precio de venta" type="number" className={input} value={form.precio_venta} onChange={e => setForm({ ...form, precio_venta: e.target.value })} placeholder="0.00" /></div>
+                <div><label className={label}>Precio de venta{(form as any).condicion === 'seminueva' && <span className="text-mute font-normal"> · interno, el cliente NO lo ve</span>}</label><InputDinero etiqueta="Precio de venta" valor={String(form.precio_venta)} onValor={(v: string) => setForm({ ...form, precio_venta: v })} /></div>
                 <div><label className={label}>Ubicación (taller)</label><input aria-label="Ubicación (taller)" className={input} value={form.ubicacion} onChange={e => setForm({ ...form, ubicacion: e.target.value })} placeholder="Estante / caja" /></div>
                 <div><label className={label}>Stock</label><input aria-label="Stock" type="number" min={0} className={input} value={form.stock} onChange={e => setForm({ ...form, stock: e.target.value })} /></div>
                 <div><label className={label}>Stock mínimo (alerta)</label><input aria-label="Stock mínimo (alerta)" type="number" min={0} className={input} value={form.stock_minimo} onChange={e => setForm({ ...form, stock_minimo: e.target.value })} /></div>
@@ -5229,504 +4967,6 @@ function RefaccionesAdmin({ refacciones, reload, notify }: {
     </div>
   )
 }
-
-/* ════════════════════════════════════════
-   REPARACIONES — Órdenes de servicio
-════════════════════════════════════════ */
-const OR_ESTADOS: { key: OrdenReparacion['estado']; label: string; cls: string; dot: string }[] = [
-  { key: 'recibida', label: 'Recibida', cls: 'bg-blue-500/10 text-blue-500', dot: '#2B5FAD' },
-  { key: 'proceso', label: 'En proceso', cls: 'bg-gold-soft text-gold-ink', dot: '#B8872E' },
-  { key: 'terminada', label: 'Terminada', cls: 'bg-emerald-500/10 text-emerald-500', dot: '#1F7A4D' },
-  { key: 'entregada', label: 'Entregada', cls: 'bg-surface-2 text-mute', dot: '#6B7280' },
-]
-const orEstadoMeta = (e: string) => OR_ESTADOS.find(x => x.key === e) || OR_ESTADOS[0]
-const orMoney = formatMoney
-// Una MÁQUINA PROPIA no se "recibe" ni se "entrega": sus estados son internos y su
-// total es un COSTO (no un cobro). Estas ayudas diferencian el flujo por tipo.
-const OR_LABEL_INTERNA: Record<string, string> = { recibida: 'Abierta', proceso: 'En reparación', terminada: 'Terminada', entregada: 'Terminada' }
-const orLabel = (e: string, tipo?: string) => tipo === 'interna' ? (OR_LABEL_INTERNA[e] || e) : (OR_ESTADOS.find(x => x.key === e)?.label || e)
-const orPasos = (tipo?: string) => tipo === 'interna' ? OR_ESTADOS.filter(x => x.key !== 'entregada') : OR_ESTADOS
-const esFinal = (o: { tipo: string; estado: string }) => o.tipo === 'interna' ? o.estado === 'terminada' : o.estado === 'entregada'
-
-function ReparacionesAdmin({ ordenes, refacciones, unidades, empresas, reload, notify, abrirId, onAbierto }: {
-  ordenes: OrdenReparacion[]; refacciones: Refaccion[]; unidades: Unidad[]; empresas: Empresa[]
-  reload: () => void; notify: (m: string, t?: 'ok' | 'err') => void
-  abrirId?: number | null; onAbierto?: () => void
-}) {
-  const [q, setQ] = useState('')
-  const [filtro, setFiltro] = useState<'todas' | OrdenReparacion['estado']>('todas')
-  const [nuevaOpen, setNuevaOpen] = useState(false)
-  const [detalle, setDetalle] = useState<OrdenReparacion | null>(null)
-  const [carta, setCarta] = useState<OrdenReparacion | null>(null)
-
-  // Apertura automática de una orden (p.ej. recién creada desde Inventario)
-  useEffect(() => {
-    if (!abrirId) return
-    const found = ordenes.find(o => o.id === abrirId)
-    if (found) { setDetalle(found); onAbierto?.() }
-    else { api.get<OrdenReparacion>(`/reparaciones/${abrirId}/`).then(r => setDetalle(r.data)).catch(() => {}).finally(() => onAbierto?.()) }
-  }, [abrirId, ordenes, onAbierto])
-
-  const abiertas = ordenes.filter(o => !esFinal(o)).length
-  // Facturado = solo lo que se cobra a CLIENTES; las internas son costo, no ingreso.
-  const facturado = ordenes.filter(o => o.tipo !== 'interna' && o.estado === 'entregada').reduce((a, o) => a + (Number(o.total) || 0), 0)
-  const costoInterno = ordenes.filter(o => o.tipo === 'interna' && o.estado === 'terminada').reduce((a, o) => a + (Number(o.total) || 0), 0)
-
-  const filtradas = ordenes.filter(o => {
-    if (filtro !== 'todas' && o.estado !== filtro) return false
-    const t = q.trim().toLowerCase()
-    if (!t) return true
-    return `${o.folio} ${o.cliente_display} ${o.equipo_display} ${o.empresa_nombre || ''}`.toLowerCase().includes(t)
-  })
-
-  const fechaCorta = (v?: string | null) => (v ? new Date(v).toLocaleDateString('es-MX', { day: '2-digit', month: 'short' }) : '—')
-
-  return (
-    <div className="space-y-4">
-      <KpiGrid
-        gridClassName="grid-cols-2 lg:grid-cols-4"
-        items={[
-          { label: 'Órdenes totales', value: String(ordenes.length), tone: 'default' },
-          { label: 'Abiertas', value: String(abiertas), tone: 'gold', emphasis: abiertas > 0 },
-          { label: 'Facturado (clientes)', value: orMoney(facturado), tone: 'default' },
-          { label: 'Costo interno', value: orMoney(costoInterno), tone: 'default' },
-        ]}
-      />
-
-      <Card className="overflow-hidden">
-        <div className="flex items-center gap-3 p-4 border-b border-edge flex-wrap">
-          <h3 className="font-bold text-ink shrink-0">Órdenes de reparación <span className="text-mute font-normal">({filtradas.length})</span></h3>
-          <div className="flex-1" />
-          <div className="relative w-full sm:w-64">
-            <svg className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-mute pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><circle cx="9" cy="9" r="6" /><path d="M15 15l3 3" strokeLinecap="round" /></svg>
-            <input aria-label="Buscar folio, cliente o equipo" value={q} onChange={e => setQ(e.target.value)} placeholder="Buscar folio, cliente o equipo…" className="w-full bg-surface-2 border border-edge rounded-full pl-9 pr-3 py-2 text-sm text-ink placeholder-mute focus:outline-none focus:border-gold/50 transition-colors" />
-          </div>
-          <button onClick={() => setNuevaOpen(true)} className="shrink-0 inline-flex items-center gap-2 px-4 py-2 rounded-full bg-gold text-black text-sm font-bold hover:opacity-90 transition-opacity">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.2"><path strokeLinecap="round" d="M12 5v14M5 12h14" /></svg>
-            <span className="hidden sm:inline">Nueva orden</span>
-          </button>
-        </div>
-
-        <div className="flex items-center gap-2 px-4 py-3 border-b border-edge flex-wrap">
-          {([['todas', 'Todas'], ...OR_ESTADOS.map(e => [e.key, e.label] as const)] as const).map(([k, lbl]) => (
-            <button key={k} onClick={() => setFiltro(k as any)}
-              className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-colors ${filtro === k ? 'bg-ink text-surface' : 'bg-surface-2 text-mute hover:text-ink'}`}>
-              {lbl}{k !== 'todas' && <span className="ml-1.5 opacity-70">{ordenes.filter(o => o.estado === k).length}</span>}
-            </button>
-          ))}
-        </div>
-
-        <div className="overflow-x-auto">
-          <table className="tabla-panel w-full min-w-[820px] text-left">
-            <thead>
-              <tr className="text-[10px] uppercase tracking-wider text-mute border-b border-edge">
-                <th className="font-semibold px-5 py-3">Folio</th>
-                <th className="font-semibold px-3 py-3">Cliente</th>
-                <th className="font-semibold px-3 py-3">Equipo</th>
-                <th className="font-semibold px-3 py-3">Estado</th>
-                <th className="font-semibold px-3 py-3 text-right">Total</th>
-                <th className="font-semibold px-3 py-3">Recibida</th>
-                <th className="font-semibold px-5 py-3 text-right">Acciones</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-edge">
-              {filtradas.map(o => {
-                const m = orEstadoMeta(o.estado)
-                return (
-                  <tr key={o.id} className="hover:bg-surface-2 transition-colors cursor-pointer" onClick={() => setDetalle(o)}>
-                    <td className="px-5 py-3 font-mono text-[13px] font-bold text-ink whitespace-nowrap">{o.folio}</td>
-                    <td data-col="Cliente" className="px-3 py-3">
-                      <div>
-                        {o.tipo === 'interna'
-                          ? <p className="text-sm font-medium text-mute italic">Máquina propia</p>
-                          : <>
-                            <p className="text-sm font-semibold text-ink">{o.cliente_display}</p>
-                            {o.cliente_telefono && <p className="text-[11px] text-mute">{o.cliente_telefono}</p>}
-                          </>}
-                      </div>
-                    </td>
-                    <td data-col="Equipo" className="px-3 py-3 text-sm text-ink max-w-[220px] truncate"><span>{o.equipo_display}</span></td>
-                    <td data-col="Estado" className="px-3 py-3"><span className={`inline-flex items-center gap-1.5 text-[11px] font-bold px-2 py-0.5 rounded-full ${m.cls}`}><span className="w-1.5 h-1.5 rounded-full" style={{ background: m.dot }} />{orLabel(o.estado, o.tipo)}</span></td>
-                    <td data-col="Total" className="px-3 py-3 text-sm font-bold text-price text-right whitespace-nowrap"><span>{orMoney(o.total)}</span></td>
-                    <td data-col="Recibida" className="px-3 py-3 text-[13px] text-mute whitespace-nowrap"><span>{fechaCorta(o.fecha_recibida)}</span></td>
-                    <td className="px-5 py-3 text-right" onClick={e => e.stopPropagation()}>
-                      <div className="flex flex-wrap items-center justify-end gap-2">
-                        <button onClick={() => setDetalle(o)} className="h-8 px-3 rounded-lg border border-edge text-mute text-xs font-semibold hover:text-ink hover:border-gold/40 transition-colors">Abrir</button>
-                        <button onClick={() => setCarta(o)} title="Imprimir orden (Carta)" className="w-8 h-8 rounded-lg border border-edge text-mute hover:text-gold-ink hover:border-gold/40 transition-colors flex items-center justify-center">
-                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.7"><path d="M6 9V4h12v5M6 18H4v-6a2 2 0 012-2h12a2 2 0 012 2v6h-2M8 14h8v6H8z" /></svg>
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-          {filtradas.length === 0 && <p className="text-sm text-mute py-14 text-center">{q || filtro !== 'todas' ? 'Sin órdenes con ese criterio.' : 'Aún no hay órdenes. Crea la primera con “Nueva orden”.'}</p>}
-        </div>
-      </Card>
-
-      {nuevaOpen && (
-        <NuevaOrdenModal
-          empresas={empresas} unidades={unidades} notify={notify}
-          onClose={() => setNuevaOpen(false)}
-          onCreated={(o) => { setNuevaOpen(false); reload(); setDetalle(o) }}
-        />
-      )}
-      {detalle && (
-        <OrdenDetalleModal
-          orden={detalle} refacciones={refacciones} notify={notify}
-          onClose={() => setDetalle(null)}
-          onChanged={reload}
-          onPrint={(o) => setCarta(o)}
-        />
-      )}
-      {carta && <OrdenCartaModal orden={carta} onClose={() => setCarta(null)} />}
-    </div>
-  )
-}
-
-function NuevaOrdenModal({ empresas, unidades, notify, onClose, onCreated }: {
-  empresas: Empresa[]; unidades: Unidad[]; notify: (m: string, t?: 'ok' | 'err') => void
-  onClose: () => void; onCreated: (o: OrdenReparacion) => void
-}) {
-  const [tipo, setTipo] = useState<'cliente' | 'interna'>('cliente')
-  const [form, setForm] = useState({ cliente_nombre: '', cliente_telefono: '', empresa: '', unidad: '', equipo_descripcion: '', numero_serie: '', diagnostico: '' })
-  const [saving, setSaving] = useState(false)
-
-  function crear() {
-    if (tipo === 'cliente' && !form.cliente_nombre.trim() && !form.empresa) { notify('Indica el nombre del cliente o la empresa', 'err'); return }
-    if (tipo === 'cliente' && !form.equipo_descripcion.trim()) { notify('Describe el equipo del cliente', 'err'); return }
-    if (tipo === 'interna' && !form.unidad) { notify('Selecciona la unidad propia', 'err'); return }
-    setSaving(true)
-    const payload: any = { tipo, diagnostico: form.diagnostico.trim() }
-    if (tipo === 'interna') {
-      payload.unidad = Number(form.unidad)
-    } else {
-      payload.cliente_nombre = form.cliente_nombre.trim()
-      payload.cliente_telefono = form.cliente_telefono.trim()
-      payload.equipo_descripcion = form.equipo_descripcion.trim()
-      payload.numero_serie = form.numero_serie.trim()
-      if (form.empresa) payload.empresa = Number(form.empresa)
-    }
-    api.post<OrdenReparacion>('/reparaciones/', payload)
-      .then(r => { notify(`Orden ${r.data.folio} creada`); onCreated(r.data) })
-      .catch(err => notify(err?.response?.data?.detalle || 'No se pudo crear la orden', 'err'))
-      .finally(() => setSaving(false))
-  }
-
-  return (
-    <Modal className="fixed inset-0 z-[60] bg-black/40 backdrop-blur-[2px]" onClose={onClose} label="Nueva orden de reparación">
-      <motion.div
-        initial={{ x: '100%' }} animate={{ x: 0 }} transition={{ duration: 0.3, ease: [0.23, 1, 0.32, 1] }}
-        onClick={(e: React.MouseEvent) => e.stopPropagation()}
-        className="fixed inset-y-0 right-0 w-full sm:max-w-[560px] bg-surface border-l border-edge shadow-[-24px_0_60px_rgba(33,29,22,0.22)] flex flex-col"
-      >
-        <div className="px-6 py-4 border-b border-edge flex items-center justify-between shrink-0">
-          <h2 className="font-bold text-ink">Nueva orden de reparación</h2>
-          <button onClick={onClose} className="text-mute hover:text-ink p-1" aria-label="Cerrar"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" d="M6 6l12 12M18 6L6 18" /></svg></button>
-        </div>
-        <div className="p-6 space-y-4 flex-1 overflow-y-auto">
-          <div className="grid grid-cols-2 gap-2">
-            <button onClick={() => setTipo('cliente')} className={`px-3 py-2.5 rounded-xl border text-sm font-semibold transition-colors ${tipo === 'cliente' ? 'border-gold bg-gold-soft text-gold-ink' : 'border-edge text-mute hover:text-ink'}`}>Equipo de cliente</button>
-            <button onClick={() => setTipo('interna')} className={`px-3 py-2.5 rounded-xl border text-sm font-semibold transition-colors ${tipo === 'interna' ? 'border-gold bg-gold-soft text-gold-ink' : 'border-edge text-mute hover:text-ink'}`}>Máquina propia</button>
-          </div>
-
-          {tipo === 'cliente' ? (
-            <>
-              <div className="grid grid-cols-2 gap-3">
-                <div><label className={label}>Cliente</label><input aria-label="Cliente" className={input} value={form.cliente_nombre} onChange={e => setForm({ ...form, cliente_nombre: e.target.value })} placeholder="Nombre del cliente" autoFocus /></div>
-                <div><label className={label}>Teléfono</label><input aria-label="Teléfono" type="tel" inputMode="numeric" maxLength={10} className={input} value={form.cliente_telefono} onChange={e => setForm({ ...form, cliente_telefono: soloTelefono(e.target.value) })} placeholder="Opcional" /></div>
-              </div>
-              <div>
-                <label className={label}>Empresa (opcional)</label>
-                <select aria-label="Empresa (opcional)" className={input} value={form.empresa} onChange={e => setForm({ ...form, empresa: e.target.value })}>
-                  <option value="">— Cliente particular —</option>
-                  {empresasActivas(empresas).map(e => <option key={e.id} value={e.id}>{e.nombre}</option>)}
-                </select>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="col-span-2"><label className={label}>Equipo del cliente *</label><input aria-label="Equipo del cliente" aria-required="true" className={input} value={form.equipo_descripcion} onChange={e => setForm({ ...form, equipo_descripcion: e.target.value })} placeholder="Ej. Compresor Truper 100L" /></div>
-                <div className="col-span-2"><label className={label}>Número de serie</label><input aria-label="Número de serie" className={input} value={form.numero_serie} onChange={e => setForm({ ...form, numero_serie: e.target.value })} placeholder="Opcional" /></div>
-              </div>
-            </>
-          ) : (
-            <div>
-              <label className={label}>Unidad propia *</label>
-              <select aria-label="Unidad propia" aria-required="true" className={input} value={form.unidad} onChange={e => setForm({ ...form, unidad: e.target.value })} autoFocus>
-                <option value="">— Selecciona una unidad —</option>
-                {/* Solo máquinas de RENTA (seminuevas). Las nuevas se venden, no se reparan aquí. */}
-                {unidades.filter(u => (u.equipo_info?.modo ?? (u.condicion === 'seminueva' ? 'renta' : 'venta')) === 'renta').map(u => <option key={u.id} value={u.id}>{u.codigo} · {u.equipo_modelo || u.equipo_info?.modelo || ''}</option>)}
-              </select>
-              <p className="text-[11px] text-mute mt-1.5">Solo máquinas de <b>renta</b> (las nuevas se venden, no se reparan aquí). No requiere datos de cliente.</p>
-            </div>
-          )}
-
-          <div><label className={label}>Falla reportada / diagnóstico inicial</label><textarea aria-label="Falla reportada / diagnóstico inicial" className={`${input} resize-none`} rows={3} value={form.diagnostico} onChange={e => setForm({ ...form, diagnostico: e.target.value })} placeholder="Qué reporta el cliente / síntomas" /></div>
-        </div>
-        <div className="px-6 py-4 border-t border-edge flex justify-end gap-3 shrink-0 bg-surface">
-          <button onClick={onClose} className="px-6 py-2.5 rounded-full border border-edge text-ink text-sm font-semibold hover:bg-surface-2 transition-colors">Cancelar</button>
-          <button onClick={crear} disabled={saving} className="px-7 py-2.5 rounded-full bg-gold text-black font-bold text-sm hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center justify-center gap-2">
-            {saving ? <span className="w-4 h-4 border-2 border-black/30 border-t-black rounded-full animate-spin" /> : null}
-            Crear orden
-          </button>
-        </div>
-      </motion.div>
-    </Modal>
-  )
-}
-
-function OrdenDetalleModal({ orden, refacciones, notify, onClose, onChanged, onPrint }: {
-  orden: OrdenReparacion; refacciones: Refaccion[]; notify: (m: string, t?: 'ok' | 'err') => void
-  onClose: () => void; onChanged: () => void; onPrint: (o: OrdenReparacion) => void
-}) {
-  const [o, setO] = useState<OrdenReparacion>(orden)
-  const [trabajo, setTrabajo] = useState(orden.trabajo_realizado || '')
-  const [diag, setDiag] = useState(orden.diagnostico || '')
-  const [mano, setMano] = useState(String(Number(orden.costo_mano_obra) || 0))
-  const [notas, setNotas] = useState(orden.notas || '')
-  const [clienteNombre, setClienteNombre] = useState(orden.cliente_nombre || '')
-  const [clienteTel, setClienteTel] = useState(orden.cliente_telefono || '')
-  const [savingInfo, setSavingInfo] = useState(false)
-  const [busy, setBusy] = useState(false)
-  // Liga de vinculación a la cuenta del cliente (un solo uso).
-  const [liga, setLiga] = useState('')
-  const [ligaCopiada, setLigaCopiada] = useState(false)
-  const [generandoLiga, setGenerandoLiga] = useState(false)
-
-  // Alta de refacción
-  const [origen, setOrigen] = useState<'stock' | 'externa'>('stock')
-  const [refId, setRefId] = useState('')
-  const [extNombre, setExtNombre] = useState('')
-  const [extCosto, setExtCosto] = useState('')
-  const [cant, setCant] = useState('1')
-
-  const disponibles = refacciones.filter(r => r.stock > 0)
-
-  function apply(nuevo: OrdenReparacion) { setO(nuevo); onChanged() }
-
-  function guardarInfo() {
-    setSavingInfo(true)
-    // Cliente/teléfono solo aplican a órdenes de equipo de cliente (no a máquina propia).
-    const extra = o.tipo === 'cliente' ? { cliente_nombre: clienteNombre.trim(), cliente_telefono: clienteTel.trim() } : {}
-    api.patch<OrdenReparacion>(`/reparaciones/${o.id}/`, {
-      diagnostico: diag, trabajo_realizado: trabajo, costo_mano_obra: Number(mano) || 0, notas, ...extra,
-    })
-      .then(r => { apply(r.data); notify('Orden actualizada') })
-      .catch(() => notify('No se pudo guardar', 'err'))
-      .finally(() => setSavingInfo(false))
-  }
-
-  async function generarLiga() {
-    if (liga || generandoLiga) return
-    setGenerandoLiga(true)
-    try {
-      const r = await api.post<{ ruta: string }>(`/reparaciones/${o.id}/vinculo/`, {}, { fondo: true } as never)
-      setLiga(`${window.location.origin}${r.data.ruta}`)
-    } catch (e: any) {
-      notify(e?.response?.data?.detalle || 'No se pudo generar la liga', 'err')
-    } finally { setGenerandoLiga(false) }
-  }
-  async function copiarLiga() {
-    try { await navigator.clipboard.writeText(liga); setLigaCopiada(true); setTimeout(() => setLigaCopiada(false), 1800) }
-    catch { notify('No se pudo copiar; selecciona el texto a mano', 'err') }
-  }
-
-  function cambiarEstado(estado: OrdenReparacion['estado']) {
-    api.patch<OrdenReparacion>(`/reparaciones/${o.id}/`, { estado })
-      .then(r => { apply(r.data); notify(`Estado: ${orLabel(estado, o.tipo)}`) })
-      .catch(() => notify('No se pudo cambiar el estado', 'err'))
-  }
-
-  function agregarItem() {
-    const c = Math.max(1, Number(cant) || 1)
-    if (origen === 'stock') {
-      if (!refId) { notify('Selecciona una refacción del inventario', 'err'); return }
-    } else if (!extNombre.trim()) { notify('Escribe el nombre de la pieza', 'err'); return }
-    setBusy(true)
-    const payload: any = origen === 'stock'
-      ? { origen: 'stock', refaccion_id: Number(refId), cantidad: c }
-      : { origen: 'externa', nombre: extNombre.trim(), costo_unitario: Number(extCosto) || 0, cantidad: c }
-    api.post<OrdenReparacion>(`/reparaciones/${o.id}/items/`, payload)
-      .then(r => { apply(r.data); setRefId(''); setExtNombre(''); setExtCosto(''); setCant('1'); notify('Refacción agregada') })
-      .catch(err => notify(err?.response?.data?.detalle || 'No se pudo agregar', 'err'))
-      .finally(() => setBusy(false))
-  }
-
-  function quitarItem(itemId: number) {
-    api.delete<OrdenReparacion>(`/reparaciones/${o.id}/items/${itemId}/`)
-      .then(r => { apply(r.data); notify('Refacción quitada') })
-      .catch(() => notify('No se pudo quitar', 'err'))
-  }
-
-  const pasos = orPasos(o.tipo)
-  const curIdx = pasos.findIndex(e => e.key === o.estado)
-  const totalOrden = (Number(o.total_refacciones) || 0) + (Number(mano) || 0)
-  const inp = 'w-full border border-edge rounded-[9px] px-[13px] py-[11px] text-[13px] bg-surface-2 text-ink placeholder-mute focus:outline-none focus:border-gold focus:bg-surface transition-colors'
-  const inpSide = 'w-full border border-edge rounded-[9px] px-[13px] py-[11px] text-[13.5px] bg-surface text-ink placeholder-mute focus:outline-none focus:border-gold transition-colors'
-  const capLabel = 'text-[11px] font-bold tracking-[0.5px] text-mute'
-
-  return createPortal(
-    <Modal className="fixed inset-0 z-[60] bg-[rgba(33,29,22,0.4)] backdrop-blur-[2px] flex items-start justify-center p-0 sm:p-6 overflow-y-auto" onClose={onClose} label="Detalle de la orden de reparación">
-      <div onClick={(e: React.MouseEvent) => e.stopPropagation()} className="w-full sm:max-w-[1080px] bg-surface rounded-none sm:rounded-[18px] shadow-[0_24px_60px_rgba(33,29,22,0.2)] min-h-screen sm:min-h-0 sm:my-auto sm:max-h-[92vh] flex flex-col overflow-hidden border-0 sm:border border-edge">
-        {/* Header */}
-        <div className="flex items-center justify-between gap-3 px-7 pt-[22px] pb-3 shrink-0">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <span className="font-mono text-[18px] font-extrabold text-ink">{o.folio}</span>
-            <span className="text-[12.5px] text-mute truncate">{o.equipo_display}</span>
-          </div>
-          <button onClick={onClose} className="w-8 h-8 rounded-[9px] flex items-center justify-center text-mute hover:text-ink hover:bg-surface-2 transition-colors shrink-0" aria-label="Cerrar"><svg className="w-[18px] h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" d="M6 6l12 12M18 6L6 18" /></svg></button>
-        </div>
-
-        {/* Stepper */}
-        <div className="px-7 pb-5 border-b border-edge flex items-center overflow-x-auto shrink-0">
-          {pasos.map((e, i) => {
-            const done = i <= curIdx
-            return (
-              <div key={e.key} className="flex items-center flex-none">
-                <button onClick={() => cambiarEstado(e.key)} className="flex items-center gap-2 flex-none group">
-                  <span className={`w-[22px] h-[22px] rounded-full border-[1.5px] text-[11px] font-extrabold flex items-center justify-center transition-colors ${done ? 'bg-ink border-ink text-surface' : 'bg-surface border-edge text-mute group-hover:border-ink'}`}>{i + 1}</span>
-                  <span className={`text-[12.5px] font-bold whitespace-nowrap transition-colors ${done ? 'text-ink' : 'text-mute group-hover:text-ink'}`}>{orLabel(e.key, o.tipo)}</span>
-                </button>
-                {i < pasos.length - 1 && <div className={`h-[1.5px] w-[60px] mx-2.5 shrink-0 ${i < curIdx ? 'bg-ink' : 'bg-edge'}`} />}
-              </div>
-            )
-          })}
-        </div>
-
-        {/* Cuerpo */}
-        <div className="flex-1 overflow-y-auto flex flex-col md:flex-row">
-          {/* Columna principal */}
-          <div className="flex-1 p-[26px] md:border-r border-edge min-w-0">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 mb-5">
-              <div>
-                <div className={`${capLabel} mb-2`}>FALLA REPORTADA / DIAGNÓSTICO</div>
-                <textarea aria-label="Diagnóstico" value={diag} onChange={e => setDiag(e.target.value)} className={`${inp} min-h-[72px] resize-y`} />
-              </div>
-              <div>
-                <div className={`${capLabel} mb-2`}>TRABAJO REALIZADO</div>
-                <textarea aria-label="Describe lo que se le hizo al equipo" value={trabajo} onChange={e => setTrabajo(e.target.value)} placeholder="Describe lo que se le hizo al equipo" className={`${inp} min-h-[72px] resize-y`} />
-              </div>
-            </div>
-
-            <div className={`${capLabel} mb-2`}>REFACCIONES Y MATERIALES</div>
-            {o.items.length === 0 ? (
-              <div className="border border-edge rounded-[9px] px-4 py-3.5 text-center text-[13px] text-mute bg-surface-2 mb-2.5">Sin refacciones. Agrega del inventario o compradas aparte.</div>
-            ) : (
-              <div className="border border-edge rounded-[9px] overflow-hidden mb-2.5">
-                {o.items.map(it => (
-                  <div key={it.id} className="flex items-center gap-3 px-3.5 py-2.5 border-b border-edge last:border-0">
-                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0 ${it.origen === 'stock' ? 'bg-blue-500/10 text-blue-500' : 'bg-amber-500/10 text-amber-600'}`}>{it.origen === 'stock' ? 'Inventario' : 'Aparte'}</span>
-                    <div className="min-w-0 flex-1"><p className="text-[13px] font-medium text-ink truncate">{it.nombre}</p><p className="text-[11px] text-mute">{it.cantidad} × {orMoney(it.costo_unitario)}</p></div>
-                    <span className="text-[13px] font-bold text-ink whitespace-nowrap">{orMoney(it.subtotal)}</span>
-                    <button onClick={() => quitarItem(it.id)} title="Quitar" className="w-7 h-7 rounded-lg border border-red-500/20 text-red-400 hover:bg-red-500/10 transition-colors flex items-center justify-center shrink-0"><svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" d="M6 6l12 12M18 6L6 18" /></svg></button>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* Agregar refacción */}
-            <div className="border border-edge rounded-[9px] p-[13px]">
-              <div className="flex gap-2 mb-2.5">
-                <button onClick={() => setOrigen('stock')} className={`flex-1 py-[9px] rounded-[7px] text-[13px] font-bold border-[1.5px] transition-colors ${origen === 'stock' ? 'border-gold text-gold-ink bg-gold-soft' : 'border-edge text-ink hover:bg-surface-2'}`}>Del inventario</button>
-                <button onClick={() => setOrigen('externa')} className={`flex-1 py-[9px] rounded-[7px] text-[13px] font-bold border-[1.5px] transition-colors ${origen === 'externa' ? 'border-gold text-gold-ink bg-gold-soft' : 'border-edge text-ink hover:bg-surface-2'}`}>Comprada / pedida aparte</button>
-              </div>
-              {origen === 'stock' ? (
-                <div className="flex gap-2 mb-2.5">
-                  <select aria-label="Refacción del stock" value={refId} onChange={e => setRefId(e.target.value)} className="flex-1 border border-edge rounded-[7px] px-[11px] py-[9px] text-[13px] bg-surface-2 text-ink focus:outline-none focus:border-gold">
-                    <option value="">Selecciona una refacción…</option>
-                    {disponibles.map(r => <option key={r.id} value={r.id}>{r.nombre} · {orMoney(r.precio_venta)} · stock {r.stock}</option>)}
-                  </select>
-                  <input aria-label="Cantidad" type="number" min={1} value={cant} onChange={e => setCant(e.target.value)} title="Cantidad" className="w-[70px] border border-edge rounded-[7px] px-[11px] py-[9px] text-[13px] bg-surface-2 text-ink text-center focus:outline-none focus:border-gold" />
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto_auto] gap-2 mb-2.5">
-                  <input aria-label="Nombre de la pieza (pedida aparte)" value={extNombre} onChange={e => setExtNombre(e.target.value)} placeholder="Nombre de la pieza (pedida aparte)" className="border border-edge rounded-[7px] px-[11px] py-[9px] text-[13px] bg-surface-2 text-ink placeholder-mute focus:outline-none focus:border-gold" />
-                  <input aria-label="Costo c/u" type="number" value={extCosto} onChange={e => setExtCosto(e.target.value)} placeholder="Costo c/u" className="sm:w-28 border border-edge rounded-[7px] px-[11px] py-[9px] text-[13px] bg-surface-2 text-ink placeholder-mute focus:outline-none focus:border-gold" />
-                  <input aria-label="Cantidad" type="number" min={1} value={cant} onChange={e => setCant(e.target.value)} title="Cantidad" className="sm:w-[70px] border border-edge rounded-[7px] px-[11px] py-[9px] text-[13px] bg-surface-2 text-ink text-center focus:outline-none focus:border-gold" />
-                </div>
-              )}
-              <button onClick={agregarItem} disabled={busy} className="w-full py-2.5 rounded-[7px] border border-dashed border-edge text-mute font-bold text-[13px] hover:text-ink hover:border-gold/50 transition-colors disabled:opacity-50 flex items-center justify-center gap-1.5">
-                {busy ? <span className="w-3.5 h-3.5 border-2 border-mute/40 border-t-mute rounded-full animate-spin" /> : '+'} Agregar refacción
-              </button>
-            </div>
-          </div>
-
-          {/* Panel lateral */}
-          <div className="md:w-[260px] flex-none p-5 bg-surface-2">
-            {o.tipo === 'cliente' && (
-              <div className="mb-5">
-                <div className={`${capLabel} mb-2`}>CLIENTE</div>
-                <input aria-label="Nombre del cliente" value={clienteNombre} onChange={e => setClienteNombre(e.target.value)} placeholder="Nombre del cliente" className={`${inpSide} mb-2`} />
-                <input aria-label="Teléfono (10 dígitos)" value={clienteTel} onChange={e => setClienteTel(e.target.value)} inputMode="numeric" maxLength={10} placeholder="Teléfono (10 dígitos)" className={inpSide} />
-                {/* Vincular a su cuenta: liga de un solo uso, como ventas/rentas. */}
-                {o.cuenta ? (
-                  <p className="mt-2.5 text-[12px] text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-1.5">
-                    <svg className="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.4"><path strokeLinecap="round" d="M5 13l4 4L19 7" /></svg>
-                    En la cuenta de {o.cuenta}
-                  </p>
-                ) : !liga ? (
-                  <button onClick={generarLiga} disabled={generandoLiga}
-                    className="mt-2.5 w-full py-2 rounded-[9px] border border-edge text-ink text-[12.5px] font-bold hover:bg-surface transition-colors disabled:opacity-50">
-                    {generandoLiga ? 'Generando…' : 'Vincular a una cuenta'}
-                  </button>
-                ) : (
-                  <div className="mt-2.5">
-                    <p className="text-[11px] text-mute mb-1.5">Mándale esta liga al cliente; al abrirla con su cuenta, la orden aparece en “Mis reparaciones”.</p>
-                    <div className="flex gap-1.5">
-                      <input aria-label="Liga para compartir" readOnly value={liga} onFocus={e => e.currentTarget.select()} className="flex-1 min-w-0 bg-surface border border-edge rounded-[8px] px-2.5 py-1.5 text-[11px] text-ink outline-none" />
-                      <button onClick={copiarLiga} className={`px-2.5 py-1.5 rounded-[8px] text-[12px] font-bold border transition-colors ${ligaCopiada ? 'border-emerald-500/50 text-emerald-600' : 'border-edge text-ink hover:bg-surface'}`}>{ligaCopiada ? '✓' : 'Copiar'}</button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-            <div className={`${capLabel} mb-2`}>MANO DE OBRA ($)</div>
-            <input aria-label="Mano de obra" type="number" value={mano} onChange={e => setMano(e.target.value)} placeholder="0.00" className={`${inpSide} mb-3.5`} />
-            <div className={`${capLabel} mb-2`}>NOTAS INTERNAS</div>
-            <input aria-label="Notas internas" value={notas} onChange={e => setNotas(e.target.value)} placeholder="Opcional" className={`${inpSide} mb-5`} />
-
-            <div className={`${capLabel} mb-2.5`}>RESUMEN</div>
-            <div className="flex justify-between text-[12.5px] text-mute mb-1.5"><span>Refacciones</span><span>{orMoney(o.total_refacciones)}</span></div>
-            <div className="flex justify-between text-[12.5px] text-mute mb-3.5"><span>Mano de obra</span><span>{orMoney(mano)}</span></div>
-            <div className="border-t border-edge pt-3 flex justify-between text-[17px] font-extrabold text-ink mb-[18px]"><span>{o.tipo === 'interna' ? 'Costo interno' : 'Total'}</span><span className="text-price">{orMoney(totalOrden)}</span></div>
-
-            <div className="flex flex-col gap-2">
-              <button onClick={guardarInfo} disabled={savingInfo} className="py-[11px] rounded-[9px] bg-gold text-gold-on font-bold text-[13.5px] hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center justify-center gap-2">
-                {savingInfo ? <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" /> : null}
-                Guardar cambios
-              </button>
-              <button onClick={() => onPrint({ ...o, trabajo_realizado: trabajo, diagnostico: diag, notas, costo_mano_obra: String(Number(mano) || 0), total: String(totalOrden) })} className="py-[11px] rounded-[9px] border border-edge text-ink font-bold text-[13.5px] hover:bg-surface transition-colors">
-                Imprimir orden (Carta)
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </Modal>,
-    document.body,
-  )
-}
-
-/* ════════════════════════════════════════
-   ADEUDOS — cobranza: rentas con saldo pendiente
-════════════════════════════════════════ */
-type AdeudosDatos = { rentas: RentaFull[]; total: string; clientes: number }
-// Apartado / sobre pedido (venta con anticipo). Espejo de _serialize_pedido en el backend.
-type Pedido = {
-  id: number; folio: string | null; nombre_cliente: string; telefono_cliente: string
-  empresa: string | null; cuenta: string | null; estado: string; sobre_pedido: boolean
-  total: string; pagado: string; saldo: string
-  pagos: { fecha: string; monto: string; metodo: string; por?: string }[]
-  metodo_pago: string; anticipo_nota: string | null; fecha: string
-  fecha_estimada_entrega: string | null; pedido_fase: string; entregada_en: string | null
-  entregada_por: string | null
-  vendedor: string | null; equipo: string | null; equipo_id: number | null
-  unidad: { id: number; codigo: string; equipo: string | null } | null
-  /** Las máquinas del pedido: cuáles llegaron y cuáles se esperan. */
-  maquinas?: { id: number; unidad_id: number | null; codigo: string | null; numero_serie?: string | null; equipo?: string | null; precio: string; entregada: boolean }[]
-}
-type PedidosDatos = { pedidos: Pedido[]; total: string; clientes: number }
 
 /* La deuda se agrupa por la identidad MÁS FUERTE que tenga la renta: cuenta
    vinculada primero, empresa después, y el nombre de mostrador al final. Así
@@ -5774,207 +5014,9 @@ const CHIP_RENTA_ADEUDO: Record<string, { label: string; cls: string }> = {
   finalizada: { label: 'EQUIPO DEVUELTO', cls: 'bg-surface-2 text-mute' },
 }
 
-/* ════════════════════════════════════════
-   PEDIDOS Y APARTADOS (venta con anticipo)
-════════════════════════════════════════ */
-// Contexto opcional cuando el pedido nace de una cotización sin stock (sobre pedido).
-type PedidoDesde = {
-  id: number                 // id de la cotización de origen
-  equipoId?: number | null
-  equipoNombre?: string
-  precio?: number
-  cliente?: string
-  telefono?: string
-  empresaId?: number | null
-}
-
-function NuevoPedidoModal({ desde, equipos = [], empresas, onClose, onDone, notify }: {
-  desde?: PedidoDesde | null
-  equipos?: Equipo[]; empresas: Empresa[]
-  onClose: () => void; onDone: () => void; notify: (m: string, t?: 'ok' | 'err') => void
-}) {
-  const [equipoId, setEquipoId] = useState<string>(desde?.equipoId ? String(desde.equipoId) : '')
-  const equipo = equipos.find(e => String(e.id) === equipoId) || null
-  const [precio, setPrecio] = useState<string>(
-    desde?.precio ? String(desde.precio) : (equipo && num(equipo.precio_venta) ? String(num(equipo.precio_venta)) : '')
-  )
-  const [cliente, setCliente] = useState(desde?.cliente || '')
-  const [telefono, setTelefono] = useState(desde?.telefono || '')
-  const [empresaId, setEmpresaId] = useState<string>(desde?.empresaId ? String(desde.empresaId) : '')
-  const [anticipo, setAnticipo] = useState('')
-  const [metodo, setMetodo] = useState('efectivo')
-  const [fecha, setFecha] = useState('')     // ETA opcional (yyyy-mm-dd)
-  const [codigo, setCodigo] = useState('')   // por si el anticipo va bajo el mínimo
-  const [busy, setBusy] = useState(false)
-  // Sobre pedido = se ordena al proveedor: pide un anticipo mínimo (config, 60% por
-  // defecto). El backend lo impone; aquí se sugiere y se avisa antes de enviar.
-  const cfg = useConfigPublica()
-  const pctMin = Number(cfg.anticipo_minimo_pct) || 60
-  // Ligar a una cuenta de cliente para que vea su pedido y su avance en "Mis compras".
-  const [clientes, setClientes] = useState<{ id: number; nombre: string; empresa?: string }[]>([])
-  const [clienteCuenta, setClienteCuenta] = useState('')
-  useEffect(() => {
-    api.get<{ clientes: { id: number; nombre: string; empresa?: string }[] }>('/clientes-lookup/')
-      .then(r => setClientes(r.data.clientes || [])).catch(() => {})
-  }, [])
-
-  // Al elegir equipo (cuando no viene de una cotización), sugiere su precio de venta.
-  useEffect(() => {
-    if (desde?.precio) return
-    const e = equipos.find(x => String(x.id) === equipoId)
-    if (e && num(e.precio_venta)) setPrecio(String(num(e.precio_venta)))
-  }, [equipoId])   // eslint-disable-line react-hooks/exhaustive-deps
-
-  const precioNum = Number(precio) || 0
-  const anticipoNum = Number(anticipo) || 0
-  const saldo = Math.max(0, precioNum - anticipoNum)
-  // El pedido es SOLO para máquinas sin stock: agotadas (en inventario, 0 disponibles)
-  // o especiales de proveedor (sin inventario). Las que tienen stock se venden directo.
-  const equiposPedibles = equipos.filter(e => Number(e.stock_disponible || 0) === 0 && num(e.precio_venta) > 0)
-  const anticipoMin = precioNum > 0 ? Math.round(precioNum * pctMin / 100 * 100) / 100 : 0
-  const anticipoBajo = anticipoNum > 0 && anticipoMin > 0 && anticipoNum < anticipoMin
-  // Sugerir el anticipo mínimo cuando ya hay precio y aún no se capturó (el común es el 60%).
-  useEffect(() => {
-    if (anticipoMin > 0 && !anticipo) setAnticipo(String(anticipoMin))
-  }, [anticipoMin])   // eslint-disable-line react-hooks/exhaustive-deps
-
-  function submit() {
-    if (!equipoId) { notify('Elige el equipo a pedir', 'err'); return }
-    if (precioNum <= 0) { notify('Captura el precio del pedido', 'err'); return }
-    if (!cliente.trim()) { notify('Escribe el nombre del cliente', 'err'); return }
-    if (anticipoNum > precioNum) { notify('El anticipo no puede ser mayor al precio', 'err'); return }
-    if (anticipoBajo && codigo.length !== 6) {
-      notify(`El anticipo es menor al mínimo (${pctMin}% = ${formatMoney(anticipoMin)}). Súbelo o pon el código de autorización.`, 'err'); return
-    }
-    setBusy(true)
-    api.post('/ventas/pedidos/crear/', {
-      equipo_id: Number(equipoId),
-      cotizacion_id: desde?.id || undefined,
-      precio: precioNum,
-      nombre_cliente: cliente.trim(),
-      telefono_cliente: telefono.trim(),
-      cliente_id: empresaId || undefined,
-      cliente_usuario_id: clienteCuenta || undefined,
-      anticipo: anticipoNum,
-      metodo_pago: metodo,
-      fecha_estimada_entrega: fecha || undefined,
-      codigo_ajuste: codigo || undefined,
-    })
-      .then(() => { notify('Pedido registrado'); onDone() })
-      .catch(err => { const d = err?.response?.data?.detalle; if (d) notify(d, 'err') })
-      .finally(() => setBusy(false))
-  }
-
-  return (
-    <Modal className="fixed inset-0 z-[70] bg-black/40 backdrop-blur-[2px]" onClose={onClose} label="Nuevo pedido">
-      <motion.div
-        initial={{ x: '100%' }} animate={{ x: 0 }} transition={{ duration: 0.3, ease: [0.23, 1, 0.32, 1] }}
-        onClick={e => e.stopPropagation()}
-        className="fixed inset-y-0 right-0 w-full sm:max-w-[520px] bg-surface border-l border-edge shadow-[-24px_0_60px_rgba(33,29,22,0.22)] flex flex-col"
-      >
-        <div className="px-6 py-4 border-b border-edge flex items-start justify-between gap-3 shrink-0">
-          <div className="min-w-0">
-            <h3 className="font-black text-ink">Nuevo pedido</h3>
-            <p className="text-xs text-mute mt-0.5">Aparta una máquina sin stock con anticipo. La unidad se asigna cuando llega.</p>
-          </div>
-          <button onClick={onClose} className="w-8 h-8 grid place-items-center rounded-full hover:bg-surface-2 text-mute hover:text-ink transition-colors shrink-0">✕</button>
-        </div>
-        <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
-          {desde && (
-            <div className="rounded-xl border border-gold/35 bg-gold/[0.06] px-3.5 py-2.5 text-[12px] text-mute">
-              Nace de la cotización <b className="text-ink">#{desde.id}</b>: hereda al cliente y aplica su cupón al guardar.
-            </div>
-          )}
-          {desde?.equipoId ? (
-            <div>
-              <label className={label}>Equipo a pedir</label>
-              <div className="h-10 px-3 flex items-center rounded-lg border border-edge bg-surface-2 text-[13.5px] font-medium text-ink">{desde.equipoNombre || equipo?.modelo || 'Equipo de la cotización'}</div>
-            </div>
-          ) : (
-            <div>
-              <label className={label}>Equipo a pedir</label>
-              <select aria-label="Equipo a pedir" value={equipoId} onChange={e => setEquipoId(e.target.value)} className={input}>
-                <option value="">Elige el equipo…</option>
-                {equiposPedibles.map(e => (
-                  <option key={e.id} value={e.id}>{e.modelo}{e.unidades_total ? ' · agotado' : ' · sobre pedido'}</option>
-                ))}
-              </select>
-              {equiposPedibles.length === 0
-                ? <p className="text-[11px] text-amber-600 dark:text-amber-400 mt-1">No hay máquinas sin stock. Solo se piden las agotadas o especiales; las que tienen stock se venden directo.</p>
-                : <p className="text-[11px] text-mute mt-1">Solo máquinas sin stock (agotadas o especiales de proveedor). Al llegar, se asigna la unidad.</p>}
-            </div>
-          )}
-          <div className="grid grid-cols-2 gap-3">
-            <div><label className={label}>Precio</label><InputDinero valor={precio} onValor={setPrecio} placeholder="0" /></div>
-            <div><label className={label}>Anticipo</label><InputDinero valor={anticipo} onValor={setAnticipo} placeholder="0" /></div>
-          </div>
-          <div className="flex items-center justify-between text-[12px] px-1">
-            <span className="text-mute">Saldo tras el anticipo</span>
-            <span className="font-bold text-ink tabular-nums">{formatMoney(saldo)}</span>
-          </div>
-          {precioNum > 0 && (
-            <div className={`flex items-center justify-between gap-2 text-[11.5px] rounded-lg px-3 py-2 border ${anticipoBajo ? 'border-amber-500/30 bg-amber-500/[0.06] text-amber-700 dark:text-amber-300' : 'border-edge bg-surface-2 text-mute'}`}>
-              <span>Anticipo mínimo <b>{pctMin}%</b> = {formatMoney(anticipoMin)}{anticipoBajo ? ' · va bajo, pide código' : ''}</span>
-              <button type="button" onClick={() => setAnticipo(String(anticipoMin))} className="font-bold text-gold-ink hover:underline shrink-0 whitespace-nowrap">Usar {pctMin}%</button>
-            </div>
-          )}
-          <div>
-            <label className={label}>Método del anticipo</label>
-            <div className="flex gap-2">
-              {(['efectivo', 'tarjeta', 'transferencia'] as const).map(m => (
-                <button key={m} type="button" onClick={() => setMetodo(m)}
-                  className={`flex-1 h-10 rounded-lg border text-[12.5px] font-semibold capitalize transition-colors ${metodo === m ? 'border-gold bg-gold/10 text-ink' : 'border-edge text-mute hover:text-ink'}`}>{m}</button>
-              ))}
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div><label className={label}>Cliente</label><input aria-label="Cliente" value={cliente} onChange={e => setCliente(e.target.value)} placeholder="Nombre" className={input} /></div>
-            <div><label className={label}>Teléfono</label><input aria-label="Teléfono" type="tel" inputMode="numeric" maxLength={10} value={telefono} onChange={e => setTelefono(soloTelefono(e.target.value))} placeholder="Opcional" className={input} /></div>
-          </div>
-          {desde ? (
-            <p className="text-[11px] text-mute px-1">Se liga al cliente de la cotización #{desde.id} (verá su pedido en "Mis compras").</p>
-          ) : (
-            <div>
-              <label className={label}>Ligar a cuenta de cliente (opcional)</label>
-              <select aria-label="Ligar a cuenta de cliente (opcional)" value={clienteCuenta} onChange={e => { setClienteCuenta(e.target.value); const c = clientes.find(x => String(x.id) === e.target.value); if (c && !cliente.trim()) setCliente(c.nombre) }} className={input}>
-                <option value="">Sin cuenta (solo nombre)</option>
-                {clientes.map(c => <option key={c.id} value={c.id}>{c.nombre}{c.empresa ? ` · ${c.empresa}` : ''}</option>)}
-              </select>
-              <p className="text-[11px] text-mute mt-1">Si lo ligas, el cliente ve su pedido y su avance en "Mis compras".</p>
-            </div>
-          )}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className={label}>Empresa (opcional)</label>
-              <select aria-label="Empresa (opcional)" value={empresaId} onChange={e => setEmpresaId(e.target.value)} className={input}>
-                <option value="">Sin empresa</option>
-                {empresas.map(em => <option key={em.id} value={em.id}>{em.nombre}</option>)}
-              </select>
-            </div>
-            <div><label className={label}>Llega aprox.</label><input aria-label="Llega aprox." type="date" value={fecha} onChange={e => setFecha(e.target.value)} className={input} /></div>
-          </div>
-          {anticipoBajo && (
-            <div className="rounded-xl border border-amber-500/40 bg-amber-500/[0.07] px-3.5 py-3 space-y-2">
-              <p className="text-[12.5px] font-bold text-amber-700 dark:text-amber-300">Recibir menos del {pctMin}% requiere autorización</p>
-              <p className="text-[11.5px] text-mute">Queda a criterio de administración. Escribe el código de 6 dígitos de un administrador o gerente para registrar este anticipo bajo.</p>
-              <input aria-label="Código de seguridad" type="password" autoComplete="one-time-code" inputMode="numeric" maxLength={6} value={codigo}
-                onChange={e => setCodigo(e.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="••••••"
-                className={`${input} text-center font-mono tracking-[0.4em]`} />
-            </div>
-          )}
-        </div>
-        <div className="px-6 py-4 border-t border-edge flex justify-end gap-3 shrink-0">
-          <button onClick={onClose} className="px-6 py-2.5 rounded-full border border-edge text-mute text-sm font-medium hover:text-ink transition-colors active:scale-[0.97]">Cancelar</button>
-          <button onClick={submit} disabled={busy} className="px-7 py-2.5 rounded-full bg-gold text-black text-sm font-bold hover:opacity-90 active:scale-[0.96] transition disabled:opacity-50">{busy ? 'Guardando…' : 'Registrar pedido'}</button>
-        </div>
-      </motion.div>
-    </Modal>
-  )
-}
-
-function PedidosAdmin({ datos, reload, equipos, empresas, notify }: {
+function PedidosAdmin({ datos, reload, equipos, empresas, notify, cargando }: {
   datos: PedidosDatos; reload: () => void; equipos: Equipo[]; empresas: Empresa[]
-  notify: (m: string, t?: 'ok' | 'err') => void
+  notify: Notify; cargando?: boolean
 }) {
   const money = formatMoney
   const puedeAlta = usePuede()('alta_inventario')
@@ -5998,7 +5040,7 @@ function PedidosAdmin({ datos, reload, equipos, empresas, notify }: {
     if (mes) params.set('mes', String(mes))
     api.get<PedidosDatos>(`/ventas/pedidos/?${params.toString()}`)
       .then(r => setHistorial(r.data || { pedidos: [], total: '0', clientes: 0 }))
-      .catch(() => {}).finally(() => setCargandoHist(false))
+      .catch(anotarFallo).finally(() => setCargandoHist(false))
   }, [anio, mes])
   useEffect(() => { if (pestana === 'entregados') cargarHistorial() }, [pestana, cargarHistorial])
   const toggle = (id: number) => setAbierto(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
@@ -6011,21 +5053,23 @@ function PedidosAdmin({ datos, reload, equipos, empresas, notify }: {
   const q = busca.trim().toLowerCase()
   const lista = !q ? fuente.pedidos : fuente.pedidos.filter(p =>
     [p.nombre_cliente, p.empresa, p.cuenta, p.equipo, p.folio].some(x => (x || '').toLowerCase().includes(q)))
+  // Cada renglón de aquí es una ficha alta (cliente, máquinas, abonos): con
+  // treinta abiertas la pantalla ya no termina nunca. Van de 25 en 25.
+  const { enPantalla, ancla, props: pagProps } = usePaginado(lista, undefined, [busca, pestana])
 
+  // Sin `catch`: el rechazo lo muestra el AbonoModal (ver guardarAbono).
   async function abonar(monto: number, metodo: string, fecha: string) {
     if (!abonando) return
-    try {
-      await api.post(`/ventas/${abonando.id}/abono/`, { monto, metodo, fecha: fecha || undefined })
-      notify(`Abono de ${money(monto)} registrado`)
-      setAbonando(null); reload()
-    } catch { /* el interceptor avisa */ }
+    await api.post(`/ventas/${abonando.id}/abono/`, { monto, metodo, fecha: fecha || undefined })
+    notify(`Abono de ${money(monto)} registrado`)
+    setAbonando(null); reload()
   }
 
   // Liga de vinculación (como renta/venta): para clientes SIN cuenta. Al abrirla con
   // su sesión, el pedido cae en SU "Mis compras" y puede seguirlo y liquidar el saldo.
   async function generarLigaPedido(p: Pedido) {
     try {
-      const res = await api.post<{ ruta: string }>(`/ventas/${p.id}/vinculo/`, {}, { fondo: true } as never)
+      const res = await api.post<{ ruta: string }>(`/ventas/${p.id}/vinculo/`, {}, { fondo: true })
       const link = `${window.location.origin}${res.data.ruta}`
       try { await navigator.clipboard.writeText(link) } catch { /* sin portapapeles: igual va por WhatsApp */ }
       const wa = waLink(p.telefono_cliente, `Hola${p.nombre_cliente ? ' ' + p.nombre_cliente : ''}, aquí sigues tu pedido de ${p.equipo || 'tu máquina'} en REMALI y liquidas tu saldo: ${link}`)
@@ -6044,7 +5088,7 @@ function PedidosAdmin({ datos, reload, equipos, empresas, notify }: {
     const sig = FASES[idx + 1] || FASES[0]
     try {
       await api.post(`/ventas/${p.id}/pedido-fase/`, { fase: sig.key })
-      notify(`Seguimiento: ${sig.label}`)
+      notify(`Seguimiento: ${sig.label}`, 'info')
       reload()
     } catch (e) { notify((e as { response?: { data?: { detalle?: string } } })?.response?.data?.detalle || 'No se pudo actualizar', 'err') }
   }
@@ -6056,7 +5100,7 @@ function PedidosAdmin({ datos, reload, equipos, empresas, notify }: {
   async function registrarLaQueLlego(p: Pedido): Promise<{ numero_serie: string } | null> {
     let codigo = ''
     try {
-      const r = await api.get<{ codigo: string }>(`/equipos/${p.equipo_id}/unidades/proximo-codigo/`, { fondo: true } as never)
+      const r = await api.get<{ codigo: string }>(`/equipos/${p.equipo_id}/unidades/proximo-codigo/`, { fondo: true })
       codigo = r.data?.codigo || ''
     } catch { /* el código es cortesía: si no carga, igual se registra */ }
     const serie = await pedir({
@@ -6093,7 +5137,7 @@ function PedidosAdmin({ datos, reload, equipos, empresas, notify }: {
     } else if (p.sobre_pedido || !p.unidad) {
       let libres: Unidad[] = []
       try {
-        const resp = await api.get<Unidad[]>(`/equipos/${p.equipo_id}/unidades/`, { fondo: true } as never)
+        const resp = await api.get<Unidad[]>(`/equipos/${p.equipo_id}/unidades/`, { fondo: true })
         libres = (resp.data || []).filter(u => u.estado === 'disponible')
       } catch { notify('No se pudieron cargar las unidades', 'err'); return }
 
@@ -6127,9 +5171,10 @@ function PedidosAdmin({ datos, reload, equipos, empresas, notify }: {
     }
     try {
       const r = await api.post<{ pedido?: { estado?: string } }>(`/ventas/${p.id}/entregar/`, { unidad_id, unidad_ids, nueva_unidad })
-      notify(r.data?.pedido?.estado === 'apartada'
+      const parcial = r.data?.pedido?.estado === 'apartada'
+      notify(parcial
         ? 'Máquinas entregadas · el pedido sigue abierto por las que faltan'
-        : 'Pedido entregado')
+        : 'Pedido entregado', parcial ? 'warning' : 'ok')
       reload()
       if (pestana === 'entregados') cargarHistorial()
     } catch (e) { notify((e as { response?: { data?: { detalle?: string } } })?.response?.data?.detalle || 'No se pudo entregar', 'err') }
@@ -6138,26 +5183,24 @@ function PedidosAdmin({ datos, reload, equipos, empresas, notify }: {
   return (
     <div className="space-y-5">
       <KpiGrid
-        gridClassName="grid-cols-2 lg:grid-cols-3"
         items={entregados ? [
-          { label: 'Cobrado en el periodo', value: money(Number(historial.total)), tone: 'gold' },
-          { label: 'Pedidos entregados', value: String(historial.pedidos.length), tone: 'muted' },
-          { label: 'Clientes', value: String(historial.clientes), tone: 'muted' },
+          { label: 'Cobrado en el periodo', value: <Monto valor={historial.total} />, tone: 'gold', helper: 'ya entró completo', icon: <><path d="M12 1v22" /><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" /></> },
+          { label: 'Pedidos entregados', value: historial.pedidos.length, tone: 'muted', helper: 'máquina entregada y saldo liquidado', icon: <><circle cx="12" cy="12" r="9" /><path d="m8.4 12 2.4 2.4 4.8-5" /></> },
+          { label: 'Clientes', value: historial.clientes, tone: 'muted', helper: 'distintos en el periodo', icon: <><circle cx="9" cy="8" r="3.4" /><path d="M2.5 20a6.5 6.5 0 0 1 13 0" /><path d="M16.5 5.2a3.4 3.4 0 0 1 0 5.6M18 20a6.5 6.5 0 0 0-2.6-5.2" /></> },
         ] : [
-          { label: 'Por cobrar', value: money(Number(datos.total)), tone: 'gold' },
-          { label: 'Apartados con saldo', value: String(conSaldo), tone: 'muted' },
-          { label: 'Sobre pedido', value: String(sobre), tone: 'muted' },
+          { label: 'Por cobrar', value: <Monto valor={datos.total} />, tone: 'gold', emphasis: Number(datos.total) > 0, helper: 'saldo que falta antes de entregar', icon: <><path d="M12 1v22" /><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" /></> },
+          { label: 'Apartados', value: conSaldo, tone: 'muted', helper: 'con saldo, apartadas en bodega', icon: <><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" /><path d="M3.3 7 12 12l8.7-5M12 22V12" /></> },
+          { label: 'Sobre pedido', value: sobre, tone: 'muted', helper: 'todavía no llega a sucursal', icon: <><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></> },
         ]}
       />
 
-      <div className="flex items-center gap-1 p-1 rounded-full border border-edge bg-surface w-fit">
-        {([['abiertos', 'Abiertos'], ['entregados', 'Entregados']] as const).map(([k, etiqueta]) => (
-          <button key={k} onClick={() => setPestana(k)}
-            className={`h-8 px-4 rounded-full text-[12.5px] font-bold transition-colors ${pestana === k ? 'bg-gold text-black' : 'text-mute hover:text-ink'}`}>
-            {etiqueta}
-          </button>
-        ))}
-      </div>
+      <Segmentado
+        forma="pastilla"
+        valor={pestana}
+        onChange={k => setPestana(k as typeof pestana)}
+        opciones={[{ key: 'abiertos', label: 'Abiertos' }, { key: 'entregados', label: 'Entregados' }]}
+        className="w-fit"
+      />
 
       <div className="flex flex-wrap items-center gap-2">
         <input aria-label="Buscar cliente, equipo o folio" value={busca} onChange={e => setBusca(e.target.value)} placeholder="Buscar cliente, equipo o folio…"
@@ -6166,31 +5209,29 @@ function PedidosAdmin({ datos, reload, equipos, empresas, notify }: {
           ? <SelectorPeriodo anio={anio} mes={mes} onAnio={setAnio} onMes={setMes} />
           : (
             <button onClick={() => setNuevo(true)}
-              className="h-10 px-4 rounded-full bg-gold text-black text-sm font-bold hover:brightness-95 transition whitespace-nowrap active:scale-[0.97]">
-              + Nuevo pedido
+              className="btn-acento shrink-0 inline-flex items-center gap-2 h-10 px-4 rounded-full text-[13.5px] font-bold whitespace-nowrap">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5"><path strokeLinecap="round" d="M12 5v14M5 12h14" /></svg>
+              Nuevo pedido
             </button>
           )}
       </div>
 
-      {cargandoHist && entregados ? (
-        <div className="rounded-2xl border border-edge bg-surface px-6 py-14 text-center">
-          <p className="text-[13px] text-mute">Cargando el historial…</p>
-        </div>
+      {(cargandoHist && entregados) || (cargando && lista.length === 0) ? (
+        <Card className="overflow-hidden"><FilasEsqueleto filas={4} columnas={3} /></Card>
       ) : lista.length === 0 ? (
-        <div className="rounded-2xl border border-edge bg-surface px-6 py-14 text-center">
-          <p className="text-[16px] font-bold text-ink">
-            {fuente.pedidos.length ? 'Sin coincidencias'
+        <Card className="overflow-hidden">
+          <EstadoVacio
+            titulo={fuente.pedidos.length ? 'Sin coincidencias'
               : entregados ? 'Nada entregado en este periodo' : 'No hay pedidos ni apartados'}
-          </p>
-          <p className="text-[13px] text-mute mt-1">
-            {fuente.pedidos.length ? 'Prueba con otro nombre o folio.'
+            mensaje={fuente.pedidos.length ? 'Prueba con otro nombre o folio.'
               : entregados ? 'Prueba con otro mes o año. Aquí queda cada pedido que se entregó, con su máquina.'
                 : 'Registra un sobre pedido con "Nuevo pedido", o convierte una cotización sin stock.'}
-          </p>
-        </div>
+            icono={<><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z" /><path d="M3 6h18" /><path d="M16 10a4 4 0 0 1-8 0" /></>}
+          />
+        </Card>
       ) : (
-        <div className="space-y-3">
-          {lista.map(p => {
+        <div ref={ancla} className="space-y-3 scroll-mt-24">
+          {enPantalla.map(p => {
             const abiertoP = abierto.has(p.id)
             const quien = p.cuenta || p.empresa || p.nombre_cliente || 'Cliente'
             const inicial = (quien.trim()[0] || '?').toUpperCase()
@@ -6215,6 +5256,16 @@ function PedidosAdmin({ datos, reload, equipos, empresas, notify }: {
                         ? (p.entregada_en ? ` · entregado ${fechaAbono(p.entregada_en)}` : '')
                         : (p.fecha_estimada_entrega ? ` · llega ${fechaAbono(p.fecha_estimada_entrega)}` : '')}
                     </p>
+                    {/* A quién se le reclama si la máquina llegó mal. Se enseña
+                        aquí, en la fila del pedido, porque la pregunta llega
+                        cuando el cliente reporta la falla — y para entonces
+                        nadie se acuerda de qué proveedor fue ni cuánto dio. */}
+                    {p.garantia_proveedor && (
+                      <p className="text-[11.5px] text-mute mt-0.5 truncate" title={p.garantia_proveedor.nota || undefined}>
+                        Proveedor responde {p.garantia_proveedor.meses} mes{p.garantia_proveedor.meses === 1 ? '' : 'es'}
+                        {p.garantia_proveedor.nota ? ` · ${p.garantia_proveedor.nota}` : ''}
+                      </p>
+                    )}
                     {/* Qué máquina se llevó el cliente: su código y su serie. Es
                         la pregunta que trae a alguien al historial. */}
                     {entregados && (
@@ -6291,6 +5342,7 @@ function PedidosAdmin({ datos, reload, equipos, empresas, notify }: {
               </div>
             )
           })}
+          <Paginador {...pagProps} nombre="pedidos" />
         </div>
       )}
 
@@ -6300,9 +5352,9 @@ function PedidosAdmin({ datos, reload, equipos, empresas, notify }: {
   )
 }
 
-function AdeudosAdmin({ datos, pedidos, reload, reloadApartados, notify }: {
+function AdeudosAdmin({ datos, pedidos, reload, reloadApartados, notify, cargando }: {
   datos: AdeudosDatos; pedidos: PedidosDatos
-  reload: () => void; reloadApartados: () => void; notify: (m: string, t?: 'ok' | 'err') => void
+  reload: () => void; reloadApartados: () => void; notify: Notify; cargando?: boolean
 }) {
   const money = formatMoney
   const [ver, setVer] = useState<RentaFull | null>(null)
@@ -6321,29 +5373,31 @@ function AdeudosAdmin({ datos, pedidos, reload, reloadApartados, notify }: {
   }
 
   const grupos = useMemo(() => agruparAdeudos(datos.rentas), [datos.rentas])
+  // Se pagina por CLIENTE, no por renta: la sección agrupa la deuda de cada
+  // quien en una ficha, y cortar a la mitad las rentas de una persona sería
+  // enseñar un adeudo incompleto. Las cifras de arriba siguen sumando todo.
+  const { enPantalla: gruposPag, ancla, props: pagProps } = usePaginado(grupos, 15)
   const toggle = (clave: string) => setAbiertos(s => {
     const n = new Set(s); n.has(clave) ? n.delete(clave) : n.add(clave); return n
   })
 
+  // Sin `catch`: el rechazo lo muestra el AbonoModal (ver guardarAbono).
   async function registrarAbono(monto: number, metodo: string, fecha: string) {
     if (!abonando) return
-    try {
-      await api.post(`/rentas/${abonando.id}/abonos/`, { monto, metodo, fecha: fecha || undefined })
-      notify(`Abono de ${money(monto)} registrado`)
-      setAbonando(null)
-      reload()
-    } catch { /* el interceptor avisa */ }
+    await api.post(`/rentas/${abonando.id}/abonos/`, { monto, metodo, fecha: fecha || undefined })
+    notify(`Abono de ${money(monto)} registrado`)
+    setAbonando(null)
+    reload()
   }
 
   // Abono a un APARTADO (venta con anticipo). Endpoint distinto al de rentas.
+  // Sin `catch`: el rechazo lo muestra el AbonoModal (ver guardarAbono).
   async function registrarAbonoApartado(monto: number, metodo: string, fecha: string) {
     if (!abonandoApartado) return
-    try {
-      await api.post(`/ventas/${abonandoApartado.id}/abono/`, { monto, metodo, fecha: fecha || undefined })
-      notify(`Abono de ${money(monto)} registrado`)
-      setAbonandoApartado(null)
-      reloadApartados()
-    } catch { /* el interceptor avisa */ }
+    await api.post(`/ventas/${abonandoApartado.id}/abono/`, { monto, metodo, fecha: fecha || undefined })
+    notify(`Abono de ${money(monto)} registrado`)
+    setAbonandoApartado(null)
+    reloadApartados()
   }
 
   // Identidad de un grupo, tal como la espera el backend para fusionar.
@@ -6387,11 +5441,15 @@ function AdeudosAdmin({ datos, pedidos, reload, reloadApartados, notify }: {
       <div className="flex items-start justify-between gap-3">
         <div className="flex-1">
           <KpiGrid
-            gridClassName="grid-cols-2 lg:grid-cols-3"
-            items={[
-              { label: 'Por cobrar', value: money(Number(datos.total) + totalApartados), tone: 'gold' },
-              { label: 'Rentas con saldo', value: String(datos.rentas.length), tone: 'muted' },
-              { label: 'Apartados con saldo', value: String(apartados.length), tone: 'muted' },
+                items={[
+              {
+                label: 'Por cobrar', value: <Monto valor={Number(datos.total) + totalApartados} />, tone: 'gold',
+                emphasis: Number(datos.total) + totalApartados > 0,
+                helper: `${datos.rentas.length + apartados.length} cuenta${datos.rentas.length + apartados.length === 1 ? '' : 's'} con saldo`,
+                icon: <><path d="M12 1v22" /><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" /></>,
+              },
+              { label: 'Rentas', value: datos.rentas.length, tone: 'muted', helper: 'con saldo, se abona hasta liquidar', icon: <><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></> },
+              { label: 'Apartados', value: apartados.length, tone: 'muted', helper: 'falta el resto para entregar', icon: <><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" /><path d="M3.3 7 12 12l8.7-5M12 22V12" /></> },
             ]}
           />
         </div>
@@ -6401,15 +5459,20 @@ function AdeudosAdmin({ datos, pedidos, reload, reloadApartados, notify }: {
       </div>
 
       {grupos.length === 0 && apartados.length === 0 ? (
-        <div className="rounded-2xl border border-edge bg-surface px-6 py-14 text-center">
-          <p className="text-[16px] font-bold text-ink">Nadie debe nada</p>
-          <p className="text-[13px] text-mute mt-1">Cuando una renta o un apartado quede con saldo, aparece aquí hasta liquidarse.</p>
-        </div>
+        <Card className="overflow-hidden">
+          {cargando ? <FilasEsqueleto filas={4} columnas={3} /> : (
+            <EstadoVacio
+              titulo="Nadie debe nada"
+              mensaje="Cuando una renta o un apartado quede con saldo, aparece aquí hasta liquidarse."
+              icono={<><path d="M20 6 9 17l-5-5" /></>}
+            />
+          )}
+        </Card>
       ) : (
         <div className="space-y-6">
          {grupos.length > 0 && (
-          <div className="space-y-3">
-          {grupos.map(g => {
+          <div ref={ancla} className="space-y-3 scroll-mt-24">
+          {gruposPag.map(g => {
             const abierto = abiertos.has(g.clave)
             const tipo = TIPO_ADEUDO[g.tipo]
             const inicial = (g.nombre.trim()[0] || '?').toUpperCase()
@@ -6482,6 +5545,7 @@ function AdeudosAdmin({ datos, pedidos, reload, reloadApartados, notify }: {
               </div>
             )
           })}
+          <Paginador {...pagProps} nombre="clientes con adeudo" />
           </div>
          )}
          {apartados.length > 0 && (
@@ -6570,14 +5634,14 @@ const FORMA_PAGO_LABEL: Record<string, string> = {
   '04': '04 · Tarjeta de crédito', '28': '28 · Tarjeta de débito', '99': '99 · Por definir',
 }
 const FACT_ESTADOS: { key: SolicitudFactura['estado']; label: string; cls: string; dot: string }[] = [
-  { key: 'pendiente', label: 'Pendiente', cls: 'bg-amber-500/10 text-amber-600', dot: '#B8872E' },
+  { key: 'pendiente', label: 'Pendiente', cls: 'bg-amber-500/10 text-taller-ink', dot: '#B8872E' },
   { key: 'facturada', label: 'Facturada', cls: 'bg-emerald-500/10 text-emerald-600', dot: '#1F7A4D' },
   { key: 'cancelada', label: 'Cancelada', cls: 'bg-surface-2 text-mute', dot: '#6B7280' },
 ]
 const factEstadoMeta = (e: string) => FACT_ESTADOS.find(x => x.key === e) || FACT_ESTADOS[0]
 
-function FacturacionAdmin({ solicitudes, reload, notify }: {
-  solicitudes: SolicitudFactura[]; reload: () => void; notify: (m: string, t?: 'ok' | 'err') => void
+function FacturacionAdmin({ solicitudes, reload, notify, cargando }: {
+  solicitudes: SolicitudFactura[]; reload: () => void; notify: Notify; cargando?: boolean
 }) {
   const [q, setQ] = useState('')
   const [filtro, setFiltro] = useState<'todas' | SolicitudFactura['estado']>('pendiente')
@@ -6594,6 +5658,11 @@ function FacturacionAdmin({ solicitudes, reload, notify }: {
     if (!t) return true
     return `${s.folio_origen} ${s.razon_social} ${s.rfc} ${s.uuid} ${s.concepto}`.toLowerCase().includes(t)
   })
+
+  // La bandeja se llena para siempre —cada venta y cada renta facturable deja
+  // su solicitud—, así que la tabla se pagina. Los contadores de arriba siguen
+  // contando sobre TODO, que es lo que se pregunta al abrir la sección.
+  const { enPantalla, ancla, props: pagProps } = usePaginado(filtradas, undefined, [q, filtro])
 
   const fechaCorta = (v?: string | null) => (v ? new Date(v).toLocaleDateString('es-MX', { day: '2-digit', month: 'short' }) : '—')
 
@@ -6613,37 +5682,39 @@ function FacturacionAdmin({ solicitudes, reload, notify }: {
   return (
     <div className="space-y-4">
       <KpiGrid
-        gridClassName="grid-cols-2 lg:grid-cols-4"
         items={[
-          { label: 'Pendientes de facturar', value: String(pendientes.length), tone: 'gold', emphasis: pendientes.length > 0 },
-          { label: 'Monto pendiente', value: orMoney(montoPend), tone: 'default' },
-          { label: 'Facturadas', value: String(facturadas.length), tone: 'default' },
-          { label: 'Monto facturado', value: orMoney(montoFact), tone: 'default' },
+          {
+            label: 'Pendientes', value: pendientes.length, tone: 'gold', emphasis: pendientes.length > 0,
+            helper: pendientes.length ? 'el cliente ya la pidió: falta timbrar' : 'nada esperando',
+            icon: <><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5M9 13h6M9 17h4" /></>,
+          },
+          { label: 'Monto pendiente', value: <Monto valor={montoPend} />, tone: 'default', helper: 'suma de lo que falta timbrar', icon: <><path d="M12 1v22" /><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" /></> },
+          { label: 'Facturadas', value: facturadas.length, tone: 'default', helper: 'ya timbradas y marcadas', icon: <><circle cx="12" cy="12" r="9" /><path d="m8.4 12 2.4 2.4 4.8-5" /></> },
+          { label: 'Monto facturado', value: <Monto valor={montoFact} />, tone: 'default', helper: 'en el periodo visible', icon: <><path d="M12 1v22" /><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" /></> },
         ]}
       />
 
-      <Card className="overflow-hidden">
-        <div className="flex items-center gap-3 p-4 border-b border-edge flex-wrap">
-          <h3 className="font-bold text-ink shrink-0">Por facturar <span className="text-mute font-normal">({filtradas.length})</span></h3>
-          <div className="flex-1" />
+      <Card ref={ancla} className="overflow-hidden scroll-mt-24">
+        <CardBarra titulo="Por facturar" cuenta={filtradas.length}>
           <div className="relative w-full sm:w-56">
-            <svg className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-mute pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><circle cx="9" cy="9" r="6" /><path d="M15 15l3 3" strokeLinecap="round" /></svg>
-            <input aria-label="Buscar RFC, cliente, folio" value={q} onChange={e => setQ(e.target.value)} placeholder="Buscar RFC, cliente, folio…" className="w-full bg-surface-2 border border-edge rounded-full pl-9 pr-3 py-2 text-sm text-ink placeholder-mute focus:outline-none focus:border-gold/50 transition-colors" />
+            <svg className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-mute pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><circle cx="9" cy="9" r="6" /><path d="M15 15l3 3" strokeLinecap="round" /></svg>
+            <input aria-label="Buscar RFC, cliente, folio" value={q} onChange={e => setQ(e.target.value)} placeholder="Buscar RFC, cliente, folio…" className="campo campo-sm pl-10" />
           </div>
           <button onClick={exportar} className="shrink-0 inline-flex items-center gap-2 px-4 py-2 rounded-full border border-edge text-ink text-sm font-semibold hover:bg-surface-2 transition-colors">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.8"><path d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14" strokeLinecap="round" strokeLinejoin="round" /></svg>
             <span className="hidden sm:inline">Exportar CSV</span>
           </button>
-        </div>
+        </CardBarra>
 
-        <div className="flex items-center gap-2 px-4 py-3 border-b border-edge flex-wrap">
-          {([['todas', 'Todas'], ...FACT_ESTADOS.map(e => [e.key, e.label] as const)] as const).map(([k, lbl]) => (
-            <button key={k} onClick={() => setFiltro(k as any)}
-              className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-colors ${filtro === k ? 'bg-ink text-surface' : 'bg-surface-2 text-mute hover:text-ink'}`}>
-              {lbl}{k !== 'todas' && <span className="ml-1.5 opacity-70">{solicitudes.filter(s => s.estado === k).length}</span>}
-            </button>
-          ))}
-        </div>
+        <FiltroChips
+          className="px-4 py-3 border-b border-edge"
+          valor={filtro}
+          onChange={(v: string) => setFiltro(v as any)}
+          opciones={[
+            { valor: 'todas', label: 'Todas', cuenta: solicitudes.length },
+            ...FACT_ESTADOS.map(e => ({ valor: e.key as string, label: e.label, cuenta: solicitudes.filter(s => s.estado === e.key).length })),
+          ]}
+        />
 
         <div className="overflow-x-auto">
           <table className="tabla-panel w-full min-w-[820px] text-left">
@@ -6658,8 +5729,8 @@ function FacturacionAdmin({ solicitudes, reload, notify }: {
               </tr>
             </thead>
             <tbody className="divide-y divide-edge">
-              {filtradas.map(s => {
-                const m = factEstadoMeta(s.estado)
+              {enPantalla.map(s => {
+  const m = factEstadoMeta(s.estado)
                 return (
                   <tr key={s.id} className="hover:bg-surface-2 transition-colors cursor-pointer" onClick={() => setDetalle(s)}>
                     <td className="px-5 py-3">
@@ -6693,8 +5764,17 @@ function FacturacionAdmin({ solicitudes, reload, notify }: {
               })}
             </tbody>
           </table>
-          {filtradas.length === 0 && <p className="text-sm text-mute py-14 text-center">{q || filtro !== 'todas' ? 'Sin solicitudes con ese criterio.' : 'No hay solicitudes de factura todavía.'}</p>}
+          {filtradas.length === 0 && (cargando ? <FilasEsqueleto filas={5} columnas={4} /> : (
+            <EstadoVacio
+              titulo={q || filtro !== 'todas' ? 'Sin solicitudes con ese criterio' : 'Nada por facturar'}
+              mensaje={q || filtro !== 'todas'
+                ? 'Cambia el filtro de arriba o borra la búsqueda.'
+                : 'Cuando un cliente pida factura de una venta o una renta, la solicitud aparece aquí para que la timbres.'}
+              icono={<><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5M9 13h6M9 17h4" /></>}
+            />
+          ))}
         </div>
+        <Paginador {...pagProps} nombre="solicitudes" />
       </Card>
 
       {detalle && <SolicitudFacturaModal solicitud={detalle} notify={notify} onClose={() => setDetalle(null)} onChanged={reload} />}
@@ -6703,7 +5783,7 @@ function FacturacionAdmin({ solicitudes, reload, notify }: {
 }
 
 function SolicitudFacturaModal({ solicitud, notify, onClose, onChanged }: {
-  solicitud: SolicitudFactura; notify: (m: string, t?: 'ok' | 'err') => void; onClose: () => void; onChanged: () => void
+  solicitud: SolicitudFactura; notify: Notify; onClose: () => void; onChanged: () => void
 }) {
   const [s, setS] = useState<SolicitudFactura>(solicitud)
   const [uuid, setUuid] = useState(solicitud.uuid || '')
@@ -6725,14 +5805,14 @@ function SolicitudFacturaModal({ solicitud, notify, onClose, onChanged }: {
     if (!uuid.trim()) { notify('Captura el folio fiscal (UUID)', 'err'); return }
     setBusy(true)
     api.post<SolicitudFactura>(`/facturacion/solicitudes/${s.id}/facturada/`, { uuid: uuid.trim(), notas: s.notas })
-      .then(r => { setS(r.data); notify('Marcada como facturada'); onChanged() })
+      .then(r => { setS(r.data); notify('Marcada como facturada · el cliente ya fue avisado', 'ok'); onChanged() })
       .catch(err => notify(err?.response?.data?.detalle || 'Error', 'err'))
       .finally(() => setBusy(false))
   }
   function reabrir() {
     setBusy(true)
     api.post<SolicitudFactura>(`/facturacion/solicitudes/${s.id}/reabrir/`, {})
-      .then(r => { setS(r.data); setUuid(''); notify('Regresada a pendiente'); onChanged() })
+      .then(r => { setS(r.data); setUuid(''); notify('Regresada a pendiente', 'neutro'); onChanged() })
       .catch(err => notify(err?.response?.data?.detalle || 'Error', 'err'))
       .finally(() => setBusy(false))
   }
@@ -6744,7 +5824,7 @@ function SolicitudFacturaModal({ solicitud, notify, onClose, onChanged }: {
       `Subtotal: ${s.subtotal}`, `IVA: ${s.iva}`, `Total: ${s.total}`,
       `Forma de pago: ${s.forma_pago}`, `Concepto: ${s.concepto}`,
     ].join('\n')
-    navigator.clipboard?.writeText(txt).then(() => notify('Datos copiados'), () => {})
+    navigator.clipboard?.writeText(txt).then(() => notify('Datos copiados', 'ok'), () => {})
   }
 
   const m = factEstadoMeta(s.estado)
@@ -6807,4039 +5887,20 @@ function SolicitudFacturaModal({ solicitud, notify, onClose, onChanged }: {
           ) : (
             <div>
               <label className={label}>Folio fiscal (UUID) — al timbrar en tu PAC</label>
-              <input aria-label="Folio fiscal (UUID) — al timbrar en tu PAC" className={`${input} font-mono`} value={uuid} onChange={e => setUuid(e.target.value)} placeholder="Ej. 3F2504E0-4F89-11D3-9A0C-0305E82C3301" />
+              <input aria-label="Folio fiscal (UUID)" className={`${input} font-mono`} value={uuid} onChange={e => setUuid(e.target.value)} placeholder="Ej. 3F2504E0-4F89-11D3-9A0C-0305E82C3301" />
+              <p className="text-[11px] text-mute mt-1.5">Al marcarla, al cliente le llega el aviso de que su compra ya está facturada.</p>
             </div>
           )}
+
         </div>
 
         <div className="px-6 py-4 border-t border-edge flex gap-3 shrink-0">
           <button onClick={onClose} className="flex-1 py-2.5 rounded-full border border-edge text-ink text-sm font-semibold hover:bg-surface-2 transition-colors">Cerrar</button>
           {facturada
-            ? <button onClick={reabrir} disabled={busy} className="flex-1 py-2.5 rounded-full border border-amber-500/40 text-amber-600 text-sm font-semibold hover:bg-amber-500/10 transition-colors disabled:opacity-50">Reabrir</button>
-            : <button onClick={marcarFacturada} disabled={busy} className="flex-1 py-2.5 rounded-full bg-gold text-black text-sm font-bold hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center justify-center gap-2">{busy ? <span className="w-4 h-4 border-2 border-black/30 border-t-black rounded-full animate-spin" /> : null}Marcar facturada</button>}
+            ? <button onClick={reabrir} disabled={busy} className="flex-1 py-2.5 rounded-full border border-amber-500/40 text-taller-ink text-sm font-semibold hover:bg-amber-500/10 transition-colors disabled:opacity-50">Reabrir</button>
+            : <button onClick={marcarFacturada} disabled={busy} className="flex-1 py-2.5 rounded-full bg-gold text-black text-sm font-bold hover:opacity-90 transition-opacity disabled:opacity-50">Marcar facturada</button>}
         </div>
       </div>
     </Modal>
-  )
-}
-
-/* ════════════════════════════════════════
-   COTIZACIONES — presupuestos para clientes
-════════════════════════════════════════ */
-const COT_ESTADOS: { key: Cotizacion['estado']; label: string; cls: string; dot: string }[] = [
-  { key: 'borrador', label: 'Borrador', cls: 'bg-surface-2 text-mute', dot: '#6B7280' },
-  { key: 'enviada', label: 'Enviada', cls: 'bg-blue-500/10 text-blue-500', dot: '#2B5FAD' },
-  { key: 'aceptada', label: 'Aceptada', cls: 'bg-emerald-500/10 text-emerald-600', dot: '#1F7A4D' },
-  { key: 'rechazada', label: 'Rechazada', cls: 'bg-red-500/10 text-red-500', dot: '#B91C1C' },
-  { key: 'cancelada', label: 'Cancelada', cls: 'bg-red-500/10 text-red-500', dot: '#7F1D1D' },
-]
-const cotEstadoMeta = (e: string) => COT_ESTADOS.find(x => x.key === e) || COT_ESTADOS[0]
-
-type CotStats = { total: number; borrador: number; enviada: number; aceptada: number; rechazada: number; vencida: number; abiertas: number; monto_aceptado: string }
-type PaginaCot = { count: number; next: string | null; previous: string | null; results: Cotizacion[] }
-const COT_PAGE_SIZE = 25
-
-/** Lista de cotizaciones: paginada y filtrada EN EL SERVIDOR, para que aguante
- *  miles sin cargar todo al navegador. Los conteos vienen del endpoint de stats. */
-/* Puente cotización→renta: la cotización aceptada que se está concretando.
-   Vive a nivel módulo para no enhebrar props por medio panel; el RentModal
-   la lee al montar y la limpia al registrar. */
-type CotParaRenta = { id: number; folio: string | null; cliente: string; telefono: string; direccion: string; usuario_id: number | null; modalidad?: 'dia' | 'semana' | 'mes' | null; duracion?: number | null; equipo_id?: number | null; equipo_nombre?: string | null }
-let cotParaRenta: CotParaRenta | null = null
-/* Qué renta abrir al aterrizar en la sección. Mismo patrón que el puente de
-   cotización→renta: sessionStorage para que sobreviva al cambio de sección sin
-   meter la navegación en el estado global. */
-const RENTA_ABRIR_KEY = 'remali_renta_abrir'
-export function fijarRentaAAbrir(id: number | null) {
-  llegaDeTraspaso = id !== null
-  try { id ? sessionStorage.setItem(RENTA_ABRIR_KEY, String(id)) : sessionStorage.removeItem(RENTA_ABRIR_KEY) } catch { /* privado */ }
-}
-/* Si la renta se abre por un traspaso, su modal entra desde la derecha (el otro
-   extremo del mismo movimiento). Abierta a mano desde la lista, entra centrada
-   como cualquier otro modal: no venías de ningún lado. */
-let llegaDeTraspaso = false
-
-function tomarRentaAAbrir(): number | null {
-  try {
-    const v = sessionStorage.getItem(RENTA_ABRIR_KEY)
-    if (v) sessionStorage.removeItem(RENTA_ABRIR_KEY)   // de un solo uso
-    return v ? Number(v) : null
-  } catch { return null }
-}
-
-/* La renta pedida desde otra pantalla, ya en vuelo. Se dispara al hacer clic —no
-   al montar la sección—, así la red corre DEBAJO de la animación de salida en vez
-   de después: al aterrizar, la renta suele estar lista y el viaje se lee como un
-   solo gesto en vez de tres cortes. */
-let rentaEnVuelo: { id: number; promesa: Promise<RentaFull | null> } | null = null
-function pedirRenta(id: number) {
-  rentaEnVuelo = {
-    id,
-    promesa: api.get<{ rentas: RentaFull[] }>('/rentas/?estado=todas')
-      .then(r => (r.data?.rentas || []).find(x => x.id === id) ?? null)
-      .catch(() => null),
-  }
-}
-function tomarRentaEnVuelo(id: number) {
-  const v = rentaEnVuelo && rentaEnVuelo.id === id ? rentaEnVuelo.promesa : null
-  rentaEnVuelo = null
-  return v
-}
-
-const COT_RENTA_KEY = 'remali_cot_para_renta'
-function leerCotParaRenta(): CotParaRenta | null {
-  if (cotParaRenta) return cotParaRenta
-  try { cotParaRenta = JSON.parse(sessionStorage.getItem(COT_RENTA_KEY) || 'null') } catch { cotParaRenta = null }
-  return cotParaRenta
-}
-function fijarCotParaRenta(v: CotParaRenta | null) {
-  cotParaRenta = v
-  try { v ? sessionStorage.setItem(COT_RENTA_KEY, JSON.stringify(v)) : sessionStorage.removeItem(COT_RENTA_KEY) } catch { /* privado */ }
-}
-
-function CotizacionesAdmin({ empresas, notify, irAInventario, irARentas }: {
-  empresas: Empresa[]; notify: (m: string, t?: 'ok' | 'err' | 'info') => void; irAInventario?: () => void
-  irARentas?: (rentaId: number) => void
-}) {
-  const [q, setQ] = useState('')
-  const [qDebounced, setQDebounced] = useState('')
-  const [filtro, setFiltro] = useState<'todas' | 'vencida' | Cotizacion['estado']>('todas')
-  const [anio, setAnio] = useState<number>(new Date().getFullYear())
-  const [mes, setMes] = useState<number>(0)
-  const [page, setPage] = useState(1)
-  const [data, setData] = useState<PaginaCot>({ count: 0, next: null, previous: null, results: [] })
-  const [stats, setStats] = useState<CotStats | null>(null)
-  const [cargando, setCargando] = useState(false)
-  const [detalle, setDetalle] = useState<Cotizacion | null>(null)
-  const [recienCreada, setRecienCreada] = useState(false)
-  const [creando, setCreando] = useState(false)
-  const [carta, setCarta] = useState<Cotizacion | null>(null)
-
-  const cargarStats = useCallback(() => {
-    const params = new URLSearchParams({ anio: String(anio) })
-    if (mes) params.set('mes', String(mes))
-    api.get<CotStats>(`/cotizaciones/stats/?${params.toString()}`).then(r => setStats(r.data)).catch(() => {})
-  }, [anio, mes])
-  const cargarLista = useCallback(() => {
-    setCargando(true)
-    const params = new URLSearchParams({ page: String(page), anio: String(anio) })
-    if (mes) params.set('mes', String(mes))
-    if (qDebounced.trim()) params.set('q', qDebounced.trim())
-    if (filtro !== 'todas') params.set('estado', filtro)
-    api.get<PaginaCot>(`/cotizaciones/?${params.toString()}`)
-      .then(r => setData(r.data)).catch(() => {}).finally(() => setCargando(false))
-  }, [page, qDebounced, filtro, anio, mes])
-  const recargar = useCallback(() => { cargarLista(); cargarStats() }, [cargarLista, cargarStats])
-
-  // Búsqueda con debounce: al teclear se espera un poco y se vuelve a la página 1.
-  useEffect(() => {
-    const t = setTimeout(() => { setQDebounced(q); setPage(1) }, 350)
-    return () => clearTimeout(t)
-  }, [q])
-  useEffect(() => { setPage(1) }, [filtro, anio, mes])  // cambiar de pestaña/periodo → página 1
-  useEffect(() => { cargarLista() }, [cargarLista])   // montaje + cambios de página/búsqueda/filtro
-  useEffect(() => { cargarStats() }, [cargarStats])   // conteos al montar
-
-  function crearNueva() {
-    setCreando(true)
-    api.post<Cotizacion>('/cotizaciones/', { tipo: 'venta', aplica_iva: true, vigencia_dias: 15 })
-      .then(r => { setRecienCreada(true); setDetalle(r.data) })
-      .catch(err => notify(err?.response?.data?.detalle || 'No se pudo crear', 'err'))
-      .finally(() => setCreando(false))
-  }
-
-  const fechaCorta = (v?: string | null) => (v ? new Date(v).toLocaleDateString('es-MX', { day: '2-digit', month: 'short' }) : '—')
-  const totalPaginas = Math.max(1, Math.ceil(data.count / COT_PAGE_SIZE))
-  const cuenta = (k: string): number | undefined => (stats ? (stats as any)[k] : undefined)
-  const pestanas: { key: string; label: string; n?: number }[] = [
-    { key: 'todas', label: 'Todas', n: stats?.total },
-    ...COT_ESTADOS.map(e => ({ key: e.key, label: e.label, n: cuenta(e.key) })),
-    { key: 'vencida', label: 'Vencidas', n: stats?.vencida },
-  ]
-
-  return (
-    <div className="space-y-4">
-      <KpiGrid
-        gridClassName="grid-cols-2 lg:grid-cols-4"
-        items={[
-          { label: 'Cotizaciones', value: stats ? String(stats.total) : '—', tone: 'default' },
-          { label: 'Abiertas', value: stats ? String(stats.abiertas) : '—', tone: 'gold', emphasis: (stats?.abiertas ?? 0) > 0 },
-          { label: 'Aceptadas', value: stats ? String(stats.aceptada) : '—', tone: 'default' },
-          { label: 'Monto aceptado', value: orMoney(stats?.monto_aceptado ?? 0), tone: 'default' },
-        ]}
-      />
-
-      <Card className="overflow-hidden">
-        <div className="flex items-center gap-3 p-4 border-b border-edge flex-wrap">
-          <h3 className="font-bold text-ink shrink-0">Cotizaciones <span className="text-mute font-normal">({data.count})</span></h3>
-          <div className="flex-1" />
-          <SelectorPeriodo anio={anio} mes={mes} onAnio={setAnio} onMes={setMes} />
-          <div className="relative w-full sm:w-56">
-            <svg className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-mute pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><circle cx="9" cy="9" r="6" /><path d="M15 15l3 3" strokeLinecap="round" /></svg>
-            <input aria-label="Buscar folio o cliente" value={q} onChange={e => setQ(e.target.value)} placeholder="Buscar folio o cliente…" className="w-full bg-surface-2 border border-edge rounded-full pl-9 pr-3 py-2 text-sm text-ink placeholder-mute focus:outline-none focus:border-gold/50 transition-colors" />
-          </div>
-          <button onClick={crearNueva} disabled={creando} className="shrink-0 inline-flex items-center gap-2 px-4 py-2 rounded-full bg-gold text-black text-sm font-bold hover:opacity-90 transition active:scale-[0.98] disabled:opacity-60">
-            {creando
-              ? <span className="w-4 h-4 border-2 border-black/30 border-t-black rounded-full animate-spin" />
-              : <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.2"><path strokeLinecap="round" d="M12 5v14M5 12h14" /></svg>}
-            <span className="hidden sm:inline">Nueva cotización</span>
-          </button>
-        </div>
-
-        <div className="flex items-center gap-2 px-4 py-3 border-b border-edge flex-wrap">
-          {pestanas.map(p => (
-            <button key={p.key} onClick={() => setFiltro(p.key as any)}
-              className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-colors ${filtro === p.key
-                ? (p.key === 'vencida' ? 'bg-red-600 text-white' : 'bg-ink text-surface')
-                : 'bg-surface-2 text-mute hover:text-ink'}`}>
-              {p.label}{p.n !== undefined && <span className="ml-1.5 opacity-70">{p.n}</span>}
-            </button>
-          ))}
-        </div>
-
-        <div className="overflow-x-auto">
-          <table className="tabla-panel w-full min-w-[820px] text-left">
-            <thead>
-              <tr className="text-[10px] uppercase tracking-wider text-mute border-b border-edge">
-                <th className="font-semibold px-5 py-3">Folio</th>
-                <th className="font-semibold px-3 py-3">Cliente</th>
-                <th className="font-semibold px-3 py-3">Tipo</th>
-                <th className="font-semibold px-3 py-3 text-right">Total</th>
-                <th className="font-semibold px-3 py-3">Vigencia</th>
-                <th className="font-semibold px-3 py-3">Estado</th>
-                <th className="font-semibold px-5 py-3 text-right">Acciones</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-edge">
-              {data.results.map(c => {
-                const m = cotEstadoMeta(c.estado)
-                return (
-                  <tr key={c.id} className="hover:bg-surface-2 transition-colors cursor-pointer" onClick={() => setDetalle(c)}>
-                    <td className="px-5 py-3 font-mono text-[13px] font-bold text-ink whitespace-nowrap">{c.folio || <span className="text-mute font-sans font-semibold">Borrador</span>}</td>
-                    <td data-col="Cliente" className="px-3 py-3">
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <p className="text-sm font-semibold text-ink">{c.cliente_display}</p>
-                          {c.origen === 'cliente' && <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-600">Cliente</span>}
-                        </div>
-                        {c.cliente_telefono && <p className="text-[11px] text-mute">{c.cliente_telefono}</p>}
-                      </div>
-                    </td>
-                    <td data-col="Tipo" className="px-3 py-3 text-[13px] text-mute"><span>{TIPO_COT_LABEL[c.tipo] || c.tipo}</span></td>
-                    <td data-col="Total" className="px-3 py-3 text-sm font-bold text-price text-right whitespace-nowrap"><span>{orMoney(c.total)}</span></td>
-                    <td data-col="Vigencia" className={`px-3 py-3 text-[13px] whitespace-nowrap ${c.vencida ? 'text-red-600 dark:text-red-500 font-semibold' : 'text-mute'}`}><span>{fechaCorta(c.vigencia_hasta)}</span></td>
-                    <td data-col="Estado" className="px-3 py-3">
-                      <div className="flex items-center gap-1.5">
-                        <span className={`inline-flex items-center gap-1.5 text-[11px] font-bold px-2 py-0.5 rounded-full ${m.cls}`}><span className="w-1.5 h-1.5 rounded-full" style={{ background: m.dot }} />{m.label}</span>
-                        {c.vencida && <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-red-500/10 text-red-600 dark:text-red-500">Vencida</span>}
-                      </div>
-                    </td>
-                    <td className="px-5 py-3 text-right" onClick={e => e.stopPropagation()}>
-                      <div className="flex flex-wrap items-center justify-end gap-2">
-                        <button onClick={() => setDetalle(c)} className="h-8 px-3 rounded-lg border border-edge text-mute text-xs font-semibold hover:text-ink hover:border-gold/40 transition-colors">Abrir</button>
-                        <button onClick={() => setCarta(c)} title="Imprimir cotización" className="w-8 h-8 rounded-lg border border-edge text-mute hover:text-gold-ink hover:border-gold/40 transition-colors flex items-center justify-center">
-                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.7"><path d="M6 9V4h12v5M6 18H4v-6a2 2 0 012-2h12a2 2 0 012 2v6h-2M8 14h8v6H8z" /></svg>
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-          {data.results.length === 0 && <p className="text-sm text-mute py-14 text-center">{cargando ? 'Cargando…' : (qDebounced || filtro !== 'todas' ? 'Sin cotizaciones con ese criterio.' : 'Aún no hay cotizaciones. Crea la primera con “Nueva cotización”.')}</p>}
-        </div>
-
-        {data.count > COT_PAGE_SIZE && (
-          <div className="flex items-center justify-between gap-3 px-4 py-3 border-t border-edge">
-            <span className="text-[12px] text-mute">Página {page} de {totalPaginas} · {data.count} en total</span>
-            <div className="flex gap-2">
-              <button disabled={!data.previous || cargando} onClick={() => setPage(p => Math.max(1, p - 1))} className="px-3 py-1.5 rounded-lg border border-edge text-xs font-semibold text-ink hover:bg-surface-2 transition active:scale-[0.98] disabled:opacity-40">Anterior</button>
-              <button disabled={!data.next || cargando} onClick={() => setPage(p => p + 1)} className="px-3 py-1.5 rounded-lg border border-edge text-xs font-semibold text-ink hover:bg-surface-2 transition active:scale-[0.98] disabled:opacity-40">Siguiente</button>
-            </div>
-          </div>
-        )}
-      </Card>
-
-      {detalle && <CotizacionDetalleModal cotizacion={detalle} empresas={empresas} recienCreada={recienCreada} notify={notify} onConcretarRenta={irAInventario} onVerRenta={irARentas} onClose={() => { setDetalle(null); setRecienCreada(false); recargar() }} onChanged={recargar} onPrint={(c) => setCarta(c)} onConvertida={(id) => { setDetalle(null); setRecienCreada(false); recargar(); abrirOrdenCartaPDF('ventas', id) }} />}
-      {carta && <CotizacionCartaModal cotizacion={carta} onClose={() => setCarta(null)} />}
-    </div>
-  )
-}
-
-/** Control segmentado con indicador deslizante (estilo iOS). Columnas iguales
- *  para posicionar el indicador por índice sin medir el DOM; anima al cambiar. */
-function Segmentado({ opciones, valor, onChange, disabled, className = '' }: {
-  opciones: { key: string; label: string }[]
-  valor: string; onChange: (k: string) => void; disabled?: boolean; className?: string
-}) {
-  const idx = opciones.findIndex(o => o.key === valor)
-  return (
-    <div className={`relative grid w-full rounded-xl border border-edge bg-surface-2 p-1 ${disabled ? 'opacity-60' : ''} ${className}`}
-      style={{ gridTemplateColumns: `repeat(${opciones.length}, minmax(0, 1fr))` }}>
-      {idx >= 0 && (
-        <span aria-hidden className="absolute top-1 bottom-1 rounded-lg bg-ink shadow-sm"
-          style={{ left: 4, width: `calc((100% - 8px) / ${opciones.length})`, transform: `translateX(${idx * 100}%)`, transition: 'transform 180ms cubic-bezier(0.23, 1, 0.32, 1)' }} />
-      )}
-      {opciones.map(o => (
-        <button key={o.key} type="button" disabled={disabled} onClick={() => onChange(o.key)}
-          className={`relative z-10 px-4 py-1.5 rounded-lg text-[13px] font-semibold transition-colors active:scale-[0.98] disabled:active:scale-100 ${valor === o.key ? 'text-surface' : 'text-mute hover:text-ink'}`}>
-          {o.label}
-        </button>
-      ))}
-    </div>
-  )
-}
-
-/** Switch (toggle) con el mismo estilo que el resto del sistema: pista azul y
- *  perilla que desliza. Mejor objetivo de toque en móvil que un checkbox. */
-function Switch({ checked, onChange, disabled, label }: {
-  checked: boolean; onChange: (v: boolean) => void; disabled?: boolean; label?: string
-}) {
-  return (
-    <button type="button" role="switch" aria-checked={checked} aria-label={label} disabled={disabled}
-      onClick={() => onChange(!checked)}
-      className={`relative w-10 h-[22px] rounded-full flex-none transition-colors active:scale-95 disabled:opacity-50 ${checked ? 'bg-[#2B6CF6]' : 'bg-ink/15'}`}>
-      <span className={`absolute top-[2px] w-[18px] h-[18px] rounded-full bg-white shadow-[0_1px_2px_rgba(0,0,0,0.2)] transition-all ${checked ? 'left-[20px]' : 'left-[2px]'}`} />
-    </button>
-  )
-}
-
-function CotizacionDetalleModal({ cotizacion, empresas, recienCreada, notify, onClose, onChanged, onPrint, onConvertida, onConcretarRenta, onVerRenta }: {
-  cotizacion: Cotizacion; empresas: Empresa[]; recienCreada?: boolean; notify: (m: string, t?: 'ok' | 'err' | 'info') => void
-  onClose: () => void; onChanged: () => void; onPrint: (c: Cotizacion) => void; onConvertida: (ventaId: number) => void; onConcretarRenta?: () => void; onVerRenta?: (rentaId: number) => void
-}) {
-  // Vincular/cambiar la cuenta de la tienda dueña de esta cotización.
-  async function vincularCuentaCot() {
-    if (c.items.length === 0) { notify('Agrega partidas antes de vincular a una cuenta', 'err'); return }
-    try {
-      const rc = await api.get<{ clientes: { id: number; nombre: string; empresa?: string }[] }>('/clientes-lookup/')
-      const lista = rc.data.clientes || []
-      if (!lista.length) { await confirmar({ titulo: 'Sin cuentas', mensaje: 'Aún no hay cuentas de cliente en el sistema.', aceptar: 'Entendido' }); return }
-      const sel = await elegir({
-        titulo: 'Vincular a una cuenta',
-        mensaje: 'El cliente verá esta cotización en "Mis cotizaciones" y podrá aceptarla.',
-        opciones: lista.map(cl => ({ valor: String(cl.id), label: cl.nombre, detalle: cl.empresa || undefined })),
-      })
-      if (!sel || !sel[0]) return
-      await api.post(`/cotizaciones/${cotizacion.id}/vincular/`, { usuario_id: Number(sel[0]) })
-      notify('Cotización vinculada a la cuenta')
-      onChanged()
-    } catch { notify('No se pudo vincular', 'err') }
-  }
-
-  /* Vincular por LIGA (lo que escala con cientos de clientes): se genera un
-     enlace de un solo uso, se manda por WhatsApp, y al abrirlo con su sesión
-     la cotización cae en SU cuenta — sin buscar en ningún selector. */
-  const [ligaVinculo, setLigaVinculo] = useState('')
-  const [ligaCopiada, setLigaCopiada] = useState(false)
-  const [generandoLiga, setGenerandoLiga] = useState(false)
-  async function generarLigaVinculo() {
-    if (!cotizacion.id || c.items.length === 0) { notify('Agrega partidas antes de generar la liga: vincular una cotización vacía no sirve de nada', 'err'); return }
-    if (ligaVinculo || generandoLiga) return
-    setGenerandoLiga(true)
-    try {
-      const r = await api.post<{ ruta: string }>(`/cotizaciones/${cotizacion.id}/vinculo/`, {}, { fondo: true } as never)
-      setLigaVinculo(`${window.location.origin}${r.data.ruta}`)
-    } catch (e: any) {
-      notify(e?.response?.data?.detalle || 'No se pudo generar la liga', 'err')
-    } finally { setGenerandoLiga(false) }
-  }
-  async function copiarLigaVinculo() {
-    try {
-      await navigator.clipboard.writeText(ligaVinculo)
-      setLigaCopiada(true)
-      setTimeout(() => setLigaCopiada(false), 1800)
-    } catch { notify('No se pudo copiar; selecciona el texto a mano', 'err') }
-  }
-  function waVinculo() {
-    const msg = `Hola${clienteNombre ? ' ' + clienteNombre : ''}, te preparé la cotización ${c.folio}. Ábrela con tu cuenta para verla en "Mis cotizaciones" y aceptarla cuando gustes:\n${ligaVinculo}`
-    const tel = (clienteTel || '').replace(/\D/g, '')
-    return `https://wa.me/${tel.length === 10 ? '52' + tel : tel}?text=${encodeURIComponent(msg)}`
-  }
-  const [c, setC] = useState<Cotizacion>(cotizacion)
-  const [notas, setNotas] = useState(cotizacion.notas || '')
-  const [email, setEmail] = useState(cotizacion.cliente_email || '')
-  const [clienteNombre, setClienteNombre] = useState(cotizacion.cliente_nombre || '')
-  const [clienteTel, setClienteTel] = useState(cotizacion.cliente_telefono || '')
-  const [empresaSel, setEmpresaSel] = useState(String(cotizacion.empresa || ''))
-  // Sobre pedido: si la cotización es de VENTA y su equipo no tiene stock, "convertir"
-  // no crea una venta sino un PEDIDO con anticipo (la unidad se asigna cuando llega).
-  const [sinStock, setSinStock] = useState<boolean | null>(null)
-  const [pedidoDesde, setPedidoDesde] = useState<PedidoDesde | null>(null)
-  const itemVenta = c.items.find(i => i.modalidad === 'venta' && i.equipo)
-  useEffect(() => {
-    let cancel = false
-    const eqs = Array.from(new Set(c.items.filter(i => i.modalidad === 'venta' && i.equipo).map(i => i.equipo as number)))
-    if (c.tipo === 'renta' || eqs.length === 0) { setSinStock(false); return }
-    ;(async () => {
-      try {
-        for (const eq of eqs) {
-          const r = await api.get<Unidad[]>(`/equipos/${eq}/unidades/`, { fondo: true } as never)
-          if ((r.data || []).some(u => u.estado === 'disponible')) { if (!cancel) setSinStock(false); return }
-        }
-        if (!cancel) setSinStock(true)
-      } catch { if (!cancel) setSinStock(false) }
-    })()
-    return () => { cancel = true }
-  }, [c.id, c.tipo, c.items.length])   // eslint-disable-line react-hooks/exhaustive-deps
-  const [vigencia, setVigencia] = useState(String(cotizacion.vigencia_dias || 15))
-  const [aplicaIva, setAplicaIva] = useState(cotizacion.aplica_iva)
-  const [savingInfo, setSavingInfo] = useState(false)
-  const [busy, setBusy] = useState(false)
-  const [fotos, setFotos] = useState<CotizacionFoto[]>(cotizacion.fotos || [])
-  const [subiendoFotos, setSubiendoFotos] = useState(false)
-  const [zoomFoto, setZoomFoto] = useState<CotizacionFoto | null>(null)
-  const [enviando, setEnviando] = useState(false)
-  const fotoInput = useRef<HTMLInputElement>(null)
-
-  function apply(nuevo: Cotizacion) { setC(nuevo); onChanged() }
-
-  // Cierre: si es un borrador recién creado y quedó vacío (sin partidas, sin
-  // cliente ni fotos), se descarta para no dejar cotizaciones huérfanas.
-  async function cerrar() {
-    // Una cotización sin cliente o sin conceptos no tiene sentido: un borrador
-    // recién creado así NO se conserva. Con datos parciales se pregunta antes de
-    // descartar; totalmente vacío se descarta en silencio.
-    if (recienCreada) {
-      const sinCliente = !clienteNombre.trim() && !empresaSel
-      const sinConceptos = c.items.length === 0
-      if (sinCliente || sinConceptos) {
-        const algo = clienteNombre.trim() || empresaSel || c.items.length > 0 || fotos.length > 0
-        const faltan = [sinCliente && 'el nombre del cliente', sinConceptos && 'al menos un concepto'].filter(Boolean).join(' y ')
-        if (algo && !await confirmar({ titulo: '¿Descartar la cotización?', mensaje: `No se puede guardar sin ${faltan}.`, aceptar: 'Descartar', cancelar: 'Seguir editando', tono: 'peligro' })) return
-        api.delete(`/cotizaciones/${c.id}/`).then(() => onChanged()).catch(() => {})
-        onClose()
-        return
-      }
-    }
-    if (!bloqueada) {
-      // Guardar en silencio los datos del cliente/notas/vigencia si cambiaron,
-      // para no perderlos al cerrar sin haber pulsado "Guardar".
-      const dirty = notas !== (c.notas || '') || email.trim() !== (c.cliente_email || '')
-        || clienteNombre.trim() !== (c.cliente_nombre || '') || clienteTel.trim() !== (c.cliente_telefono || '')
-        || (Number(vigencia) || 15) !== c.vigencia_dias || aplicaIva !== c.aplica_iva
-      if (dirty) {
-        api.patch(`/cotizaciones/${c.id}/`, {
-          notas, cliente_email: email.trim(), cliente_nombre: clienteNombre.trim(), cliente_telefono: clienteTel.trim(),
-          vigencia_dias: Number(vigencia) || 15, aplica_iva: aplicaIva,
-        }).then(() => onChanged()).catch(() => {})
-      }
-    }
-    onClose()
-  }
-  // Tipo de la cotización: solo se elige mientras está vacía; con partidas se
-  // deriva de sus modalidades (venta/renta/mixta).
-  function cambiarTipo(tipo: string) {
-    api.patch<Cotizacion>(`/cotizaciones/${c.id}/`, { tipo })
-      .then(r => apply(r.data))
-      .catch(err => notify(errorMsg(err, 'No se pudo cambiar el tipo'), 'err'))
-  }
-  function cambiarEmpresa(id: string) {
-    setEmpresaSel(id)
-    const em = empresas.find(x => String(x.id) === id)
-    const payload: any = { empresa: id ? Number(id) : null }
-    // Al elegir una empresa, el cliente ES la empresa: se rellenan sus datos y el
-    // nombre queda bloqueado (no se captura otro). El teléfono va solo a dígitos.
-    if (em) {
-      const tel = (em.telefono || '').replace(/\D/g, '').slice(0, 10)
-      setClienteNombre(em.nombre || ''); payload.cliente_nombre = em.nombre || ''
-      setClienteTel(tel); payload.cliente_telefono = tel
-      if (em.email) { setEmail(em.email); payload.cliente_email = em.email }
-    }
-    api.patch<Cotizacion>(`/cotizaciones/${c.id}/`, payload)
-      .then(r => apply(r.data))
-      .catch(err => notify(errorMsg(err, 'No se pudo asignar la empresa'), 'err'))
-  }
-
-  function guardarInfo() {
-    // Un borrador nuevo no se guarda incompleto (sin cliente o sin conceptos).
-    if (recienCreada && (!(clienteNombre.trim() || empresaSel) || c.items.length === 0)) {
-      notify('Agrega el nombre del cliente y al menos un concepto', 'err'); return
-    }
-    setSavingInfo(true)
-    api.patch<Cotizacion>(`/cotizaciones/${c.id}/`, {
-      notas, cliente_email: email.trim(), cliente_nombre: clienteNombre.trim(), cliente_telefono: clienteTel.trim(),
-      vigencia_dias: Number(vigencia) || 15, aplica_iva: aplicaIva,
-    })
-      .then(r => { apply(r.data); notify('Cotización guardada'); onClose() })
-      .catch(() => notify('No se pudo guardar', 'err'))
-      .finally(() => setSavingInfo(false))
-  }
-  function cambiarEstado(estado: Cotizacion['estado'], extra?: Record<string, unknown>) {
-    // Para marcarla como Enviada o Aceptada debe tener cliente y conceptos.
-    if ((estado === 'enviada' || estado === 'aceptada') && (!(clienteNombre.trim() || empresaSel) || c.items.length === 0)) {
-      notify('Agrega el nombre del cliente y al menos un concepto primero', 'err'); return
-    }
-    api.patch<Cotizacion>(`/cotizaciones/${c.id}/`, { estado, ...(extra || {}) })
-      .then(r => {
-        apply(r.data)
-        notify(`Estado: ${cotEstadoMeta(estado).label}`)
-        // El siguiente paso natural: comprometer fecha y hora de entrega.
-        if (estado === 'aceptada' && !r.data.entrega_prometida) notify('Ahora indica la fecha y hora de entrega prometida', 'info')
-      })
-      .catch(async err => {
-        // Venció: los precios ya no están garantizados. Respetarlos es una
-        // decisión humana — se confirma y se reintenta con la marca.
-        if (err?.response?.data?.codigo === 'vencida') {
-          const ok = await confirmar({
-            titulo: 'Cotización vencida',
-            mensaje: `${err.response.data.detalle} ¿Aceptarla respetando esos precios?`,
-            aceptar: 'Sí, respetar precios',
-            cancelar: 'Mejor no',
-          })
-          if (ok) cambiarEstado(estado, { confirmar_vencida: true })
-          return
-        }
-        notify(err?.response?.data?.detalle || 'No se pudo cambiar el estado', 'err')
-      })
-  }
-  /* Concretar la RENTA de una cotización aceptada: se cuelga la cotización
-     al puente y se manda al admin a Inventario a elegir la unidad; el
-     RentModal llega precargado y liga la renta a esta cotización. */
-  function concretarRenta() {
-    // La partida de renta dice QUÉ equipo pidió el cliente, en qué modalidad y
-    // cuántos periodos: todo se precarga para que el admin caiga en las unidades
-    // de ESE equipo y solo tenga que elegir cuál y tocar Rentar.
-    const partida = c.items.find(i => i.modalidad === 'dia' || i.modalidad === 'semana' || i.modalidad === 'mes')
-    fijarCotParaRenta({
-      id: c.id, folio: c.folio,
-      cliente: clienteNombre || c.cliente_display || '',
-      telefono: clienteTel || c.cliente_telefono || '',
-      direccion: c.datos_solicitud?.obra?.direccion || '',
-      usuario_id: c.usuario ?? null,
-      modalidad: (partida?.modalidad as 'dia' | 'semana' | 'mes' | undefined) || null,
-      duracion: partida?.duracion || null,
-      equipo_id: partida?.equipo ?? null,
-      // El nombre del equipo va limpio (la descripción trae " · renta por día").
-      equipo_nombre: partida ? partida.descripcion.split(' · ')[0].split(' (promo')[0] : null,
-    })
-    notify(partida?.equipo
-      ? `El cliente pidió ${partida.descripcion.split(' · ')[0]}: elige la unidad y tócale Rentar`
-      : `Elige la unidad y tócale Rentar: quedará ligada a la ${c.folio || 'cotización'}`, 'info')
-    onClose()
-    onConcretarRenta?.()
-  }
-
-  function aprobarCancelacion() {
-    api.post(`/cotizaciones/${c.id}/aprobar-cancelacion/`, {})
-      .then(() => { notify('Cancelación aprobada'); onChanged() })
-      .catch(err => notify(err?.response?.data?.detalle || 'No se pudo aprobar', 'err'))
-  }
-  // Entrega prometida: editable en cualquier momento; el cliente la ve al recargar.
-  function guardarEntrega(v: string) {
-    const iso = v ? new Date(v).toISOString() : null
-    api.patch<Cotizacion>(`/cotizaciones/${c.id}/`, { entrega_prometida: iso })
-      .then(r => { apply(r.data); notify(iso ? 'Entrega prometida guardada' : 'Entrega prometida quitada') })
-      .catch(() => notify('No se pudo guardar la entrega', 'err'))
-  }
-  function atender() {
-    api.post<{ cotizacion: Cotizacion }>(`/cotizaciones/${c.id}/atender/`, {})
-      .then(r => { apply(r.data.cotizacion); notify('La estás atendiendo') })
-      .catch(err => notify(err?.response?.data?.detalle || 'No se pudo tomar', 'err'))
-  }
-  // "+ Agregar partida": del CATÁLOGO (el servidor pone el precio de la web,
-  // con su promo) o LIBRE (flete, operador, un servicio — a mano).
-  async function agregarItem() {
-    setBusy(true)
-    try {
-      type EqMin = { id: number; modelo: string; precio_venta?: string | number | null; precio_dia?: string | number | null; precio_semana?: string | number | null; precio_mes?: string | number | null }
-      const r = await api.get<EqMin[]>('/equipos/', { fondo: true } as never)
-      const eqs = Array.isArray(r.data) ? r.data : []
-      const hint = (e: EqMin) => {
-        const partes: string[] = []
-        if (Number(e.precio_venta)) partes.push(`Venta ${orMoney(Number(e.precio_venta))}`)
-        if (Number(e.precio_dia)) partes.push(`Día ${orMoney(Number(e.precio_dia))}`)
-        else if (Number(e.precio_semana)) partes.push(`Semana ${orMoney(Number(e.precio_semana))}`)
-        return partes.join(' · ') || 'Sin precio en la web'
-      }
-      const sel = await elegir({
-        titulo: 'Agregar partida',
-        mensaje: 'Del catálogo se cotiza con el precio de la web; la partida libre es para conceptos a mano.',
-        opciones: [
-          ...eqs.map(e => ({ valor: String(e.id), label: e.modelo, detalle: hint(e) })),
-          { valor: 'proveedor', label: 'Máquina bajo pedido (proveedor)', detalle: 'No está en tu inventario · siempre venta' },
-          { valor: 'libre', label: 'Partida libre', detalle: 'Concepto y precio a mano (flete, operador…)' },
-        ],
-      })
-      if (!sel || !sel[0]) return
-      let payload: Record<string, unknown>
-      if (sel[0] === 'proveedor') {
-        // Máquina que REMALI no tiene en stock: la cotiza con su proveedor y la
-        // vende bajo pedido. Siempre venta; al convertir, la venta se crea SIN
-        // unidad de inventario (no se toca stock).
-        const nombre = (await pedir({ titulo: 'Máquina bajo pedido', mensaje: 'Nombre/modelo de la máquina que cotizas con tu proveedor.', placeholder: 'Ej. Compactadora Wacker DPU6555' }))?.trim()
-        if (!nombre) return
-        const precioStr = (await pedir({ titulo: 'Precio de venta (sin IVA)', mensaje: `Lo que le cobras al cliente por ${nombre}.`, placeholder: 'Ej. 85000', inputMode: 'decimal' }))?.trim()
-        const precio = Math.round(Number((precioStr || '').replace(/[^0-9.]/g, '')) * 100) / 100
-        payload = { descripcion: `${nombre} (bajo pedido)`, cantidad: 1, precio_unitario: precio || 0, modalidad: 'venta' }
-      } else if (sel[0] === 'libre') {
-        payload = { descripcion: 'Nueva partida', cantidad: 1, precio_unitario: 0, modalidad: c.tipo === 'renta' ? 'dia' : 'venta' }
-      } else {
-        payload = { equipo_id: Number(sel[0]), cantidad: 1, modalidad: c.tipo === 'renta' ? 'dia' : '' }
-      }
-      const res = await api.post<Cotizacion>(`/cotizaciones/${c.id}/items/`, payload)
-      apply(res.data)
-    } catch (err) {
-      const d = (err as { response?: { data?: { detalle?: string } } })?.response?.data?.detalle
-      if (d) notify(d, 'err')
-    } finally {
-      setBusy(false)
-    }
-  }
-  // Edición en línea de una partida: manda solo el campo que cambió.
-  function editarItem(itemId: number, campo: 'descripcion' | 'cantidad' | 'duracion' | 'precio_unitario', valor: string | number) {
-    api.patch<Cotizacion>(`/cotizaciones/${c.id}/items/${itemId}/`, { [campo]: valor })
-      .then(r => apply(r.data))
-      .catch(err => notify(errorMsg(err, 'No se pudo actualizar la partida'), 'err'))
-  }
-  function cambiarModalidad(itemId: number, m: Modalidad) {
-    api.patch<Cotizacion>(`/cotizaciones/${c.id}/items/${itemId}/modalidad/`, { modalidad: m })
-      .then(r => apply(r.data))
-      .catch(err => notify(err?.response?.data?.detalle || 'No se pudo cambiar', 'err'))
-  }
-  function quitarItem(itemId: number) {
-    api.delete<Cotizacion>(`/cotizaciones/${c.id}/items/${itemId}/`)
-      .then(r => { apply(r.data); notify('Partida quitada') })
-      .catch(err => notify(err?.response?.data?.detalle || 'No se pudo quitar', 'err'))
-  }
-  async function convertir() {
-    if (c.convertida && c.venta_id) { onConvertida(c.venta_id); return }
-    if (c.estado !== 'aceptada') { notify('Marca la cotización como “Aceptada” antes de convertirla en venta', 'err'); return }
-    if (!clienteNombre.trim() && !empresaSel) { notify('Agrega el nombre del cliente antes de convertir', 'err'); return }
-    if (c.items.length === 0) { notify('Agrega al menos una partida antes de convertir', 'err'); return }
-    // Sin stock → sobre pedido: se recoge el contexto de la cotización y se abre el
-    // modal de pedido (crea una venta 'apartada' ligada, no una venta consumada).
-    if (sinStock) {
-      setPedidoDesde({
-        id: c.id,
-        equipoId: itemVenta?.equipo || null,
-        equipoNombre: itemVenta?.descripcion,
-        precio: Number(c.subtotal_venta || c.total) || undefined,
-        cliente: clienteNombre.trim() || undefined,
-        empresaId: empresaSel ? Number(empresaSel) : null,
-      })
-      return
-    }
-    const aviso = c.tipo === 'mixta'
-      ? `¿Crear la venta con las partidas de venta (${orMoney(c.subtotal_venta)})?\n\nLas partidas de renta NO se incluyen: esas se concretan desde Rentas eligiendo unidad y fechas.`
-      : '¿Convertir esta cotización en venta? Se creará la venta con estas partidas y su orden en carta.'
-    if (!(await confirmar({ titulo: 'Convertir en venta', mensaje: aviso, aceptar: 'Convertir' }))) return
-    setBusy(true)
-    const rMet = await elegir({
-      titulo: 'Método de pago principal',
-      opciones: [
-        { valor: 'efectivo', label: 'Efectivo' },
-        { valor: 'tarjeta', label: 'Tarjeta' },
-        { valor: 'transferencia', label: 'Transferencia' },
-      ],
-    })
-    if (!rMet || !rMet[0]) return
-    const met = rMet[0]
-    // Pago combinado: monto parcial del método principal; el resto con otro método.
-    let pagos: { metodo: string; monto: number }[] = []
-    const totalNum = Math.round(Number(c.total) * 100) / 100
-    const parcial = ((await pedir({
-      titulo: '¿Pago combinado?',
-      mensaje: `Monto pagado con ${met}. Vacío = todo el total ($${totalNum}) con ${met}.`,
-      placeholder: 'Ej. 10000', inputMode: 'decimal',
-    })) || '').trim()
-    if (parcial) {
-      const monto = Math.round(Number(parcial.replace(/[^0-9.]/g, '')) * 100) / 100
-      const resto = Math.round((totalNum - monto) * 100) / 100
-      if (!(monto > 0) || resto <= 0) { notify('Monto parcial no válido (debe ser mayor a 0 y menor al total)', 'err'); return }
-      const rMet2 = await elegir({
-        titulo: `Método del resto ($${resto})`,
-        opciones: [
-          { valor: 'efectivo', label: 'Efectivo' },
-          { valor: 'tarjeta', label: 'Tarjeta' },
-          { valor: 'transferencia', label: 'Transferencia' },
-        ].filter(o => o.valor !== met),
-      })
-      if (!rMet2 || !rMet2[0]) return
-      const met2 = rMet2[0]
-      pagos = [{ metodo: met, monto }, { metodo: met2, monto: resto }]
-    }
-    // Unidades físicas que se entregan: se marcan vendidas en la conversión,
-    // y el inventario y el catálogo público quedan cuadrados solos.
-    const unidadIds: number[] = []
-    try {
-      const ru = await api.get<{ id: number; codigo: string; numero_serie?: string; estado: string; equipo_info?: { modelo?: string } }[]>('/unidades/')
-      const disp = (ru.data || []).filter(u => u.estado === 'disponible')
-      if (disp.length) {
-        const sel = await elegir({
-          titulo: '¿Qué unidad(es) se entregan?',
-          mensaje: 'Se marcan vendidas y el catálogo se actualiza solo.',
-          multiple: true, vacioLabel: 'Asignar después',
-          opciones: disp.map(u => ({
-            valor: String(u.id),
-            label: `${u.codigo} — ${u.equipo_info?.modelo || 'Equipo'}`,
-            detalle: u.numero_serie ? `S/N ${u.numero_serie}` : undefined,
-          })),
-        })
-        if (sel === null) return
-        unidadIds.push(...sel.map(Number))
-      }
-    } catch { /* sin lista: se convierte y la unidad se marca después */ }
-    api.post(`/cotizaciones/${c.id}/convertir/`, { metodo_pago: met, pagos, unidad_ids: unidadIds })
-      .then(r => { notify(r.data?.detalle || 'Convertida a venta'); onConvertida(r.data.venta_id) })
-      .catch(err => notify(err?.response?.data?.detalle || 'No se pudo convertir', 'err'))
-      .finally(() => setBusy(false))
-  }
-
-  // Las fotos van aparte de "Guardar": se suben/quitan al momento (multipart), y
-  // se reflejan en `c` para que la carta y el PDF que se imprimen las lleven.
-  function subirFotos(ev: React.ChangeEvent<HTMLInputElement>) {
-    const files = Array.from(ev.target.files || [])
-    ev.target.value = ''
-    if (!files.length) return
-    const fd = new FormData()
-    files.forEach(f => fd.append('imagenes', f))
-    setSubiendoFotos(true)
-    api.post<{ fotos: CotizacionFoto[] }>(`/cotizaciones/${c.id}/fotos/`, fd, { headers: { 'Content-Type': 'multipart/form-data' } })
-      .then(r => {
-        const nuevas = [...fotos, ...(r.data?.fotos || [])]
-        setFotos(nuevas); setC(p => ({ ...p, fotos: nuevas })); onChanged()
-        notify(`${r.data?.fotos?.length || 0} foto(s) agregada(s)`)
-      })
-      .catch(err => notify(errorMsg(err, 'No se pudieron subir las fotos'), 'err'))
-      .finally(() => setSubiendoFotos(false))
-  }
-  function quitarFoto(id: number) {
-    api.delete(`/cotizaciones/${c.id}/fotos/${id}/`)
-      .then(() => {
-        const nuevas = fotos.filter(f => f.id !== id)
-        setFotos(nuevas); setC(p => ({ ...p, fotos: nuevas })); onChanged()
-      })
-      .catch(err => notify(errorMsg(err, 'No se pudo quitar la foto'), 'err'))
-  }
-  /* Imprimir y descargar trabajan sobre el PDF del SERVIDOR (reportlab), no
-     sobre una recreación del HTML: lo que sale de la impresora es idéntico a lo
-     que el cliente recibió por correo. Si el papel y el correo no coinciden, la
-     discusión con el cliente la pierde REMALI. */
-  const [documento, setDocumento] = useState<'' | 'descarga' | 'impresion'>('')
-
-  function pedirPDF() {
-    if (!(clienteNombre.trim() || empresaSel) || c.items.length === 0) {
-      notify('Agrega el cliente y al menos un concepto para generar el PDF', 'err')
-      return null
-    }
-    return api.get(`/cotizaciones/${c.id}/pdf/`, { responseType: 'blob' }).then(r => r.data as Blob)
-  }
-
-  function descargarPDF() {
-    const p = pedirPDF()
-    if (!p) return
-    setDocumento('descarga')
-    p.then(b => descargarBlob(b, `${c.folio || 'cotizacion'}.pdf`))
-      .catch(() => notify('No se pudo descargar el PDF', 'err'))
-      .finally(() => setDocumento(''))
-  }
-
-  /* El PDF se carga en un iframe oculto y se imprime desde ahí. `window.print()`
-     a secas mandaría a la impresora el panel entero, que es lo que hacía el
-     botón viejo cuando no había una hoja montada. */
-  function imprimirPDF() {
-    const p = pedirPDF()
-    if (!p) return
-    setDocumento('impresion')
-    p.then(b => {
-      const url = URL.createObjectURL(b)
-      const marco = document.createElement('iframe')
-      marco.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0'
-      marco.src = url
-      marco.onload = () => { marco.contentWindow?.focus(); marco.contentWindow?.print() }
-      document.body.appendChild(marco)
-      // El diálogo del sistema es modal: el iframe tiene que seguir vivo mientras
-      // esté abierto, así que la limpieza va con holgura.
-      window.setTimeout(() => { URL.revokeObjectURL(url); marco.remove() }, 60_000)
-    })
-      .catch(() => notify('No se pudo abrir la impresión', 'err'))
-      .finally(() => setDocumento(''))
-  }
-  // Enviar por correo: guarda primero (para que el servidor tenga el correo
-  // actual) y luego manda el PDF adjunto. El envío la marca como "Enviada".
-  function enviarCorreo() {
-    if (!email.trim()) { notify('Agrega el correo del cliente para enviarla', 'err'); return }
-    if (!(clienteNombre.trim() || empresaSel) || c.items.length === 0) { notify('Falta el cliente o los conceptos', 'err'); return }
-    setEnviando(true)
-    api.patch(`/cotizaciones/${c.id}/`, { cliente_email: email.trim(), cliente_nombre: clienteNombre.trim(), cliente_telefono: clienteTel.trim(), notas, vigencia_dias: Number(vigencia) || 15, aplica_iva: aplicaIva })
-      .then(() => api.post<{ detalle: string; cotizacion: Cotizacion }>(`/cotizaciones/${c.id}/enviar/`, {}))
-      .then(r => { apply(r.data.cotizacion); notify(r.data.detalle || 'Cotización enviada') })
-      .catch(err => notify(errorMsg(err, 'No se pudo enviar'), 'err'))
-      .finally(() => setEnviando(false))
-  }
-
-  /* Traspaso a la renta. La petición sale primero (viaja mientras la hoja se
-     retira), luego corre la salida, y al terminar se navega: un solo gesto en
-     lugar de "desaparece / cambia / aparece". 160ms es la salida del sistema. */
-  const [traspasando, setTraspasando] = useState(false)
-  function traspasarARenta(rentaId: number) {
-    if (traspasando) return
-    pedirRenta(rentaId)
-    setTraspasando(true)
-    const reducido = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
-    // La flecha sale (240ms) y la hoja se retira detrás de ella (160ms); se
-    // solapan a propósito —el panel arranca a los 90ms— para que se lea como un
-    // arrastre y no como dos animaciones en fila.
-    window.setTimeout(() => { onVerRenta?.(rentaId); onClose() }, reducido ? 0 : 250)
-  }
-
-  const m = cotEstadoMeta(c.estado)
-  // Estado final (cancelada/rechazada): es un registro cerrado — no se edita,
-  // ni se envía, ni se convierte; solo se consulta o se imprime.
-  const cotCerrada = c.estado === 'cancelada' || c.estado === 'rechazada'
-  // Ya convertida en venta, o en un estado final: queda de solo lectura. Editar
-  // partidas/precios desincronizaría su total y su ticket, y en una cerrada no aplica.
-  const bloqueada = Boolean(c.convertida) || cotCerrada
-  // Los conceptos que armó EL CLIENTE no se tocan: son su pedido, no una
-  // captura del panel. El admin solo edita partidas de sus propias cotizaciones.
-  const conceptosBloqueados = bloqueada || c.origen === 'cliente'
-  // Identidad de la solicitud (nombre/tel/correo): también es del cliente.
-  const identidadBloqueada = c.origen === 'cliente'
-  const sub = Number(c.subtotal) || 0
-  // Venta: el precio ya incluye IVA → se desglosa. Renta: IVA solo si hay factura.
-  const esVenta = c.tipo === 'venta'
-  const baseMonto = esVenta ? sub / 1.16 : sub
-  const ivaMonto = esVenta ? sub - sub / 1.16 : (aplicaIva ? sub * 0.16 : 0)
-  const totalMonto = baseMonto + ivaMonto
-  // Debe tener cliente (nombre o empresa) y al menos un concepto para poder
-  // imprimirse o descargarse: un documento sin eso no sirve.
-  const completa = (clienteNombre.trim() !== '' || Boolean(empresaSel)) && c.items.length > 0
-  // Link público del PDF (para compartir por WhatsApp) y el mensaje armado.
-  const linkPdf = c.token_publico ? `${window.location.origin}/api/cotizaciones/publica/${c.token_publico}/pdf/` : ''
-  const msgWa = `Hola ${(clienteNombre.trim() || c.cliente_display || '').trim()}, le comparto su cotización ${c.folio} por ${orMoney(totalMonto)}${linkPdf ? `. Puede verla aquí: ${linkPdf}` : ''}.`
-  const waHref = (completa && clienteTel.trim().length === 10 && linkPdf) ? waLink(clienteTel.trim(), msgWa) : ''
-  // Celda editable en línea: parece texto, muestra fondo/anillo al enfocar.
-  const celda = 'w-full bg-transparent rounded-md px-2 py-1.5 text-sm text-ink placeholder-mute focus:outline-none focus:bg-surface-2 focus:ring-1 focus:ring-gold/40 transition disabled:opacity-60'
-  const labelCot = 'block text-[10.5px] font-bold uppercase tracking-[0.09em] text-mute mb-2'
-  // La fecha de entrega existe hasta que hay trato: aceptada (o autorizada,
-  // que cae directo en aceptada). Antes de eso no hay nada que prometer.
-  const verEntrega = c.estado === 'aceptada' || Boolean(c.entrega_prometida)
-  return (
-    <Modal className={`fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm flex items-start justify-center p-0 sm:p-6 overflow-y-auto ${traspasando ? 'modal-out' : 'modal-in'}`} onClose={cerrar} label="Detalle de la cotización">
-      <div onClick={(e: React.MouseEvent) => e.stopPropagation()} className="w-full sm:max-w-5xl my-0 sm:my-auto bg-surface border border-edge rounded-none sm:rounded-2xl shadow-[0_20px_50px_rgba(33,29,22,0.18)] min-h-screen sm:min-h-0 sm:max-h-[92vh] flex flex-col sm:overflow-hidden">
-        <div className="px-5 sm:px-7 py-4 sm:py-5 border-b border-edge flex items-start justify-between gap-4 bg-surface shrink-0">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2.5 flex-wrap">
-              <span className="font-mono font-bold text-ink text-lg tracking-tight">{c.folio || <span className="text-mute font-sans text-[15px]">Sin folio · nace al enviarla</span>}</span>
-              <span className={`inline-flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1 rounded-full ${m.cls}`}><span className="w-1.5 h-1.5 rounded-full" style={{ background: m.dot }} />{m.label}</span>
-            </div>
-            <p className="text-[14px] text-mute truncate mt-1">{c.cliente_display} · {TIPO_COT_LABEL[c.tipo] || c.tipo}</p>
-          </div>
-          <div className="flex items-start gap-3 sm:gap-4 shrink-0">
-            <div className="text-right">
-              <p className="text-[10px] font-bold uppercase tracking-[0.1em] text-mute">Total</p>
-              <p className="text-xl sm:text-[27px] font-extrabold text-ink tabular-nums leading-tight">{orMoney(totalMonto)}</p>
-            </div>
-            <button onClick={cerrar} className="text-mute hover:text-ink hover:bg-surface-2 p-1.5 rounded-lg transition active:scale-90 mt-0.5" aria-label="Cerrar"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" d="M6 6l12 12M18 6L6 18" /></svg></button>
-          </div>
-        </div>
-
-        <div className="px-5 sm:px-7 py-6 space-y-7 bg-surface flex-1 sm:overflow-y-auto">
-          {c.convertida && (
-            <div className="flex items-start gap-2.5 rounded-xl border border-emerald-500/25 bg-emerald-500/5 px-4 py-3">
-              <svg className="w-4 h-4 mt-0.5 shrink-0 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.9"><path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zM16 11V7a4 4 0 00-8 0v4" /></svg>
-              <p className="text-[12.5px] text-ink leading-relaxed">
-                Esta cotización ya se concretó en {c.renta_id && !c.venta_id
-                  ? <>la <b>renta #{c.renta_id}</b></>
-                  : <>la <b>venta #{c.venta_id}</b></>}, así que quedó <b>bloqueada</b> y no se puede volver a concretar.
-                Es su respaldo; para cambiar algo, hazlo en la {c.renta_id && !c.venta_id ? 'renta' : 'venta'}.
-              </p>
-            </div>
-          )}
-          {cotCerrada && (
-            <div className="flex items-start gap-2.5 rounded-xl border border-red-500/25 bg-red-500/5 px-4 py-3">
-              <svg className="w-4 h-4 mt-0.5 shrink-0 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.9"><path strokeLinecap="round" d="M6 6l12 12M18 6L6 18" /></svg>
-              <p className="text-[12.5px] text-ink leading-relaxed">
-                Esta cotización está <b>{c.estado === 'cancelada' ? 'cancelada' : 'rechazada'}</b>: es un registro cerrado. Solo se puede consultar o imprimir — no se edita, ni se envía, ni se convierte.
-              </p>
-            </div>
-          )}
-          {(c.origen === 'cliente' || c.autorizada_por) && (
-            <div className="rounded-xl border border-blue-500/20 bg-blue-500/5 p-4">
-              <div className="flex items-center justify-between gap-3 mb-2 flex-wrap">
-                <p className="text-[11px] font-bold uppercase tracking-wide text-blue-600">Solicitud del cliente</p>
-                <div className="flex items-center gap-2 flex-wrap">
-                  {/* Procedencia: quién la firmó del lado del cliente. Vive aquí
-                      —no bajo la barra de Estado— porque no habla del estado,
-                      habla de dónde vino; y su par natural es "Atendida por". */}
-                  {c.autorizada_por && (
-                    <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-emerald-600" title={c.autorizada_en ? new Date(c.autorizada_en).toLocaleString('es-MX') : undefined}>
-                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5"><path strokeLinecap="round" d="M5 13l4 4L19 7" /></svg>
-                      Autorizada por {c.autorizada_por}{c.autorizada_en ? ` · ${new Date(c.autorizada_en).toLocaleDateString('es-MX', { day: 'numeric', month: 'short' })}` : ''}
-                    </span>
-                  )}
-                  {c.atendida_por_nombre
-                    ? <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-emerald-600"><svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5"><path strokeLinecap="round" d="M5 13l4 4L19 7" /></svg>Atendida por {c.atendida_por_nombre}</span>
-                    : <button onClick={atender} className="px-3 h-8 rounded-lg border border-blue-500/40 text-blue-600 text-xs font-bold hover:bg-blue-500/10 transition-colors">La estoy atendiendo</button>}
-                  {c.cliente_telefono && waLink(c.cliente_telefono, `Hola ${c.cliente_display}, te contactamos de REMALI sobre tu solicitud de cotización ${c.folio}.`) && (
-                    <a href={waLink(c.cliente_telefono, `Hola ${c.cliente_display}, te contactamos de REMALI sobre tu solicitud de cotización ${c.folio}.`)} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 px-3 h-8 rounded-lg bg-[#25D366] text-white text-xs font-bold hover:opacity-90 transition-opacity shrink-0">
-                      <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M17.5 14.4c-.3-.1-1.7-.8-1.9-.9-.3-.1-.5-.1-.7.1-.2.3-.7.9-.9 1.1-.2.2-.3.2-.6.1-.3-.1-1.2-.5-2.3-1.4-.9-.8-1.4-1.7-1.6-2-.2-.3 0-.5.1-.6.1-.1.3-.3.4-.5.1-.1.2-.3.2-.4.1-.2 0-.3 0-.5-.1-.1-.7-1.6-.9-2.2-.2-.6-.5-.5-.7-.5h-.6c-.2 0-.5.1-.8.4-.3.3-1 1-1 2.5s1.1 2.9 1.2 3.1c.1.2 2.1 3.2 5.1 4.5.7.3 1.3.5 1.7.6.7.2 1.4.2 1.9.1.6-.1 1.7-.7 2-1.4.2-.7.2-1.3.2-1.4-.1-.1-.3-.2-.6-.3zM12 2C6.5 2 2 6.5 2 12c0 1.8.5 3.5 1.3 5L2 22l5.1-1.3c1.4.8 3.1 1.2 4.9 1.2 5.5 0 10-4.5 10-10S17.5 2 12 2z" /></svg>
-                      Responder por WhatsApp
-                    </a>
-                  )}
-                </div>
-              </div>
-              {/* Ficha en bloques (etiqueta arriba, dato abajo): el "label: valor"
-                  corrido dejaba las dos columnas disparejas y costaba escanear. */}
-              <div className="grid grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-3.5">
-                {([
-                  ['Empresa', c.datos_solicitud?.empresa],
-                  ['Responsable de obra', c.datos_solicitud?.obra?.responsable],
-                  ['Tel. de obra', c.datos_solicitud?.obra?.telefono],
-                  ['Email', c.cliente_email],
-                  ['Dirección de obra', c.datos_solicitud?.obra?.direccion],
-                  ['Email de obra', c.datos_solicitud?.obra?.email],
-                ] as [string, string | undefined][]).filter(([, v]) => v).map(([k, v]) => (
-                  <div key={k} className={k.startsWith('Dirección') || k.startsWith('Email') ? 'col-span-2 lg:col-span-1' : ''}>
-                    <p className="text-[10.5px] font-bold uppercase tracking-[0.08em] text-mute">{k}</p>
-                    <p className="text-[13px] font-bold text-ink mt-0.5 break-words leading-snug">{v}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-          {/* Estado (ancho) + Entrega y Tipo en columnas parejas. En tableta el
-              estado toma su propia fila; en escritorio los tres van en una. */}
-          <div className={`grid grid-cols-1 sm:grid-cols-2 ${verEntrega ? 'lg:grid-cols-[minmax(0,1fr)_230px_230px]' : 'lg:grid-cols-[minmax(0,1fr)_230px]'} gap-5 lg:gap-6 items-start`}>
-            <div className="sm:col-span-2 lg:col-span-1 min-w-0">
-              <p className={labelCot}>Estado</p>
-              {/* SOLO LECTURA: se ven todas las etapas y en cuál va; los cambios
-                  ocurren por acciones (botones, autorización del jefe, conversión,
-                  aprobación de cancelación) — nunca tocando esta barra. */}
-              <div className="grid w-full rounded-xl border border-edge bg-surface-2 p-1"
-                style={{ gridTemplateColumns: 'repeat(4, minmax(0, 1fr))' }}>
-                {[
-                  { key: 'borrador', label: 'Borrador' },
-                  { key: 'enviada', label: 'Enviada' },
-                  { key: 'aceptada', label: 'Aceptada' },
-                  { key: c.estado === 'cancelada' ? 'cancelada' : 'rechazada', label: c.estado === 'cancelada' ? 'Cancelada' : 'Rechazada' },
-                ].map(e => (
-                  <span key={e.key} className={`text-center px-2 py-1.5 rounded-lg text-[13px] font-bold transition-colors ${
-                    c.estado === e.key
-                      ? (e.key === 'rechazada' || e.key === 'cancelada' ? 'bg-red-600 text-white' : 'bg-ink text-app')
-                      : 'text-mute'
-                  }`}>{e.label}</span>
-                ))}
-              </div>
-
-              {/* Acciones que SÍ mueven el estado, según dónde va */}
-              {!bloqueada && c.estado === 'borrador' && (
-                <button onClick={() => cambiarEstado('enviada')} className="mt-2.5 h-10 px-4 rounded-full bg-ink text-app text-[13px] font-bold hover:opacity-90 transition active:scale-[0.98]">
-                  Marcar como enviada
-                </button>
-              )}
-              {!bloqueada && c.estado === 'enviada' && (c.origen === 'cliente' ? (
-                /* Tubería AUTOMÁTICA (la mandó el cliente): administración solo
-                   confirma disponibilidad; el aviso a su campanita sale solo y
-                   después nada más falta fecha/hora de entrega y convertir. */
-                <div className="mt-2.5 flex gap-2">
-                  <button onClick={() => cambiarEstado('aceptada')} className="h-10 px-4 rounded-full bg-emerald-600 text-white text-[13px] font-bold hover:bg-emerald-700 transition active:scale-[0.98]">
-                    Hay disponibilidad — aceptar
-                  </button>
-                  <button onClick={() => cambiarEstado('rechazada')} className="h-10 px-4 rounded-full text-red-600 dark:text-red-400 text-[13px] font-bold hover:bg-red-500/10 transition active:scale-[0.98]">
-                    Sin disponibilidad
-                  </button>
-                </div>
-              ) : (
-                /* Tubería MANUAL (la capturaste tú para alguien sin cuenta):
-                   el estado sigue lo que el cliente diga por teléfono/WhatsApp. */
-                <div className="mt-2.5 flex gap-2">
-                  <button onClick={() => cambiarEstado('aceptada')} className="h-10 px-4 rounded-full bg-emerald-600 text-white text-[13px] font-bold hover:bg-emerald-700 transition active:scale-[0.98]">
-                    El cliente la aceptó
-                  </button>
-                  <button onClick={() => cambiarEstado('rechazada')} className="h-10 px-4 rounded-full text-red-600 dark:text-red-400 text-[13px] font-bold hover:bg-red-500/10 transition active:scale-[0.98]">
-                    Rechazar
-                  </button>
-                </div>
-              ))}
-            </div>
-            {verEntrega && <div className="min-w-0">
-              <p className={labelCot}>Entrega prometida</p>
-              {/* Display propio + input nativo superpuesto (opacity-0): conserva el
-                  selector del sistema pero sin el "mm/dd/yyyy" nativo, que rompía
-                  la línea visual del resto de campos. */}
-              <div className="relative">
-                <input type="datetime-local" aria-label="Fecha y hora de entrega prometida"
-                  value={c.entrega_prometida ? (() => { const d = new Date(c.entrega_prometida); const p = (n: number) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}` })() : ''}
-                  onChange={e => guardarEntrega(e.target.value)}
-                  className="peer absolute inset-0 w-full h-full opacity-0 cursor-pointer [color-scheme:light] dark:[color-scheme:dark]" />
-                <div className={`${input} pointer-events-none flex items-center justify-between gap-2 peer-focus:border-gold/60 ${c.entrega_prometida ? 'text-ink' : 'text-mute'}`}>
-                  <span className="truncate">{c.entrega_prometida
-                    ? new Date(c.entrega_prometida).toLocaleString('es-MX', { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' })
-                    : 'Elegir fecha y hora'}</span>
-                  {!c.entrega_prometida && <svg className="w-4 h-4 shrink-0 text-mute" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.8"><rect x="3" y="4.5" width="18" height="16" rx="2.5" /><path strokeLinecap="round" d="M3 9h18M8 3v3m8-3v3" /></svg>}
-                </div>
-                {c.entrega_prometida && (
-                  <button type="button" onClick={() => guardarEntrega('')} aria-label="Quitar fecha de entrega"
-                    className="absolute right-2.5 top-1/2 -translate-y-1/2 w-6 h-6 grid place-items-center rounded-md text-mute hover:text-ink hover:bg-surface transition-colors active:scale-90">
-                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.2"><path strokeLinecap="round" d="M6 6l12 12M18 6L6 18" /></svg>
-                  </button>
-                )}
-              </div>
-            </div>}
-            <div className="min-w-0">
-              <p className={labelCot}>Tipo</p>
-              <Segmentado
-                opciones={[{ key: 'venta', label: 'Venta' }, { key: 'renta', label: 'Renta' }]}
-                valor={c.tipo}
-                onChange={cambiarTipo}
-                disabled={bloqueada || c.items.length > 0}
-              />
-              {c.tipo === 'mixta' && <p className="text-[11px] text-mute mt-1.5">Mixta: venta + renta.</p>}
-              {c.items.length > 0 && c.tipo !== 'mixta' && <p className="text-[11px] text-mute mt-1.5">Se define por las partidas.</p>}
-            </div>
-          </div>
-
-          {/* El cliente pidió cancelar: visible ANTES que nada; tú decides. */}
-          {c.cancelacion_solicitada && (
-            <div className="rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3">
-              <p className="text-[13.5px] font-bold text-red-700 dark:text-red-300">
-                {c.estado === 'cancelada' ? 'El cliente CANCELÓ esta cotización' : 'El cliente solicitó CANCELAR esta cotización'}
-                <span className="font-semibold text-red-600/80 dark:text-red-400/80"> · {new Date(c.cancelacion_solicitada).toLocaleDateString('es-MX', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}</span>
-              </p>
-              {c.cancelacion_motivo && <p className="text-[13px] text-red-600 dark:text-red-400 mt-1">Motivo: {c.cancelacion_motivo}</p>}
-              {c.estado === 'cancelada' ? (
-                <p className="text-[12px] text-mute mt-1.5">Cancelada: estado final. Si el cliente la necesita de nuevo, que vuelva a cotizar.</p>
-              ) : (
-                <button onClick={aprobarCancelacion}
-                  className="mt-2.5 h-9 px-4 rounded-full bg-red-600 text-white text-[12.5px] font-bold hover:bg-red-700 transition active:scale-[0.98]">
-                  Aprobar cancelación
-                </button>
-              )}
-            </div>
-          )}
-
-          {/* Datos del cliente (arriba): para corregir un nombre/teléfono mal
-              capturado sin tener que rehacer la cotización. */}
-          <div>
-            <div className="flex items-center justify-between gap-3">
-              <p className={labelCot}>Cliente</p>
-              {/* Vincular la cotización a una cuenta de la tienda: el cliente
-                  la ve en "Mis cotizaciones" y ÉL decide aceptarla. */}
-              {!bloqueada && (c.usuario_nombre ? (
-                <button onClick={vincularCuentaCot}
-                  className="mb-2 text-[12px] font-bold text-gold-ink hover:opacity-80 transition-opacity">
-                  Cambiar cuenta
-                </button>
-              ) : (
-                <div className="mb-2 flex items-center gap-3">
-                  <button onClick={generarLigaVinculo} disabled={generandoLiga}
-                    title={c.items.length === 0 ? 'Primero agrega las partidas' : undefined}
-                    className={`text-[12px] font-bold transition-opacity disabled:opacity-50 ${c.items.length === 0 ? 'text-mute cursor-not-allowed' : 'text-gold-ink hover:opacity-80'}`}>
-                    {ligaVinculo ? '✓ Liga generada' : generandoLiga ? 'Generando…' : '+ Vincular por liga'}
-                  </button>
-                  <button onClick={vincularCuentaCot} className="text-[11px] font-semibold text-mute hover:text-ink transition-colors">
-                    o elegir de la lista
-                  </button>
-                </div>
-              ))}
-            </div>
-            {ligaVinculo && !c.usuario_nombre && (
-              <div className="mb-3 flex items-center gap-2.5 bg-surface-2 border border-edge rounded-xl px-3 py-2.5">
-                <span className="flex-1 min-w-0 text-[12.5px] text-mute overflow-hidden text-ellipsis whitespace-nowrap">{ligaVinculo.replace(/^https?:\/\//, '')}</span>
-                <button onClick={copiarLigaVinculo} className="h-8 px-3 shrink-0 rounded-lg border border-edge bg-surface text-[12px] font-bold text-ink hover:bg-surface-2 transition-colors">
-                  {ligaCopiada ? '✓ Copiada' : 'Copiar'}
-                </button>
-                <a href={waVinculo()} target="_blank" rel="noopener noreferrer"
-                  className="h-8 px-3 shrink-0 rounded-lg bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 text-[12px] font-bold inline-flex items-center hover:bg-emerald-500/25 transition-colors">
-                  WhatsApp
-                </a>
-              </div>
-            )}
-            {c.usuario_nombre && (
-              /* Vino de una cuenta de la tienda: la identidad es del cliente,
-                 no se recaptura. Los campos de abajo quedan para ajustes de
-                 contacto; el nombre de la cuenta manda. */
-              <div className="mb-3 flex items-center gap-3 rounded-xl border border-gold/40 bg-gold-soft/40 px-4 py-3">
-                <span className="w-9 h-9 rounded-full bg-gold text-black grid place-items-center font-extrabold text-[13px]">
-                  {c.usuario_nombre.split(' ').map(p => p[0]).slice(0, 2).join('').toUpperCase()}
-                </span>
-                <div className="min-w-0">
-                  <p className="text-[13.5px] font-bold text-ink truncate">Cliente de la tienda: {c.usuario_nombre}</p>
-                  <p className="text-[12px] text-mute truncate">{c.usuario_email || 'sin correo'} · sus datos vienen de su perfil</p>
-                </div>
-              </div>
-            )}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <select aria-label="Cuenta del cliente" disabled={bloqueada || identidadBloqueada || !!c.usuario_nombre} title={c.usuario_nombre || identidadBloqueada ? 'La identidad la puso el cliente: no se cambia por una empresa' : undefined} value={empresaSel} onChange={e => cambiarEmpresa(e.target.value)} className={`${input} sm:col-span-2 disabled:opacity-60`}>
-                <option value="">— Cliente particular —</option>
-                {empresasActivas(empresas).map(e => <option key={e.id} value={e.id}>{e.nombre}</option>)}
-              </select>
-              <input aria-label="Nombre del cliente" disabled={bloqueada || identidadBloqueada || !!empresaSel || !!c.usuario_nombre} value={clienteNombre} onChange={e => setClienteNombre(e.target.value)}
-                title={empresaSel ? 'El nombre lo define la empresa seleccionada' : undefined}
-                className={`${input} disabled:opacity-60`} placeholder="Nombre del cliente" />
-              <div>
-                <input aria-label="Teléfono (10 dígitos)" type="tel" inputMode="numeric" maxLength={10} disabled={bloqueada || identidadBloqueada} value={clienteTel}
-                  onChange={e => setClienteTel(e.target.value.replace(/\D/g, '').slice(0, 10))}
-                  className={`${input} disabled:opacity-60`} placeholder="Teléfono (10 dígitos)" />
-                {clienteTel.length > 0 && clienteTel.length < 10 && <p className="text-[11px] text-red-600 dark:text-red-500 mt-1">Deben ser 10 dígitos.</p>}
-              </div>
-              <input aria-label="Correo (cliente@correo.com)" type="email" disabled={bloqueada || identidadBloqueada} value={email} onChange={e => setEmail(e.target.value)} className={`${input} sm:col-span-2 disabled:opacity-60`} placeholder="Correo (cliente@correo.com)" />
-            </div>
-            {identidadBloqueada && !bloqueada && (
-              <p className="text-[11.5px] text-mute mt-2">El nombre, teléfono y correo los puso el cliente en su solicitud — se corrigen desde su cuenta.</p>
-            )}
-          </div>
-
-          {/* Partidas: tabla editable en línea */}
-          <div>
-            <div className="flex items-center justify-between mb-2 gap-3">
-              <p className={`${labelCot} mb-0`}>Partidas</p>
-              {conceptosBloqueados && !bloqueada
-                ? <span className="text-[12px] font-semibold text-gold-ink">Las armó el cliente — solo lectura</span>
-                : !bloqueada && <span className="text-[12px] text-mute">Toca cualquier celda para editar</span>}
-            </div>
-            <div className="rounded-xl border border-edge overflow-hidden">
-              <div className="overflow-x-auto">
-                {/* En celular la partida se apila (concepto arriba, los campitos
-                    abajo) para no obligar a scroll horizontal; de md en adelante
-                    vuelve a ser la tabla de siempre con su ancho mínimo. */}
-                <div className="md:min-w-[640px]">
-                  {/* Encabezado de columnas */}
-                  <div className="hidden md:flex items-center gap-2 px-3 py-2.5 bg-surface-2 border-b border-edge text-[10.5px] font-bold uppercase tracking-[0.06em] text-mute">
-                    <div className="flex-1 min-w-0 pl-2">Concepto</div>
-                    <div className="w-32 shrink-0">Modalidad</div>
-                    <div className="w-16 shrink-0 text-center" title="Cuántas máquinas">Equipos</div>
-                    <div className="w-16 shrink-0 text-center" title="Días / semanas / meses (renta)">Dur.</div>
-                    <div className="w-28 shrink-0 text-right pr-2">P. Unit</div>
-                    <div className="w-6 shrink-0" />
-                  </div>
-                  {c.items.length === 0 && <div className="px-5 py-6 text-center text-[13px] text-mute">Sin partidas todavía.</div>}
-                  {c.items.map(it => (
-                    <div key={it.id} className="flex flex-col md:flex-row md:items-center gap-1 md:gap-2 px-3 py-2 md:py-0 border-b border-edge last:border-0">
-                      <div className="flex-1 min-w-0 py-1">
-                        <input aria-label="Concepto" key={`${it.id}-${it.descripcion}`} defaultValue={it.descripcion} disabled={conceptosBloqueados} placeholder="Concepto"
-                          onBlur={e => { const v = e.target.value.trim(); if (v && v !== it.descripcion) editarItem(it.id, 'descripcion', v) }}
-                          className={celda} />
-                      </div>
-                      {/* `md:contents` disuelve este contenedor en escritorio: los
-                          campos vuelven a ser hijos directos de la fila y conservan
-                          sus anchos de columna. En celular agrupan en su renglón. */}
-                      <div className="flex flex-wrap items-end gap-2 md:contents">
-                      <div className="w-full md:w-32 shrink-0 py-1">
-                        <span className="md:hidden block text-[9.5px] font-bold uppercase tracking-[0.06em] text-mute pl-2">Modalidad</span>
-                        <select aria-label="¿Se vende o se renta?" value={it.modalidad} disabled={conceptosBloqueados} title="¿Se vende o se renta?"
-                          onChange={e => cambiarModalidad(it.id, e.target.value as Modalidad)}
-                          className={`${celda} cursor-pointer font-medium`}>
-                          {MODALIDADES.map(mm => <option key={mm.key} value={mm.key} className="bg-surface text-ink">{mm.corto}</option>)}
-                        </select>
-                      </div>
-                      <div className="w-16 shrink-0 py-1">
-                        <span className="md:hidden block text-[9.5px] font-bold uppercase tracking-[0.06em] text-mute text-center">Equipos</span>
-                        <input aria-label="Cantidad" type="number" min={1} defaultValue={it.cantidad} disabled={conceptosBloqueados} title="Cuántas máquinas"
-                          onBlur={e => { const v = Math.max(1, Number(e.target.value) || 1); if (v !== it.cantidad) editarItem(it.id, 'cantidad', v) }}
-                          className={`${celda} text-center`} />
-                      </div>
-                      <div className="w-16 shrink-0 py-1">
-                        <span className="md:hidden block text-[9.5px] font-bold uppercase tracking-[0.06em] text-mute text-center">Dur.</span>
-                        {/* Duración = periodos de renta; en venta no aplica. */}
-                        {it.modalidad === 'venta'
-                          ? <div className={`${celda} text-center text-mute cursor-default`}>—</div>
-                          : <input aria-label="Duración" key={`${it.id}-dur-${it.duracion}`} type="number" min={1} defaultValue={it.duracion || 1} disabled={conceptosBloqueados}
-                              title="Cuántos días / semanas / meses"
-                              onBlur={e => { const v = Math.max(1, Number(e.target.value) || 1); if (v !== (it.duracion || 1)) editarItem(it.id, 'duracion', v) }}
-                              className={`${celda} text-center`} />}
-                      </div>
-                      <div className="flex-1 min-w-[96px] md:flex-none md:w-28 shrink-0 py-1">
-                        <span className="md:hidden block text-[9.5px] font-bold uppercase tracking-[0.06em] text-mute text-right pr-2">P. Unit</span>
-                        <input aria-label="Precio unitario" key={`${it.id}-${it.precio_unitario}`} type="number" min={0} step="0.01" defaultValue={it.precio_unitario} disabled={conceptosBloqueados}
-                          onBlur={e => { const v = Number(e.target.value) || 0; if (v !== Number(it.precio_unitario)) editarItem(it.id, 'precio_unitario', v) }}
-                          className={`${celda} text-right font-bold tabular-nums`} />
-                        {Number(it.precio_lista) > 0 && Number(it.precio_unitario) !== Number(it.precio_lista) && (
-                          /* Se capturó un precio distinto al de la web: la
-                             desviación se ve, no se esconde. */
-                          <p className={`text-[10px] text-right pr-2 pb-1 font-bold ${Number(it.precio_unitario) < Number(it.precio_lista) ? 'text-amber-600' : 'text-blue-600'}`}>
-                            lista {orMoney(Number(it.precio_lista))} · {Number(it.precio_unitario) < Number(it.precio_lista) ? '−' : '+'}{Math.abs(Math.round((Number(it.precio_unitario) - Number(it.precio_lista)) / Number(it.precio_lista) * 100))}%
-                          </p>
-                        )}
-                      </div>
-                      <div className="w-6 shrink-0 flex justify-center py-1 md:py-0">
-                        {!conceptosBloqueados && (
-                          <button onClick={() => quitarItem(it.id)} title="Quitar" className="text-red-500 hover:bg-red-500/10 rounded p-1 transition active:scale-90">
-                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" d="M6 6l12 12M18 6L6 18" /></svg>
-                          </button>
-                        )}
-                      </div>
-                      </div>
-                    </div>
-                  ))}
-                  {!conceptosBloqueados && (
-                    <button onClick={agregarItem} disabled={busy} className="w-full flex items-center gap-2 px-5 py-3 text-[13px] font-bold text-gold-ink hover:bg-gold-soft/60 transition active:scale-[0.995] disabled:opacity-50 border-t border-edge">
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.2"><path strokeLinecap="round" d="M12 5v14M5 12h14" /></svg>
-                      Agregar partida
-                    </button>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {c.tipo === 'mixta' && (
-              <p className="text-[11px] text-mute mt-2.5 leading-relaxed">
-                Lleva venta y renta: <b className="text-ink tabular-nums">{orMoney(c.subtotal_venta)}</b> de venta y <b className="text-ink tabular-nums">{orMoney(c.subtotal_renta)}</b> de renta. Al convertir se crea la venta; la renta se concreta desde Rentas.
-              </p>
-            )}
-
-            {/* Totales (derecha) + enviar al cliente (izquierda, aprovechando el hueco) */}
-            <div className="flex flex-col sm:flex-row sm:items-end gap-5 mt-5">
-              {!bloqueada && (
-                <div className="order-2 sm:order-1">
-                  <p className={labelCot}>Enviar al cliente</p>
-                  <div className="flex flex-wrap gap-2">
-                    <button type="button" onClick={enviarCorreo} disabled={enviando || !completa || !email.trim()}
-                      className="inline-flex items-center gap-2 px-4 py-2.5 rounded-full bg-ink text-surface text-sm font-bold hover:opacity-90 transition active:scale-[0.98] disabled:opacity-50">
-                      {enviando
-                        ? <span className="w-4 h-4 border-2 border-surface/30 border-t-surface rounded-full animate-spin" />
-                        : <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.8"><path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16v12H4z" /><path strokeLinecap="round" strokeLinejoin="round" d="M4 7l8 6 8-6" /></svg>}
-                      Enviar por correo
-                    </button>
-                    {waHref
-                      ? <a href={waHref} target="_blank" rel="noopener noreferrer"
-                          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-full bg-[#25D366] text-white text-sm font-bold hover:opacity-90 transition active:scale-[0.98]">
-                          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M17.5 14.4c-.3-.1-1.7-.8-1.9-.9-.3-.1-.5-.1-.7.1-.2.3-.7.9-.9 1.1-.2.2-.3.2-.6.1-.3-.1-1.2-.5-2.3-1.4-.9-.8-1.4-1.7-1.6-2-.2-.3 0-.5.1-.6.1-.1.3-.3.4-.5.1-.1.2-.3.2-.4.1-.2 0-.3 0-.5-.1-.1-.7-1.6-.9-2.2-.2-.6-.5-.5-.7-.5h-.6c-.2 0-.5.1-.8.4-.3.3-1 1-1 2.5s1.1 2.9 1.2 3.1c.1.2 2.1 3.2 5.1 4.5.7.3 1.3.5 1.7.6.7.2 1.4.2 1.9.1.6-.1 1.7-.7 2-1.4.2-.7.2-1.3.2-1.4-.1-.1-.3-.2-.6-.3zM12 2C6.5 2 2 6.5 2 12c0 1.8.5 3.5 1.3 5L2 22l5.1-1.3c1.4.8 3.1 1.2 4.9 1.2 5.5 0 10-4.5 10-10S17.5 2 12 2z" /></svg>
-                          WhatsApp
-                        </a>
-                      : <span title="Agrega el teléfono (10 dígitos) del cliente" className="inline-flex items-center gap-2 px-4 py-2.5 rounded-full bg-[#25D366]/40 text-white text-sm font-bold opacity-60 cursor-not-allowed">
-                          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M17.5 14.4c-.3-.1-1.7-.8-1.9-.9-.3-.1-.5-.1-.7.1-.2.3-.7.9-.9 1.1-.2.2-.3.2-.6.1-.3-.1-1.2-.5-2.3-1.4-.9-.8-1.4-1.7-1.6-2-.2-.3 0-.5.1-.6.1-.1.3-.3.4-.5.1-.1.2-.3.2-.4.1-.2 0-.3 0-.5-.1-.1-.7-1.6-.9-2.2-.2-.6-.5-.5-.7-.5h-.6c-.2 0-.5.1-.8.4-.3.3-1 1-1 2.5s1.1 2.9 1.2 3.1c.1.2 2.1 3.2 5.1 4.5.7.3 1.3.5 1.7.6.7.2 1.4.2 1.9.1.6-.1 1.7-.7 2-1.4.2-.7.2-1.3.2-1.4-.1-.1-.3-.2-.6-.3zM12 2C6.5 2 2 6.5 2 12c0 1.8.5 3.5 1.3 5L2 22l5.1-1.3c1.4.8 3.1 1.2 4.9 1.2 5.5 0 10-4.5 10-10S17.5 2 12 2z" /></svg>
-                          WhatsApp
-                        </span>}
-                  </div>
-                  <p className="text-[11px] text-mute mt-1.5 max-w-[340px]">Por correo va el PDF adjunto; por WhatsApp, un enlace para verlo. Enviar por correo la marca como “Enviada”.</p>
-                </div>
-              )}
-              <div className="order-1 sm:order-2 w-full sm:max-w-[320px] sm:ml-auto space-y-2.5">
-                <div className="flex items-center justify-between text-[14px]"><span className="text-mute">Subtotal</span><span className="text-ink tabular-nums font-medium">{orMoney(baseMonto)}</span></div>
-                <div className="flex items-center justify-between text-[14px] pb-2.5 border-b border-edge">
-                  {esVenta ? (
-                    /* Venta: el precio ya trae IVA, se desglosa siempre (sin toggle). */
-                    <span className="text-mute">IVA (16%) <span className="text-[11px]">· incluido</span></span>
-                  ) : (
-                    /* Renta: el IVA es opcional según si el cliente pide factura. */
-                    <div className={`flex items-center gap-2.5 ${bloqueada ? 'opacity-60' : ''}`}>
-                      <Switch checked={aplicaIva} disabled={bloqueada} onChange={setAplicaIva} label="¿Factura? (suma IVA)" />
-                      <span className="text-mute">¿Factura? (+IVA)</span>
-                    </div>
-                  )}
-                  <span className="text-ink tabular-nums font-medium">{orMoney(ivaMonto)}</span>
-                </div>
-                <div className="flex items-baseline justify-between">
-                  <span className="text-ink font-bold text-[15px]">Total</span>
-                  <span className="text-[22px] font-extrabold text-price tabular-nums leading-none">{orMoney(totalMonto)}</span>
-                </div>
-                {esVenta && <div className="flex items-center justify-between text-[11.5px] text-mute"><span>Pago de contado (−5%)</span><span className="tabular-nums">{orMoney(totalMonto * 0.95)}</span></div>}
-              </div>
-            </div>
-          </div>
-
-          {/* Vigencia */}
-          <div>
-            <label className={labelCot}>Vigencia</label>
-            <div className="relative sm:max-w-[220px]">
-              <input aria-label="Vigencia" type="number" min={1} disabled={bloqueada} value={vigencia} onChange={e => setVigencia(e.target.value)} className={`${input} pr-14 disabled:opacity-60`} />
-              <span className="absolute right-3.5 top-1/2 -translate-y-1/2 text-mute text-sm pointer-events-none">días</span>
-            </div>
-            <p className="text-[11.5px] text-mute mt-2">Los datos del cliente y la vigencia se guardan con “Guardar”. El envío por correo se conectará más adelante.</p>
-          </div>
-
-          {/* Notas */}
-          <div>
-            <label className={labelCot}>Notas</label>
-            <textarea aria-label="Notas" className={`${input} resize-none disabled:opacity-60`} rows={3} disabled={bloqueada} value={notas} onChange={e => setNotas(e.target.value)} placeholder="Condiciones, entrega, etc." />
-          </div>
-
-          {/* Fotos: apoyo visual del equipo. Se guardan al instante y salen en
-              la carta y el PDF del cliente. */}
-          <div>
-            <div className="flex items-center justify-between mb-2 gap-3">
-              <label className={`${labelCot} mb-0`}>Fotos ({fotos.length})</label>
-              {!bloqueada && (
-                <button type="button" onClick={() => fotoInput.current?.click()} disabled={subiendoFotos || fotos.length >= 10}
-                  className="text-[12px] font-bold text-gold-ink hover:opacity-80 transition active:scale-95 disabled:opacity-50">
-                  {subiendoFotos ? 'Subiendo…' : '+ Agregar fotos'}
-                </button>
-              )}
-              <input aria-label="Fotos de la cotización" ref={fotoInput} type="file" accept="image/*" multiple className="hidden" onChange={subirFotos} />
-            </div>
-            {fotos.length === 0 ? (
-              bloqueada ? (
-                <p className="text-[12px] text-mute">Sin fotos.</p>
-              ) : (
-                <button type="button" onClick={() => fotoInput.current?.click()} disabled={subiendoFotos}
-                  className="w-full py-6 rounded-xl border border-dashed border-edge text-[12px] text-mute hover:text-ink hover:border-gold/50 transition-colors disabled:opacity-50">
-                  Agrega imágenes del equipo para que salgan en la cotización.
-                </button>
-              )
-            ) : (
-              <div className="grid grid-cols-4 sm:grid-cols-6 gap-2">
-                {fotos.map(f => (
-                  <div key={f.id} className="relative group aspect-square rounded-[9px] overflow-hidden border border-edge bg-surface-2">
-                    <button type="button" onClick={() => setZoomFoto(f)} className="w-full h-full" title="Ver foto">
-                      <img src={resolveMediaUrl(f.imagen)} alt="Foto de la cotización" className="w-full h-full object-cover" />
-                    </button>
-                    {!bloqueada && (
-                      <button type="button" onClick={() => quitarFoto(f.id)} aria-label="Quitar foto"
-                        className="absolute top-1 right-1 w-5 h-5 rounded-md bg-black/60 text-white opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity flex items-center justify-center">
-                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5"><path strokeLinecap="round" d="M6 6l12 12M18 6L6 18" /></svg>
-                      </button>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-            {!bloqueada && fotos.length > 0 && <p className="text-[11px] text-mute mt-2">Hasta 10 fotos. Aparecen en la carta y el PDF del cliente.</p>}
-          </div>
-
-        </div>
-
-        <div className="px-5 sm:px-7 py-3.5 border-t border-edge flex flex-col sm:flex-row sm:items-center gap-2.5 bg-surface shrink-0">
-          {/* El documento del cliente: UNA puerta, no tres.
-              Había "Imprimir" y "Descargar PDF" aquí, y la vista previa que abría
-              el primero ya trae dentro esos mismos dos botones — tres caminos
-              para dos acciones. Ahora se abre la orden y se decide viéndola:
-              nadie imprime a ciegas un documento que va a firmar un cliente. */}
-          <div className="grid grid-cols-3 sm:flex gap-2 sm:mr-auto">
-            <button onClick={() => onPrint({ ...c, notas, vigencia_dias: Number(vigencia) || 15, aplica_iva: aplicaIva, base: String(baseMonto), iva: String(ivaMonto), total: String(totalMonto) })} disabled={!completa} title={!completa ? 'Agrega cliente y al menos un concepto' : 'Ver la orden en carta antes de imprimirla'} className="py-2.5 sm:px-4 rounded-full border border-edge text-ink text-sm font-semibold hover:bg-surface-2 transition active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100 flex items-center justify-center gap-2">
-              <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /><path d="M8 13h8M8 17h5" />
-              </svg>
-              Ver la orden
-            </button>
-            <button onClick={imprimirPDF} disabled={documento === 'impresion' || !completa} title={!completa ? 'Agrega cliente y al menos un concepto' : undefined} className="py-2.5 sm:px-4 rounded-full border border-edge text-ink text-sm font-semibold hover:bg-surface-2 transition active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100 flex items-center justify-center gap-2">
-              {documento === 'impresion'
-                ? <span className="w-4 h-4 border-2 border-ink/30 border-t-ink rounded-full animate-spin shrink-0" />
-                : <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9V3h12v6" /><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" /><path d="M6 14h12v7H6z" /></svg>}
-              Imprimir
-            </button>
-            <button onClick={descargarPDF} disabled={documento === 'descarga' || !completa} title={!completa ? 'Agrega cliente y al menos un concepto' : undefined} className="py-2.5 sm:px-4 rounded-full border border-edge text-ink text-sm font-semibold hover:bg-surface-2 transition active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100 flex items-center justify-center gap-2">
-              {documento === 'descarga'
-                ? <span className="w-4 h-4 border-2 border-ink/30 border-t-ink rounded-full animate-spin shrink-0" />
-                : <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" /></svg>}
-              Descargar PDF
-            </button>
-          </div>
-
-          {/* Guardar */}
-          {!bloqueada && (
-            <button onClick={guardarInfo} disabled={savingInfo} className="w-full sm:w-auto sm:min-w-[110px] py-2.5 px-5 rounded-full border border-edge text-ink font-bold text-sm hover:bg-surface-2 transition active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-2">
-              {savingInfo ? <span className="w-4 h-4 border-2 border-ink/30 border-t-ink rounded-full animate-spin" /> : null}
-              Guardar
-            </button>
-          )}
-
-          {/* Acción de negocio: no aplica en estados finales (cancelada/rechazada). */}
-          {/* Ya concretada: el botón lleva al comprobante de lo que se hizo.
-              Antes decía "Ver ticket" y llamaba a `convertir` para TODAS: con
-              una renta el atajo idempotente no aplica (no hay venta_id) y el
-              admin caía en el diálogo "Convertir en venta", que no viene a
-              cuento. La excepción real es la MIXTA con la renta ya concretada:
-              ahí sí falta convertir su parte de venta. */}
-          {!cotCerrada && (c.venta_id ? (
-            <button onClick={() => onConvertida(c.venta_id as number)} className="w-full sm:w-auto py-2.5 px-5 rounded-full text-sm font-bold transition active:scale-[0.98] flex items-center justify-center gap-2 border border-emerald-500/40 text-emerald-600 hover:bg-emerald-500/10">
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.9"><path strokeLinecap="round" strokeLinejoin="round" d="M4 12l5 5L20 6" /></svg>
-              Ver la orden en carta
-            </button>
-          ) : c.renta_id && c.tipo !== 'mixta' ? (
-            /* Lleva A la renta. Antes bajaba su orden en PDF: dos botones con el
-               mismo ícono de descarga, uno al lado del otro, y el que decía
-               "Ver" no llevaba a ningún lado. Los documentos están a la
-               izquierda; esto es navegación. */
-            <button onClick={() => traspasarARenta(c.renta_id as number)} className="w-full sm:w-auto py-2.5 px-5 rounded-full text-sm font-bold transition active:scale-[0.98] flex items-center justify-center gap-2 border border-emerald-500/40 text-emerald-600 hover:bg-emerald-500/10">
-              Ver la renta #{c.renta_id}
-              <svg className={`w-4 h-4 shrink-0 ${traspasando ? 'flecha-vuela' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
-            </button>
-          ) : !bloqueada && c.estado === 'aceptada' && (c.tipo === 'renta' || c.tipo === 'mixta') ? (
-            /* Lo que sigue. Estaba arriba, colgando de la barra de Estado, que
-               solo informa; las acciones viven en el pie. Y así ocupa el mismo
-               lugar que "Ver la renta #N": la acción se convierte en su
-               resultado sin que la vista se reacomode. */
-            <button onClick={concretarRenta} className="w-full sm:w-auto py-2.5 px-5 rounded-full btn-renta text-sm font-bold transition active:scale-[0.98] flex items-center justify-center gap-2">
-              Concretar renta
-              <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
-            </button>
-          ) : c.tipo === 'renta' ? (
-            <div className="w-full sm:w-auto py-2.5 px-4 rounded-full border border-edge text-mute text-[12px] font-medium flex items-center justify-center text-center" title="Acéptala para poder concretar la renta">
-              Acéptala primero
-            </div>
-          ) : c.estado !== 'aceptada' ? (
-            <div className="w-full sm:w-auto py-2.5 px-4 rounded-full border border-edge text-mute text-[12px] font-medium flex items-center justify-center text-center" title="Marca la cotización como “Aceptada” para poder convertirla en venta o pedirla sobre pedido">
-              Acéptala primero
-            </div>
-          ) : (
-            <button onClick={convertir} disabled={busy} className="w-full sm:w-auto py-2.5 px-5 rounded-full bg-gold text-black text-sm font-bold hover:opacity-90 transition active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-2">
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M4 12l5 5L20 6" /></svg>
-              {sinStock ? 'Registrar sobre pedido' : c.tipo === 'mixta' ? `Convertir la venta (${orMoney(c.subtotal_venta)})` : 'Convertir a venta'}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {pedidoDesde && (
-        <NuevoPedidoModal
-          desde={pedidoDesde}
-          empresas={empresas}
-          onClose={() => setPedidoDesde(null)}
-          onDone={() => { setPedidoDesde(null); onChanged(); onClose() }}
-          notify={notify}
-        />
-      )}
-      {zoomFoto && createPortal(
-        <Modal className="modal-in fixed inset-0 z-[70] bg-black/75 flex items-center justify-center p-4" onClose={() => setZoomFoto(null)} label="Foto de la cotización">
-          <img src={resolveMediaUrl(zoomFoto.imagen)} alt="Foto de la cotización" onClick={e => e.stopPropagation()}
-            className="max-w-3xl w-full max-h-[85vh] object-contain rounded-xl" />
-        </Modal>,
-        document.body,
-      )}
-    </Modal>
-  )
-}
-
-/* ════════════════════════════════════════
-   EL DÍA DEL TÉCNICO: dónde está el equipo y qué hay en taller
-════════════════════════════════════════ */
-type Urgencia = 'vencida' | 'hoy' | 'reparar' | 'manana' | 'proxima'
-type TipoTarea = 'entregar' | 'recoger' | 'reparar' | 'entrega_prometida'
-
-type Tarea = {
-  tipo: TipoTarea; urgencia: Urgencia; etiqueta: string
-  adeudo?: string | null
-  equipo: string; codigo: string; numero_serie?: string
-  // Campos de renta (entregar / recoger)
-  renta_id?: number; lugar?: string; obra?: string | null
-  contacto?: string; telefono?: string; empresa?: string | null
-  fecha_fin?: string; evidencias?: { entrega: number; devolucion: number }
-  // Campos de reparación
-  orden_id?: number; folio?: string; orden_tipo?: string; estado?: string
-  de_quien?: string; falla?: string; dias_en_taller?: number
-}
-type ResumenTareas = { total: number; entregar: number; recoger: number; reparar: number; vencidas: number; proximas: number }
-
-// Cada tipo de tarea tiene su color e ícono: se distingue de un vistazo sin leer.
-const TAREA_META: Record<TipoTarea, { label: string; anillo: string; icono: React.ReactNode }> = {
-  entregar: { label: 'Entregar', anillo: 'bg-gold-soft text-gold-ink',
-    icono: <><path d="M12 19V5" /><path d="M6 11l6-6 6 6" /></> },
-  recoger: { label: 'Recoger', anillo: 'bg-[var(--c-renta)]/12 text-[var(--c-renta)]',
-    icono: <><path d="M12 5v14" /><path d="M6 13l6 6 6-6" /></> },
-  reparar: { label: 'Reparar', anillo: 'bg-surface-2 text-mute',
-    icono: <><path d="M14.7 6.3a4 4 0 0 0-5.6 5.6l-6 6v3h3l6-6a4 4 0 0 0 5.6-5.6l-2.5 2.5-2.1-2.1z" /></> },
-  // Entrega PROMETIDA: cotización aceptada con fecha de HOY, aún sin convertir a
-  // renta/venta. Es un compromiso informativo (sin renta_id), no una acción.
-  entrega_prometida: { label: 'Prometida', anillo: 'bg-gold-soft text-gold-ink',
-    icono: <><circle cx="12" cy="12" r="9" /><path d="M12 8v4l3 2" /></> },
-}
-// La urgencia tiñe solo la etiqueta de tiempo, no todo el card: el ruido cansa.
-const URGENCIA_TXT: Record<Urgencia, string> = {
-  vencida: 'text-red-600 dark:text-red-500', hoy: 'text-amber-600 dark:text-amber-500',
-  reparar: 'text-mute', manana: 'text-ink', proxima: 'text-mute',
-}
-
-function UbicacionesAdmin({ notify, empresas, unidades, onOrdenCreada }: {
-  notify: (m: string, t?: 'ok' | 'err') => void
-  /* Para recibir una máquina en taller sin salir de aquí. El técnico no tiene la
-     sección Reparaciones —sería duplicarle el día— pero sí recibe máquinas. */
-  empresas: Empresa[]; unidades: Unidad[]
-  onOrdenCreada: () => void
-}) {
-  // Administración VE el tablero pero no lo toca: sin `jornada_campo` no hay
-  // botones de entregar/recoger, no se abre la sábana de fotos ni el modal de
-  // taller. Que el admin pudiera entregar desde aquí, sin estar en la obra ni
-  // tener las fotos, era pedir un desastre. Corregir sigue siendo posible, pero
-  // desde Rentas, donde el acto es deliberado.
-  const puede = usePuede()
-  const soloLectura = !puede('jornada_campo')
-  const [tareas, setTareas] = useState<Tarea[]>([])
-  const [resumen, setResumen] = useState<ResumenTareas>({ total: 0, entregar: 0, recoger: 0, reparar: 0, vencidas: 0, proximas: 0 })
-  const [cargando, setCargando] = useState(true)
-  const [hoja, setHoja] = useState<Tarea | null>(null)      // sábana de entrega/recolección con fotos
-  const [trabajando, setTrabajando] = useState<number | null>(null)
-  const [recibiendo, setRecibiendo] = useState(false)   // alta de orden de taller
-
-  const cargar = useCallback(() => {
-    api.get<{ tareas: Tarea[]; resumen: ResumenTareas }>('/rentas/tareas/')
-      .then(r => { setTareas(r.data?.tareas || []); if (r.data?.resumen) setResumen(r.data.resumen) })
-      .catch(() => notify('No se pudo cargar', 'err'))
-      .finally(() => setCargando(false))
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-  useRecurso(['rentas', 'reparaciones'], cargar)
-
-  /* Tiempo real ENTRE usuarios: el bus solo avisa dentro del mismo navegador,
-     así que la renta que el admin crea en su máquina no llegaría sola al
-     teléfono del técnico. Sondeo silencioso cada 20 s (rentas/tareas/ está en
-     SIN_INDICADOR: no enciende el loader global) y al volver a la pestaña. */
-  useEffect(() => {
-    const id = window.setInterval(cargar, 20_000)
-    const alVolver = () => { if (document.visibilityState === 'visible') cargar() }
-    document.addEventListener('visibilitychange', alVolver)
-    return () => { window.clearInterval(id); document.removeEventListener('visibilitychange', alVolver) }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
-  // Las "próximas" (entregas a futuro) se separan: son planeación, no lo de hoy.
-  const pendientes = tareas.filter(t => t.urgencia !== 'proxima')
-  const proximas = tareas.filter(t => t.urgencia === 'proxima')
-
-  return (
-    <div className="max-w-2xl mx-auto space-y-2.5">
-      {/* Recibir una máquina en taller. Va aquí y no en una sección aparte: el
-          técnico ya trabaja sus órdenes desde este tablero, y darle además la
-          sección Reparaciones sería mostrarle su mismo día en otra pantalla.
-          Es el MISMO modal de alta que usa administración, montado donde él
-          está parado. `soloLectura` lo esconde para quien solo supervisa. */}
-      {!soloLectura && puede('reparar') && (
-        <div className="flex justify-end">
-          <button onClick={() => setRecibiendo(true)}
-            className="h-10 px-4 rounded-xl border border-edge bg-surface text-[13px] font-bold text-ink hover:border-gold/40 transition-colors inline-flex items-center gap-2">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round"><path d="M12 5v14M5 12h14" /></svg>
-            Recibir máquina
-          </button>
-        </div>
-      )}
-
-      {/* Un resumen de una línea, no un tablero. El técnico quiere el número, no gráficas. */}
-      <div className="bg-surface border border-edge rounded-2xl px-5 sm:px-6 py-5">
-        {cargando ? (
-          // Esqueleto con la forma del resumen (línea + dos chips): el técnico ve
-          // lo que va a llegar y la espera se siente más corta que un "Cargando…".
-          <div aria-busy="true" aria-label="Cargando tu jornada">
-            <div className="h-4 w-2/3 rounded-md bg-surface-2 animate-pulse" />
-            <div className="flex gap-2 mt-3.5">
-              <div className="h-6 w-24 rounded-full bg-surface-2 animate-pulse" />
-              <div className="h-6 w-20 rounded-full bg-surface-2 animate-pulse" />
-            </div>
-          </div>
-        ) : resumen.total === 0 ? (
-          // Vacío que dice qué significa estar en cero, con un icono en verde
-          // "disponible". Sin emoji.
-          <div className="flex items-center gap-3.5">
-            <span className="shrink-0 w-10 h-10 rounded-full grid place-items-center bg-libre/12 text-libre">
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>
-            </span>
-            <div>
-              <p className="text-[15px] font-black text-ink leading-tight">Vas al día</p>
-              <p className="text-[13px] text-mute mt-0.5">Sin entregas, recolecciones ni reparaciones pendientes.</p>
-            </div>
-          </div>
-        ) : (
-          <>
-            <p className="text-[15px] text-ink">
-              Tienes <b className="font-black">{pendientes.length}</b> {pendientes.length === 1 ? 'tarea pendiente' : 'tareas pendientes'}
-              {/* La coma va FUERA del span: es puntuación normal, no parte del
-                  rojo. Solo "N vencida(s)" se pinta. */}
-              {resumen.vencidas > 0 && <>, <span className="text-red-600 dark:text-red-500 font-bold">{resumen.vencidas} vencida{resumen.vencidas > 1 ? 's' : ''}</span></>}.
-            </p>
-            <div className="flex flex-wrap gap-2 mt-3">
-              {resumen.entregar > 0 && <TareaResumenChip n={resumen.entregar} label="entregar" tipo="entregar" />}
-              {resumen.recoger > 0 && <TareaResumenChip n={resumen.recoger} label="recoger" tipo="recoger" />}
-              {resumen.reparar > 0 && <TareaResumenChip n={resumen.reparar} label="reparar" tipo="reparar" />}
-            </div>
-          </>
-        )}
-      </div>
-
-      {soloLectura && (
-        <p className="px-4 py-3 rounded-xl bg-surface-2 border border-edge text-[13px] text-mute">
-          Vista de supervisión: aquí solo se mira. Para entregar, recoger o subir fotos, entra a <b className="text-ink">Rentas</b>.
-        </p>
-      )}
-
-      {/* La lista de tareas: una acción por card. */}
-      {pendientes.map((t, i) => (
-        <TareaCard key={`${t.tipo}-${t.renta_id ?? t.orden_id}-${i}`} t={t} soloLectura={soloLectura}
-          onEntregar={() => setHoja(t)} onReparar={() => t.orden_id && setTrabajando(t.orden_id)} />
-      ))}
-
-      {/* Próximas: se agenda, no urge. Colapsadas visualmente. */}
-      {/* space-y-2.5 en el contenedor: las próximas se apilaban pegadas, sin el
-          gap que sí tienen las pendientes por vivir en el contenedor de arriba. */}
-      {proximas.length > 0 && (
-        <div className="pt-2 space-y-2.5">
-          <p className="text-[12px] font-bold text-mute uppercase tracking-wide px-1 mb-2">Próximas ({proximas.length})</p>
-          {proximas.map((t, i) => (
-            <TareaCard key={`prox-${t.renta_id}-${i}`} t={t} atenuada soloLectura={soloLectura}
-              onEntregar={() => setHoja(t)} onReparar={() => {}} />
-          ))}
-        </div>
-      )}
-
-      {/* Los `!soloLectura` son cinturón: hoy sin botones nadie los abre, pero un
-          camino nuevo que llame a setHoja no debe destapar la sábana de fotos. */}
-      {hoja && !soloLectura && (
-        <EntregaHoja tarea={hoja} onClose={() => setHoja(null)} onHecho={() => { setHoja(null); cargar() }} notify={notify} />
-      )}
-      {trabajando !== null && !soloLectura && (
-        <TallerTrabajoModal ordenId={trabajando} onClose={() => setTrabajando(null)} onCambio={cargar} notify={notify} />
-      )}
-
-      {recibiendo && (
-        <NuevaOrdenModal
-          empresas={empresas} unidades={unidades} notify={notify}
-          onClose={() => setRecibiendo(false)}
-          onCreated={() => {
-            setRecibiendo(false)
-            // La orden nueva entra a su jornada como una tarea más: no hay que
-            // mandarlo a otra pantalla a buscarla.
-            cargar()
-            onOrdenCreada()
-          }}
-        />
-      )}
-    </div>
-  )
-}
-
-function TareaResumenChip({ n, label, tipo }: { n: number; label: string; tipo: TipoTarea }) {
-  const meta = TAREA_META[tipo] ?? TAREA_META.entregar
-  return (
-    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[12.5px] font-bold ${meta.anillo}`}>
-      {n} por {label}
-    </span>
-  )
-}
-
-function TareaCard({ t, atenuada, soloLectura, onEntregar, onReparar }: {
-  t: Tarea; atenuada?: boolean; soloLectura?: boolean
-  onEntregar: () => void; onReparar: () => void
-}) {
-  // Fallback defensivo: si el backend emite un tipo de tarea que este panel aún
-  // no conoce, se degrada con un estilo genérico en vez de tumbar TODO el panel
-  // (un tipo sin entrada aquí reventaba con "undefined.anillo" → pantalla 500).
-  const meta = TAREA_META[t.tipo] ?? TAREA_META.entregar
-  const tel = (t.telefono || '').replace(/\D+/g, '')
-  const esCampo = t.tipo === 'entregar' || t.tipo === 'recoger' || t.tipo === 'entrega_prometida'
-  const fotos = t.tipo === 'recoger' ? (t.evidencias?.devolucion ?? 0) : (t.evidencias?.entrega ?? 0)
-
-  // Borde rojo tenue solo si está vencida: dirige el ojo a lo urgente sin pintar
-  // todo el card (el ruido cansa). Borde completo, no franja lateral.
-  return (
-    <div className={`bg-surface border rounded-2xl overflow-hidden ${t.urgencia === 'vencida' ? 'border-red-500/35' : 'border-edge'} ${atenuada ? 'opacity-70' : ''}`}>
-      <div className="px-5 sm:px-6 py-4">
-        <div className="flex items-start gap-3.5">
-          <span className={`shrink-0 w-11 h-11 rounded-full grid place-items-center ${meta.anillo}`}>
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">{meta.icono}</svg>
-          </span>
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-[11px] font-bold uppercase tracking-wide text-mute">{meta.label}</span>
-              <span className={`text-[12.5px] font-bold text-right ${URGENCIA_TXT[t.urgencia]}`}>{t.etiqueta}</span>
-            </div>
-            <h3 className="text-[15px] font-black text-ink mt-0.5 leading-tight">{t.equipo}</h3>
-            <p className="text-[12px] font-mono text-mute">{t.codigo}{t.numero_serie ? ` · ${t.numero_serie}` : ''}</p>
-
-            {esCampo ? (
-              <div className="mt-2 space-y-0.5">
-                <p className="text-[13.5px] text-ink flex items-start gap-1.5">
-                  <svg className="w-3.5 h-3.5 mt-0.5 shrink-0 text-mute" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path d="M12 21s7-5.5 7-11a7 7 0 1 0-14 0c0 5.5 7 11 7 11z" /><circle cx="12" cy="10" r="2.5" /></svg>
-                  {t.obra ? <span><b className="font-bold">{t.obra}</b> · {t.lugar}</span> : t.lugar}
-                </p>
-                {t.contacto && <p className="text-[12.5px] text-mute pl-5">{t.contacto}{t.empresa ? ` · ${t.empresa}` : ''}</p>}
-                {/* Adeudo: la única cifra que el técnico SÍ ve — al recoger, cobra. */}
-                {t.tipo === 'recoger' && t.adeudo && (
-                  <p className="mt-2 inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-red-500/10 border border-red-500/30 text-[13px] font-bold text-red-600 dark:text-red-400">
-                    <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round"><path d="M12 7v6" /><circle cx="12" cy="17" r="0.6" className="fill-current" /></svg>
-                    Adeudo: cobrar ${Number(t.adeudo).toLocaleString('en-US', { minimumFractionDigits: 2 })}
-                  </p>
-                )}
-              </div>
-            ) : (
-              <div className="mt-2">
-                <p className="text-[12.5px] text-mute">{t.de_quien}{t.orden_tipo === 'interna' ? '' : ''} · {t.folio}</p>
-                {t.falla && <p className="text-[13.5px] text-ink mt-1 leading-snug">{t.falla}</p>}
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Barra de acciones: llamar / mapa a la izquierda, la acción principal a la derecha */}
-      <div className="px-5 sm:px-6 py-3 bg-surface-2/40 border-t border-edge flex items-center gap-2">
-        {esCampo && tel && (
-          <a href={`tel:${tel}`} aria-label="Llamar" className="shrink-0 w-9 h-9 rounded-lg grid place-items-center border border-edge bg-surface text-ink hover:border-gold/40 hover:text-gold-ink active:scale-95 transition-[transform,border-color,color] duration-150 motion-reduce:active:scale-100">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.9"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a1 1 0 0 1-1 1A16 16 0 0 1 4 5a1 1 0 0 1 1-1z" /></svg>
-          </a>
-        )}
-        {esCampo && (
-          <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(t.lugar || '')}`} target="_blank" rel="noopener noreferrer" aria-label="Cómo llegar"
-            className="shrink-0 w-9 h-9 rounded-lg grid place-items-center border border-edge bg-surface text-ink hover:border-gold/40 hover:text-gold-ink active:scale-95 transition-[transform,border-color,color] duration-150 motion-reduce:active:scale-100">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.9"><path d="M12 21s7-5.5 7-11a7 7 0 1 0-14 0c0 5.5 7 11 7 11z" /><circle cx="12" cy="10" r="2.5" /></svg>
-          </a>
-        )}
-        {esCampo && t.tipo !== 'entrega_prometida' && (
-          <span className="text-[11.5px] text-mute pl-1">
-            {fotos > 0 ? `${fotos} foto${fotos > 1 ? 's' : ''}` : 'Sin fotos'}
-          </span>
-        )}
-        <div className="flex-1" />
-        {soloLectura ? (
-          // Supervisión: en vez del botón, qué se espera de esta tarea. Sin botón
-          // fantasma que se vea deshabilitado y invite a picarlo.
-          <span className="text-[12px] text-mute pl-1 font-medium">
-            {t.tipo === 'reparar' ? 'En taller'
-              : t.tipo === 'entrega_prometida' ? 'Compromiso de hoy'
-              : t.tipo === 'recoger' ? 'Por recoger' : 'Por entregar'}
-          </span>
-        ) : t.tipo === 'reparar' ? (
-          <button onClick={onReparar} className="btn-acento h-9 px-4 rounded-full text-[13px] font-bold">Trabajar</button>
-        ) : t.tipo === 'entrega_prometida' ? (
-          // Compromiso informativo: todavía no es renta/venta, no hay nada que "entregar" en el sistema.
-          <span className="text-[12px] text-mute pl-1 font-medium">Compromiso de hoy</span>
-        ) : (
-          <button onClick={onEntregar} className={`${t.tipo === 'recoger' ? 'btn-renta' : 'btn-acento'} h-9 px-4 rounded-full text-[13px] font-bold`}>
-            {t.tipo === 'recoger' ? 'Recoger' : 'Entregar'}
-          </button>
-        )}
-      </div>
-    </div>
-  )
-}
-
-/* ── Sábana de entrega / recolección: captura fotos ANTES de confirmar ── */
-function EntregaHoja({ tarea, onClose, onHecho, notify }: {
-  tarea: Tarea; onClose: () => void; onHecho: () => void; notify: (m: string, t?: 'ok' | 'err') => void
-}) {
-  const esRecoger = tarea.tipo === 'recoger'
-  const momento = esRecoger ? 'devolucion' : 'entrega'
-  const [fotos, setFotos] = useState<File[]>([])
-  const [nota, setNota] = useState('')
-  const [ocupado, setOcupado] = useState(false)
-  const inputRef = useRef<HTMLInputElement | null>(null)
-
-  /* ── Cobrar al recoger ──
-     Al técnico se le pedía cobrar y no se le daba dónde anotarlo: su tarjeta
-     decía "Adeudo: cobrar $2,000" y esta hoja no tenía campo de pago. El
-     AbonoModal vivía en Rentas y en Adeudos, dos secciones que su rol no ve.
-     Aquí queda a la mano, en el momento en que el dinero cambia de manos.
-     `saldo` es lo que queda por cobrar; baja con cada abono sin recargar. */
-  const [saldo, setSaldo] = useState(Number(tarea.adeudo || 0))
-  const [cobrando, setCobrando] = useState(false)
-  const puedeCobrar = usePuede()('ver_montos_operacion')
-  const hayQueCobrar = esRecoger && saldo > 0 && !!tarea.renta_id && puedeCobrar
-
-  async function registrarAbono(monto: number, metodo: string, fecha: string) {
-    await api.post(`/rentas/${tarea.renta_id}/abonos/`, { monto, metodo, fecha: fecha || undefined })
-    setSaldo(s => Math.max(0, Number((s - monto).toFixed(2))))
-    setCobrando(false)
-    notify(monto >= saldo ? 'Adeudo liquidado' : 'Abono registrado')
-  }
-
-  const previews = useMemo(() => fotos.map(f => URL.createObjectURL(f)), [fotos])
-  useEffect(() => () => previews.forEach(URL.revokeObjectURL), [previews])
-
-  function agregar(ev: React.ChangeEvent<HTMLInputElement>) {
-    const nuevos = Array.from(ev.target.files || [])
-    ev.target.value = ''
-    if (nuevos.length) setFotos(f => [...f, ...nuevos].slice(0, 12))
-  }
-
-  // Sube las fotos (si hay) y luego marca la entrega/recolección. Si la subida
-  // falla, NO se marca: la evidencia es parte del acto, no un extra.
-  async function enviarEntrega(conFotos: boolean) {
-    setOcupado(true)
-    try {
-      if (conFotos && fotos.length) {
-        const fd = new FormData()
-        fd.append('momento', momento)
-        if (nota.trim()) fd.append('nota', nota.trim())
-        fotos.forEach(f => fd.append('imagenes', f))
-        await api.post(`/rentas/${tarea.renta_id}/evidencias/`, fd, { headers: { 'Content-Type': 'multipart/form-data' } })
-      }
-      const url = esRecoger ? `/rentas/${tarea.renta_id}/devolver/` : `/rentas/${tarea.renta_id}/entregar/`
-      const body = esRecoger ? {} : { entregado: true }
-      const r = await api.post(url, body)
-      notify(r.data?.detalle || (esRecoger ? 'Equipo recogido' : 'Entrega confirmada'))
-      onHecho()
-    } catch (err) {
-      notify(errorMsg(err, 'No se pudo completar'), 'err')
-    } finally {
-      setOcupado(false)
-    }
-  }
-
-  return createPortal(
-    <Modal className="fixed inset-0 z-[60] bg-[rgba(33,29,22,0.45)] backdrop-blur-[2px] flex items-end sm:items-center justify-center" onClose={onClose} label="Hoja de entrega">
-      <div onClick={e => e.stopPropagation()} className="w-full sm:max-w-[520px] bg-surface rounded-t-3xl sm:rounded-2xl shadow-[0_-8px_40px_rgba(33,29,22,0.2)] sm:shadow-[0_24px_60px_rgba(33,29,22,0.25)] max-h-[92vh] flex flex-col overflow-hidden border-t sm:border border-edge">
-        <div className="px-6 pt-5 pb-4 border-b border-edge flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <h2 className="text-lg font-black text-ink">{esRecoger ? 'Recoger' : 'Entregar'} · {tarea.equipo}</h2>
-            <p className="text-[12.5px] text-mute mt-0.5 truncate">{tarea.codigo}{tarea.lugar ? ` · ${tarea.lugar}` : ''}</p>
-          </div>
-          <button onClick={onClose} aria-label="Cerrar" className="w-8 h-8 rounded-[9px] grid place-items-center text-mute hover:text-ink hover:bg-surface-2 transition-colors">
-            <svg className="w-[18px] h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" d="M6 6l12 12M18 6L6 18" /></svg>
-          </button>
-        </div>
-
-        <div className="px-6 py-5 overflow-y-auto flex-1 space-y-5">
-          <div>
-            <p className="text-[11px] font-extrabold tracking-[0.5px] text-gold-ink mb-1">FOTOS DEL EQUIPO</p>
-            <p className="text-[12.5px] text-mute mb-3">
-              {esRecoger ? 'Cómo regresó la máquina. Respalda el estado por si hay reclamo.' : 'El estado en que sale. Es tu respaldo si el cliente reporta un daño.'}
-            </p>
-            <input aria-label="Fotos de la entrega" ref={inputRef} type="file" accept="image/*" capture="environment" multiple className="hidden" onChange={agregar} />
-            <div className="grid grid-cols-4 gap-2">
-              <button onClick={() => inputRef.current?.click()}
-                className="aspect-square rounded-xl border-2 border-dashed border-edge grid place-items-center text-mute hover:text-gold-ink hover:border-gold/50 transition-colors">
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.8"><path d="M12 8v8M8 12h8" strokeLinecap="round" /><rect x="3" y="5" width="18" height="15" rx="2.5" /><path d="M8 5l1.5-2h5L16 5" /></svg>
-              </button>
-              {previews.map((src, i) => (
-                <div key={i} className="relative aspect-square rounded-xl overflow-hidden border border-edge">
-                  <img src={src} alt="" className="w-full h-full object-cover" />
-                  <button onClick={() => setFotos(f => f.filter((_, j) => j !== i))} aria-label="Quitar"
-                    className="absolute top-1 right-1 w-5 h-5 rounded-md bg-black/60 text-white grid place-items-center">
-                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5"><path strokeLinecap="round" d="M6 6l12 12M18 6L6 18" /></svg>
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {hayQueCobrar && (
-            <div className="rounded-xl border border-amber-500/40 bg-amber-500/[0.07] px-4 py-3.5">
-              <p className="text-[11px] font-extrabold tracking-[0.5px] text-amber-700 dark:text-amber-400 mb-1">POR COBRAR</p>
-              <p className="text-[13px] text-ink">
-                El cliente debe <b>${saldo.toLocaleString('en-US', { minimumFractionDigits: 2 })}</b> de esta renta.
-              </p>
-              <p className="text-[12px] text-mute mt-0.5">Si te entrega dinero, regístralo ahora: después no vas a acordarte de cuánto fue.</p>
-              <button onClick={() => setCobrando(true)}
-                className="mt-3 h-10 px-5 rounded-full btn-acento text-[13px] font-black">
-                Registrar cobro
-              </button>
-            </div>
-          )}
-          {esRecoger && saldo === 0 && Number(tarea.adeudo || 0) > 0 && (
-            <p className="text-[13px] font-semibold text-libre">✓ Adeudo liquidado. Puedes recoger.</p>
-          )}
-
-          <div>
-            <label className="text-[11px] font-extrabold tracking-[0.5px] text-gold-ink mb-2 block">NOTA (OPCIONAL)</label>
-            <input aria-label="NOTA (OPCIONAL)" value={nota} onChange={e => setNota(e.target.value)} placeholder="Ej. Rayón en la tapa, tanque lleno…"
-              className="w-full bg-surface-2 border border-edge rounded-xl px-3.5 py-2.5 text-sm text-ink placeholder-mute focus:outline-none focus:border-gold/50 transition-colors" />
-          </div>
-        </div>
-
-        <div className="px-6 py-5 border-t border-edge">
-          {/* El camino esperado es CON fotos: el botón principal se activa al
-              tener al menos una. Sin fotos es una decisión explícita, abajo. */}
-          <button onClick={() => enviarEntrega(true)} disabled={ocupado || fotos.length === 0}
-            className={`${esRecoger ? 'btn-renta' : 'btn-acento'} w-full h-12 rounded-full text-[14px] font-black`}>
-            {ocupado ? 'Guardando…'
-              : fotos.length ? `Confirmar con ${fotos.length} foto${fotos.length > 1 ? 's' : ''}`
-              : (esRecoger ? 'Confirmar recolección' : 'Confirmar entrega')}
-          </button>
-          {fotos.length === 0 ? (
-            <button onClick={async () => { if (await confirmar({ titulo: '¿Entregar sin fotos?', mensaje: 'Sin evidencia no hay respaldo si el cliente reclama un daño.', aceptar: 'Sin fotos', cancelar: 'Tomar fotos', tono: 'peligro' })) enviarEntrega(false) }}
-              className="w-full mt-2.5 h-9 text-[13px] font-semibold text-mute hover:text-ink transition-colors">
-              {esRecoger ? 'Recoger sin fotos' : 'Entregar sin fotos'}
-            </button>
-          ) : (
-            <p className="text-center text-[12px] text-mute mt-2.5">Toca una foto para quitarla, o agrega más arriba.</p>
-          )}
-        </div>
-      </div>
-
-      {cobrando && (
-        <AbonoModal
-          saldo={saldo}
-          onClose={() => setCobrando(false)}
-          onRegistrar={registrarAbono}
-        />
-      )}
-    </Modal>,
-    document.body
-  )
-}
-
-/* ── Trabajar una reparación ──
-   Una reparación es un PROCESO, no un instante: se empieza, se trabaja (a veces
-   varios días) y solo al final queda lista. El flujo lo refleja —
-   recibida → en proceso → terminada — y terminar exige describir qué se hizo,
-   para que no sea un botón que se toca en segundos. */
-type OrdenDetalle = {
-  id: number; folio: string; tipo: string; estado: string
-  equipo_display?: string; cliente_display?: string; diagnostico?: string
-  trabajo_realizado?: string
-  items: { id: number; origen: string; nombre: string; cantidad: number; refaccion?: number | null }[]
-}
-type RefaccionPick = { id: number; nombre: string; stock: number }
-
-const ESTADO_ORDEN: Record<string, { label: string; cls: string }> = {
-  recibida: { label: 'Sin empezar', cls: 'bg-amber-500/10 text-amber-700 dark:text-amber-500' },
-  proceso: { label: 'En proceso', cls: 'bg-[var(--c-renta)]/12 text-[var(--c-renta)]' },
-  terminada: { label: 'Terminada', cls: 'bg-emerald-500/10 text-emerald-600' },
-  entregada: { label: 'Entregada', cls: 'bg-surface-2 text-mute' },
-}
-
-function TallerTrabajoModal({ ordenId, onClose, onCambio, notify }: {
-  ordenId: number; onClose: () => void; onCambio: () => void; notify: (m: string, t?: 'ok' | 'err') => void
-}) {
-  const [orden, setOrden] = useState<OrdenDetalle | null>(null)
-  const [refs, setRefs] = useState<RefaccionPick[]>([])
-  const [busqueda, setBusqueda] = useState('')
-  const [trabajo, setTrabajo] = useState('')          // qué se hizo (se guarda al terminar / al cerrar)
-  const [ocupado, setOcupado] = useState(false)
-
-  const cargar = useCallback(() => {
-    api.get<OrdenDetalle>(`/reparaciones/${ordenId}/`)
-      .then(r => { setOrden(r.data); setTrabajo(r.data.trabajo_realizado || '') })
-      .catch(() => notify('No se pudo abrir la orden', 'err'))
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ordenId])
-  useEffect(() => { cargar() }, [cargar])
-  const cargarRefs = useCallback(() => {
-    api.get<RefaccionPick[]>('/refacciones/', { params: { q: busqueda } })
-      .then(r => setRefs(Array.isArray(r.data) ? r.data : [])).catch(() => {})
-  }, [busqueda])
-  useEffect(() => { cargarRefs() }, [cargarRefs])
-
-  const estado = orden?.estado
-  const enProceso = estado === 'proceso'
-  const recibida = estado === 'recibida'
-
-  function guardarTrabajo() {
-    // Persiste la nota de avance sin cambiar de estado. Silencioso: es autosave.
-    if (!orden || (orden.trabajo_realizado || '') === trabajo) return Promise.resolve()
-    return api.patch(`/reparaciones/${ordenId}/`, { trabajo_realizado: trabajo })
-      .then(() => onCambio()).catch(() => {})
-  }
-  function agarrar(ref: RefaccionPick) {
-    if (ref.stock < 1) { notify(`No queda "${ref.nombre}" en inventario`, 'err'); return }
-    setOcupado(true)
-    api.post(`/reparaciones/${ordenId}/items/`, { origen: 'stock', refaccion_id: ref.id, cantidad: 1 })
-      .then(r => { setOrden(o => o ? { ...o, items: r.data.items, estado: r.data.estado } : r.data); cargarRefs(); notify(`${ref.nombre} tomado del inventario`); onCambio() })
-      .catch(err => notify(errorMsg(err, 'No se pudo registrar'), 'err'))
-      .finally(() => setOcupado(false))
-  }
-  function quitar(itemId: number) {
-    api.delete(`/reparaciones/${ordenId}/items/${itemId}/`)
-      .then(r => { setOrden(o => o ? { ...o, items: r.data.items } : r.data); cargarRefs(); onCambio() })
-      .catch(err => notify(errorMsg(err, 'No se pudo quitar'), 'err'))
-  }
-  function empezar() {
-    setOcupado(true)
-    api.patch(`/reparaciones/${ordenId}/`, { estado: 'proceso' })
-      .then(() => { notify('Reparación iniciada'); onCambio(); cargar() })
-      .catch(err => notify(errorMsg(err, 'No se pudo iniciar'), 'err'))
-      .finally(() => setOcupado(false))
-  }
-  async function terminar() {
-    if (trabajo.trim().length < 4) { notify('Escribe qué le hiciste antes de terminar.', 'err'); return }
-    if (!await confirmar({ titulo: '¿La máquina ya quedó lista para entregar?', mensaje: 'Al terminar sale de tus pendientes.', aceptar: 'Sí, está lista' })) return
-    setOcupado(true)
-    api.patch(`/reparaciones/${ordenId}/`, { estado: 'terminada', trabajo_realizado: trabajo.trim() })
-      .then(() => { notify('Reparación terminada'); onCambio(); onClose() })
-      .catch(err => notify(errorMsg(err, 'No se pudo terminar'), 'err'))
-      .finally(() => setOcupado(false))
-  }
-  async function cerrar() {
-    await guardarTrabajo()   // no perder el avance escrito
-    onClose()
-  }
-
-  const est = estado ? ESTADO_ORDEN[estado] : undefined
-
-  return createPortal(
-    <Modal className="fixed inset-0 z-[60] bg-[rgba(33,29,22,0.4)] backdrop-blur-[2px] flex items-end sm:items-center justify-center" onClose={cerrar} label="Detalle de la reparación">
-      <div onClick={e => e.stopPropagation()} className="w-full sm:max-w-[560px] bg-surface rounded-t-3xl sm:rounded-2xl shadow-[0_-8px_40px_rgba(33,29,22,0.2)] sm:shadow-[0_24px_60px_rgba(33,29,22,0.25)] max-h-[92vh] flex flex-col overflow-hidden border-t sm:border border-edge">
-        <div className="px-6 pt-5 pb-4 border-b border-edge flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2 mb-1">
-              <span className="text-[10.5px] font-bold tracking-[0.5px] text-mute">REPARACIÓN</span>
-              {est && <span className={`text-[10.5px] px-2 py-[3px] rounded-md font-bold ${est.cls}`}>{est.label}</span>}
-            </div>
-            <h2 className="text-lg font-black text-ink truncate">{orden?.equipo_display || 'Equipo'}</h2>
-            <p className="text-[12.5px] text-mute mt-0.5">
-              {orden?.folio}{orden ? ` · ${orden.tipo === 'interna' ? 'Máquina propia' : orden.cliente_display || 'De cliente'}` : ''}
-            </p>
-          </div>
-          <button onClick={cerrar} aria-label="Cerrar" className="w-8 h-8 rounded-[9px] grid place-items-center text-mute hover:text-ink hover:bg-surface-2 transition-colors">
-            <svg className="w-[18px] h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" d="M6 6l12 12M18 6L6 18" /></svg>
-          </button>
-        </div>
-
-        <div className="px-6 py-5 space-y-6 overflow-y-auto flex-1">
-          {orden?.diagnostico && (
-            <div>
-              <p className="text-[11px] font-extrabold tracking-[0.5px] text-gold-ink mb-1.5">FALLA REPORTADA</p>
-              <p className="text-[13.5px] text-ink leading-snug">{orden.diagnostico}</p>
-            </div>
-          )}
-
-          {recibida ? (
-            // Sin empezar: lo único que toca es arrancarla. Nada de "terminar" aquí.
-            <div className="rounded-xl bg-surface-2 px-4 py-4 text-center">
-              <p className="text-[13.5px] text-ink font-semibold">Aún no la has empezado.</p>
-              <p className="text-[12.5px] text-mute mt-1 max-w-[42ch] mx-auto">
-                Márcala como iniciada cuando te pongas a trabajarla. No tienes que terminarla hoy — puedes seguir mañana.
-              </p>
-            </div>
-          ) : (
-            <>
-              {/* Refacciones usadas */}
-              <div>
-                <p className="text-[11px] font-extrabold tracking-[0.5px] text-gold-ink mb-2">REFACCIONES USADAS</p>
-                {orden && orden.items.length === 0 ? (
-                  <p className="text-[13px] text-mute">Nada todavía. Abajo tomas lo que ocupes del inventario.</p>
-                ) : (
-                  <div className="space-y-1.5">
-                    {orden?.items.map(it => (
-                      <div key={it.id} className="flex items-center gap-3 px-3.5 py-2.5 rounded-xl bg-surface-2">
-                        <span className="text-sm text-ink flex-1 truncate">{it.nombre}</span>
-                        <span className="text-[13px] font-mono text-mute">×{it.cantidad}</span>
-                        <span className="text-[10px] uppercase font-semibold px-1.5 py-0.5 rounded text-mute">{it.origen === 'stock' ? 'Inventario' : 'Aparte'}</span>
-                        <button onClick={() => quitar(it.id)} aria-label="Quitar" className="w-7 h-7 rounded-lg grid place-items-center text-mute hover:text-red-500 hover:bg-red-500/10 transition-colors">
-                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" d="M6 6l12 12M18 6L6 18" /></svg>
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* Tomar del inventario */}
-              <div>
-                <p className="text-[11px] font-extrabold tracking-[0.5px] text-gold-ink mb-2">TOMAR DEL INVENTARIO</p>
-                <div className="relative mb-2">
-                  <svg className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-mute pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><circle cx="11" cy="11" r="7" /><path d="M20 20l-3.5-3.5" /></svg>
-                  <input aria-label="Buscar refacción" value={busqueda} onChange={e => setBusqueda(e.target.value)} placeholder="Buscar refacción…"
-                    className="w-full bg-surface-2 border border-edge rounded-xl pl-9 pr-3 py-2.5 text-sm text-ink placeholder-mute focus:outline-none focus:border-gold/50 transition-colors" />
-                </div>
-                <div className="max-h-44 overflow-y-auto space-y-1.5">
-                  {refs.length === 0 && <p className="text-[13px] text-mute px-1 py-2">Sin resultados.</p>}
-                  {refs.map(ref => (
-                    <button key={ref.id} onClick={() => agarrar(ref)} disabled={ocupado || ref.stock < 1}
-                      className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl border border-edge hover:border-gold/40 disabled:opacity-40 transition-colors text-left">
-                      <span className="text-sm text-ink flex-1 truncate">{ref.nombre}</span>
-                      <span className={`text-[12px] ${ref.stock < 1 ? 'text-red-500' : 'text-mute'}`}>{ref.stock} en stock</span>
-                      <span className="text-gold-ink font-black text-lg leading-none">+</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Qué se hizo: obligatorio para terminar */}
-              <div>
-                <p className="text-[11px] font-extrabold tracking-[0.5px] text-gold-ink mb-2">¿QUÉ LE HICISTE?</p>
-                <textarea aria-label="Qué le hiciste al equipo" value={trabajo} onChange={e => setTrabajo(e.target.value)} onBlur={guardarTrabajo} rows={3}
-                  placeholder="Ej. Cambié el filtro y limpié el carburador. Probada y funcionando."
-                  className="w-full bg-surface-2 border border-edge rounded-xl px-3.5 py-2.5 text-sm text-ink placeholder-mute focus:outline-none focus:border-gold/50 transition-colors resize-none" />
-                <p className="text-[12px] text-mute mt-1.5">Se guarda solo. Descríbelo antes de marcarla terminada.</p>
-              </div>
-            </>
-          )}
-        </div>
-
-        <div className="px-6 py-5 border-t border-edge">
-          {recibida ? (
-            <button onClick={empezar} disabled={ocupado} className="btn-acento w-full h-12 rounded-full text-[14px] font-black">
-              {ocupado ? 'Guardando…' : 'Empezar reparación'}
-            </button>
-          ) : enProceso ? (
-            <>
-              <button onClick={terminar} disabled={ocupado || trabajo.trim().length < 4}
-                className="btn-acento w-full h-12 rounded-full text-[14px] font-black">
-                {ocupado ? 'Guardando…' : 'Marcar terminada'}
-              </button>
-              <button onClick={cerrar} disabled={ocupado}
-                className="w-full mt-2.5 h-9 text-[13px] font-semibold text-mute hover:text-ink transition-colors">
-                Seguir después
-              </button>
-            </>
-          ) : (
-            <button onClick={cerrar} className="w-full h-11 rounded-full border border-edge text-ink text-[13.5px] font-bold hover:bg-surface-2 transition-colors">Cerrar</button>
-          )}
-        </div>
-      </div>
-    </Modal>,
-    document.body
-  )
-}
-
-/* ════════════════════════════════════════
-   MÓDULO USUARIOS
-════════════════════════════════════════ */
-type UsuarioPanel = {
-  id: number; username: string; nombre: string; first_name: string; last_name: string
-  email: string; rol: string | null; es_admin: boolean; es_superusuario: boolean
-  activo: boolean; telefono: string; puesto: string
-  email_verificado?: boolean; datos_completos?: boolean; perfil_verificado?: boolean
-  ultimo_acceso: string | null; creado: string
-}
-
-/**
- * Color del rol. El superusuario va en negro sólido: es el máximo nivel y debe
- * distinguirse de un vistazo. Los demás roles usan el amarillo de la tienda.
- *
- * En tema oscuro el negro se invierte a claro (`bg-ink text-app` lo hace solo):
- * un chip #111827 sobre el panel #161618 tiene 1.02:1 de contraste, o sea
- * invisible. El amarillo no se invierte porque es el mismo en ambos temas y
- * lleva texto negro (9.8:1).
- */
-function estiloRol(u: UsuarioPanel) {
-  if (u.es_superusuario) return { label: 'Dueño', cls: 'bg-ink text-app' }
-  if (u.rol === 'Cliente') return { label: 'Cliente', cls: 'bg-surface-2 text-mute' }
-  if (u.rol) return { label: u.rol, cls: 'bg-yellow text-[#111827]' }
-  return { label: 'Sin rol', cls: 'bg-surface-2 text-mute' }
-}
-
-/** Un cliente es quien SOLO tiene el grupo Cliente; todo lo demás es equipo
- *  (incluye cuentas sin rol: se crearon para el panel y están a medio dar de alta). */
-function esCliente(u: UsuarioPanel) {
-  return u.rol === 'Cliente' && !u.es_superusuario
-}
-
-/** Mismo criterio para el avatar de iniciales. */
-function estiloAvatar(u: UsuarioPanel) {
-  if (u.es_superusuario) return 'bg-ink text-app'
-  if (u.rol) return 'bg-yellow text-[#111827]'
-  return 'bg-surface-2 text-mute'
-}
-
-function iniciales(u: UsuarioPanel) {
-  const base = (u.nombre || u.username).trim().split(/\s+/)
-  return ((base[0]?.[0] || '') + (base[1]?.[0] || '')).toUpperCase() || u.username.slice(0, 2).toUpperCase()
-}
-
-function hace(iso: string | null) {
-  if (!iso) return 'Nunca ha entrado'
-  const min = Math.floor((Date.now() - new Date(iso).getTime()) / 60000)
-  if (min < 1) return 'Ahora mismo'
-  if (min < 60) return `Hace ${min} min`
-  const h = Math.floor(min / 60)
-  if (h < 24) return `Hace ${h} h`
-  const d = Math.floor(h / 24)
-  return d < 30 ? `Hace ${d} día${d > 1 ? 's' : ''}` : new Date(iso).toLocaleDateString('es-MX')
-}
-
-type OpcionMenu = { label: string; onClick: () => void; icono?: React.ReactNode; peligro?: boolean; deshabilitado?: boolean; razon?: string }
-
-/**
- * Menú "…" de una fila. Va en portal con posición fija a propósito: la tabla
- * vive dentro de un contenedor con overflow, y un menú absoluto quedaría
- * recortado por él.
- */
-function MenuFila({ opciones }: { opciones: OpcionMenu[] }) {
-  const [pos, setPos] = useState<{ top?: number; bottom?: number; right: number } | null>(null)
-  const btn = useRef<HTMLButtonElement | null>(null)
-
-  const abrir = () => {
-    const r = btn.current?.getBoundingClientRect()
-    if (!r) return
-    const right = Math.max(8, window.innerWidth - r.right)
-    const estimado = opciones.length * 50 + 16   // alto aproximado del menú
-    const espacioAbajo = window.innerHeight - r.bottom
-    // Si no cabe abajo pero sí arriba, abre hacia ARRIBA (evita que se corte "Eliminar").
-    if (espacioAbajo < estimado + 12 && r.top > espacioAbajo) {
-      setPos({ bottom: window.innerHeight - r.top + 6, right })
-    } else {
-      setPos({ top: r.bottom + 6, right })
-    }
-  }
-
-  useEffect(() => {
-    if (!pos) return
-    const cerrar = () => setPos(null)
-    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') { setPos(null); btn.current?.focus() } }
-    // `true` en scroll: también captura el de la tabla, no solo el de la ventana.
-    window.addEventListener('scroll', cerrar, true)
-    window.addEventListener('resize', cerrar)
-    window.addEventListener('keydown', esc)
-    return () => {
-      window.removeEventListener('scroll', cerrar, true)
-      window.removeEventListener('resize', cerrar)
-      window.removeEventListener('keydown', esc)
-    }
-  }, [pos])
-
-  return (
-    <>
-      <button ref={btn} onClick={() => (pos ? setPos(null) : abrir())} aria-haspopup="menu" aria-expanded={!!pos} aria-label="Más acciones"
-        className="w-8 h-8 rounded-lg grid place-items-center text-mute hover:text-ink hover:bg-surface-2 transition-colors">
-        <svg className="w-[18px] h-[18px]" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.6" /><circle cx="12" cy="12" r="1.6" /><circle cx="12" cy="19" r="1.6" /></svg>
-      </button>
-      {pos && createPortal(
-        <>
-          <div className="fixed inset-0 z-[70]" onClick={() => setPos(null)} />
-          <div role="menu" style={{ top: pos.top, bottom: pos.bottom, right: pos.right }}
-            className="fixed z-[71] min-w-[230px] max-h-[70vh] overflow-y-auto bg-surface border border-edge rounded-2xl shadow-[0_16px_40px_rgba(33,29,22,0.18)] p-2">
-            {opciones.map((o, i) => (
-              <button key={i} role="menuitem" disabled={o.deshabilitado}
-                title={o.deshabilitado ? o.razon : undefined}
-                onClick={() => { setPos(null); o.onClick() }}
-                className={`w-full flex items-center gap-3 text-left px-3.5 py-3 rounded-xl text-[14px] font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${o.peligro ? 'text-red-500 hover:bg-red-500/10 disabled:hover:bg-transparent' : 'text-ink hover:bg-surface-2'}`}>
-                {o.icono && <span className="shrink-0 w-[18px] h-[18px] grid place-items-center">{o.icono}</span>}
-                {o.label}
-              </button>
-            ))}
-          </div>
-        </>, document.body)}
-    </>
-  )
-}
-
-function UsuariosAdmin({ usuarios, reload, notify, yoId }: {
-  usuarios: UsuarioPanel[]; reload: () => void; notify: (m: string, t?: 'ok' | 'err') => void; yoId?: number
-}) {
-  // Filtros del directorio (aplican en vivo sobre la pestaña activa)
-  const [f, setF] = useState({ q: '', correo: '', tel: '', desde: '', hasta: '' })
-  const hayFiltros = Object.values(f).some(Boolean)
-  const [editando, setEditando] = useState<UsuarioPanel | null>(null)
-  const [viendo, setViendo] = useState<UsuarioPanel | null>(null)
-  const [creando, setCreando] = useState(false)
-  const [roles, setRoles] = useState<string[]>([])
-
-  useEffect(() => {
-    api.get<{ roles: string[] }>('/usuarios/roles/').then(r => setRoles((r.data?.roles || []).filter(x => x !== 'Cliente'))).catch(() => {})
-  }, [])
-
-  const activos = usuarios.filter(u => u.activo)
-  const admins = activos.filter(u => u.es_admin)
-  // Dos mundos separados: el equipo que opera el panel y los clientes de la tienda.
-  const [grupo, setGrupo] = useState<'equipo' | 'clientes'>('equipo')
-  const [asignando, setAsignando] = useState<UsuarioPanel | null>(null)
-  const equipo = usuarios.filter(u => !esCliente(u))
-  const clientes = usuarios.filter(esCliente)
-  const sinVerificar = clientes.filter(u => !u.email_verificado).length
-  const filtrados = (grupo === 'equipo' ? equipo : clientes).filter(u => {
-    if (f.q.trim() && !`${u.nombre} ${u.username} ${u.rol || ''} ${u.puesto}`.toLowerCase().includes(f.q.toLowerCase().trim())) return false
-    if (f.correo.trim() && !(u.email || '').toLowerCase().includes(f.correo.toLowerCase().trim())) return false
-    if (f.tel.trim() && !(u.telefono || '').replace(/\D/g, '').includes(f.tel.replace(/\D/g, ''))) return false
-    if (f.desde && (!u.creado || new Date(u.creado) < new Date(f.desde))) return false
-    if (f.hasta) { const h = new Date(f.hasta); h.setHours(23, 59, 59, 999); if (!u.creado || new Date(u.creado) > h) return false }
-    return true
-  })
-  const verificados = clientes.filter(u => u.email_verificado).length
-  const inactivos = usuarios.length - activos.length
-  const filas: (UsuarioPanel | { sep: string })[] = filtrados
-
-  async function desactivar(u: UsuarioPanel) {
-    const ok = await confirmar({
-      titulo: esCliente(u) ? `Eliminar a ${u.nombre}` : `Quitarle el acceso a ${u.nombre}`,
-      mensaje: 'No se borra su historial: cotizaciones, rentas y ventas se conservan. Solo deja de poder entrar.',
-      aceptar: esCliente(u) ? 'Eliminar' : 'Quitar acceso', tono: 'peligro',
-    })
-    if (!ok) return
-    api.delete(`/usuarios/${u.id}/`)
-      .then(() => { notify(`${u.nombre} ya no puede entrar`); reload() })
-      .catch(err => notify(errorMsg(err, 'No se pudo desactivar'), 'err'))
-  }
-  // Contraseña sin abrir el editor: la info del cliente no se toca desde aquí.
-  async function passwordExpres(u: UsuarioPanel) {
-    const nueva = await pedir({
-      titulo: `Nueva contraseña para ${u.nombre}`,
-      mensaje: 'Mínimo 8 caracteres. Anótala y dásela en persona; el sistema no se la manda por correo.',
-      placeholder: 'Nueva contraseña',
-    })
-    if (nueva === null) return
-    if (nueva.trim().length < 8) { notify('La contraseña debe tener al menos 8 caracteres', 'err'); return }
-    api.patch(`/usuarios/${u.id}/`, { password: nueva.trim() })
-      .then(() => notify(`Contraseña nueva para ${u.nombre}`))
-      .catch(err => notify(errorMsg(err, 'No se pudo cambiar'), 'err'))
-  }
-  async function marcarVerificacion(u: UsuarioPanel, valor: boolean) {
-    const ok = await confirmar({
-      titulo: valor ? `Marcar verificado a ${u.nombre}` : `Marcar como no verificado`,
-      mensaje: valor
-        ? 'Su correo quedará como confirmado y podrá iniciar sesión.'
-        : `${u.nombre} tendrá que confirmar su correo de nuevo para poder entrar.`,
-      aceptar: 'Confirmar', tono: valor ? 'normal' : 'peligro',
-    })
-    if (!ok) return
-    api.patch(`/usuarios/${u.id}/`, { email_verificado: valor })
-      .then(() => { notify(valor ? 'Correo marcado como verificado' : 'Marcado como no verificado'); reload() })
-      .catch(err => notify(errorMsg(err, 'No se pudo cambiar'), 'err'))
-  }
-  function reactivar(u: UsuarioPanel) {
-    api.patch(`/usuarios/${u.id}/`, { activo: true })
-      .then(() => { notify(`${u.nombre} puede entrar de nuevo`); reload() })
-      .catch(err => notify(errorMsg(err, 'No se pudo reactivar'), 'err'))
-  }
-
-  const th = 'text-left text-[13px] font-bold text-ink px-5 sm:px-6 py-4 whitespace-nowrap'
-  const td = 'px-5 sm:px-6 py-5 align-middle'
-
-  return (
-    <div className="max-w-6xl space-y-2.5">
-      {/* Encabezado: quién tiene acceso y quién manda */}
-      <div className="bg-surface border border-edge rounded-2xl px-6 sm:px-7 py-6">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div className="min-w-0">
-            <h2 className="text-lg font-black text-ink">Usuarios</h2>
-            <p className="text-sm text-mute mt-1 max-w-[62ch]">
-              Quién puede entrar al panel y qué puede hacer.{' '}
-              {admins.length === 1
-                ? <span className="text-ink font-semibold">Solo una cuenta administra el sistema; considera dejar otra por si pierdes el acceso.</span>
-                : `${admins.length} cuentas administran el sistema.`}
-            </p>
-          </div>
-          <button onClick={() => setCreando(true)} className="btn-acento shrink-0 inline-flex items-center gap-2 h-11 pl-4 pr-5 rounded-full text-[14px] font-bold">
-            <svg className="w-[18px] h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.2" strokeLinecap="round"><path d="M12 5v14M5 12h14" /></svg>
-            Agregar usuario
-          </button>
-        </div>
-
-      </div>
-
-      {/* KPIs del directorio */}
-      <KpiGrid
-        gridClassName="grid-cols-2 lg:grid-cols-4"
-        items={[
-          { label: 'Usuarios totales', value: String(usuarios.length), helper: `${equipo.length} de equipo · ${clientes.length} clientes` },
-          { label: 'Sin acceso', value: String(inactivos), tone: inactivos > 0 ? 'danger' : 'muted', emphasis: inactivos > 0 },
-          { label: 'Clientes sin verificar', value: String(sinVerificar), tone: sinVerificar > 0 ? 'warning' : 'muted', emphasis: sinVerificar > 0 },
-          { label: 'Clientes verificados', value: String(verificados), tone: 'success' },
-        ]}
-      />
-
-      {/* Filtros */}
-      <div className="bg-surface border border-edge rounded-2xl px-5 py-4">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-          {([
-            ['q', 'Nombre o usuario', 'Filtrar por nombre'],
-            ['correo', 'Correo', 'Filtrar por correo'],
-            ['tel', 'Teléfono', 'Filtrar por teléfono'],
-          ] as const).map(([k, etiqueta, ph]) => (
-            <div key={k}>
-              <label className="block text-[12px] font-semibold text-mute mb-1.5">{etiqueta}</label>
-              <input aria-label={etiqueta} value={f[k]} onChange={e => setF({ ...f, [k]: e.target.value })} placeholder={ph}
-                className="w-full bg-surface-2 border border-edge rounded-xl px-3.5 py-2.5 text-sm text-ink placeholder-mute focus:outline-none focus:border-gold/50 transition-colors" />
-            </div>
-          ))}
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <label className="block text-[12px] font-semibold text-mute mb-1.5">Desde</label>
-              <input aria-label="Desde" type="date" value={f.desde} onChange={e => setF({ ...f, desde: e.target.value })}
-                className="w-full bg-surface-2 border border-edge rounded-xl px-3 py-2.5 text-sm text-ink focus:outline-none focus:border-gold/50 transition-colors" />
-            </div>
-            <div>
-              <label className="block text-[12px] font-semibold text-mute mb-1.5">Hasta</label>
-              <input aria-label="Hasta" type="date" value={f.hasta} onChange={e => setF({ ...f, hasta: e.target.value })}
-                className="w-full bg-surface-2 border border-edge rounded-xl px-3 py-2.5 text-sm text-ink focus:outline-none focus:border-gold/50 transition-colors" />
-            </div>
-          </div>
-        </div>
-        {hayFiltros && (
-          <div className="flex justify-end mt-3">
-            <button onClick={() => setF({ q: '', correo: '', tel: '', desde: '', hasta: '' })}
-              className="inline-flex items-center gap-2 h-9 px-4 rounded-full border border-edge text-[13px] font-bold text-mute hover:text-ink hover:bg-surface-2 transition-colors">
-              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round"><path d="M3 12a9 9 0 1 0 2.6-6.4M3 4v5h5" /></svg>
-              Limpiar filtros ({filtrados.length} resultado{filtrados.length === 1 ? '' : 's'})
-            </button>
-          </div>
-        )}
-      </div>
-
-      {/* Tabla */}
-      <div className="bg-surface border border-edge rounded-2xl">
-        <div className="px-4 sm:px-5 py-3.5 border-b border-edge flex flex-wrap items-center justify-between gap-3">
-          <div className="flex border border-edge rounded-xl overflow-hidden shrink-0">
-            {([['equipo', `Equipo de trabajo (${equipo.length})`], ['clientes', `Clientes (${clientes.length})`]] as const).map(([g, etiqueta]) => (
-              <button key={g} onClick={() => setGrupo(g)}
-                className={`px-4 py-2.5 text-[13px] font-bold transition-colors ${grupo === g ? 'bg-ink text-app' : 'text-mute hover:text-ink hover:bg-surface-2'}`}>
-                {etiqueta}
-              </button>
-            ))}
-          </div>
-          <span className="text-[13px] text-mute">{filtrados.length} de {(grupo === 'equipo' ? equipo : clientes).length}</span>
-        </div>
-
-        {filtrados.length === 0 ? (
-          <div className="px-6 py-16 text-center">
-            <p className="text-sm text-ink font-semibold">{hayFiltros ? 'Nadie coincide con esos filtros' : grupo === 'clientes' ? 'Aún no hay clientes registrados' : 'Aún no hay más cuentas'}</p>
-            <p className="text-[13px] text-mute mt-1.5 max-w-[46ch] mx-auto">
-              {hayFiltros ? 'Afloja alguno de los filtros o límpialos para ver todo.' : 'Agrega a quien trabaje contigo para que registre rentas y ventas con su propio nombre.'}
-            </p>
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full border-collapse">
-              <thead>
-                <tr className="bg-surface-2 border-b border-edge">
-                  {/* w-full en Usuario + w-px en las demás: la primera absorbe el
-                      sobrante y el resto se ajusta a su contenido, así la tabla
-                      no se desborda en pantallas chicas. */}
-                  <th scope="col" className={`${th} w-full`}>Usuario</th>
-                  {grupo !== 'equipo' && <th scope="col" className={`${th} hidden md:table-cell w-px`}>Correo</th>}
-                  <th scope="col" className={`${th} hidden xl:table-cell w-px`}>Teléfono</th>
-                  <th scope="col" className={`${th} hidden sm:table-cell w-px`}>Estado</th>
-                  <th scope="col" className={`${th} hidden lg:table-cell w-px`}>Registro</th>
-                  {grupo !== 'clientes' && <th scope="col" className={`${th} hidden xl:table-cell w-px`}>Último acceso</th>}
-                  <th scope="col" className={`${th} text-right w-px`}>Acciones</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-edge">
-                {filas.map((item, idx) => {
-                  if ('sep' in item) {
-                    return (
-                      <tr key={`sep-${idx}`} className="bg-surface-2/70">
-                        <td colSpan={99} className="px-5 sm:px-6 py-2 text-[11px] font-extrabold uppercase tracking-[0.6px] text-mute">{item.sep}</td>
-                      </tr>
-                    )
-                  }
-                  const u = item
-                  const rol = estiloRol(u)
-                  const soyYo = u.id === yoId
-                  return (
-                    <tr key={u.id} className={`transition-colors hover:bg-surface-2 ${u.activo ? '' : 'opacity-55'}`}>
-                      {/* max-w-0 es lo que permite que `truncate` funcione dentro de una tabla. */}
-                      <td className={`${td} max-w-0`}>
-                        <div className="flex items-center gap-3.5">
-                          <div className={`shrink-0 w-10 h-10 rounded-full grid place-items-center text-[13px] font-black ${estiloAvatar(u)}`}>
-                            {iniciales(u)}
-                          </div>
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-2">
-                              <span className="text-sm font-black text-ink truncate">{u.nombre}</span>
-                              {soyYo && <span className="shrink-0 text-[10px] uppercase font-semibold px-1.5 py-0.5 rounded bg-surface-2 text-mute">Tú</span>}
-                              {!u.activo && <span className="shrink-0 text-[10px] uppercase font-semibold px-1.5 py-0.5 rounded bg-red-500/10 text-red-500">Sin acceso</span>}
-                            </div>
-                            <div className="mt-1 flex items-center gap-2 flex-wrap">
-                              <span className={`text-[10px] uppercase font-semibold px-2 py-0.5 rounded-full ${rol.cls}`}>{rol.label}</span>
-                              {u.puesto && <span className="text-[12px] text-mute truncate">{u.puesto}</span>}
-                            </div>
-                            {/* En pantallas chicas las columnas se esconden: el dato baja aquí. */}
-                            {esCliente(u) && <p className="md:hidden text-[12px] text-mute truncate mt-1">{u.email || u.username}</p>}
-                          </div>
-                        </div>
-                      </td>
-                      {/* nowrap: con `w-px` la columna se encoge al mínimo y un
-                          teléfono con espacios se partiría en varias líneas. */}
-                      {grupo !== 'equipo' && (
-                        <td className={`${td} hidden md:table-cell whitespace-nowrap`}>
-                          <span className="text-[13.5px] text-ink">{u.email || <span className="text-mute">—</span>}</span>
-                        </td>
-                      )}
-                      <td className={`${td} hidden xl:table-cell whitespace-nowrap`}>
-                        <span className="text-[13.5px] text-ink font-mono">{u.telefono || <span className="text-mute font-sans">—</span>}</span>
-                      </td>
-                      {/* Estado: acceso al sistema y, en clientes, si su correo es real */}
-                      <td className={`${td} hidden sm:table-cell`}>
-                        <div className="flex items-center gap-1.5 flex-nowrap">
-                          {/* En clientes el "Activo" verde sobra (casi todos lo están);
-                              solo se señala la excepción: Inactivo en rojo. */}
-                          {u.activo ? (!esCliente(u) && (
-                            <span className="inline-flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-600 whitespace-nowrap"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />Activo</span>
-                          )) : (
-                            <span className="inline-flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1 rounded-full bg-red-500/10 text-red-500 whitespace-nowrap"><span className="w-1.5 h-1.5 rounded-full bg-red-500" />Inactivo</span>
-                          )}
-                          {esCliente(u) && (
-                            u.email_verificado ? (
-                              <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full border border-emerald-500/30 bg-emerald-500/5 text-emerald-600 whitespace-nowrap" title="Confirmó su correo con el link">
-                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="3"><path d="M5 13l4 4L19 7" /></svg>
-                                Verificado
-                              </span>
-                            ) : (
-                              <span className="text-[11px] font-bold px-2.5 py-1 rounded-full border border-amber-500/30 bg-amber-500/5 text-amber-600 whitespace-nowrap" title="Aún no abre el link de confirmación: no puede iniciar sesión">Sin verificar</span>
-                            )
-                          )}
-                        </div>
-                      </td>
-                      <td className={`${td} hidden lg:table-cell whitespace-nowrap`}>
-                        <span className="text-[13px] text-mute">{u.creado ? new Date(u.creado).toLocaleDateString('es-MX') : '—'}</span>
-                      </td>
-                      {grupo !== 'clientes' && (
-                        <td className={`${td} hidden xl:table-cell`}>
-                          <span className="text-[13px] text-mute whitespace-nowrap">{hace(u.ultimo_acceso)}</span>
-                        </td>
-                      )}
-                      <td className={`${td} text-right`}>
-                        <div className="flex items-center justify-end gap-1">
-                          <button onClick={() => setViendo(u)}
-                            className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-lg text-[13px] font-bold text-mute hover:text-ink hover:bg-surface-2 transition-colors">
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.9"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z" /><circle cx="12" cy="12" r="3" /></svg>
-                            <span className="hidden sm:inline">Ver</span>
-                          </button>
-                          {!esCliente(u) && (
-                            <button onClick={() => setEditando(u)}
-                              className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-lg text-[13px] font-bold text-mute hover:text-ink hover:bg-surface-2 transition-colors">
-                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.9"><path d="M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17z" /></svg>
-                              <span className="hidden sm:inline">Editar</span>
-                            </button>
-                          )}
-                          <MenuFila
-                            opciones={esCliente(u) ? [
-                              // El cliente es dueño de su información: aquí solo
-                              // contraseña, verificación y eliminación.
-                              { label: 'Cambiar contraseña', icono: <svg className="w-[18px] h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.9"><path d="M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17z" /><path d="M13.5 6.5l3 3" /></svg>, onClick: () => passwordExpres(u) },
-                              u.email_verificado
-                                ? { label: 'Marcar como no verificado', icono: <svg className="w-[16px] h-[16px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.2" strokeLinecap="round"><path d="M6 6l12 12M18 6L6 18" /></svg>, onClick: () => marcarVerificacion(u, false) }
-                                : { label: 'Marcar como verificado', icono: <svg className="w-[17px] h-[17px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M5 13l4 4L19 7" /></svg>, onClick: () => marcarVerificacion(u, true) },
-                              u.activo
-                                ? { label: 'Eliminar', icono: <svg className="w-[17px] h-[17px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.9" strokeLinecap="round"><path d="M4 7h16" /><path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" /><path d="M18 7l-.8 12.1a2 2 0 0 1-2 1.9H8.8a2 2 0 0 1-2-1.9L6 7" /><path d="M10 11v6M14 11v6" /></svg>, onClick: () => desactivar(u), peligro: true }
-                                : { label: 'Devolver acceso', icono: <svg className="w-[17px] h-[17px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round"><path d="M3 12a9 9 0 1 0 2.6-6.4M3 4v5h5" /></svg>, onClick: () => reactivar(u) },
-                            ] : [
-                              { label: 'Cambiar contraseña', icono: <svg className="w-[18px] h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.9"><path d="M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17z" /><path d="M13.5 6.5l3 3" /></svg>, onClick: () => setEditando(u) },
-                              { label: 'Asignar rol', icono: <svg className="w-[17px] h-[17px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.9" strokeLinejoin="round"><path d="M12 3l7 3v5c0 4.5-3 8.2-7 10-4-1.8-7-5.5-7-10V6z" /></svg>, onClick: () => setAsignando(u), deshabilitado: u.es_superusuario, razon: 'El dueño no cambia de rol' },
-                              u.activo
-                                ? { label: 'Quitar acceso', icono: <svg className="w-[17px] h-[17px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.9" strokeLinecap="round"><path d="M4 7h16" /><path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" /><path d="M18 7l-.8 12.1a2 2 0 0 1-2 1.9H8.8a2 2 0 0 1-2-1.9L6 7" /><path d="M10 11v6M14 11v6" /></svg>, onClick: () => desactivar(u), peligro: true, deshabilitado: soyYo, razon: 'No puedes quitarte tu propio acceso' }
-                                : { label: 'Devolver acceso', icono: <svg className="w-[17px] h-[17px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round"><path d="M3 12a9 9 0 1 0 2.6-6.4M3 4v5h5" /></svg>, onClick: () => reactivar(u) },
-                            ]}
-                          />
-                        </div>
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-
-
-      {(creando || editando) && (
-        <UsuarioModal usuario={editando} roles={roles} soyYo={editando?.id === yoId}
-          onClose={() => { setCreando(false); setEditando(null) }}
-          onSaved={(msg) => { notify(msg); setCreando(false); setEditando(null); reload() }}
-          notify={notify} />
-      )}
-
-      {viendo && (
-        <UsuarioDetalle u={viendo} soyYo={viendo.id === yoId}
-          onClose={() => setViendo(null)}
-          onEditar={() => { const u = viendo; setViendo(null); setEditando(u) }} />
-      )}
-
-      {asignando && (
-        <AsignarRolModal u={asignando} roles={roles.filter(r => r !== 'Cliente')}
-          onClose={() => setAsignando(null)}
-          onSaved={(msg) => { notify(msg); setAsignando(null); reload() }}
-          notify={notify} />
-      )}
-    </div>
-  )
-}
-
-/* ── Asignar rol (pills de un solo elegido, como el directorio de referencia) ── */
-function AsignarRolModal({ u, roles, onClose, onSaved, notify }: {
-  u: UsuarioPanel; roles: string[]; onClose: () => void
-  onSaved: (m: string) => void; notify: (m: string, t?: 'ok' | 'err') => void
-}) {
-  const [sel, setSel] = useState<string>(u.rol || '')
-  const [guardando, setGuardando] = useState(false)
-
-  function guardar() {
-    setGuardando(true)
-    api.patch(`/usuarios/${u.id}/`, { rol: sel })
-      .then(() => onSaved(sel ? `${u.nombre} ahora es ${sel}` : `${u.nombre} quedó sin rol`))
-      .catch(err => notify(errorMsg(err, 'No se pudo cambiar el rol'), 'err'))
-      .finally(() => setGuardando(false))
-  }
-
-  const Pill = ({ valor, etiqueta }: { valor: string; etiqueta: string }) => {
-    const activo = sel === valor
-    return (
-      <button onClick={() => setSel(valor)}
-        className={`inline-flex items-center gap-2 h-10 px-4 rounded-full border text-[13.5px] font-bold transition-colors ${
-          activo ? 'bg-ink text-app border-ink' : 'bg-surface border-edge text-ink hover:bg-surface-2'
-        }`}>
-        {activo
-          ? <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M5 13l4 4L19 7" /></svg>
-          : <span className="w-3.5 h-3.5 rounded-full border-2 border-current opacity-40" />}
-        {etiqueta}
-      </button>
-    )
-  }
-
-  return createPortal(
-    <Modal className="fixed inset-0 z-[60] bg-black/40 backdrop-blur-[2px]" onClose={onClose} label="Asignar rol">
-      <motion.div
-        initial={{ x: '100%' }} animate={{ x: 0 }} transition={{ duration: 0.3, ease: [0.23, 1, 0.32, 1] }}
-        onClick={e => e.stopPropagation()}
-        className="fixed inset-y-0 right-0 w-full sm:max-w-[520px] bg-surface border-l border-edge shadow-[-24px_0_60px_rgba(33,29,22,0.22)] flex flex-col"
-      >
-        <div className="px-6 sm:px-7 py-4 border-b border-edge flex items-center justify-between shrink-0">
-          <h2 className="font-bold text-ink">Asignar rol</h2>
-          <button onClick={onClose} aria-label="Cerrar" className="w-8 h-8 rounded-[9px] grid place-items-center text-mute hover:text-ink hover:bg-surface-2 transition-colors">
-            <svg className="w-[18px] h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" d="M6 6l12 12M18 6L6 18" /></svg>
-          </button>
-        </div>
-
-        <div className="flex-1 overflow-y-auto px-6 sm:px-7 py-6">
-          {/* Quién es */}
-          <div className="flex items-center gap-3.5 bg-surface-2 border border-edge rounded-2xl px-4 py-3.5">
-            <div className={`shrink-0 w-12 h-12 rounded-full grid place-items-center text-[15px] font-black ${estiloAvatar(u)}`}>{iniciales(u)}</div>
-            <div className="min-w-0">
-              <p className="text-[15px] font-bold text-ink truncate">{u.nombre}</p>
-              <p className="text-[13px] text-mute truncate">{u.email || u.username}</p>
-            </div>
-          </div>
-
-          <p className="text-[13px] font-extrabold uppercase tracking-[0.5px] text-ink mt-6 mb-3">Roles disponibles</p>
-          <div className="flex flex-wrap gap-2">
-            {roles.map(r => <Pill key={r} valor={r} etiqueta={r} />)}
-            <Pill valor="" etiqueta="Sin rol" />
-          </div>
-          {sel === '' && <p className="text-[12px] text-mute mt-3">Sin rol la cuenta existe pero no puede entrar al panel.</p>}
-        </div>
-
-        <div className="px-6 sm:px-7 py-4 border-t border-edge flex justify-end gap-2.5 shrink-0">
-          <button onClick={onClose} className="px-6 py-2.5 rounded-full border border-edge text-ink text-sm font-semibold hover:bg-surface-2 transition-colors">Cancelar</button>
-          <button onClick={guardar} disabled={guardando || sel === (u.rol || '')}
-            className="px-7 py-2.5 rounded-full bg-ink text-app text-sm font-bold hover:opacity-90 transition-opacity disabled:opacity-40">
-            {guardando ? 'Guardando…' : 'Actualizar rol'}
-          </button>
-        </div>
-      </motion.div>
-    </Modal>,
-    document.body,
-  )
-}
-
-/* ── Ficha completa de un usuario (el "ojo" de la tabla) ── */
-function UsuarioDetalle({ u, soyYo, onClose, onEditar }: {
-  u: UsuarioPanel; soyYo?: boolean; onClose: () => void; onEditar: () => void
-}) {
-  const rol = estiloRol(u)
-  const Dato = ({ k, v, mono }: { k: string; v?: React.ReactNode; mono?: boolean }) => (
-    <div className="flex items-start gap-3.5 py-3">
-      <div className="min-w-0">
-        <p className="text-[11px] font-bold uppercase tracking-[0.5px] text-mute">{k}</p>
-        <p className={`text-[14px] font-bold text-ink mt-0.5 break-words ${mono ? 'font-mono text-[13.5px]' : ''}`}>{v || <span className="text-mute font-sans font-normal">—</span>}</p>
-      </div>
-    </div>
-  )
-  const Chip = ({ cls, children }: { cls: string; children: React.ReactNode }) => (
-    <span className={`inline-flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1 rounded-full whitespace-nowrap ${cls}`}>{children}</span>
-  )
-  return createPortal(
-    <Modal className="fixed inset-0 z-[60] bg-black/40 backdrop-blur-[2px]" onClose={onClose} label="Detalle de usuario">
-      <motion.div
-        initial={{ x: '100%' }} animate={{ x: 0 }} transition={{ duration: 0.3, ease: [0.23, 1, 0.32, 1] }}
-        onClick={e => e.stopPropagation()}
-        className="fixed inset-y-0 right-0 w-full sm:max-w-[560px] bg-surface border-l border-edge shadow-[-24px_0_60px_rgba(33,29,22,0.22)] flex flex-col"
-      >
-        <div className="px-6 sm:px-7 py-4 border-b border-edge flex items-center justify-between shrink-0">
-          <h2 className="font-bold text-ink">Detalle de usuario</h2>
-          <button onClick={onClose} aria-label="Cerrar" className="w-8 h-8 rounded-[9px] grid place-items-center text-mute hover:text-ink hover:bg-surface-2 transition-colors">
-            <svg className="w-[18px] h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" d="M6 6l12 12M18 6L6 18" /></svg>
-          </button>
-        </div>
-
-        <div className="flex-1 overflow-y-auto">
-          {/* Héroe: quién es y en qué estado está */}
-          <div className="px-6 sm:px-7 py-6 border-b border-edge">
-            <div className="flex items-center gap-4">
-              <div className={`shrink-0 w-16 h-16 rounded-full grid place-items-center text-[20px] font-black ${estiloAvatar(u)}`}>{iniciales(u)}</div>
-              <div className="min-w-0">
-                <p className="text-[18px] font-black text-ink leading-tight break-words">{u.nombre}{soyYo && <span className="ml-2 align-middle text-[10px] uppercase font-semibold px-1.5 py-0.5 rounded bg-surface-2 text-mute">Tú</span>}</p>
-                <p className="text-[13px] text-mute mt-0.5 break-all">@{u.username}</p>
-              </div>
-            </div>
-            <div className="flex flex-wrap gap-1.5 mt-4">
-              <Chip cls={rol.cls}>{rol.label}</Chip>
-              {u.activo
-                ? <Chip cls="bg-emerald-500/10 text-emerald-600"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />Activo</Chip>
-                : <Chip cls="bg-red-500/10 text-red-500"><span className="w-1.5 h-1.5 rounded-full bg-red-500" />Inactivo</Chip>}
-              {esCliente(u) && (u.email_verificado
-                ? <Chip cls="border border-emerald-500/30 bg-emerald-500/5 text-emerald-600"><svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="3"><path d="M5 13l4 4L19 7" /></svg>Correo verificado</Chip>
-                : <Chip cls="border border-amber-500/30 bg-amber-500/5 text-amber-600">Sin verificar</Chip>)}
-              {esCliente(u) && u.datos_completos && <Chip cls="bg-surface-2 text-mute">Perfil completo</Chip>}
-            </div>
-          </div>
-
-          {/* Datos de la cuenta */}
-          <div className="px-6 sm:px-7 py-5 border-b border-edge">
-            <p className="text-[11px] font-extrabold tracking-[0.5px] text-gold-ink mb-1">DATOS DE LA CUENTA</p>
-            <div className="divide-y divide-edge">
-              <Dato k="Usuario" v={u.username} mono />
-              <Dato k="Nombre completo" v={u.nombre} />
-              <Dato k="Rol" v={rol.label} />
-              {u.puesto && <Dato k="Puesto" v={u.puesto} />}
-              <Dato k="Cuenta creada" v={u.creado ? new Date(u.creado).toLocaleDateString('es-MX', { day: 'numeric', month: 'long', year: 'numeric' }) : undefined} />
-              <Dato k="Último acceso" v={hace(u.ultimo_acceso)} />
-            </div>
-          </div>
-
-          {/* Contacto */}
-          <div className="px-6 sm:px-7 py-5">
-            <p className="text-[11px] font-extrabold tracking-[0.5px] text-gold-ink mb-1">CONTACTO</p>
-            <div className="divide-y divide-edge">
-              <Dato k="Correo" v={u.email} mono />
-              <Dato k="Teléfono" v={u.telefono} mono />
-            </div>
-          </div>
-        </div>
-
-        <div className="px-6 sm:px-7 py-4 border-t border-edge flex justify-end gap-2.5 shrink-0">
-          <button onClick={onClose} className="px-6 py-2.5 rounded-full border border-edge text-ink text-sm font-semibold hover:bg-surface-2 transition-colors">Cerrar</button>
-          {/* La info del cliente es suya: el admin no la edita */}
-          {!esCliente(u) && <button onClick={onEditar} className="px-7 py-2.5 rounded-full bg-gold text-black text-sm font-bold hover:opacity-90 transition-opacity">Editar</button>}
-        </div>
-      </motion.div>
-    </Modal>,
-    document.body,
-  )
-}
-
-function UsuarioModal({ usuario, roles, soyYo, onClose, onSaved, notify }: {
-  usuario: UsuarioPanel | null; roles: string[]; soyYo?: boolean
-  onClose: () => void; onSaved: (m: string) => void; notify: (m: string, t?: 'ok' | 'err') => void
-}) {
-  const nuevo = !usuario
-  const [f, setF] = useState({
-    username: usuario?.username || '', first_name: usuario?.first_name || '', last_name: usuario?.last_name || '',
-    email: usuario?.email || '', rol: usuario?.rol || '', telefono: usuario?.telefono || '',
-    puesto: usuario?.puesto || '', password: '', codigo_seguridad: '',
-  })
-  const [guardando, setGuardando] = useState(false)
-  const set = (k: keyof typeof f, v: string) => setF(s => ({ ...s, [k]: v }))
-  // Solo el Administrador (y el Dueño) autoriza acciones sensibles: su PIN es su
-  // firma. A los demás roles ni se les pide (el backend también lo impone).
-  const esAutoridad = f.rol === 'Administrador'
-
-  function guardar() {
-    setGuardando(true)
-    const pedir = nuevo
-      ? api.post('/usuarios/', f)
-      : api.patch(`/usuarios/${usuario!.id}/`, {
-          first_name: f.first_name, last_name: f.last_name, email: f.email,
-          rol: f.rol, telefono: f.telefono, puesto: f.puesto,
-          ...(esAutoridad && f.codigo_seguridad ? { codigo_seguridad: f.codigo_seguridad } : {}),
-        })
-    pedir
-      .then(() => onSaved(nuevo ? `${f.first_name || f.username} ya puede entrar` : 'Cambios guardados'))
-      .catch(err => notify(errorMsg(err, 'No se pudo guardar'), 'err'))
-      .finally(() => setGuardando(false))
-  }
-  function cambiarPassword() {
-    if (f.password.length < 8) { notify('La contraseña debe tener al menos 8 caracteres', 'err'); return }
-    api.patch(`/usuarios/${usuario!.id}/`, { password: f.password })
-      .then(() => { notify(`Contraseña nueva para ${usuario!.nombre}`); set('password', '') })
-      .catch(err => notify(errorMsg(err, 'No se pudo cambiar'), 'err'))
-  }
-
-  const campo = 'w-full bg-surface-2 border border-edge rounded-xl px-3.5 py-2.5 text-sm text-ink placeholder-mute focus:outline-none focus:border-gold/50 transition-colors'
-  const etiqueta = 'block text-[12px] font-semibold text-mute mb-1.5'
-
-  return createPortal(
-    <Modal className="fixed inset-0 z-[60] bg-black/40 backdrop-blur-[2px]" onClose={onClose} label={nuevo ? 'Agregar usuario' : 'Editar usuario'}>
-      <motion.div
-        initial={{ x: '100%' }} animate={{ x: 0 }} transition={{ duration: 0.3, ease: [0.23, 1, 0.32, 1] }}
-        onClick={e => e.stopPropagation()}
-        className="fixed inset-y-0 right-0 w-full sm:max-w-[560px] bg-surface border-l border-edge shadow-[-24px_0_60px_rgba(33,29,22,0.22)] flex flex-col"
-      >
-        <div className="px-6 sm:px-7 pt-6 pb-5 border-b border-edge flex items-start justify-between gap-3 shrink-0">
-          <div>
-            <h2 className="text-lg font-black text-ink">{nuevo ? 'Agregar usuario' : usuario!.nombre}</h2>
-            <p className="text-[13px] text-mute mt-0.5">
-              {nuevo ? 'Tendrá su propia cuenta para entrar al panel.' : `Cuenta ${usuario!.username}`}
-            </p>
-          </div>
-          <button onClick={onClose} aria-label="Cerrar" className="w-8 h-8 rounded-[9px] grid place-items-center text-mute hover:text-ink hover:bg-surface-2 transition-colors">
-            <svg className="w-[18px] h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" d="M6 6l12 12M18 6L6 18" /></svg>
-          </button>
-        </div>
-
-        <div className="px-6 sm:px-7 py-5 space-y-5 overflow-y-auto flex-1">
-          <div className="grid sm:grid-cols-2 gap-4">
-            <div><label className={etiqueta}>Nombre</label><input aria-label="Nombre" className={campo} value={f.first_name} onChange={e => set('first_name', e.target.value)} placeholder="Pedro" /></div>
-            <div><label className={etiqueta}>Apellido</label><input aria-label="Apellido" className={campo} value={f.last_name} onChange={e => set('last_name', e.target.value)} placeholder="Ruiz" /></div>
-          </div>
-
-          {nuevo && (
-            <div className="grid sm:grid-cols-2 gap-4">
-              <div>
-                <label className={etiqueta}>Usuario para entrar</label>
-                <input aria-label="Usuario para entrar" className={campo} value={f.username} onChange={e => set('username', e.target.value.toLowerCase().replace(/\s/g, ''))} placeholder="pedro" autoComplete="off" />
-              </div>
-              <div>
-                <label className={etiqueta}>Contraseña</label>
-                <input aria-label="Contraseña" className={campo} type="text" value={f.password} onChange={e => set('password', e.target.value)} placeholder="Mínimo 8 caracteres" autoComplete="new-password" />
-              </div>
-            </div>
-          )}
-
-          <div className="grid sm:grid-cols-2 gap-4">
-            <div><label className={etiqueta}>Correo</label><input aria-label="Correo" className={campo} type="email" value={f.email} onChange={e => set('email', e.target.value)} placeholder="pedro@ejemplo.com" /></div>
-            <div><label className={etiqueta}>Teléfono</label><input aria-label="Teléfono" type="tel" inputMode="numeric" maxLength={10} className={campo} value={f.telefono} onChange={e => set('telefono', soloTelefono(e.target.value))} placeholder="10 dígitos" /></div>
-          </div>
-
-          <div>
-            <label className={etiqueta}>Rol</label>
-            <div className="flex flex-wrap gap-2">
-              {roles.map(r => (
-                <button key={r} type="button" onClick={() => set('rol', r)} disabled={soyYo && f.rol === 'Administrador' && r !== 'Administrador'}
-                  aria-pressed={f.rol === r}
-                  className={`px-4 py-2.5 rounded-xl text-[13px] font-bold border transition-all active:scale-[0.98] ${f.rol === r ? 'bg-yellow border-transparent text-[#111827]' : 'bg-surface-2 border-edge text-ink hover:border-gold/40'} disabled:opacity-40 disabled:hover:border-edge`}>
-                  {r}
-                </button>
-              ))}
-            </div>
-            {/* Qué implica cada rol, con las palabras del negocio. Es lo mismo
-                que impone la API; aquí solo se explica. */}
-            <div className="mt-3 rounded-xl bg-surface-2 px-4 py-3 text-[12.5px] leading-relaxed">
-              {f.rol === 'Administrador' ? (
-                <>
-                  <p className="text-ink font-bold mb-1">Administrador</p>
-                  <p className="text-mute">Opera todo el negocio: rentas, ventas, cotizaciones, facturación, inventario y catálogo. Ve los montos y las métricas.</p>
-                  <p className="text-mute mt-1.5">No puede gestionar usuarios ni cambiar la configuración del negocio: eso es solo tuyo.</p>
-                </>
-              ) : f.rol === 'Técnico' ? (
-                <>
-                  <p className="text-ink font-bold mb-1">Técnico</p>
-                  <p className="text-mute">Entrega, recoge y repara. Ve dónde está cada máquina, con quién y cuándo se recoge; marca los regresos, sube las fotos de entrega y devolución, y trabaja las órdenes de taller.</p>
-                  <p className="text-mute mt-1.5">No ve montos ni crea rentas o ventas.</p>
-                </>
-              ) : f.rol ? (
-                <p className="text-mute">Rol personalizado: entra al panel con los permisos que le hayas dado a ese grupo.</p>
-              ) : (
-                <p className="text-mute">Sin rol la cuenta existe pero <b className="text-ink">no puede entrar al panel</b>. Elige uno arriba.</p>
-              )}
-              {soyYo && f.rol === 'Administrador' && <p className="text-mute mt-1.5">No puedes quitarte a ti mismo el acceso de administrador.</p>}
-            </div>
-          </div>
-
-          {esAutoridad && (
-            <div>
-              <label className={etiqueta}>Código de seguridad (PIN de 6 dígitos)</label>
-              <input aria-label="Código de seguridad (PIN de 6 dígitos)" className={`${campo} font-mono tracking-[0.3em]`} type="password" inputMode="numeric" maxLength={6} autoComplete="one-time-code"
-                value={f.codigo_seguridad} onChange={e => set('codigo_seguridad', e.target.value.replace(/\D/g, '').slice(0, 6))}
-                placeholder={nuevo ? '6 dígitos' : 'Dejar vacío para no cambiarlo'} />
-              <p className="text-[12px] text-mute mt-1.5">Solo el Administrador puede autorizar acciones sensibles (ajustes de precio, anticipos bajos, devoluciones). Este PIN es su firma.</p>
-            </div>
-          )}
-
-          <div><label className={etiqueta}>Puesto</label><input aria-label="Puesto" className={campo} value={f.puesto} onChange={e => set('puesto', e.target.value)} placeholder="Técnico de servicio, asesor de ventas…" /></div>
-
-          {!nuevo && (
-            <div className="pt-5 border-t border-edge">
-              <label className={etiqueta}>Cambiar su contraseña</label>
-              <div className="flex flex-col sm:flex-row gap-2">
-                <input aria-label="Cambiar su contraseña" className={`${campo} flex-1`} type="text" value={f.password} onChange={e => set('password', e.target.value)} placeholder="Nueva contraseña, mínimo 8 caracteres" autoComplete="new-password" />
-                <button onClick={cambiarPassword} disabled={!f.password}
-                  className="shrink-0 h-[42px] px-4 rounded-xl border border-edge bg-surface-2 text-[13px] font-bold text-ink hover:border-gold/40 disabled:opacity-40 transition-colors">
-                  Cambiar
-                </button>
-              </div>
-              <p className="text-[12px] text-mute mt-2">Anótala y dásela en persona; el sistema no se la manda por correo.</p>
-            </div>
-          )}
-        </div>
-
-        <div className="px-6 sm:px-7 py-5 border-t border-edge flex items-center justify-end gap-2.5 shrink-0">
-          <button onClick={onClose} className="px-6 h-11 rounded-[10px] border border-edge text-ink text-[13.5px] font-bold hover:bg-surface-2 transition-colors">Cancelar</button>
-          <button onClick={guardar} disabled={guardando || (nuevo && (!f.username || f.password.length < 8))}
-            className="px-7 h-11 rounded-[10px] bg-gold text-black text-[13.5px] font-black hover:brightness-95 active:scale-[0.98] disabled:opacity-40 transition-all">
-            {guardando ? 'Guardando…' : nuevo ? 'Crear cuenta' : 'Guardar cambios'}
-          </button>
-        </div>
-      </motion.div>
-    </Modal>,
-    document.body
-  )
-}
-
-type ConfigSitio = {
-  whatsapp_principal: string
-  whatsapp_respaldos: { label: string; number: string }[]
-  negocio_nombre: string; negocio_telefono: string; negocio_direccion: string
-  negocio_email: string; negocio_web: string
-  negocio_rfc: string; negocio_representante: string; negocio_footer: string
-  cotizacion_condiciones: string; cotizacion_condiciones_renta: string; datos_bancarios: string; cotizacion_cierre: string
-  /* Qué puede cobrarse desde la caja del mostrador. Nacen apagados. */
-  caja_vende_maquinaria: boolean; caja_renta_maquinaria: boolean; caja_cobra_abonos: boolean
-}
-type CorreoAviso = { id: number; email: string; etiqueta: string; verificado: boolean; creado: string }
-
-/* ── Piezas compartidas de Configuración ──
-   Una superficie por pestaña, secciones separadas por divisores. Nada de
-   tarjetas dentro de tarjetas: el borde ya lo pone el contenedor. */
-
-function Panel({ titulo, desc, children }: { titulo?: string; desc?: string; children: React.ReactNode }) {
-  return (
-    <section className="bg-surface border border-edge rounded-2xl overflow-hidden">
-      {titulo && (
-        <header className="px-6 sm:px-7 pt-6 pb-5 border-b border-edge">
-          <h3 className="text-base font-black text-ink">{titulo}</h3>
-          {desc && <p className="text-[13px] text-mute mt-1 max-w-[68ch] leading-relaxed">{desc}</p>}
-        </header>
-      )}
-      <div className="divide-y divide-edge">{children}</div>
-    </section>
-  )
-}
-
-/** Fila de ajuste: qué es, a la izquierda; con qué se cambia, a la derecha. */
-function Ajuste({ titulo, desc, children, apilado, pie }: {
-  titulo: string; desc?: React.ReactNode; children?: React.ReactNode; apilado?: boolean; pie?: React.ReactNode
-}) {
-  return (
-    <div className="px-6 sm:px-7 py-5">
-      <div className={apilado ? '' : 'flex items-start justify-between gap-6 flex-wrap'}>
-        <div className="min-w-0 max-w-[58ch]">
-          <p className="text-sm font-black text-ink">{titulo}</p>
-          {desc && <p className="text-[13px] text-mute mt-1 leading-relaxed">{desc}</p>}
-        </div>
-        {children && <div className={apilado ? 'mt-4' : 'shrink-0'}>{children}</div>}
-      </div>
-      {pie && <div className="mt-3">{pie}</div>}
-    </div>
-  )
-}
-
-const campoCfg = 'w-full bg-surface-2 border border-edge rounded-xl px-3.5 py-2.5 text-sm text-ink placeholder-mute focus:outline-none focus:border-gold/50 transition-colors'
-const btnPrimario = 'btn-acento h-11 px-5 rounded-full text-[13.5px] font-black'
-const btnSecundario = 'h-11 px-5 rounded-[10px] border border-edge bg-surface-2 text-[13.5px] font-bold text-ink hover:border-gold/40 disabled:opacity-40 transition-colors'
-
-/** Configuración editable del sitio: WhatsApp, datos del negocio y correos de aviso. */
-function NegocioAdmin({ notify }: { notify: (m: string, t?: 'ok' | 'err') => void }) {
-  const puede = usePuede()
-  const vacia: ConfigSitio = { whatsapp_principal: '', whatsapp_respaldos: [], negocio_nombre: '', negocio_telefono: '', negocio_direccion: '', negocio_email: '', negocio_web: '', negocio_rfc: '', negocio_representante: '', negocio_footer: '', cotizacion_condiciones: '', cotizacion_condiciones_renta: '', datos_bancarios: '', cotizacion_cierre: '', caja_vende_maquinaria: false, caja_renta_maquinaria: false, caja_cobra_abonos: false }
-  const [cfg, setCfg] = useState<ConfigSitio>(vacia)
-  const [guardado, setGuardado] = useState<ConfigSitio>(vacia)   // lo último confirmado por el servidor
-  const [correos, setCorreos] = useState<CorreoAviso[]>([])
-  const [nuevoCorreo, setNuevoCorreo] = useState({ email: '', etiqueta: '' })
-  const [saving, setSaving] = useState(false)
-  const [busy, setBusy] = useState(false)
-
-  const load = useCallback(() => {
-    api.get<ConfigSitio>('/config/')
-      .then(r => { const c = { ...vacia, ...r.data }; setCfg(c); setGuardado(c) })
-      .catch(() => {})
-    api.get<CorreoAviso[]>('/config/correos/').then(r => setCorreos(Array.isArray(r.data) ? r.data : [])).catch(() => {})
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-  useEffect(() => { load() }, [load])
-
-  const set = (k: keyof ConfigSitio, v: any) => setCfg(c => ({ ...c, [k]: v }))
-  const resp = cfg.whatsapp_respaldos || []
-  const setResp = (r: { label: string; number: string }[]) => set('whatsapp_respaldos', r)
-  const hayCambios = JSON.stringify(cfg) !== JSON.stringify(guardado)
-
-  function guardar() {
-    setSaving(true)
-    api.patch<ConfigSitio>('/config/', cfg)
-      .then(r => {
-        const c = { ...vacia, ...r.data }
-        setCfg(c); setGuardado(c)
-        invalidarConfigPublica()   // tickets, fichas y tienda toman los datos nuevos al instante
-        notify('Configuración guardada')
-      })
-      .catch(err => notify(errorMsg(err, 'No se pudo guardar'), 'err'))
-      .finally(() => setSaving(false))
-  }
-  function agregarCorreo() {
-    const email = nuevoCorreo.email.trim()
-    if (!email) { notify('Escribe un correo', 'err'); return }
-    setBusy(true)
-    api.post('/config/correos/', { email, etiqueta: nuevoCorreo.etiqueta.trim() })
-      .then(r => {
-        notify(r.data?.verificacion_enviada ? 'Le enviamos el correo de confirmación' : 'Correo agregado, pero no se pudo enviar la confirmación', r.data?.verificacion_enviada ? 'ok' : 'err')
-        setNuevoCorreo({ email: '', etiqueta: '' }); load()
-      })
-      .catch(err => notify(errorMsg(err, 'No se pudo agregar'), 'err'))
-      .finally(() => setBusy(false))
-  }
-  function reenviar(id: number) {
-    api.post(`/config/correos/${id}/reenviar/`)
-      .then(r => notify(r.data?.enviado ? 'Confirmación reenviada' : 'No se pudo enviar', r.data?.enviado ? 'ok' : 'err'))
-      .catch(() => notify('No se pudo reenviar', 'err'))
-  }
-  async function eliminarCorreo(c: CorreoAviso) {
-    if (!await confirmar({ titulo: `¿Dejar de avisar a ${c.email}?`, aceptar: 'Dejar de avisar', tono: 'peligro' })) return
-    api.delete(`/config/correos/${c.id}/`).then(() => { notify('Ya no recibirá avisos'); load() }).catch(() => notify('No se pudo quitar', 'err'))
-  }
-
-  const sinVerificar = correos.filter(c => !c.verificado).length
-
-  return (
-    <div className="space-y-2.5 pb-24">
-      <Panel titulo="WhatsApp" desc="El número principal es el que ve el cliente en la tienda. Los de respaldo son la referencia de tu equipo para dar seguimiento.">
-        <Ajuste titulo="Número principal" desc="Aparece en el botón de WhatsApp de la tienda y en el acuse que recibe el cliente.">
-          <input aria-label="WhatsApp del negocio" className={`${campoCfg} sm:w-56`} value={cfg.whatsapp_principal} onChange={e => set('whatsapp_principal', e.target.value)} placeholder="7443737201" inputMode="numeric" />
-        </Ajuste>
-
-        <Ajuste titulo="Números de respaldo" desc="No se muestran al cliente. Sirven para que otra persona pueda retomar una solicitud." apilado
-          pie={
-            <button onClick={() => setResp([...resp, { label: `Respaldo ${resp.length + 1}`, number: '' }])}
-              className="inline-flex items-center gap-1.5 text-[13px] font-black text-gold-ink hover:opacity-80 transition-opacity">
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.2"><path strokeLinecap="round" d="M12 5v14M5 12h14" /></svg>
-              Agregar respaldo
-            </button>
-          }>
-          {resp.length === 0
-            ? <p className="text-[13px] text-mute">Ninguno por ahora.</p>
-            : (
-              <div className="space-y-2 w-full">
-                {resp.map((r, i) => (
-                  <div key={i} className="flex gap-2 items-center">
-                    <input aria-label="Quién es" className={`${campoCfg} flex-1`} value={r.label} onChange={e => setResp(resp.map((x, j) => j === i ? { ...x, label: e.target.value } : x))} placeholder="Quién es" />
-                    <input aria-label="Número de WhatsApp de respaldo" className={`${campoCfg} flex-1`} value={r.number} onChange={e => setResp(resp.map((x, j) => j === i ? { ...x, number: e.target.value } : x))} placeholder="7441234567" inputMode="numeric" />
-                    <button onClick={() => setResp(resp.filter((_, j) => j !== i))} aria-label="Quitar respaldo"
-                      className="shrink-0 w-9 h-9 rounded-lg grid place-items-center text-mute hover:text-red-500 hover:bg-red-500/10 transition-colors">
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" d="M6 6l12 12M18 6L6 18" /></svg>
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-        </Ajuste>
-      </Panel>
-
-      <Panel titulo="Datos del negocio" desc="Se imprimen en tickets, fichas técnicas y cotizaciones. Son los mismos en todas las computadoras.">
-        <Ajuste titulo="Nombre" desc="Encabeza cada documento que entregas.">
-          <input aria-label="Nombre del negocio" className={`${campoCfg} sm:w-72`} value={cfg.negocio_nombre} onChange={e => set('negocio_nombre', e.target.value)} placeholder="REMALI" />
-        </Ajuste>
-        <Ajuste titulo="Teléfono" desc="El que ve el cliente en la cotización si tiene dudas.">
-          <input aria-label="Teléfono del negocio" type="tel" inputMode="numeric" maxLength={10} className={`${campoCfg} sm:w-56`} value={cfg.negocio_telefono} onChange={e => set('negocio_telefono', soloTelefono(e.target.value))} placeholder="10 dígitos" />
-        </Ajuste>
-        <Ajuste titulo="Correo" desc="Aparece en el encabezado de la cotización.">
-          <input aria-label="Correo del negocio" type="email" className={`${campoCfg} sm:w-72`} value={cfg.negocio_email} onChange={e => set('negocio_email', e.target.value)} placeholder="contacto@remali.mx" />
-        </Ajuste>
-        <Ajuste titulo="Página web">
-          <input aria-label="Sitio web del negocio" className={`${campoCfg} sm:w-56`} value={cfg.negocio_web} onChange={e => set('negocio_web', e.target.value)} placeholder="remali.mx" />
-        </Ajuste>
-        <Ajuste titulo="Dirección" apilado>
-          <input aria-label="Calle, colonia, ciudad" className={campoCfg} value={cfg.negocio_direccion} onChange={e => set('negocio_direccion', e.target.value)} placeholder="Calle, colonia, ciudad" />
-        </Ajuste>
-        <Ajuste titulo="RFC" desc="Solo si facturas. Se omite del documento cuando está vacío.">
-          <input aria-label="RFC del negocio" className={`${campoCfg} sm:w-56 font-mono`} value={cfg.negocio_rfc} onChange={e => set('negocio_rfc', e.target.value.toUpperCase())} placeholder="XAXX010101000" />
-        </Ajuste>
-        <Ajuste titulo="Representante (firma)" desc="Nombre que firma la cotización al pie. Si lo dejas vacío, no se muestra la firma.">
-          <input aria-label="Representante que firma" className={`${campoCfg} sm:w-72`} value={cfg.negocio_representante} onChange={e => set('negocio_representante', e.target.value)} placeholder="C.P. Nombre Apellido" />
-        </Ajuste>
-      </Panel>
-
-      <Panel titulo="Caja del mostrador" desc="Qué se puede cobrar desde la caja, además de refacciones. Lo que apagues aquí desaparece de la caja y el servidor también lo rechaza.">
-        <Ajuste
-          titulo="Vender maquinaria desde la caja"
-          desc="El mostrador podrá escanear el QR de una máquina y venderla sin salir de la caja. El cobro entra al turno y el arqueo lo espera."
-        >
-          <Switch
-            checked={!!cfg.caja_vende_maquinaria}
-            onChange={v => set('caja_vende_maquinaria', v)}
-            label="Vender maquinaria desde la caja"
-          />
-        </Ajuste>
-        <Ajuste
-          titulo="Levantar rentas desde la caja"
-          desc="Abre la misma hoja de renta de siempre (cliente, obra, fechas, depósito). El cobro y el depósito entran al turno."
-        >
-          <Switch
-            checked={!!cfg.caja_renta_maquinaria}
-            onChange={v => set('caja_renta_maquinaria', v)}
-            label="Levantar rentas desde la caja"
-          />
-        </Ajuste>
-        <Ajuste
-          titulo="Recibir abonos desde la caja"
-          desc="El mostrador podrá cobrar abonos de pedidos y de rentas. Sin esto, esos anticipos solo los recibe administración. Un abono cobrado con turno abierto siempre entra al corte, lo prendas o no."
-        >
-          <Switch
-            checked={!!cfg.caja_cobra_abonos}
-            onChange={v => set('caja_cobra_abonos', v)}
-            label="Recibir abonos desde la caja"
-          />
-        </Ajuste>
-      </Panel>
-
-      <Panel titulo="Cotizaciones · condiciones y pago" desc="Aparecen en la carta y en el PDF que recibe el cliente. Puedes usar varias líneas.">
-        <Ajuste titulo="Condiciones · VENTA" desc="Anticipo, saldo, descuentos. Salen en las cotizaciones de venta." apilado>
-          <textarea aria-label="Condiciones para cotización de venta" className={`${campoCfg} resize-y min-h-[84px]`} rows={3} value={cfg.cotizacion_condiciones}
-            onChange={e => set('cotizacion_condiciones', e.target.value)}
-            placeholder={'Anticipo del 60% para iniciar el pedido; el resto contra entrega.\nPago de contado: 5% de descuento.'} />
-        </Ajuste>
-        <Ajuste titulo="Condiciones · RENTA" desc="Uso, mantenimiento y responsabilidad. Salen en las cotizaciones de renta." apilado>
-          <textarea aria-label="Condiciones para cotización de renta" className={`${campoCfg} resize-y min-h-[120px]`} rows={5} value={cfg.cotizacion_condiciones_renta}
-            onChange={e => set('cotizacion_condiciones_renta', e.target.value)}
-            placeholder={'El equipo se entrega limpio; de lo contrario, cargo de $300 + IVA.\nVerificar aceite a diario. Cambio de aceite cada 25 h…'} />
-        </Ajuste>
-        {/* Los datos bancarios se imprimen en CADA cotización: cambiarlos desvía
-            los pagos de los clientes a otra cuenta, y no se nota hasta que
-            alguien diga "ya te pagué". Por eso son del dueño y no de quien
-            administra. El servidor rechaza el cambio igual: esconderlo aquí es
-            para no ofrecer un campo que va a fallar, no la defensa. */}
-        {puede('editar_datos_bancarios') && (
-        <Ajuste titulo="Datos bancarios" desc="Banco, titular, cuenta y CLABE. Si lo dejas vacío, no se muestra." apilado>
-          <textarea aria-label="Datos bancarios" className={`${campoCfg} resize-y min-h-[84px]`} rows={4} value={cfg.datos_bancarios}
-            onChange={e => set('datos_bancarios', e.target.value)}
-            placeholder={'Titular: Nombre o razón social\nBanco: XYZ\nCuenta: 0000000000\nCLABE: 000000000000000000'} />
-        </Ajuste>
-        )}
-        <Ajuste titulo="Despedida" desc="Frase de cortesía al final de la cotización. Si la dejas vacía, no se muestra." apilado>
-          <textarea aria-label="Frase de despedida" className={`${campoCfg} resize-y min-h-[72px]`} rows={2} value={cfg.cotizacion_cierre}
-            onChange={e => set('cotizacion_cierre', e.target.value)}
-            placeholder={'En espera de que lo anterior merezca su conformidad…'} />
-        </Ajuste>
-      </Panel>
-
-      <Panel titulo="Avisos por correo"
-        desc="Reciben un correo en cuanto un cliente manda una solicitud. Solo los confirmados reciben avisos: así un correo mal escrito no se traga los pendientes en silencio.">
-        <Ajuste titulo="Quién recibe los avisos"
-          desc={sinVerificar > 0
-            ? <>Hay <b className="text-ink">{sinVerificar} sin confirmar</b>; esos todavía no reciben nada.</>
-            : correos.length > 0 ? 'Todos confirmados.' : undefined}
-          apilado>
-          <div className="w-full space-y-2">
-            {correos.length === 0 && <p className="text-[13px] text-mute">Nadie configurado. Sin esto, las solicitudes solo aparecen dentro del panel.</p>}
-            {correos.map(c => (
-              <div key={c.id} className="flex items-center gap-3 px-4 py-3 rounded-xl bg-surface-2">
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm text-ink truncate">{c.email}</p>
-                  {c.etiqueta && <p className="text-[12px] text-mute truncate">{c.etiqueta}</p>}
-                </div>
-                {c.verificado
-                  ? <span className="shrink-0 text-[10px] uppercase font-semibold px-2 py-1 rounded bg-emerald-500/10 text-emerald-600">Confirmado</span>
-                  : <>
-                      <span className="shrink-0 text-[10px] uppercase font-semibold px-2 py-1 rounded bg-amber-500/10 text-amber-700 dark:text-amber-500">Sin confirmar</span>
-                      <button onClick={() => reenviar(c.id)} className="shrink-0 text-[12px] font-black text-gold-ink hover:opacity-80 transition-opacity">Reenviar</button>
-                    </>}
-                <button onClick={() => eliminarCorreo(c)} aria-label={`Quitar ${c.email}`}
-                  className="shrink-0 w-8 h-8 rounded-lg grid place-items-center text-mute hover:text-red-500 hover:bg-red-500/10 transition-colors">
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" d="M6 6l12 12M18 6L6 18" /></svg>
-                </button>
-              </div>
-            ))}
-          </div>
-        </Ajuste>
-
-        <Ajuste titulo="Agregar un correo" desc="Le mandamos un enlace para que confirme. Hasta que lo abra, no recibe avisos." apilado>
-          <div className="flex flex-col sm:flex-row gap-2 w-full">
-            <input aria-label="Correo a agregar" className={`${campoCfg} flex-1`} type="email" value={nuevoCorreo.email} onChange={e => setNuevoCorreo({ ...nuevoCorreo, email: e.target.value })} placeholder="correo@ejemplo.com" />
-            <input aria-label="Quién es" className={`${campoCfg} sm:w-44`} value={nuevoCorreo.etiqueta} onChange={e => setNuevoCorreo({ ...nuevoCorreo, etiqueta: e.target.value })} placeholder="Quién es" />
-            <button onClick={agregarCorreo} disabled={busy || !nuevoCorreo.email.trim()} className={`${btnPrimario} shrink-0`}>
-              {busy ? 'Enviando…' : 'Agregar'}
-            </button>
-          </div>
-        </Ajuste>
-      </Panel>
-
-      {/* Barra de guardado: aparece solo cuando hay algo pendiente. */}
-      {hayCambios && (
-        <div className="fixed bottom-0 inset-x-0 sm:left-auto sm:right-6 sm:bottom-6 z-40 px-4 pb-4 sm:p-0 pointer-events-none">
-          <div className="pointer-events-auto mx-auto sm:mx-0 max-w-md sm:max-w-none flex items-center gap-3 bg-surface border border-edge rounded-2xl shadow-[0_12px_32px_rgba(33,29,22,0.16)] px-4 py-3">
-            <p className="text-[13px] text-ink font-semibold flex-1 sm:flex-none sm:mr-2">Tienes cambios sin guardar</p>
-            <button onClick={() => setCfg(guardado)} className="h-9 px-3.5 rounded-lg text-[13px] font-bold text-mute hover:text-ink hover:bg-surface-2 transition-colors">Descartar</button>
-            <button onClick={guardar} disabled={saving} className={`${btnPrimario} h-9 px-4 text-[13px]`}>{saving ? 'Guardando…' : 'Guardar'}</button>
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
-
-/* ── Configuración › Ticket ──
-   El admin arma el ticket a la izquierda y lo ve salir a la derecha. La vista
-   previa NO es una ilustración: usa el mismo `layoutTicket` que se manda a la
-   impresora, así que lo que aquí se lee es lo que el papel va a decir. */
-
-type TicketForm = {
-  ticket_logo: string; ticket_logo_origen: string; ticket_logo_escala: number
-  ticket_mostrar_logo: boolean; ticket_lema: string
-  ticket_mostrar_direccion: boolean; ticket_mostrar_telefono: boolean
-  ticket_mostrar_rfc: boolean; ticket_mostrar_web: boolean
-  ticket_codigo_barras: boolean; ticket_leyenda: string
-  negocio_footer: string
-}
-
-const TICKET_VACIO: TicketForm = {
-  ticket_logo: '', ticket_logo_origen: '', ticket_logo_escala: 70,
-  ticket_mostrar_logo: true, ticket_lema: 'Renta · Venta · Servicio',
-  ticket_mostrar_direccion: true, ticket_mostrar_telefono: true,
-  ticket_mostrar_rfc: true, ticket_mostrar_web: false,
-  ticket_codigo_barras: true, ticket_leyenda: '', negocio_footer: '',
-}
-
-/* Solo los campos del ticket. `/config/` devuelve TODA la configuración y
-   reenviarla completa haría dos daños: pisaría lo que otro admin acabe de
-   cambiar, y mandaría los datos bancarios —que el servidor solo acepta del
-   dueño— tumbando el guardado entero con un 403. */
-function soloTicket(o: any): TicketForm {
-  const out = { ...TICKET_VACIO }
-  for (const k of Object.keys(TICKET_VACIO) as (keyof TicketForm)[]) {
-    if (o?.[k] !== undefined && o[k] !== null) (out as any)[k] = o[k]
-  }
-  return out
-}
-
-/* Venta de mostrador de verdad: tres refacciones, IVA desglosado y cambio. Un
-   ejemplo corto haría creer que el ticket siempre cabe en la mano. */
-const TICKET_EJEMPLO: Comprobante = {
-  tipo: 'venta', titulo: 'Ticket de Venta', folio: 'V-1842',
-  fecha: '19/08/2026 13:42',
-  meta: [{ label: 'Cliente', value: 'Mostrador' }, { label: 'Tel', value: '7441234567' }],
-  items: [
-    { nombre: 'Filtro de aceite HF-153', detalle: '2 x $185.00', importe: '370.00' },
-    { nombre: 'Bujía NGK BPR6ES', detalle: '1 x $95.00', importe: '95.00' },
-    { nombre: 'Aceite 15W-40 · 1 L', detalle: '3 x $148.00', importe: '444.00' },
-  ],
-  totales: [
-    { label: 'Subtotal', value: '783.62' },
-    { label: 'IVA (16%)', value: '125.38' },
-    { label: 'TOTAL', value: '909.00', fuerte: true },
-  ],
-  pie: ['Pago: Efectivo', '¡Gracias por su compra!'],
-}
-
-/* Puntos de partida. No son "temas": son decisiones de negocio ya tomadas —
-   qué tanto quieres decirle al cliente y cuánto papel estás dispuesto a gastar.
-   No tocan el logo: esa es tu marca, no un preset. */
-const PLANTILLAS: { id: string; nombre: string; desc: string; campos: Partial<TicketForm> }[] = [
-  {
-    id: 'completo', nombre: 'Completo', desc: 'Todos tus datos y el aviso de garantía.',
-    campos: {
-      ticket_mostrar_logo: true, ticket_lema: 'Renta · Venta · Servicio',
-      ticket_mostrar_direccion: true, ticket_mostrar_telefono: true, ticket_mostrar_rfc: true, ticket_mostrar_web: true,
-      ticket_codigo_barras: true,
-      ticket_leyenda: 'Cambios y devoluciones dentro de los 30 días, con este ticket y el producto sin uso.',
-      negocio_footer: '¡Gracias por su preferencia!',
-    },
-  },
-  {
-    id: 'compacto', nombre: 'Compacto', desc: 'Lo necesario para localizarte y reclamar.',
-    campos: {
-      ticket_mostrar_logo: true, ticket_lema: '',
-      ticket_mostrar_direccion: false, ticket_mostrar_telefono: true, ticket_mostrar_rfc: false, ticket_mostrar_web: false,
-      ticket_codigo_barras: true, ticket_leyenda: '', negocio_footer: '¡Gracias por su preferencia!',
-    },
-  },
-  {
-    id: 'minimo', nombre: 'Mínimo', desc: 'El menor papel posible. Solo el comprobante.',
-    campos: {
-      ticket_mostrar_logo: false, ticket_lema: '',
-      ticket_mostrar_direccion: false, ticket_mostrar_telefono: false, ticket_mostrar_rfc: false, ticket_mostrar_web: false,
-      ticket_codigo_barras: false, ticket_leyenda: '', negocio_footer: '',
-    },
-  },
-]
-
-function TicketAdmin({ notify }: { notify: (m: string, t?: 'ok' | 'err') => void }) {
-  const [f, setF] = useState<TicketForm>(TICKET_VACIO)
-  const [guardado, setGuardado] = useState<TicketForm>(TICKET_VACIO)
-  const [cargando, setCargando] = useState(true)
-  const [saving, setSaving] = useState(false)
-  const [procesando, setProcesando] = useState(false)
-  const [umbral, setUmbral] = useState(170)
-  const [tramado, setTramado] = useState(false)
-  const [afinar, setAfinar] = useState(false)
-  const [arrastrando, setArrastrando] = useState(false)
-  const [tinta, setTinta] = useState<number | null>(null)
-  const [logoMm, setLogoMm] = useState(12)
-  const [mm, setMm] = useState<58 | 80>(58)
-  const [vista, setVista] = useState<'85' | '100' | '135' | 'real'>('100')
-  const [resaltar, setResaltar] = useState<Zona | null>(null)
-  const [probando, setProbando] = useState(false)
-  const [ps] = usePrintSettings()
-  const negocio = getNegocio()
-  const temporizador = useRef<number | undefined>(undefined)
-  const reproceso = useRef<number | undefined>(undefined)
-
-  useEffect(() => {
-    api.get<TicketForm>('/config/')
-      .then(r => {
-        const c = soloTicket(r.data); setF(c); setGuardado(c)
-        if (c.ticket_logo) analizarTinta(c.ticket_logo).then(setTinta)
-      })
-      .catch(() => {})
-      .finally(() => setCargando(false))
-  }, [])
-
-  /* Señala en el papel la zona que se está editando y la apaga sola cuando el
-     admin deja de moverle. Sin esto hay que buscar a ojo qué cambió. */
-  const marcar = useCallback((z: Zona) => {
-    setResaltar(z)
-    window.clearTimeout(temporizador.current)
-    temporizador.current = window.setTimeout(() => setResaltar(null), 1100)
-  }, [])
-
-  useEffect(() => () => { window.clearTimeout(temporizador.current); window.clearTimeout(reproceso.current) }, [])
-
-  const set = useCallback(<K extends keyof TicketForm>(k: K, v: TicketForm[K], z: Zona) => {
-    setF(c => ({ ...c, [k]: v })); marcar(z)
-  }, [marcar])
-
-  const hayCambios = JSON.stringify(f) !== JSON.stringify(guardado)
-  const W = charsPerLine(mm)
-  const cfgTicket = useMemo(() => ({
-    logo: f.ticket_logo, logoEscala: f.ticket_logo_escala, mostrarLogo: f.ticket_mostrar_logo,
-    lema: f.ticket_lema, mostrarDireccion: f.ticket_mostrar_direccion,
-    mostrarTelefono: f.ticket_mostrar_telefono, mostrarRfc: f.ticket_mostrar_rfc,
-    mostrarWeb: f.ticket_mostrar_web, codigoBarras: f.ticket_codigo_barras, leyenda: f.ticket_leyenda,
-  }), [f])
-
-  const lineas = useMemo(
-    () => layoutTicket(TICKET_EJEMPLO, { width: W, negocio: { ...negocio, footer: f.negocio_footer }, ticket: cfgTicket }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [W, cfgTicket, f.negocio_footer, negocio.nombre, negocio.direccion, negocio.telefono, negocio.rfc, negocio.web],
-  )
-  const largoCm = altoTicketMm(lineas, logoMm) / 10
-
-  /* Lo que cuesta cada plantilla, en el papel de este mostrador. Sin el número
-     "Compacto" es solo una palabra; con él es una decisión de cuánto rollo
-     gastas en cada venta del día. */
-  const costoPlantillas = useMemo(() => PLANTILLAS.map(p => {
-    const c = { ...f, ...p.campos }
-    const l = layoutTicket(TICKET_EJEMPLO, {
-      width: W,
-      negocio: { ...negocio, footer: c.negocio_footer },
-      ticket: {
-        logo: c.ticket_logo, logoEscala: c.ticket_logo_escala, mostrarLogo: c.ticket_mostrar_logo,
-        lema: c.ticket_lema, mostrarDireccion: c.ticket_mostrar_direccion,
-        mostrarTelefono: c.ticket_mostrar_telefono, mostrarRfc: c.ticket_mostrar_rfc,
-        mostrarWeb: c.ticket_mostrar_web, codigoBarras: c.ticket_codigo_barras, leyenda: c.ticket_leyenda,
-      },
-    })
-    return altoTicketMm(l, c.ticket_mostrar_logo && c.ticket_logo ? logoMm : 0) / 10
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [f, W, logoMm, negocio.nombre, negocio.direccion, negocio.telefono, negocio.rfc, negocio.web])
-
-  /* Cuánto papel se lleva el logo: alto real de la imagen a la escala elegida,
-     traducido a milímetros (8 puntos = 1 mm a 203 dpi). */
-  useEffect(() => {
-    let vivo = true
-    if (!f.ticket_logo || !f.ticket_mostrar_logo) { setLogoMm(0); return }
-    medirLogo(f.ticket_logo).then(d => {
-      if (!vivo || !d) return
-      const anchoImpreso = anchoPuntos(mm) * f.ticket_logo_escala / 100
-      setLogoMm((d.alto / d.ancho) * anchoImpreso / 8 + 1)
-    })
-    return () => { vivo = false }
-  }, [f.ticket_logo, f.ticket_mostrar_logo, f.ticket_logo_escala, mm])
-
-  /* El logo se convierte SIEMPRE al ancho máximo del cabezal (576 puntos, 80 mm).
-     Al imprimir en 58 mm se reduce desde ahí: guardar la mejor versión y bajar
-     conserva más detalle que guardar la chica y estirarla. */
-  async function convertir(origen: File | string, u: number, tr: boolean) {
-    setProcesando(true)
-    try {
-      const [logo, original] = await Promise.all([
-        procesarLogo(origen, { anchoPx: anchoPuntos(80), umbral: u, tramado: tr }),
-        typeof origen === 'string' ? Promise.resolve(f.ticket_logo_origen) : reducirOriginal(origen),
-      ])
-      setTinta(logo.tinta)
-      setF(c => ({ ...c, ticket_logo: logo.dataUrl, ticket_logo_origen: original || c.ticket_logo_origen }))
-      marcar('logo')
-    } catch (e: any) {
-      notify(e?.message || 'No se pudo leer esa imagen', 'err')
-    } finally {
-      setProcesando(false)
-    }
-  }
-
-  function elegirArchivo(file: File | null | undefined) {
-    if (!file) return
-    if (!file.type.startsWith('image/')) { notify('Elige una imagen (PNG o JPG)', 'err'); return }
-    if (file.size > 8 * 1024 * 1024) { notify('La imagen pesa más de 8 MB', 'err'); return }
-    setAfinar(true)
-    convertir(file, umbral, tramado)
-  }
-
-  /* Reajustar rehace el logo desde el original guardado: sin él no habría de
-     dónde recuperar los grises que el umbral necesita comparar. Va con retraso
-     porque arrastrar el control dispararía una conversión por cada píxel. */
-  function reajustar(u: number, tr: boolean) {
-    setUmbral(u); setTramado(tr); marcar('logo')
-    if (!f.ticket_logo_origen) return
-    window.clearTimeout(reproceso.current)
-    reproceso.current = window.setTimeout(() => convertir(f.ticket_logo_origen, u, tr), 130)
-  }
-
-  function aplicarPlantilla(p: typeof PLANTILLAS[number]) {
-    setF(c => ({ ...c, ...p.campos })); marcar('cabeza')
-  }
-
-  /* Imprimir de verdad, con el diseño de la pantalla y SIN guardar todavía: en
-     papel se ve si el logo quedó muy claro o muy manchado, y eso la pantalla no
-     lo puede decidir por ti. */
-  async function imprimirPrueba() {
-    setProbando(true)
-    try {
-      const bytes = await buildTicket(TICKET_EJEMPLO, {
-        width: W, puntos: anchoPuntos(mm),
-        negocio: { ...negocio, footer: f.negocio_footer }, ticket: cfgTicket,
-      })
-      await imprimirTermico(bytes, { method: ps.method, baud: ps.baud })
-      notify('Prueba enviada a la impresora')
-    } catch (e: any) {
-      notify(e?.name === 'NotFoundError' ? 'No se seleccionó impresora' : (e?.message || 'No se pudo imprimir'), 'err')
-    } finally {
-      setProbando(false)
-    }
-  }
-
-  function guardar() {
-    setSaving(true)
-    api.patch<TicketForm>('/config/', f)
-      .then(r => {
-        const c = soloTicket(r.data)
-        setF(c); setGuardado(c)
-        invalidarConfigPublica()   // las cajas toman el ticket nuevo al instante
-        notify('Ticket actualizado')
-      })
-      .catch(err => notify(errorMsg(err, 'No se pudo guardar'), 'err'))
-      .finally(() => setSaving(false))
-  }
-
-  /* Un dato del negocio vacío no se puede "mostrar": el interruptor se apaga y
-     dice dónde se llena, en vez de mentir con un renglón que nunca sale. */
-  const dato = (valor: string, campo: string) =>
-    valor ? valor : <span className="text-mute">Sin capturar · se llena en <b className="text-ink">Negocio y contacto</b> ({campo})</span>
-
-  const chip = (activo: boolean) =>
-    `px-2.5 py-1 rounded-md text-[11px] font-bold transition-colors ${activo ? 'bg-gold text-black' : 'bg-surface-2 text-mute hover:text-ink'}`
-
-  /* La conversión a un bit puede salir mal de dos formas y ninguna se nota a
-     simple vista en un monitor retroiluminado. */
-  const avisoTinta = tinta == null ? null
-    : tinta < 0.02 ? { tono: 'amber', txt: 'Quedó casi en blanco. Sube la fuerza o usa una imagen con más contraste.' }
-    : tinta > 0.45 ? { tono: 'amber', txt: 'Quedó casi sólido: saldrá como una mancha y gasta cabezal. Baja la fuerza.' }
-    : { tono: 'ok', txt: `Buen contraste · ${Math.round(tinta * 100)}% de puntos negros.` }
-
-  if (cargando) {
-    return (
-      <div className="space-y-2.5" aria-busy="true" aria-label="Cargando la configuración del ticket">
-        {[220, 300, 260].map((h, i) => <div key={i} className="bg-surface border border-edge rounded-2xl animate-pulse" style={{ height: h }} />)}
-      </div>
-    )
-  }
-
-  return (
-    <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_336px] gap-2.5 items-start pb-24">
-      <div className="space-y-2.5 min-w-0">
-        <Panel titulo="Punto de partida" desc="Tres formas de resolver el mismo ticket. Elige la más cercana y ajusta lo que quieras: nada se guarda hasta que lo digas.">
-          <div className="px-6 sm:px-7 py-5 grid sm:grid-cols-3 gap-2">
-            {PLANTILLAS.map((p, i) => (
-              <button key={p.id} onClick={() => aplicarPlantilla(p)}
-                className="text-left rounded-xl border border-edge bg-surface-2 p-3.5 hover:border-gold/50 active:scale-[0.98] transition-all">
-                <span className="flex items-baseline justify-between gap-2">
-                  <span className="text-[13.5px] font-black text-ink">{p.nombre}</span>
-                  <span className="text-[11.5px] font-bold text-gold-ink tabular-nums shrink-0">{costoPlantillas[i].toFixed(1)} cm</span>
-                </span>
-                <span className="block text-[12px] text-mute mt-1 leading-snug">{p.desc}</span>
-              </button>
-            ))}
-          </div>
-        </Panel>
-
-        <Panel titulo="Logo" desc="La térmica no imprime grises: quema puntos negros. Tu logo se convierte a blanco y negro puro y aquí ves exactamente los puntos que van a salir.">
-          <Ajuste titulo={f.ticket_logo ? 'Tu logo, ya convertido' : 'Sube tu logo'}
-            desc={f.ticket_logo ? 'Así se verá impreso. Si se ve manchado o desaparecido, ajústalo abajo.' : 'PNG o JPG. Lo mejor es un logo plano y con buen contraste; los degradados se pierden.'}
-            apilado>
-            <div className="w-full space-y-3">
-              {f.ticket_logo ? (
-                <div className="flex flex-wrap items-start gap-4">
-                  <div className="rounded-xl border border-edge p-4 grid place-items-center min-w-[180px] relative" style={{ background: '#fffdf7' }}>
-                    <img src={f.ticket_logo} alt="Logo convertido a blanco y negro" className="max-h-24 max-w-[220px]" style={{ imageRendering: 'pixelated' }} />
-                    {procesando && <span className="absolute inset-0 grid place-items-center bg-white/60 rounded-xl text-[12px] font-bold text-neutral-700">Convirtiendo…</span>}
-                  </div>
-                  <div className="flex flex-col gap-2">
-                    <label className={`${btnSecundario} inline-flex items-center cursor-pointer`}>
-                      Cambiar imagen
-                      <input type="file" accept="image/*" className="sr-only" onChange={e => elegirArchivo(e.target.files?.[0])} />
-                    </label>
-                    <button onClick={() => { setF(c => ({ ...c, ticket_logo: '', ticket_logo_origen: '' })); setTinta(null); marcar('cabeza') }}
-                      className="h-11 px-5 rounded-[10px] text-[13.5px] font-bold text-mute hover:text-red-500 hover:bg-red-500/10 transition-colors">Quitar logo</button>
-                  </div>
-                </div>
-              ) : (
-                <label
-                  onDragOver={e => { e.preventDefault(); setArrastrando(true) }}
-                  onDragLeave={() => setArrastrando(false)}
-                  onDrop={e => { e.preventDefault(); setArrastrando(false); elegirArchivo(e.dataTransfer.files?.[0]) }}
-                  className={`block rounded-xl border-2 border-dashed px-6 py-9 text-center cursor-pointer transition-colors ${arrastrando ? 'border-gold bg-gold-soft' : 'border-edge bg-surface-2 hover:border-gold/50'}`}>
-                  <svg className="w-7 h-7 mx-auto text-mute" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M12 16V4m0 0L8 8m4-4 4 4" /><path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />
-                  </svg>
-                  <p className="text-[13.5px] font-black text-ink mt-2">{procesando ? 'Convirtiendo…' : 'Arrastra tu logo o elige un archivo'}</p>
-                  <p className="text-[12.5px] text-mute mt-1">Se convierte aquí mismo. Nada sale de tu computadora sin que guardes.</p>
-                  <input type="file" accept="image/*" className="sr-only" onChange={e => elegirArchivo(e.target.files?.[0])} />
-                </label>
-              )}
-
-              {f.ticket_logo && avisoTinta && (
-                <p className={`text-[12.5px] ${avisoTinta.tono === 'ok' ? 'text-emerald-600' : 'text-amber-700 dark:text-amber-500'}`} role="status">{avisoTinta.txt}</p>
-              )}
-
-              {f.ticket_logo && (
-                <>
-                  <div className="flex items-center gap-3">
-                    <label htmlFor="tk-escala" className="text-[13px] font-bold text-ink w-16">Tamaño</label>
-                    <input id="tk-escala" type="range" min={30} max={100} step={5} value={f.ticket_logo_escala}
-                      aria-valuetext={`${f.ticket_logo_escala} por ciento del ancho del papel`}
-                      onChange={e => set('ticket_logo_escala', Number(e.target.value), 'logo')}
-                      className="flex-1 accent-[var(--c-gold)]" />
-                    <span className="text-[13px] font-mono text-ink w-20 text-right tabular-nums">{f.ticket_logo_escala}% ancho</span>
-                  </div>
-
-                  <button onClick={() => setAfinar(a => !a)} aria-expanded={afinar}
-                    className="inline-flex items-center gap-1.5 text-[13px] font-black text-gold-ink hover:opacity-80 transition-opacity">
-                    <svg className={`w-4 h-4 transition-transform ${afinar ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.4" strokeLinecap="round"><path d="m9 6 6 6-6 6" /></svg>
-                    Ajuste fino
-                  </button>
-
-                  {afinar && (
-                    <div className="rounded-xl bg-surface-2 border border-edge p-4 space-y-4">
-                      <div>
-                        <div className="flex items-center gap-3">
-                          <label htmlFor="tk-umbral" className="text-[13px] font-bold text-ink w-16">Fuerza</label>
-                          <input id="tk-umbral" type="range" min={60} max={230} step={5} value={umbral} disabled={!f.ticket_logo_origen}
-                            aria-valuetext={`Fuerza ${umbral} de 230`}
-                            onChange={e => reajustar(Number(e.target.value), tramado)}
-                            className="flex-1 accent-[var(--c-gold)] disabled:opacity-40" />
-                          <span className="text-[13px] font-mono text-ink w-20 text-right tabular-nums">{umbral}</span>
-                        </div>
-                        <p className="text-[12.5px] text-mute mt-1.5">Menos = solo lo más oscuro se imprime. Más = entra más tinta y el logo se engorda.</p>
-                      </div>
-                      <div className="flex items-start justify-between gap-4">
-                        <div className="max-w-[42ch]">
-                          <p className="text-[13px] font-bold text-ink">Tramado</p>
-                          <p className="text-[12.5px] text-mute mt-0.5">Simula grises con puntitos. Enciéndelo si tu logo es una foto o tiene degradados; apágalo si es plano.</p>
-                        </div>
-                        <Switch checked={tramado} onChange={v => reajustar(umbral, v)} disabled={!f.ticket_logo_origen} label="Tramado del logo" />
-                      </div>
-                      {!f.ticket_logo_origen && (
-                        <p className="text-[12.5px] text-amber-700 dark:text-amber-500">Este logo se subió antes de que existiera el ajuste fino. Vuelve a subir la imagen para poder reajustarlo.</p>
-                      )}
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
-          </Ajuste>
-
-          <Ajuste titulo="Imprimir el logo" desc="Apágalo para ahorrar papel sin perder la imagen que ya cargaste.">
-            <Switch checked={f.ticket_mostrar_logo} onChange={v => set('ticket_mostrar_logo', v, 'logo')} disabled={!f.ticket_logo} label="Imprimir el logo en el ticket" />
-          </Ajuste>
-        </Panel>
-
-        <Panel titulo="Encabezado" desc="Lo primero que lee el cliente. Cada renglón que enciendas alarga el ticket.">
-          <Ajuste titulo="Lema" desc="Va debajo del nombre. Déjalo vacío si no quieres ninguno." apilado>
-            <input aria-label="Lema del negocio" className={`${campoCfg} sm:max-w-md`} maxLength={80}
-              value={f.ticket_lema} onChange={e => set('ticket_lema', e.target.value, 'cabeza')} placeholder="Renta · Venta · Servicio" />
-          </Ajuste>
-          <Ajuste titulo="Dirección" desc={dato(negocio.direccion, 'Dirección')}>
-            <Switch checked={f.ticket_mostrar_direccion} onChange={v => set('ticket_mostrar_direccion', v, 'cabeza')} disabled={!negocio.direccion} label="Imprimir la dirección" />
-          </Ajuste>
-          <Ajuste titulo="Teléfono" desc={dato(negocio.telefono, 'Teléfono')}>
-            <Switch checked={f.ticket_mostrar_telefono} onChange={v => set('ticket_mostrar_telefono', v, 'cabeza')} disabled={!negocio.telefono} label="Imprimir el teléfono" />
-          </Ajuste>
-          <Ajuste titulo="Página web" desc={dato(negocio.web, 'Página web')}>
-            <Switch checked={f.ticket_mostrar_web} onChange={v => set('ticket_mostrar_web', v, 'cabeza')} disabled={!negocio.web} label="Imprimir la página web" />
-          </Ajuste>
-          <Ajuste titulo="RFC" desc={dato(negocio.rfc, 'RFC')}>
-            <Switch checked={f.ticket_mostrar_rfc} onChange={v => set('ticket_mostrar_rfc', v, 'cabeza')} disabled={!negocio.rfc} label="Imprimir el RFC" />
-          </Ajuste>
-        </Panel>
-
-        <Panel titulo="Pie" desc="Lo último que se lleva el cliente. Es donde se reclama una garantía o una devolución.">
-          <Ajuste titulo="Aviso" desc="Devoluciones, garantía, horario. Una línea por renglón; se acomoda solo al ancho del papel." apilado>
-            <textarea aria-label="Aviso al pie del ticket" className={`${campoCfg} resize-y min-h-[84px] sm:max-w-md`} rows={3} maxLength={400}
-              value={f.ticket_leyenda} onChange={e => set('ticket_leyenda', e.target.value, 'pie')}
-              placeholder={'Cambios y devoluciones dentro de los 30 días\ncon este ticket y el producto sin uso.'} />
-          </Ajuste>
-          <Ajuste titulo="Despedida" desc="La última línea, en negritas." apilado>
-            <input aria-label="Frase de despedida" className={`${campoCfg} sm:max-w-md`} maxLength={200}
-              value={f.negocio_footer} onChange={e => set('negocio_footer', e.target.value, 'pie')} placeholder="¡Gracias por su preferencia!" />
-          </Ajuste>
-          <Ajuste titulo="Código de barras del folio" desc="Deja escanear el ticket para encontrar la venta en el panel. Ocupa un centímetro de papel.">
-            <Switch checked={f.ticket_codigo_barras} onChange={v => set('ticket_codigo_barras', v, 'pie')} label="Imprimir el código de barras" />
-          </Ajuste>
-        </Panel>
-      </div>
-
-      {/* ── Vista previa ── el papel, no un dibujo del papel */}
-      <aside className="lg:sticky lg:top-3">
-        <div className="bg-surface border border-edge rounded-2xl overflow-hidden">
-          <header className="flex items-start justify-between gap-2 px-4 py-3 border-b border-edge">
-            <div className="min-w-0">
-              <h3 className="text-[13.5px] font-black text-ink">Así queda</h3>
-              {/* El largo es el dato que nadie más le da al admin: cada renglón
-                  que enciende se paga en rollo, y aquí se ve al instante. */}
-              <p className="text-[12px] text-mute tabular-nums whitespace-nowrap">
-                <span className="text-ink font-bold">{largoCm.toFixed(1)} cm</span> de papel
-              </p>
-            </div>
-            <div className="flex gap-1 shrink-0" role="group" aria-label="Ancho del papel">
-              {([58, 80] as const).map(w => (
-                <button key={w} onClick={() => setMm(w)} aria-pressed={mm === w} className={chip(mm === w)}>{w}mm</button>
-              ))}
-            </div>
-          </header>
-
-          <div className="p-4 max-h-[64vh] overflow-auto" style={{ background: '#d7d4ce' }}>
-            <div className="flex flex-col items-center gap-2">
-              {/* Cota: el papel mide lo que mide, no lo que parece en pantalla. */}
-              <div className="flex items-center gap-2 text-[10px] font-black tracking-wide text-neutral-600 tabular-nums">
-                <span className="h-px w-8 bg-neutral-500" />{mm} mm<span className="h-px w-8 bg-neutral-500" />
-              </div>
-              <TicketPaper lineas={lineas} width={W} resaltar={resaltar}
-                zoom={vista === 'real' ? 1 : Number(vista) / 100}
-                tamanoReal={vista === 'real' ? mm : undefined}
-                className="shadow-[0_6px_16px_rgba(0,0,0,.2)]" />
-            </div>
-          </div>
-
-          <footer className="border-t border-edge divide-y divide-edge">
-            <div className="flex items-center justify-between gap-2 px-4 py-2.5">
-              <span className="text-[11.5px] text-mute">Tamaño en pantalla</span>
-              <div className="flex gap-1" role="group" aria-label="Tamaño de la vista previa">
-                {(['85', '100', '135', 'real'] as const).map(v => (
-                  <button key={v} onClick={() => setVista(v)} aria-pressed={vista === v} className={chip(vista === v)}
-                    title={v === 'real' ? 'Tamaño físico aproximado: depende de los puntos por pulgada de tu monitor' : undefined}>
-                    {v === 'real' ? '1:1' : `${v}%`}
-                  </button>
-                ))}
-              </div>
-            </div>
-            {ps.method !== 'navegador' && metodoSoportado(ps.method) && (
-              <div className="p-3">
-                <button onClick={imprimirPrueba} disabled={probando}
-                  className="w-full h-10 rounded-[10px] border border-edge bg-surface-2 text-[13px] font-bold text-ink hover:border-gold/40 active:scale-[0.98] disabled:opacity-40 transition-all">
-                  {probando ? 'Enviando…' : 'Imprimir una prueba'}
-                </button>
-                <p className="text-[11.5px] text-mute mt-2 leading-snug">Sale en papel con este diseño, aunque todavía no lo guardes.</p>
-              </div>
-            )}
-          </footer>
-        </div>
-        <p className="text-[12px] text-mute mt-2 px-1 leading-relaxed">
-          El ticket se arma con las mismas líneas que se mandan a la impresora, así que lo que ves aquí es lo que sale en el papel.
-        </p>
-      </aside>
-
-      {hayCambios && (
-        <div className="fixed bottom-0 inset-x-0 sm:left-auto sm:right-6 sm:bottom-6 z-40 px-4 pb-4 sm:p-0 pointer-events-none">
-          <div className="pointer-events-auto mx-auto sm:mx-0 max-w-md sm:max-w-none flex items-center gap-3 bg-surface border border-edge rounded-2xl shadow-[0_12px_32px_rgba(33,29,22,0.16)] px-4 py-3">
-            <p className="text-[13px] text-ink font-semibold flex-1 sm:flex-none sm:mr-2">Tienes cambios sin guardar</p>
-            <button onClick={() => setF(guardado)} className="h-9 px-3.5 rounded-lg text-[13px] font-bold text-mute hover:text-ink hover:bg-surface-2 transition-colors">Descartar</button>
-            <button onClick={guardar} disabled={saving} className={`${btnPrimario} h-9 px-4 text-[13px]`}>{saving ? 'Guardando…' : 'Guardar'}</button>
-          </div>
-        </div>
-      )}
-
-      <style>{paperCss(W)}</style>
-    </div>
-  )
-}
-
-
-function ConfiguracionAdmin({ notify, lang, onLang }: {
-  notify: (m: string, t?: 'ok' | 'err') => void; lang: 'ES' | 'EN'; onLang: (l: 'ES' | 'EN') => void
-}) {
-  const { t } = useLang()
-  const puede = usePuede()
-  const [tab, setTab] = useState<'perfil' | 'negocio' | 'ticket' | 'seguridad' | 'preferencias'>('perfil')
-  const [pw, setPw] = useState({ actual: '', nueva: '', confirma: '' })
-  /* ── Código de autorización (NIP) ──
-     Hasta ahora el panel NO tenía dónde ponerlo: el endpoint existía y nadie lo
-     llamaba, así que ni el dueño tenía uno. Sin NIP del dueño, el Gestor no
-     puede autorizar nada. Es INDIVIDUAL: uno por persona, hasheado, y nunca se
-     puede leer de vuelta —solo reemplazar. */
-  const [nip, setNip] = useState({ password: '', codigo: '', confirma: '' })
-  const [savingNip, setSavingNip] = useState(false)
-  const [tieneNip, setTieneNip] = useState<boolean | null>(null)
-  useEffect(() => {
-    api.get<{ tiene_codigo_seguridad?: boolean }>('/auth/me/')
-      .then(r => setTieneNip(!!r.data?.tiene_codigo_seguridad))
-      .catch(() => setTieneNip(null))
-  }, [])
-  function guardarNip() {
-    if (nip.codigo.length !== 6) { notify('El código debe ser de 6 dígitos', 'err'); return }
-    if (nip.codigo !== nip.confirma) { notify('Los códigos no coinciden', 'err'); return }
-    setSavingNip(true)
-    api.post('/auth/codigo-seguridad/', { password: nip.password, codigo: nip.codigo })
-      .then(() => {
-        notify(tieneNip ? 'Código de autorización actualizado' : 'Código de autorización configurado')
-        setNip({ password: '', codigo: '', confirma: '' })
-        setTieneNip(true)
-      })
-      .catch(e => notify(e?.response?.data?.detalle || 'No se pudo guardar el código', 'err'))
-      .finally(() => setSavingNip(false))
-  }
-  const [savingPw, setSavingPw] = useState(false)
-
-  // "Negocio y contacto" edita datos del negocio: solo el dueño. Mostrarla a
-  // quien no puede editarla solo produce un 403 al abrirla.
-  type TabKey = 'perfil' | 'negocio' | 'ticket' | 'seguridad' | 'preferencias'
-  const tabs: { key: TabKey; label: string; icon: React.ReactNode }[] = [
-    { key: 'perfil', label: t('cfg.perfil'), icon: <><circle cx="12" cy="8" r="4" /><path d="M4.5 21a7.5 7.5 0 0 1 15 0" /></> },
-    ...(puede('configurar_negocio') ? [{ key: 'negocio' as TabKey, label: 'Negocio y contacto', icon: <><path d="M4 20V9l8-5 8 5v11" /><path d="M9 20v-6h6v6" /></> }] : []),
-    ...(puede('configurar_negocio') ? [{ key: 'ticket' as TabKey, label: 'Ticket', icon: <><path d="M5 4h14v16l-2.3-1.6L14.4 20 12 18.4 9.6 20l-2.3-1.6L5 20z" /><path d="M8.5 9h7M8.5 13h4" /></> }] : []),
-    { key: 'seguridad', label: t('cfg.seguridad'), icon: <><rect x="5" y="11" width="14" height="9" rx="2" /><path d="M8 11V8a4 4 0 0 1 8 0v3" /></> },
-    { key: 'preferencias', label: t('cfg.preferencias'), icon: <><path d="M4 7h11M18 7h2M4 12h2M9 12h11M4 17h11M18 17h2" /><circle cx="16" cy="7" r="2" /><circle cx="7" cy="12" r="2" /><circle cx="16" cy="17" r="2" /></> },
-  ]
-
-  function cambiarPassword() {
-    if (!pw.actual || !pw.nueva) { notify('Completa los campos', 'err'); return }
-    if (pw.nueva !== pw.confirma) { notify('Las contraseñas no coinciden', 'err'); return }
-    setSavingPw(true)
-    api.post('/auth/password/', { password_actual: pw.actual, password_nueva: pw.nueva })
-      .then(() => { notify('Contraseña actualizada'); setPw({ actual: '', nueva: '', confirma: '' }) })
-      .catch(e => notify(e?.response?.data?.detalle || e?.response?.data?.detail || 'No se pudo cambiar la contraseña', 'err'))
-      .finally(() => setSavingPw(false))
-  }
-
-  return (
-    <div className={`grid grid-cols-1 lg:grid-cols-[228px_1fr] gap-2.5 items-start ${tab === 'ticket' ? 'max-w-6xl' : 'max-w-5xl'}`}>
-      {/* Navegación de pestañas */}
-      <nav className="bg-surface border border-edge rounded-2xl p-2 flex lg:flex-col gap-0.5 overflow-x-auto">
-        {tabs.map(tb => {
-          const activa = tab === tb.key
-          return (
-            <button key={tb.key} onClick={() => setTab(tb.key)} aria-current={activa ? 'page' : undefined}
-              className={`flex items-center gap-2.5 px-3.5 py-3 rounded-xl text-[13.5px] font-bold text-left transition-colors whitespace-nowrap ${activa ? 'bg-gold-soft text-gold-ink' : 'text-ink hover:bg-surface-2'}`}>
-              <svg className={`w-[18px] h-[18px] shrink-0 ${activa ? 'text-gold-ink' : 'text-mute'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">{tb.icon}</svg>
-              {tb.label}
-            </button>
-          )
-        })}
-      </nav>
-
-      <div className="min-w-0">
-        {tab === 'perfil' && <PerfilAdmin notify={notify} />}
-
-        {tab === 'negocio' && <NegocioAdmin notify={notify} />}
-
-        {tab === 'ticket' && <TicketAdmin notify={notify} />}
-
-        {tab === 'seguridad' && (
-          <Panel titulo="Cambiar contraseña" desc="Al cambiarla seguirás con la sesión iniciada aquí, pero tendrás que entrar de nuevo en tus otros dispositivos.">
-            <Ajuste titulo="Contraseña actual" apilado>
-              <input aria-label="Contraseña actual" type="password" className={`${campoCfg} sm:max-w-sm`} value={pw.actual} onChange={e => setPw({ ...pw, actual: e.target.value })} placeholder="La que usas ahora" autoComplete="current-password" />
-            </Ajuste>
-            <Ajuste titulo="Contraseña nueva" desc={pw.nueva && pw.nueva.length < 8 ? 'Muy corta: usa al menos 8 caracteres.' : 'Al menos 8 caracteres.'} apilado>
-              <div className="grid sm:grid-cols-2 gap-3">
-                <input aria-label="Nueva contraseña" type="password" className={campoCfg} value={pw.nueva} onChange={e => setPw({ ...pw, nueva: e.target.value })} placeholder="Nueva contraseña" autoComplete="new-password" />
-                <input aria-label="Repítela" type="password" className={campoCfg} value={pw.confirma} onChange={e => setPw({ ...pw, confirma: e.target.value })} placeholder="Repítela" autoComplete="new-password" />
-              </div>
-              {pw.confirma && pw.nueva !== pw.confirma && <p className="text-[13px] text-red-500 mt-2">No coinciden.</p>}
-            </Ajuste>
-            <div className="px-6 sm:px-7 py-5 flex justify-end">
-              <button onClick={cambiarPassword} disabled={savingPw || !pw.actual || pw.nueva.length < 8 || pw.nueva !== pw.confirma} className={btnPrimario}>
-                {savingPw ? 'Cambiando…' : 'Cambiar contraseña'}
-              </button>
-            </div>
-          </Panel>
-        )}
-
-        {/* ── Código de autorización ──
-            Solo lo ve quien PUEDE tener uno. El GESTOR no: para él la
-            autorización es el NIP del dueño, no el suyo —dárselo sería la llave
-            que su rol le quita a propósito—. El servidor también lo rechaza, así
-            que esconderlo aquí es comodidad, no la defensa. */}
-        {tab === 'seguridad' && puede('tener_codigo_propio') && (
-          <Panel
-            titulo="Código de autorización"
-            desc="Seis dígitos que autorizan lo delicado: cancelar una venta o una renta, ajustar un precio, resolver un depósito o aceptar un anticipo bajo el mínimo. Es tuyo y solo tuyo: cada persona tiene el suyo."
-          >
-            <Ajuste
-              titulo={tieneNip === null ? 'Tu código' : tieneNip ? 'Cambiar tu código' : 'Todavía no tienes código'}
-              desc={tieneNip
-                ? 'Por seguridad no se puede ver el que tienes, solo reemplazarlo.'
-                : 'Sin código no podrás autorizar las acciones delicadas del panel.'}
-              apilado
-            >
-              <div className="grid sm:grid-cols-3 gap-3 w-full">
-                <div>
-                  <label className="block text-[12px] font-semibold text-mute mb-1.5" htmlFor="nip-pass">Tu contraseña</label>
-                  <input
-                    id="nip-pass" type="password" autoComplete="current-password"
-                    className={campoCfg} value={nip.password}
-                    onChange={e => setNip(n => ({ ...n, password: e.target.value }))}
-                    placeholder="Para confirmar que eres tú"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[12px] font-semibold text-mute mb-1.5" htmlFor="nip-codigo">Código nuevo</label>
-                  <input
-                    id="nip-codigo" type="password" inputMode="numeric" autoComplete="one-time-code"
-                    className={`${campoCfg} tracking-[0.4em]`} value={nip.codigo}
-                    onChange={e => setNip(n => ({ ...n, codigo: e.target.value.replace(/\D/g, '').slice(0, 6) }))}
-                    placeholder="6 dígitos"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[12px] font-semibold text-mute mb-1.5" htmlFor="nip-confirma">Repítelo</label>
-                  <input
-                    id="nip-confirma" type="password" inputMode="numeric" autoComplete="one-time-code"
-                    className={`${campoCfg} tracking-[0.4em]`} value={nip.confirma}
-                    onChange={e => setNip(n => ({ ...n, confirma: e.target.value.replace(/\D/g, '').slice(0, 6) }))}
-                    placeholder="6 dígitos"
-                  />
-                </div>
-              </div>
-              {nip.confirma && nip.codigo !== nip.confirma && (
-                <p className="text-[13px] text-red-500 mt-2">No coinciden.</p>
-              )}
-            </Ajuste>
-            <div className="px-6 sm:px-7 py-5 flex justify-end">
-              <button
-                onClick={guardarNip}
-                disabled={savingNip || !nip.password || nip.codigo.length !== 6 || nip.codigo !== nip.confirma}
-                className={btnPrimario}
-              >
-                {savingNip ? 'Guardando…' : tieneNip ? 'Cambiar código' : 'Configurar código'}
-              </button>
-            </div>
-          </Panel>
-        )}
-
-        {tab === 'preferencias' && (
-          <div className="space-y-2.5">
-            <Panel titulo={t('cfg.preferencias')} desc={t('cfg.preferencias.desc')}>
-              <Ajuste titulo={t('cfg.idioma')} desc={t('cfg.idioma.desc')}>
-                <div className="flex border border-edge rounded-lg overflow-hidden">
-                  {(['ES', 'EN'] as const).map(l => (
-                    <button key={l} onClick={() => onLang(l)} aria-pressed={lang === l}
-                      className={`px-4 py-2 text-[13px] font-bold transition-colors ${lang === l ? 'bg-gold text-black' : 'text-mute hover:bg-surface-2'}`}>{l}</button>
-                  ))}
-                </div>
-              </Ajuste>
-              <Ajuste titulo={t('cfg.tema')} desc={t('cfg.tema.desc')}>
-                <ThemeToggle />
-              </Ajuste>
-            </Panel>
-
-            {/* La impresora térmica es del MOSTRADOR: imprime tickets de caja.
-                El técnico imprime órdenes en PDF desde el navegador, que no usa
-                nada de esto. Mostrárselo le pedía configurar un aparato que no
-                tiene enfrente. */}
-            {puede('usar_caja') && <PrintSettingsCard notify={notify} />}
-          </div>
-        )}
-      </div>
-    </div>
-  )
-}
-
-/* ── Ajustes de impresión (métodos de conexión + papel, sin driver) ── */
-function PrintSettingsCard({ notify }: { notify: (m: string, t?: 'ok' | 'err') => void }) {
-  const [ps, setPs] = usePrintSettings()
-  const [vinculada, setVinculada] = useState(false)
-  const [busy, setBusy] = useState(false)
-  const [info, setInfo] = useState<{ vendorId: string; productId: string; nombre?: string } | null>(null)
-  const metodo = ps.method
-  const soporta = metodoSoportado(metodo)
-
-  const refrescar = useCallback(() => {
-    setInfo(null); setVinculada(false)
-    if (metodo === 'navegador') return
-    metodoVinculado(metodo).then(v => { setVinculada(v); if (v) infoMetodo(metodo).then(setInfo) })
-  }, [metodo])
-  useEffect(() => { refrescar() }, [refrescar])
-
-  async function vincular() {
-    try { await vincularMetodo(metodo); notify('Impresora vinculada'); refrescar() }
-    catch (e: any) { notify(e?.name === 'NotFoundError' ? 'No se seleccionó impresora' : (e?.message || 'No se pudo vincular'), 'err') }
-  }
-  async function prueba() {
-    setBusy(true)
-    try { await imprimirTermico(buildTestTicket(charsPerLine(ps.thermalWidth)), { method: metodo, baud: ps.baud }); notify('Prueba enviada') }
-    catch (e: any) { notify(e?.name === 'NotFoundError' ? 'No se seleccionó impresora' : (e?.message || 'No se pudo imprimir'), 'err') }
-    finally { setBusy(false) }
-  }
-  async function probarVelocidades() {
-    setBusy(true)
-    const bauds = [9600, 115200, 19200, 38400]
-    const w = charsPerLine(ps.thermalWidth)
-    try {
-      for (const b of bauds) {
-        notify(`Probando ${b} baud…`)
-        try { await imprimirTermico(buildTestTicket(w, 'REMALI', `VEL ${b}`), { method: 'serial', baud: b }) } catch { /* sigue */ }
-        await new Promise(r => setTimeout(r, 1500))
-      }
-      notify('Listo. Pon la velocidad del ticket que salió BIEN.', 'ok')
-    } catch (e: any) { notify(e?.message || 'Error al probar', 'err') } finally { setBusy(false) }
-  }
-
-  const seg = (activo: boolean) => `px-3.5 py-2 text-[13px] font-bold transition-colors ${activo ? 'bg-gold text-black' : 'text-mute hover:bg-surface-2'}`
-
-  return (
-    <Panel titulo="Impresión" desc="Estos ajustes son de esta computadora: cada caja tiene su propia impresora.">
-      <Ajuste titulo="Cómo se conecta" desc="Depende del modelo. Si uno no funciona, prueba otro." apilado>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 w-full">
-          {METODOS.map(m => {
-            const ok = metodoSoportado(m.key); const activo = metodo === m.key
-            return (
-              <button key={m.key} disabled={!ok} onClick={() => setPs({ method: m.key })} aria-pressed={activo}
-                className={`text-left rounded-xl border p-3 transition-colors ${activo ? 'border-gold/40 bg-gold-soft' : 'border-edge bg-surface-2 hover:border-gold/40'} ${!ok ? 'opacity-40 cursor-not-allowed' : ''}`}>
-                <div className={`text-[13px] font-black ${activo ? 'text-gold-ink' : 'text-ink'}`}>{m.label}</div>
-                <div className="text-[11.5px] text-mute mt-0.5 leading-tight">{m.desc}</div>
-                {!ok && <div className="text-[11px] text-amber-700 dark:text-amber-500 mt-1">Solo Chrome, Edge o Brave</div>}
-              </button>
-            )
-          })}
-        </div>
-      </Ajuste>
-
-      <Ajuste titulo="Ancho del ticket" desc="El papel que carga tu impresora térmica.">
-        <div className="flex border border-edge rounded-lg overflow-hidden">
-          {([58, 80] as const).map(w => <button key={w} onClick={() => setPs({ thermalWidth: w })} aria-pressed={ps.thermalWidth === w} className={seg(ps.thermalWidth === w)}>{w} mm</button>)}
-        </div>
-      </Ajuste>
-
-      <Ajuste titulo="Tamaño de documentos" desc="Para órdenes y cotizaciones impresas en hoja completa.">
-        <div className="flex border border-edge rounded-lg overflow-hidden">
-          {(['carta', 'a4'] as const).map(d => <button key={d} onClick={() => setPs({ docSize: d })} aria-pressed={ps.docSize === d} className={seg(ps.docSize === d)}>{d === 'carta' ? 'Carta' : 'A4'}</button>)}
-        </div>
-      </Ajuste>
-
-      {metodo === 'serial' && (
-        <Ajuste titulo="Velocidad del puerto serie" desc="Si imprime símbolos raros, casi siempre es esto.">
-          <select aria-label="Velocidad del puerto serie" className="bg-surface-2 border border-edge rounded-lg px-3 py-2.5 text-[13px] text-ink" value={ps.baud} onChange={e => setPs({ baud: Number(e.target.value) })}>
-            {[9600, 19200, 38400, 115200].map(b => <option key={b} value={b} className="bg-surface">{b} baud</option>)}
-          </select>
-        </Ajuste>
-      )}
-
-      <Ajuste titulo="Velocidad de impresión"
-        desc="Ajústala hasta que la animación del ticket termine justo cuando la impresora termina. Una POS58 ronda los 50-90 mm/s."
-        apilado>
-        <div className="w-full">
-          <div className="flex items-center gap-3">
-            <input type="range" min={30} max={120} step={5} value={ps.printSpeed} onChange={e => setPs({ printSpeed: Number(e.target.value) })}
-              aria-label="Velocidad de impresión en milímetros por segundo" className="flex-1 accent-[var(--c-gold)]" />
-            <span className="text-[13px] font-mono text-ink w-20 text-right">{ps.printSpeed} mm/s</span>
-          </div>
-        </div>
-      </Ajuste>
-
-      <Ajuste titulo="Encabezado del ticket"
-        desc={<>Sale de <b className="text-ink">Negocio y contacto</b>, así es igual en todas las computadoras. Ahora imprime <b className="text-ink">{ps.negocio.nombre}</b>{ps.negocio.telefono ? ` · ${ps.negocio.telefono}` : ''}.</>} />
-
-      <Ajuste titulo="Tu impresora"
-        desc={metodo === 'navegador'
-          ? 'Se imprime con el diálogo del navegador y el driver del sistema. Funciona en cualquier navegador; ahí eliges impresora o guardas PDF.'
-          : !soporta ? 'Este método necesita Chrome, Edge o Brave. Cambia a "Navegador / PDF" o abre el sistema en uno de esos.'
-          : metodo === 'usb' ? 'WebUSB: impresoras clase USB-printer (POS58 y genéricas). Conéctala y elígela.'
-          : 'Web Serial: impresoras que exponen puerto COM (CH340, FTDI).'}
-        apilado>
-        {metodo !== 'navegador' && soporta && (
-          <div className="w-full space-y-3">
-            <div className="flex items-center gap-2 text-[13px]">
-              <span className={`w-2 h-2 rounded-full shrink-0 ${vinculada ? 'bg-emerald-500' : 'bg-amber-500'}`} />
-              <span className="text-ink font-semibold">{vinculada ? 'Vinculada' : 'Sin vincular'}{info?.nombre ? ` · ${info.nombre}` : ''}</span>
-            </div>
-            {info && <p className="text-[12px] font-mono text-mute">VID {info.vendorId} · PID {info.productId}</p>}
-            <div className="flex flex-wrap gap-2">
-              <button onClick={vincular} className={btnSecundario}>{vinculada ? 'Cambiar impresora' : 'Vincular impresora'}</button>
-              <button onClick={prueba} disabled={busy} className={btnPrimario}>{busy ? 'Enviando…' : 'Imprimir prueba'}</button>
-              {metodo === 'serial' && (
-                <button onClick={probarVelocidades} disabled={busy} className={btnSecundario}>{busy ? 'Probando…' : 'Probar velocidades'}</button>
-              )}
-            </div>
-            <p className="text-[12px] text-mute max-w-[58ch]">¿No imprime? Prueba el otro método de arriba. Si tienes instalado el driver del fabricante, usa Navegador / PDF.</p>
-          </div>
-        )}
-      </Ajuste>
-    </Panel>
-  )
-}
-
-function PerfilAdmin({ notify }: { notify: (m: string, t?: 'ok' | 'err') => void }) {
-  const [perfil, setPerfil] = useState<Perfil | null>(null)
-  const [form, setForm] = useState<Perfil>({})
-  const [avatarFile, setAvatarFile] = useState<File | null>(null)
-  const [preview, setPreview] = useState<string | null>(null)
-  const [saving, setSaving] = useState(false)
-
-  const load = useCallback(() => {
-    api.get<Perfil>('/auth/perfil/').then(r => { setPerfil(r.data); setForm(r.data) }).catch(() => {})
-  }, [])
-  useEffect(() => { load() }, [load])
-
-  function onPickAvatar(file: File | null) {
-    setAvatarFile(file)
-    if (preview) URL.revokeObjectURL(preview)
-    setPreview(file ? URL.createObjectURL(file) : null)
-  }
-
-  function save() {
-    setSaving(true)
-    const fd = new FormData()
-    for (const k of ['first_name', 'last_name', 'email', 'telefono', 'puesto', 'bio'] as const) {
-      fd.append(k, String(form[k] ?? ''))
-    }
-    if (avatarFile) fd.append('avatar', avatarFile)
-    api.patch('/auth/perfil/', fd)
-      .then(r => { setPerfil(r.data); setForm(r.data); setAvatarFile(null); setPreview(null); notify('Perfil actualizado') })
-      .catch(err => notify(err?.response?.data?.email?.[0] || 'Error al guardar', 'err'))
-      .finally(() => setSaving(false))
-  }
-
-  // El rol lo nombra el backend; deducirlo de is_staff mostraba "Administrador"
-  // a cuentas que no lo son.
-  const rol = perfil?.puede?.rol || perfil?.groups?.[0] || 'Sin rol'
-  const initial = (perfil?.first_name?.[0] || perfil?.username?.[0] || perfil?.email?.[0] || 'U').toUpperCase()
-  const avatarSrc = preview || perfil?.avatar_url || null
-  const fullName = [perfil?.first_name, perfil?.last_name].filter(Boolean).join(' ') || perfil?.username
-
-  const inputG = 'w-full bg-surface-2 border border-edge rounded-xl px-4 py-3 text-[15px] text-ink placeholder-mute focus:outline-none focus:border-gold/50 transition-colors'
-  const labelG = 'block text-[13px] font-semibold text-mute mb-2'
-  const cambios = JSON.stringify(form) !== JSON.stringify(perfil || {}) || !!avatarFile
-
-  return (
-    <div className="max-w-4xl mx-auto space-y-6">
-      {/* Héroe: quién eres, en grande */}
-      <Card className="p-7 sm:p-8">
-        <div className="flex flex-col sm:flex-row sm:items-center gap-6">
-          <div className="relative shrink-0 mx-auto sm:mx-0">
-            <div className="w-24 h-24 rounded-full overflow-hidden bg-surface-2 border border-edge flex items-center justify-center">
-              {avatarSrc ? (
-                <img src={avatarSrc} alt="avatar" className="w-full h-full object-cover" />
-              ) : (
-                <span className="text-4xl font-black text-gold-ink">{initial}</span>
-              )}
-            </div>
-            <label className="absolute -bottom-1 -right-1 w-9 h-9 rounded-full bg-gold text-black flex items-center justify-center cursor-pointer hover:opacity-90 transition-opacity border-[3px] border-surface" title="Cambiar foto">
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M3 9a2 2 0 012-2h.93a2 2 0 001.66-.9l.82-1.2A2 2 0 0110.07 4h3.86a2 2 0 011.66.9l.82 1.2a2 2 0 001.66.9H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
-                <circle cx="12" cy="13" r="3" />
-              </svg>
-              <input aria-label="Foto de perfil" type="file" accept="image/*" className="hidden" onChange={e => onPickAvatar(e.target.files?.[0] || null)} />
-            </label>
-          </div>
-          <div className="min-w-0 flex-1 text-center sm:text-left">
-            <h2 className="text-[24px] font-black text-ink leading-tight truncate">{fullName}</h2>
-            <p className="text-[14px] text-mute mt-1 truncate">{perfil?.email || '—'}</p>
-            {avatarFile && <p className="mt-1.5 text-[12px] text-gold-ink font-semibold">Nueva foto seleccionada — guarda para aplicar.</p>}
-          </div>
-          <span className="shrink-0 mx-auto sm:mx-0 inline-flex px-3.5 py-1.5 rounded-full bg-gold-soft text-gold-ink text-[12.5px] font-bold uppercase tracking-wide">{rol}</span>
-        </div>
-      </Card>
-
-      {/* Información personal, amplia y en dos columnas */}
-      <Card className="p-7 sm:p-8">
-        <h2 className="text-[17px] font-black text-ink">Información personal</h2>
-        <p className="text-[13px] text-mute mt-1 mb-6">Estos datos aparecen en el panel y en los documentos que emites.</p>
-        <div className="grid sm:grid-cols-2 gap-5">
-          <div>
-            <label className={labelG}>Nombre</label>
-            <input aria-label="Nombre" className={inputG} value={form.first_name || ''} onChange={e => setForm({ ...form, first_name: e.target.value })} placeholder="Tu nombre" />
-          </div>
-          <div>
-            <label className={labelG}>Apellido</label>
-            <input aria-label="Apellido" className={inputG} value={form.last_name || ''} onChange={e => setForm({ ...form, last_name: e.target.value })} placeholder="Tu apellido" />
-          </div>
-          <div className="sm:col-span-2">
-            <label className={labelG}>Correo electrónico</label>
-            <input aria-label="Correo electrónico" type="email" className={inputG} value={form.email || ''} onChange={e => setForm({ ...form, email: e.target.value })} placeholder="tu@correo.com" />
-          </div>
-          <div>
-            <label className={labelG}>Teléfono</label>
-            <input aria-label="Teléfono" type="tel" inputMode="numeric" maxLength={10} className={inputG} value={form.telefono || ''} onChange={e => setForm({ ...form, telefono: soloTelefono(e.target.value) })} placeholder="10 dígitos" />
-          </div>
-          <div>
-            <label className={labelG}>Puesto</label>
-            <input aria-label="Puesto" className={inputG} value={form.puesto || ''} onChange={e => setForm({ ...form, puesto: e.target.value })} placeholder="Ej. Encargado de piso" />
-          </div>
-          <div className="sm:col-span-2">
-            <label className={labelG}>Bio</label>
-            <textarea aria-label="Bio" className={`${inputG} resize-none`} rows={3} value={form.bio || ''} onChange={e => setForm({ ...form, bio: e.target.value })} placeholder="Algo sobre ti" />
-          </div>
-        </div>
-
-        <div className="mt-7 pt-6 border-t border-edge flex flex-col sm:flex-row gap-3 sm:justify-end">
-          <button onClick={() => { setForm(perfil || {}); onPickAvatar(null) }} disabled={!cambios}
-            className="px-6 py-3 rounded-full border border-edge text-mute text-sm font-semibold hover:text-ink transition-colors disabled:opacity-40">
-            Descartar
-          </button>
-          <button onClick={save} disabled={saving || !cambios}
-            className="px-7 py-3 rounded-full bg-gold text-black text-sm font-bold hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center justify-center gap-2">
-            {saving ? <span className="w-4 h-4 border-2 border-black/30 border-t-black rounded-full animate-spin" /> : null}
-            Guardar cambios
-          </button>
-        </div>
-      </Card>
-    </div>
   )
 }

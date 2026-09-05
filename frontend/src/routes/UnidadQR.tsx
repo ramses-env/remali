@@ -17,7 +17,7 @@ type Info = {
 const ESTADO_UNIDAD: Record<string, { label: string; cls: string }> = {
   disponible: { label: 'Disponible', cls: 'bg-libre/10 text-libre' },
   rentado: { label: 'Rentada', cls: 'bg-[color:var(--c-renta)]/10 text-[color:var(--c-renta)]' },
-  mantenimiento: { label: 'En taller', cls: 'bg-amber-500/10 text-amber-600' },
+  mantenimiento: { label: 'En taller', cls: 'bg-amber-500/10 text-taller-ink' },
   vendido: { label: 'Vendida', cls: 'bg-ink/10 text-mute' },
 }
 

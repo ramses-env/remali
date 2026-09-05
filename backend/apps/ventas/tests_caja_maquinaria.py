@@ -17,15 +17,29 @@ from maquinaria.models import ConfiguracionSitio, Equipo
 from ventas.models import MovimientoCaja, SesionCaja
 
 
-def _admin(username='admin_caja'):
-    u = User.objects.create_user(username=username, password='pass12345', is_staff=True)
-    u.groups.add(Group.objects.get_or_create(name='Administrador')[0])
+def _cajera(username='caja_mostrador'):
+    """Quien cobra en el cajón. La caja es del PUESTO de mostrador: administración
+    y el dueño ya no la traen, así que estas pruebas se hacen con quien de verdad
+    la opera (ver `permissions.usar_caja`)."""
+    u = User.objects.create_user(username=username, password='pass12345')
+    u.groups.add(Group.objects.get_or_create(name='Cajero')[0])
     return u
+
+
+def _que_tambien_rente(cajera):
+    """Levantar rentas NO viene de fábrica con el mostrador: el puesto trae
+    `rentar` apagado. Si el negocio enciende "la caja renta maquinaria", el dueño
+    tiene que encenderle también «Rentar» al puesto desde Permisos —es la misma
+    palanca que usa esta prueba—."""
+    from maquinaria.models import PermisoRol
+    PermisoRol.objects.get_or_create(rol='cajero', capacidad='rentar',
+                                     defaults={'permitido': True})
+    return cajera
 
 
 class VenderMaquinariaDesdeCajaTest(TestCase):
     def setUp(self):
-        self.user = _admin()
+        self.user = _cajera()
         self.api = APIClient()
         self.api.force_authenticate(user=self.user)
         self.equipo = Equipo.objects.create(modelo='REV-9', precio_venta=Decimal('16500.00'))
@@ -112,7 +126,7 @@ class VenderMaquinariaDesdeCajaTest(TestCase):
 
 class RentarDesdeCajaTest(TestCase):
     def setUp(self):
-        self.user = _admin('admin_renta')
+        self.user = _que_tambien_rente(_cajera('caja_renta'))
         self.api = APIClient()
         self.api.force_authenticate(user=self.user)
         self.equipo = Equipo.objects.create(modelo='COM-2', precio_dia=Decimal('500.00'))
@@ -143,7 +157,9 @@ class RentarDesdeCajaTest(TestCase):
         self.cfg.caja_renta_maquinaria = True
         self.cfg.save()
 
-        r = self._rentar(desde_caja=True, deposito='2000.00')
+        # El cobro va explícito: una renta que nadie captura ya no se da por
+        # pagada sola, y aquí lo que importa es qué entra al cajón cuando SÍ pagan.
+        r = self._rentar(desde_caja=True, deposito='2000.00', monto_pago='1000.00')
 
         self.assertEqual(r.status_code, 201, r.data)
         sesion = SesionCaja.objects.get()
@@ -166,7 +182,7 @@ class RentarDesdeCajaTest(TestCase):
 
 class CorteDelDiaPorOrigenTest(TestCase):
     def test_desglosa_refacciones_maquinaria_rentas_y_depositos(self):
-        user = _admin('admin_corte')
+        user = _que_tambien_rente(_cajera('caja_corte'))
         api = APIClient()
         api.force_authenticate(user=user)
         cfg = ConfiguracionSitio.get_solo()
@@ -183,7 +199,8 @@ class CorteDelDiaPorOrigenTest(TestCase):
                  format='json')
         api.post('/api/rentas/crear/',
                  {'inventario_id': rentar.id, 'modalidad': 'dia', 'duracion': 1, 'direccion': 'Obra',
-                  'cliente': 'B', 'metodo_pago': 'efectivo', 'deposito': '500.00', 'desde_caja': True},
+                  'cliente': 'B', 'metodo_pago': 'efectivo', 'monto_pago': '300.00',
+                  'deposito': '500.00', 'desde_caja': True},
                  format='json')
 
         r = api.get('/api/ventas/corte/')
@@ -194,3 +211,65 @@ class CorteDelDiaPorOrigenTest(TestCase):
         self.assertEqual(origen['rentas']['total'], '300.00')
         self.assertEqual(origen['depositos']['total'], '500.00')
         self.assertNotIn('refacciones', origen)   # no hubo ninguna hoy
+
+
+class LaCajaEsDelMostradorTest(TestCase):
+    """El cajón tiene un dueño, y no es la jerarquía.
+
+    Ago-2026 el dueño lo pidió así: la caja es de la cajera. Administración
+    registra ventas desde Ventas y Pedidos, pero no cobra en el mostrador —y
+    sobre todo, no mete dinero al turno de alguien más—. Es lo que hace que el
+    corte siga respondiendo "¿lo que hay en el cajón es lo que debería haber?".
+    """
+
+    def setUp(self):
+        self.admin = User.objects.create_user('adm_caja', password='pass12345', is_staff=True)
+        self.admin.groups.add(Group.objects.get_or_create(name='Administrador')[0])
+        self.api = APIClient()
+        self.api.force_authenticate(self.admin)
+        cfg = ConfiguracionSitio.get_solo()
+        cfg.caja_vende_maquinaria = True
+        cfg.caja_renta_maquinaria = True
+        cfg.save()
+        self.equipo = Equipo.objects.create(modelo='BAN-1', precio_venta=Decimal('5000.00'),
+                                            precio_dia=Decimal('300.00'))
+        self.unidad = Inventario.objects.create(equipo=self.equipo, condicion='nueva',
+                                                estado='disponible')
+
+    def test_administracion_no_entra_al_mostrador(self):
+        self.assertEqual(self.api.post('/api/ventas/mostrador/', {'items': []},
+                                       format='json').status_code, 403)
+        self.assertEqual(self.api.post('/api/caja/sesiones/abrir/', {'monto_inicial': '0'},
+                                       format='json').status_code, 403)
+        self.assertEqual(self.api.get('/api/ventas/corte/').status_code, 403)
+
+    def test_la_bandera_desde_caja_no_es_un_atajo(self):
+        """`desde_caja` viaja en el CUERPO: sin esta puerta bastaba mandarla a
+        mano para colgar el cobro del arqueo del mostrador."""
+        r = self.api.post(f'/api/unidades/{self.unidad.id}/vender/',
+                          {'nombre_cliente': 'Ramírez', 'metodo_pago': 'efectivo',
+                           'total': '5000.00', 'desde_caja': True}, format='json')
+        self.assertEqual(r.status_code, 403, r.data)
+        self.assertEqual(r.data.get('codigo'), 'sin_caja')
+        self.assertFalse(SesionCaja.objects.exists())
+        self.unidad.refresh_from_db()
+        self.assertEqual(self.unidad.estado, 'disponible')
+
+    def test_ni_para_levantar_la_renta(self):
+        r = self.api.post('/api/rentas/crear/',
+                          {'inventario_id': self.unidad.id, 'modalidad': 'dia', 'duracion': 2,
+                           'direccion': 'Obra Centro', 'cliente': 'Ramírez',
+                           'metodo_pago': 'efectivo', 'desde_caja': True}, format='json')
+        self.assertEqual(r.status_code, 403, r.data)
+        self.assertEqual(r.data.get('codigo'), 'sin_caja')
+        self.assertFalse(SesionCaja.objects.exists())
+
+    def test_pero_vender_por_su_cuenta_sigue_igual(self):
+        """La regresión que importa: quitarle la caja a administración no le
+        quita vender. Solo deja de tocar el cajón."""
+        r = self.api.post(f'/api/unidades/{self.unidad.id}/vender/',
+                          {'nombre_cliente': 'Ramírez', 'metodo_pago': 'efectivo',
+                           'total': '5000.00'}, format='json')
+        self.assertEqual(r.status_code, 201, r.data)
+        self.assertFalse(MovimientoCaja.objects.exists())
+        self.assertFalse(SesionCaja.objects.exists())

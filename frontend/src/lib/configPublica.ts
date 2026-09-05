@@ -29,6 +29,19 @@ export type ConfigPublica = {
   ticket_mostrar_web: boolean
   ticket_codigo_barras: boolean
   ticket_leyenda: string
+  /* El listón de arriba de la tienda. Llega YA RESUELTO por el backend: si está
+     apagado o su fecha ya pasó, viene `null`. El navegador no decide, porque el
+     reloj del visitante puede estar en otro huso o mal puesto. */
+  aviso: AvisoTienda | null
+}
+
+export type AvisoTienda = {
+  texto: string
+  liga: string
+  liga_texto: string
+  /** Huella del contenido: identifica QUÉ aviso es, para recordar cuál cerró
+   *  el visitante. Cambia el texto → cambia la huella → la barra vuelve. */
+  id: string
 }
 
 const VACIA: ConfigPublica = {
@@ -40,6 +53,7 @@ const VACIA: ConfigPublica = {
   ticket_logo: '', ticket_logo_escala: 70, ticket_mostrar_logo: true, ticket_lema: 'Renta · Venta · Servicio',
   ticket_mostrar_direccion: true, ticket_mostrar_telefono: true, ticket_mostrar_rfc: true, ticket_mostrar_web: false,
   ticket_codigo_barras: true, ticket_leyenda: '',
+  aviso: null,
 }
 
 // Cache a nivel módulo: la config pública se pide UNA vez por sesión de página.

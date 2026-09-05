@@ -63,7 +63,12 @@ export function AvatarUsuario({
       />
     )
   }
-  if (stage === 1 && fallbackSrc) {
+  // `stage <= 1`, no `=== 1`: sin foto subida (`avatarUrl` vacío) el estado
+  // arranca en 0 y NUNCA avanzaba —el onError que lo movía nunca se dispara si
+  // no hay <img> primaria—, así que el dibujo del rol se saltaba y se pintaba la
+  // inicial. Es lo que le pasaba al panel: la tienda enseñaba el avatar del rol
+  // y el panel una "A".
+  if (stage <= 1 && fallbackSrc) {
     return (
       <img
         alt=""

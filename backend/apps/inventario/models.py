@@ -252,6 +252,19 @@ class Inventario(models.Model):
         if campos:
             campos.append('fecha_actualizacion')
             self.save(update_fields=campos)
+            # Volver a estar libre es noticia para quien cotizó este equipo y se
+            # quedó sin él. Va AQUÍ, en el único punto por el que pasan todos
+            # los cambios de estado, y no en `liberar()`: una unidad también
+            # vuelve a la bodega al salir del taller o al cancelarse una venta,
+            # y esos caminos habrían quedado mudos.
+            if 'estado' in campos and nuevo_estado == 'disponible' and self.equipo_id:
+                try:
+                    from cotizaciones.models import avisar_equipo_liberado
+                    avisar_equipo_liberado(self.equipo_id)
+                except Exception:
+                    # Un aviso que falla no puede deshacer una devolución que ya
+                    # ocurrió: la máquina está en la bodega, con correo o sin él.
+                    pass
 
     def ocupar_por_renta(self, ubicacion='Cliente (en renta)'):
         """

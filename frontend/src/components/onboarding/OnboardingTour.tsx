@@ -4,6 +4,7 @@ import { useLocation } from 'react-router-dom'
 import { useMemo, useEffect, useState } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import { useOnboarding } from '../../store/onboarding'
+import { elegirTour } from './elegirTour'
 
 export interface TourPaso extends Step {
   id: string
@@ -154,26 +155,12 @@ export default function OnboardingTour({ tours }: Props) {
   const loc = useLocation()
   const { estado, marcarPaso, marcarCompletado, tourActivo, activarTour } = useOnboarding()
 
-  const tourActivoDef = useMemo(() => {
-    if (tourActivo) return tours.find(t => t.id === tourActivo) || null
-    return null
-  }, [tourActivo, tours])
-
-  // Candidata a AUTO-arranque: solo si el onboarding NO está completado (las
-  // cuentas viejas quedaron marcadas por la migración 0039, así que en la
-  // práctica es "solo usuarios nuevos").
-  const autoTour = useMemo(() => {
-    if (!estado || estado.completado) return null
-    for (const t of tours) {
-      const coincide = typeof t.ruta_activadora === 'string'
-        ? loc.pathname === t.ruta_activadora
-        : t.ruta_activadora.test(loc.pathname)
-      if (!coincide) continue
-      if (t.soloPrimeraVez && estado.pasos_completados.includes(t.id)) continue
-      return t
-    }
-    return null
-  }, [estado, tours, loc.pathname])
+  // El criterio de "qué guía toca" vive en elegirTour: lo comparte el portero
+  // (OnboardingGate), que lo evalúa sin bajar react-joyride.
+  const { def: candidato, manual } = useMemo(
+    () => elegirTour(tours, estado, tourActivo, loc.pathname),
+    [tours, estado, tourActivo, loc.pathname],
+  )
 
   const [esMovil, setEsMovil] = useState(
     () => typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches,
@@ -190,13 +177,12 @@ export default function OnboardingTour({ tours }: Props) {
   // ya no reaparece —ni al refrescar ni al navegar, la termine el usuario o no—,
   // pero la guía actual sí corre completa porque queda fijada aparte del gate
   // (marcar visto ya no la corta). Las manuales (activarTour) no se re-marcan.
-  const candidato = tourActivoDef || autoTour
   const [corriendo, setCorriendo] = useState<TourDefinition | null>(null)
   useEffect(() => {
     if (corriendo || !candidato) return
     setCorriendo(candidato)
-    if (!tourActivoDef) marcarCompletado()
-  }, [corriendo, candidato, tourActivoDef, marcarCompletado])
+    if (!manual) marcarCompletado()
+  }, [corriendo, candidato, manual, marcarCompletado])
 
   const tourAEjecutar = corriendo
   const pasos = useMemo(
