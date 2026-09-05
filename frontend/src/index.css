@@ -916,23 +916,30 @@ input[type="number"]::-webkit-outer-spin-button {
  * que es lo que su marca exige. El color elegido es el mismo `surface-2` del
  * botón de Apple que va justo debajo: los dos se leen como el mismo par.
  */
+/* El ancho va en LOS DOS temas: desbordarse es un problema de layout, no de
+ * color. Google escribe `width:400px` en línea y no lo revisa nunca más. */
+[data-google] div[role='button'],
+[data-google] > div,
+[data-google] > div > div {
+  width: 100% !important;
+  max-width: 100% !important;
+}
+
+/* El color, solo en oscuro: en claro el botón `outline` de Google ya es blanco
+ * sobre blanco y se ve como debe. */
 html.dark [data-google] div[role='button'] {
   background-color: var(--c-surface-2) !important;
   border: 1px solid var(--c-border) !important;
   border-radius: 9999px !important;
   color: var(--c-ink) !important;
-  /* Google fija el ancho en línea; sin esto un teléfono angosto lo desborda. */
-  width: 100% !important;
-  max-width: 100% !important;
 }
 
 html.dark [data-google] div[role='button'] span {
   color: var(--c-ink) !important;
 }
 
-/* El envoltorio y las capas de estado no pueden pintar nada por su cuenta. */
+/* El envoltorio y las capas de estado no pintan fondo por su cuenta. */
 html.dark [data-google] > div,
 html.dark [data-google] > div > div {
   background-color: transparent !important;
-  width: 100% !important;
 }
