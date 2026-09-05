@@ -1,6 +1,5 @@
 import { lazy, Suspense } from 'react'
 import { Route, Routes, useLocation } from 'react-router-dom'
-import CuentaRegresiva, { bypassEstreno } from './components/CuentaRegresiva'
 import Navbar from './components/Navbar'
 import BarraAviso from './components/BarraAviso'
 import Home from './routes/Home'
@@ -73,12 +72,6 @@ function App() {
     location.pathname.startsWith('/restablecer') ||
     location.pathname.startsWith('/verificar')
 
-  /* Estreno: en producción los visitantes SOLO ven la cuenta regresiva — el
-     sitio no se destapa solo; se libera con el deploy de la versión nueva.
-     Login/registro/dashboard quedan libres para el equipo, y /?acceso=remali
-     deja previsualizar la web actual. */
-  const espera = !bypassEstreno()
-
   return (
     <I18nProvider>
       <ScrollAlTope />
@@ -114,8 +107,6 @@ function App() {
           </Routes>
           </Suspense>
         </ErrorBoundary>
-      ) : espera ? (
-        <CuentaRegresiva />
       ) : (
         <PriceUnitProvider>
           {/* La tienda pública usa el amarillo brillante del sistema (no el dorado del admin).
