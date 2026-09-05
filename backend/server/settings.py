@@ -30,14 +30,69 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, os.path.join(BASE_DIR, 'apps'))
 
 
+# ── Variables de entorno: SE CARGAN AQUÍ, ANTES QUE NADA ───────────────────
+#
+# Esto vivía más abajo, junto a la configuración de la base, y era un error
+# silencioso: SECRET_KEY, DEBUG, ALLOWED_HOSTS y demás se leen unas líneas más
+# adelante, así que se evaluaban ANTES de que existieran los archivos .env. En
+# la práctica, el DEBUG=True de .env.dev nunca se aplicaba y el proyecto corría
+# en local con la configuración de producción sin avisar.
+from dotenv import load_dotenv  # noqa: E402
+
+# Base: en Railway estos archivos no existen (git los ignora, no viajan en la
+# imagen) y las variables las inyecta la plataforma; load_dotenv no pisa lo que
+# ya está en el entorno.
+load_dotenv(os.path.join(BASE_DIR.parent, '.env'))
+load_dotenv(os.path.join(BASE_DIR, '.env'))
+
+# Y si existe .env.dev, manda: esa es la máquina de alguien desarrollando.
+_dev1 = load_dotenv(os.path.join(BASE_DIR.parent, '.env.dev'), override=True)
+_dev2 = load_dotenv(os.path.join(BASE_DIR, '.env.dev'), override=True)
+
+# Cargar .env.dev no basta: no define MYSQL_URL, así que no puede sobrescribirlo,
+# y la selección de base de más abajo comprueba MYSQL_URL ANTES que las DB_*. El
+# MYSQL_URL de producción que vive en .env apunta a mysql.railway.internal, un
+# host que solo resuelve dentro de Railway: en local deja el proyecto sin base.
+if (_dev1 or _dev2) and os.environ.get('DB_NAME'):
+    os.environ.pop('MYSQL_URL', None)
+
+# Mismo caso para REDIS_URL: el de producción (en .env) apunta a
+# redis.railway.internal, que SOLO resuelve dentro de Railway. En local eso tumba
+# la caché y Channels (ConnectionError). Se descarta ese host interno para caer a
+# caché en memoria (LocMem). Un REDIS_URL local en .env.dev sí se respeta.
+if (_dev1 or _dev2) and 'railway.internal' in os.environ.get('REDIS_URL', ''):
+    os.environ.pop('REDIS_URL', None)
+
+
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = os.environ.get('SECRET_KEY', 'django-insecure-)c$-2&1@^51q88$+47^%6egtz$e@5m__u7na^ashnvhl&o^bdp')
+#
+# NUNCA usar un valor por defecto conocido. En producción, si la variable no
+# está, el arranque FALLA (fail-closed): es más seguro un sitio que no arranca
+# que uno que corre con una SECRET_KEY pública en el repo. Solo en desarrollo
+# local (DEBUG=True y sin Railway) se genera una clave efímera en memoria.
+from django.core.exceptions import ImproperlyConfigured as _IC
+_secreto_env = os.environ.get('SECRET_KEY', '').strip()
+if _secreto_env:
+    SECRET_KEY = _secreto_env
+elif DEBUG and not os.environ.get('RAILWAY_STATIC_URL'):
+    # Solo local: clave efímera, no se persiste. Cada arranco invalida sesiones.
+    from django.utils.crypto import get_random_string
+    SECRET_KEY = get_random_string(64)
+else:
+    raise _IC(
+        "SECRET_KEY no está configurada. En producción agrégala como variable "
+        "de entorno; en local basta DEBUG=True sin la variable de Railway."
+    )
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.environ.get('DEBUG', 'False') == 'True'
+# Fallback seguro: en Railway (producción por definición) DEBUG debe venir
+# explícitamente a True; si alguien borra la variable, arranca en modo seguro.
+if os.environ.get('RAILWAY_STATIC_URL') and os.environ.get('DEBUG') is None:
+    DEBUG = False
 
 def _lista_env(nombre, extra):
     """Lee una lista separada por comas y le suma los valores fijos.
@@ -56,6 +111,26 @@ ALLOWED_HOSTS = _lista_env("ALLOWED_HOSTS", [
     "localhost",
     "127.0.0.1",
 ])
+# En desarrollo abierto (DEBUG=True) queremos probar el panel desde móvil en
+# la misma WiFi sin tener que ir cambiando ALLOWED_HOSTS cada vez que cambia
+# la IP 192.168.x.x. Sólo se permite en modo DEBUG; en producción la lista
+# explícita de arriba sigue siendo el único acceso válido.
+if DEBUG:
+    # Rangos privados RFC 1918.
+    import ipaddress
+    _rangos: list[str] = [
+        "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16",
+    ]
+    class _PrefijadoWildcardLAN(list):
+        def __contains__(self, item):
+            if super().__contains__(item):
+                return True
+            try:
+                ip = ipaddress.ip_address(item)
+            except ValueError:
+                return False
+            return any(ip in ipaddress.ip_network(r) for r in _rangos)
+    ALLOWED_HOSTS = _PrefijadoWildcardLAN(list(ALLOWED_HOSTS) + ["*"])  # "*" no hace match; es por legacy
 
 CSRF_TRUSTED_ORIGINS = _lista_env("CSRF_TRUSTED_ORIGINS", [
     "https://remali.up.railway.app",
@@ -64,6 +139,25 @@ CSRF_TRUSTED_ORIGINS = _lista_env("CSRF_TRUSTED_ORIGINS", [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
 ])
+# Mismo motivo que ALLOWED_HOSTS: abrir panel desde LAN móvil en local.
+if DEBUG:
+    # Añade cualquier origen 192.168.x.x / 10.x / 172.16-31.x en el puerto 5173
+    # (Vite) o 8000 (runserver directo) y cualquier otro puerto del mismo host.
+    try:
+        import socket
+        hostname = socket.gethostname()
+        _ips_extra = set()
+        try:
+            for info in socket.getaddrinfo(hostname, None):
+                _ips_extra.add(info[4][0])
+        except Exception:
+            pass
+        # Las propias IPs locales de esta máquina.
+        for ip in list(_ips_extra):
+            for puerto in (5173, 8000, 3000, 4173):
+                CSRF_TRUSTED_ORIGINS.append(f"http://{ip}:{puerto}")
+    except Exception:
+        pass
 
 # Sitio en construcción: tapa todo el tráfico público con una sola página.
 #
@@ -91,22 +185,34 @@ GOOGLE_CLIENT_ID = os.environ.get(
 # Application definition
 
 INSTALLED_APPS = [
+    # 'daphne' va PRIMERO: reemplaza runserver por su servidor ASGI, para que en
+    # local (manage.py runserver) funcionen los WebSockets sin configurar nada más.
+    'daphne',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    # token_blacklist DEBE ir antes de rest_framework_simplejwt o no surte efecto.
+    'rest_framework_simplejwt.token_blacklist',
     'rest_framework',
     'corsheaders',
+    'channels',
     'maquinaria',
     'inventario',
     'refacciones',
     'ventas',
     'renta',
+    # `empresas` ya no tiene modelos (Empresa → clientes.Cliente, Obra →
+    # clientes.Obra). Se conserva instalada para que sus migraciones históricas
+    # sigan resolviendo; no le agregues modelos.
     'empresas',
     'facturacion',
     'cotizaciones',
+    # Va al final: importa DomicilioMixin de `empresas` y nombre_propio de
+    # `maquinaria` a nivel de módulo, así que ambas deben cargar antes.
+    'clientes',
 ]
 
 
@@ -115,6 +221,27 @@ if importlib.util.find_spec('cloudinary') and importlib.util.find_spec('cloudina
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    # Comprime la respuesta cuando el navegador dice que sabe (Accept-Encoding).
+    # Lo que se nota es la API: el catálogo (`/equipos/`) viaja sin paginar y con
+    # una veintena de campos por equipo, y el JSON comprime alrededor del 80%.
+    # En una red móvil eso es la diferencia entre ver la pantalla y esperarla.
+    #
+    # Va arriba para que comprima TODO lo que devuelvan los de abajo, pero
+    # DEBAJO de SecurityMiddleware, que es quien redirige a https: no tiene caso
+    # comprimir un 301. Las imágenes y los PDF ya vienen comprimidos y el propio
+    # middleware los deja en paz (si el resultado no es más chico, no lo aplica).
+    'django.middleware.gzip.GZipMiddleware',
+    # Abre una caché que dura lo que la petición. Va arriba para que TODO lo de
+    # abajo (permisos incluidos) la aproveche. Ver server/porpeticion.py.
+    'server.porpeticion.CachePorPeticion',
+    # Content-Security-Policy. Arranca en modo REPORTE (solo anota violaciones
+    # en la consola del navegador, no bloquea): un CSP mal calibrado deja la
+    # página en blanco. Cuando el sitio lleve unos días sin reportar nada, se
+    # pone CSP_REPORT_ONLY=False y pasa a bloquear. Ver server/csp.py.
+    'server.csp.ContentSecurityPolicyMiddleware',
+    # Freno de fuerza bruta del admin. Va arriba, antes de sesiones y auth: a
+    # quien ya está bloqueado no tiene caso montarle sesión ni resolver usuario.
+    'server.admin_bruteforce.FrenoFuerzaBrutaAdmin',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -154,16 +281,15 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = 'server.wsgi.application'
+ASGI_APPLICATION = 'server.asgi.application'
 
 
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
 
-from dotenv import load_dotenv
+# El entorno ya se cargó arriba del todo, antes de leer SECRET_KEY y DEBUG.
 from django.core.exceptions import ImproperlyConfigured
-load_dotenv(os.path.join(BASE_DIR.parent, '.env'))
-load_dotenv(os.path.join(BASE_DIR, '.env'))
 
 _DB_NAME = os.environ.get('DB_NAME')
 
@@ -211,6 +337,9 @@ AUTH_PASSWORD_VALIDATORS = [
     },
     {
         'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator',
+        'OPTIONS': {
+            'min_length': 8,
+        }
     },
     {
         'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator',
@@ -219,6 +348,23 @@ AUTH_PASSWORD_VALIDATORS = [
         'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator',
     },
 ]
+
+# Hashers: PBKDF2 por defecto de Django, con más iteraciones que el default
+# (más lento = más caro romper por fuerza bruta si la base de datos se filtra).
+PASSWORD_HASHERS = [
+    'django.contrib.auth.hashers.PBKDF2PasswordHasher',
+    'django.contrib.auth.hashers.PBKDF2SHA1PasswordHasher',
+    'django.contrib.auth.hashers.Argon2PasswordHasher',
+    'django.contrib.auth.hashers.BCryptSHA256PasswordHasher',
+    'django.contrib.auth.hashers.ScryptPasswordHasher',
+]
+
+# Sesiones: sesiones que expiran al cerrar el navegador salvo "recordarme".
+SESSION_EXPIRE_AT_BROWSER_CLOSE = True
+# Duración máxima de sesión (2 semanas, como el refresh token):
+SESSION_COOKIE_AGE = 60 * 60 * 24 * 14
+# Regenerar el ID de sesión al iniciar sesión (anti session fixation):
+SESSION_SAVE_EVERY_REQUEST = False
 
 
 # Internationalization
@@ -311,18 +457,53 @@ REST_FRAMEWORK = {
     'DEFAULT_THROTTLE_RATES': {
         'solicitud_publica': '10/hour',   # cotizaciones que manda un mismo visitante
         'anon_publico': '120/hour',       # navegación anónima del catálogo
+        'borrador': '120/hour',           # guardar/editar borradores del cliente (no manda correos)
         'subida_evidencia': '200/hour',   # fotos de entrega/devolución por técnico
         'login': '10/min',                # intentos de login por IP (anti fuerza bruta)
         'registro': '5/hour',             # altas de cuenta de cliente por IP
+        'cambio_password': '10/hour',     # cambios de contraseña propia, por cuenta
+        'restablecer': '5/hour',          # solicitudes de "olvidé mi contraseña" por IP
+        'restablecer_uso': '20/hour',     # abrir/usar el enlace del correo por IP (anti barrido de tokens)
+        'google_login': '10/min',         # inicio de sesión con Google por IP
+        'cupon': '30/hour',               # validar/aplicar cupón, por cuenta
+        'token_publico': '120/hour',      # acceso por liga/QR/PDF público por IP
+        'direcciones_min': '20/min',      # autocompletado de direcciones: ráfaga de tecleo
+        'direcciones_hora': '120/hour',   # techo POR CUENTA: cada consulta nueva = llamada de pago a Google
     },
 }
 
 # JWT: tokens de acceso de larga duración para que la sesión del admin no expire a los 5 min
 from datetime import timedelta
 SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(hours=12),
+    'UPDATE_LAST_LOGIN': True,
+    # Access CORTO: si lo roban, la ventana es chica y ya no es "12 h no
+    # revocables". El front lo renueva solo (refresco silencioso) con el refresh
+    # que vive en cookie httpOnly, así el usuario no nota nada y la sesión larga
+    # (7 días) sigue de pie. Configurable por si se quiere afinar.
+    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=int(os.environ.get('ACCESS_TOKEN_MINUTES', '60'))),
     'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
+    # Rotación: cada refresh emite un refresh NUEVO e invalida el anterior.
+    # Si un refresh se roba, solo sirve una vez; la próxima renovación legítima
+    # del usuario lo invalida todo (blacklist).
+    'ROTATE_REFRESH_TOKENS': True,
+    'BLACKLIST_AFTER_ROTATION': True,
+    # Algoritmo moderno (HS256 es el default, pero lo explicitamos + clave):
+    'ALGORITHM': 'HS256',
+    'SIGNING_KEY': SECRET_KEY,
+    # Rechazar tokens de cuentas DESACTIVADAS. SimpleJWT lo hace por defecto
+    # con TokenUser, pero lo explicitamos para que no se desactive por accidente.
+    'CHECK_REVOKE': True,
+    'USER_ID_FIELD': 'id',
+    'USER_ID_CLAIM': 'user_id',
+    'TOKEN_TYPE_CLAIM': 'token_type',
+    'JTI_CLAIM': 'jti',
 }
+
+# Cookie httpOnly donde vive el REFRESH token: JS NO puede leerla, así un XSS no
+# roba la sesión larga (7 días). El access sí llega al front pero dura poco y se
+# renueva solo. Ver apps/maquinaria/views.py: _set_refresh_cookie / refrescar_token.
+REFRESH_COOKIE_NAME = os.environ.get('REFRESH_COOKIE_NAME', 'remali_refresh')
+REFRESH_COOKIE_PATH = '/api/auth/'  # solo se manda a refresh/logout, no a toda la API
 
 # ─────────────────────────────────────────────
 #  CACHE — listo para Redis
@@ -348,15 +529,44 @@ else:
         }
     }
 
-# Cuando se integre Celery/Channels, reutilizar REDIS_URL como broker:
-#   CELERY_BROKER_URL = REDIS_URL
-#   CHANNEL_LAYERS = {'default': {'BACKEND': 'channels_redis.core.RedisChannelLayer',
-#                                 'CONFIG': {'hosts': [REDIS_URL]}}}
+# Channels: capa de canales para WebSockets (notificaciones en tiempo real).
+# Con REDIS_URL usa Redis — necesario en producción con varios workers, para que
+# un push llegue al cliente sin importar qué worker atendió su conexión. Sin
+# Redis cae a memoria: sirve en local (un proceso) y NO tumba producción, aunque
+# ahí el push no cruzaría entre workers (por eso en Railway conviene Redis).
+if REDIS_URL:
+    CHANNEL_LAYERS = {
+        'default': {
+            'BACKEND': 'channels_redis.core.RedisChannelLayer',
+            'CONFIG': {'hosts': [REDIS_URL]},
+        }
+    }
+else:
+    CHANNEL_LAYERS = {'default': {'BACKEND': 'channels.layers.InMemoryChannelLayer'}}
+# Para Celery en el futuro: CELERY_BROKER_URL = REDIS_URL
 
 # Estaba en CORS_ALLOW_ALL_ORIGINS = True: cualquier sitio del mundo podía llamar
 # a la API desde el navegador de un usuario. En realidad casi no hace falta CORS —
 # en producción Django sirve el SPA desde el mismo origen y en desarrollo Vite hace
 # de proxy—, así que basta la lista de orígenes propios.
+# El encabezado del espacio de borradores del invitado. La lista por defecto de
+# django-cors-headers no incluye encabezados propios: sin esto, el navegador
+# tumba la petición en el preflight cuando el front no comparte origen.
+from corsheaders.defaults import default_headers  # noqa: E402
+
+CORS_ALLOW_HEADERS = (*default_headers, "x-espacio")
+
+# Cookies EN LAS PETICIONES CROSS-ORIGIN. Sin esto, el navegador descarta la
+# respuesta de cualquier llamada con `withCredentials` y la cookie del refresh
+# nunca viaja: el frontend en remali.mx pide un access nuevo a api.remali.mx,
+# no manda el refresh, y al usuario lo sacan de su sesión cada hora sin que
+# nadie entienda por qué. El default de django-cors-headers es False, y mientras
+# el frontend lo servía el mismo dominio no hacía falta.
+#
+# No abre nada de más: las cookies solo viajan a los orígenes de
+# CORS_ALLOWED_ORIGINS, que es una lista explícita.
+CORS_ALLOW_CREDENTIALS = True
+
 CORS_ALLOWED_ORIGINS = _lista_env("CORS_ALLOWED_ORIGINS", [
     "https://remali.up.railway.app",
     "https://remali.mx",
@@ -364,6 +574,30 @@ CORS_ALLOWED_ORIGINS = _lista_env("CORS_ALLOWED_ORIGINS", [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
 ])
+if DEBUG:
+    try:
+        import socket
+        hostname = socket.gethostname()
+        _ips_extra = set()
+        try:
+            for info in socket.getaddrinfo(hostname, None):
+                _ips_extra.add(info[4][0])
+        except Exception:
+            pass
+        for ip in list(_ips_extra):
+            for puerto in (5173, 8000, 3000, 4173):
+                origen = f"http://{ip}:{puerto}"
+                if origen not in CORS_ALLOWED_ORIGINS:
+                    CORS_ALLOWED_ORIGINS.append(origen)
+    except Exception:
+        pass
+# Si está instalado django-cors-headers, permitir LAN móvil en local.
+try:
+    import corsheaders  # noqa: F401
+    if DEBUG:
+        CORS_ALLOW_PRIVATE_NETWORK = True
+except Exception:
+    pass
 
 
 # Default primary key field type
@@ -384,16 +618,45 @@ DEFAULT_FROM_EMAIL = os.environ.get('DEFAULT_FROM_EMAIL', 'no-reply@remali.up.ra
 
 
 
+# CSP: en reporte por defecto (no bloquea). Poner CSP_REPORT_ONLY=False cuando
+# el sitio lleve días sin violaciones en la consola.
+CSP_REPORT_ONLY = os.environ.get('CSP_REPORT_ONLY', 'True') != 'False'
+
 if not DEBUG:
     SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+    SECURE_SSL_REDIRECT = os.environ.get('SECURE_SSL_REDIRECT', '1') == '1'
+    # HSTS: 1 año + incluir subdominios. Una vez puesto, los navegadores
+    # se niegan a conectarse por HTTP plano. HSTS_PRELOAD requiere registrar
+    # el dominio en la lista de Chrome; por defecto apagado (reversible).
+    SECURE_HSTS_SECONDS = int(os.environ.get('SECURE_HSTS_SECONDS', '31536000'))
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = os.environ.get('SECURE_HSTS_INCLUDE_SUBDOMAINS', '1') == '1'
+    SECURE_HSTS_PRELOAD = os.environ.get('SECURE_HSTS_PRELOAD', '0') == '1'
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+    SECURE_BROWSER_XSS_FILTER = True
+    SECURE_REFERRER_POLICY = os.environ.get('SECURE_REFERRER_POLICY', 'strict-origin-when-cross-origin')
+    X_FRAME_OPTIONS = os.environ.get('X_FRAME_OPTIONS', 'DENY')
+    # Cookies: solo via HTTPS en producción, HttpOnly donde aplique, SameSite.
     SESSION_COOKIE_SECURE = True
+    SESSION_COOKIE_HTTPONLY = True
+    SESSION_COOKIE_SAMESITE = 'Lax'
     CSRF_COOKIE_SECURE = True
+    CSRF_COOKIE_HTTPONLY = True
+    CSRF_COOKIE_SAMESITE = 'Lax'
+    # Previene que la cookie de sesión se fije por un atacante en otra pestaña:
+    SESSION_COOKIE_NAME = 'remali_sessionid'
+    CSRF_COOKIE_NAME = 'remali_csrftoken'
     FRONTEND_URL = os.environ.get('FRONTEND_URL', 'https://remali.up.railway.app')
     BACKEND_URL = os.environ.get('BACKEND_URL', 'https://remali.up.railway.app')
 else:
+    SESSION_COOKIE_SAMESITE = 'Lax'
+    CSRF_COOKIE_SAMESITE = 'Lax'
     FRONTEND_URL = os.environ.get('FRONTEND_URL', 'http://localhost:5173')
     BACKEND_URL = os.environ.get('BACKEND_URL', 'http://localhost:8000')
-PASSWORD_RESET_TIMEOUT = int(os.environ.get('PASSWORD_RESET_TIMEOUT', '14400'))
+# Vigencia del enlace de "olvidé mi contraseña": 1 hora. Corto a propósito —
+# el enlace llega a un buzón de correo, y ese buzón puede quedar abierto en una
+# computadora compartida. Una hora alcanza de sobra para leer el correo y
+# cambiar la clave; lo que no alcanza es para que alguien lo encuentre mañana.
+PASSWORD_RESET_TIMEOUT = int(os.environ.get('PASSWORD_RESET_TIMEOUT', '3600'))
 EMAIL_VERIFICATION_TIMEOUT = int(os.environ.get('EMAIL_VERIFICATION_TIMEOUT', '14400'))
 
 if EMAIL_USE_SSL:

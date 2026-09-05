@@ -18,6 +18,7 @@ normal no tiene.
 import uuid
 
 from django.utils import timezone
+from server.rastro import tragado
 
 # Lo que Pillow debe reconocer. HEIC de iPhone lo convierte el navegador antes
 # de subir; si algún día llega crudo, se agrega aquí con su plugin.
@@ -90,7 +91,7 @@ def fecha_de_captura(archivo):
         try:
             archivo.seek(0)
         except Exception:
-            pass
+            tragado()
 
 
 def nombre_seguro(renta_id: int, momento: str, formato: str) -> str:

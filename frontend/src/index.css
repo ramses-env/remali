@@ -2,6 +2,22 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 /* ─────────────────────────────────────────────
+   CONTENEDOR ESTÁNDAR de toda la web pública.
+   UN solo ancho máximo y UN solo margen lateral en TODAS las páginas (alineado
+   con el navbar y el footer): así el contenido empieza y termina en la misma
+   vertical en cada pantalla, sin saltos al pasar de una página a otra. El
+   padding vertical (arriba/abajo) lo pone cada página según su necesidad.
+───────────────────────────────────────────── */
+.contenedor {
+  margin-inline: auto;
+  width: 100%;
+  max-width: 80rem;            /* = max-w-7xl (1280px), igual que el navbar */
+  padding-inline: 1rem;        /* = px-4 */
+}
+@media (min-width: 640px)  { .contenedor { padding-inline: 1.5rem; } }  /* sm:px-6 */
+@media (min-width: 1024px) { .contenedor { padding-inline: 2rem; } }    /* lg:px-8 */
+
+/* ─────────────────────────────────────────────
    PALETA DE TEMA (claro / oscuro)
    El acento es un dorado cálido, más amable que
    el amber puro (#fbbf24), con mejor contraste.
@@ -11,68 +27,146 @@
   --c-bg:         #F6F7F9;   /* fondo gris muy claro */
   --c-surface:    #FFFFFF;   /* tarjetas / paneles blancos */
   --c-surface-2:  #EFF0F3;   /* chips, hover, superficies secundarias */
+  --c-alert:      #EFF0F3;   /* avisos FLOTANTES: siempre opaco (en claro = surface-2) */
   --c-border:     #E5E7EB;   /* bordes/divisores */
   --c-ink:        #111827;   /* texto principal */
   --c-mute:       #6B7280;   /* metadatos */
-  --c-gold:       #B8872E;   /* acento dorado */
-  --c-gold-soft:  #F7ECD9;   /* fondo suave del acento */
-  --c-gold-on:    #FFFFFF;   /* texto encima del acento */
-  --c-gold-glow:  rgba(184, 135, 46, 0.38);  /* halo del botón primario */
-  --c-yellow:     #f2b736;   /* el amarillo de la tienda; igual en ambos temas */
+  --c-gold:       #FFC61A;   /* acento AMARILLO (igual que la tienda y el tema oscuro) */
+  --c-gold-soft:  rgba(255, 198, 26, 0.14);   /* fondo suave del acento */
+  --c-gold-on:    #111827;   /* texto encima del amarillo: oscuro para que se lea */
+  /* El acento tiene DOS roles y necesitan dos colores. Como FONDO (`bg-gold`) va
+     el amarillo brillante. Como TEXTO (`text-gold-ink`) el amarillo es ilegible
+     sobre claro: da 1.57:1 sobre blanco y 1.38:1 sobre surface-2, cuando AA pide
+     4.5:1. Este dorado oscuro es el mismo acento con la luminosidad bajada hasta
+     pasar: 5.54:1 sobre blanco, 4.86:1 sobre surface-2 y 4.61:1 sobre gold-soft
+     (el peor caso, un chip dorado dentro de una superficie secundaria).
+     En OSCURO no hay problema y vuelve a ser el amarillo. Mismo criterio que
+     --c-price, que ya existía por esta razón. */
+  --c-gold-ink:   #8A6100;
+  --c-gold-glow:  rgba(255, 198, 26, 0.30);  /* halo del botón primario */
+  --c-yellow:     #FFC61A;   /* el amarillo de la tienda; igual en ambos temas */
   /* Estados de una unidad. Son datos, no decoración: el mismo verde/azul/ámbar
      debe significar lo mismo en la dona, los chips y la leyenda. */
   --c-libre:      #1F7A4D;   /* disponible, lista para operar */
   --c-renta:      #2B5FAD;   /* rentada, en obra */
   --c-renta-on:   #FFFFFF;   /* texto sobre el azul sólido */
   --c-renta-glow: rgba(43, 95, 173, 0.34);
-  --c-taller:     #B8872E;   /* en mantenimiento */
-  --c-price:      #111827;   /* precios: negro en claro (el dorado no resalta) */
+  --c-taller:     #FFC61A;   /* en mantenimiento */
+  /* El ámbar tiene los MISMOS dos roles que el dorado, y le faltaba el par.
+     Como fondo de insignia (`bg-amber-500/10`) funciona; como TEXTO sobre
+     claro da 2.1:1 y no pasa AA, así que las pantallas usaban `text-amber-600`
+     a mano —un color pensado para fondo claro— y en tema oscuro ese ámbar
+     quemado se hundía contra el panel: el triángulo de advertencia y las
+     insignias "Pendiente"/"Sin verificar" se perdían.
+     Este es el par, con el criterio ya escrito para --c-gold-ink: mismo matiz,
+     luminosidad ajustada hasta pasar en cada tema. NO se reusa --c-gold-ink
+     porque aquél es el ACENTO de marca (el dueño lo tiene en negro) y esto es
+     un DATO: taller, pendiente, ojo con esto. */
+  --c-taller-ink: #8A6100;   /* 5.54:1 sobre blanco */
+  /* "Vencida" era el único estado sin token: andaba como #C23B3B a mano en el
+     Resumen, calculado para fondo claro, y en oscuro deslumbraba. Ahora es un
+     estado más, con su par claro/oscuro como los demás. */
+  --c-vencida:    #C23B3B;   /* renta que ya se pasó de fecha */
+  --c-price:      #111827;   /* precios: negro en claro (el amarillo no se lee sobre blanco) */
+  /* FIRMA de quien construyó el sistema (ByRix). Azul PROPIO, no el de
+     `--c-renta`: ahí el azul es un DATO (una unidad rentada, en obra) y aquí es
+     una marca; si compartieran token, cambiar el estado repintaría la firma.
+     Claro: 5.17:1 sobre blanco y 4.53:1 sobre surface-2 (pasa AA en los dos
+     fondos donde se para el pie). */
+  --c-byrix:      #2563EB;
   --c-stroke:     #E5E7EB;
   --c-grid:       rgba(17, 24, 39, 1);
+  /* ── Marcas de gráfica ──────────────────────────────────────────────────
+     Antes aquí vivía una paleta "pastel" (menta, azul aciano, gris lavanda).
+     Se fue porque REPRUEBA: el verde daba 2.3:1 contra el panel y el gris caía
+     por debajo del piso de croma (se lee gris, no color). Estos nombres dicen
+     QUÉ significan, no a qué se parecen, que es la regla de la casa.
+
+     Los tres NO cambian entre claro y oscuro, y no es descuido: es el juego que
+     pasa las seis comprobaciones —daltonismo, banda de luminosidad y contraste—
+     contra AMBAS superficies (#FFFFFF y #161618). Si cambias uno, vuelve a
+     validarlo: a ojo no se ve.
+
+     Serie de ingresos: RENTA vs VENTA. Estos dos NO cambian entre claro y
+     oscuro, y no es descuido: es el único par que pasa las seis comprobaciones
+     de daltonismo, banda de luminosidad y contraste contra AMBAS superficies
+     (#FFFFFF y #161618). Si cambias uno, vuelve a validarlo — a ojo no se ve. */
+  --chart-renta:  #6E8CF0;   /* azul: renta, el mismo de "rentado" en todo el panel */
+  --chart-venta:  #C67C1A;   /* ocre: venta */
+  --chart-libre:  #2E9E63;   /* verde: disponible */
+  /* Ocre y no el amarillo de la marca. `--c-taller` es #FFC61A y como RELLENO de
+     gráfica da 1.57:1 contra el panel — el mismísimo número que este sistema ya
+     cita para el dorado como texto. Su regla es "cuando un color no pase AA en
+     un rol, se crea el par, no se baja la vara", y esto es ese par: el amarillo
+     sigue siendo el fondo de la insignia (con texto oscuro encima, donde sí
+     funciona) y el ocre es la marca cuando hay que pintar área. */
+  --chart-taller: #C67C1A;   /* ocre: en mantenimiento */
+  /* Fuente de los NÚMEROS en todo el sitio. Pila de SISTEMA: en cada equipo usa
+     su tipografía nativa —SF Pro en Mac/iPhone, Segoe UI en Windows, Roboto en
+     Android—, todas con cifras limpias y un "1" recto. Cero carga de red. Un
+     solo lugar para cambiarla. Se aplica vía la regla global de más abajo. */
+  --font-num: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
 }
 
 .dark {
   --c-bg:         #0a0a0b;   /* negro neutro tipo 21st.dev (de la imagen) */
   --c-surface:    #161618;   /* paneles/tarjetas */
   --c-surface-2:  rgba(255, 255, 255, 0.05);
+  /* Los avisos flotan SOBRE el contenido de la página, no dentro de un panel:
+     un fondo translúcido deja ver lo de atrás. Aquí va OPACO (gris un pelo más
+     claro que el panel, para que lea como tarjeta elevada). */
+  --c-alert:      #212127;
   --c-border:     rgba(255, 255, 255, 0.09);
   --c-ink:        #f4f4f5;   /* texto casi blanco, neutro */
   --c-mute:       #9a9aa2;   /* gris frío */
-  --c-gold:       #f2b736;
-  --c-gold-soft:  rgba(242, 183, 54, 0.12);
+  --c-gold:       #FFC61A;
+  --c-gold-soft:  rgba(255, 198, 26, 0.12);
   --c-gold-on:    #111827;   /* sobre el amarillo brillante el texto va oscuro */
-  --c-gold-glow:  rgba(242, 183, 54, 0.30);
-  --c-yellow:     #f2b736;   /* mismo amarillo que en claro: el chip no cambia de tema */
+  --c-gold-ink:   #FFC61A;   /* en oscuro el amarillo SÍ se lee (11.48:1 sobre el panel) */
+  --c-gold-glow:  rgba(255, 198, 26, 0.30);
+  --c-yellow:     #FFC61A;   /* mismo amarillo que en claro: el chip no cambia de tema */
   /* Los tonos profundos del tema claro se hunden contra el panel #161618
      (2.9:1 el azul). Aquí suben para volver a ser legibles. */
   --c-libre:      #4ADE80;
+  --c-vencida:    #F87171;
   --c-renta:      #7BAAF0;
   --c-renta-on:   #0a0a0b;
   --c-renta-glow: rgba(123, 170, 240, 0.26);
-  --c-taller:     #f2b736;
-  --c-price:      #f2b736;   /* precios: el dorado sí resalta en oscuro */
+  --c-taller:     #FFC61A;
+  --c-taller-ink: #FFC61A;   /* en oscuro el amarillo SÍ se lee: 11.48:1 sobre el panel */
+  --c-price:      #FFC61A;   /* precios: el amarillo sí resalta en oscuro */
+  --c-byrix:      #7BAAF0;   /* el azul profundo se hunde contra el panel; este da 7.7:1 */
   --c-stroke:     rgba(255, 255, 255, 0.16);
   --c-grid:       rgba(255, 255, 255, 1);
+  /* Versión más brillante para que resalten sobre el panel oscuro. */
 }
 
 /* Tokens expuestos como utilidades de Tailwind (cascada con .dark) */
 @theme inline {
   --font-sans:  'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
-  --font-mono:  'IBM Plex Mono', ui-monospace, 'SF Mono', monospace;
+  /* Sistema tipográfico de UNA familia: Plus Jakarta Sans para todo.
+     Los micro-labels que antes eran monoespaciados usan la misma sans
+     (los tracking-* de cada uso siguen aplicando); tabular-nums mantiene
+     los números alineados en contadores y precios sin fuente extra. */
+  --font-mono:  'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
   --color-app:        var(--c-bg);
   --color-surface:    var(--c-surface);
   --color-surface-2:  var(--c-surface-2);
+  --color-alert:      var(--c-alert);
   --color-edge:       var(--c-border);
   --color-ink:        var(--c-ink);
   --color-mute:       var(--c-mute);
   --color-gold:       var(--c-gold);
   --color-gold-soft:  var(--c-gold-soft);
   --color-gold-on:    var(--c-gold-on);
+  --color-gold-ink:   var(--c-gold-ink);
   --color-yellow:     var(--c-yellow);
   --color-libre:      var(--c-libre);
   --color-renta:      var(--c-renta);
   --color-taller:     var(--c-taller);
+  --color-taller-ink: var(--c-taller-ink);
   --color-price:      var(--c-price);
+  --color-byrix:      var(--c-byrix);
   --color-amber-400:  var(--c-gold);
   --color-amber-500:  var(--c-gold);
   --color-background: var(--c-bg);
@@ -130,7 +224,23 @@
     background-color: var(--c-mute);
   }
 
+  /* Oculta el scrollbar pero mantiene el scroll (p.ej. pestañas deslizables en móvil). */
+  .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+  .no-scrollbar::-webkit-scrollbar { display: none; }
+
   a { color: inherit; text-decoration: none; }
+}
+
+/* NÚMEROS con la fuente de cifras (la del reloj, Helvetica/Arial) en TODO el
+   sitio. Se engancha a las clases que ya llevan los números: tabular-nums
+   (contadores, KPIs, reloj) y text-price (montos de dinero). Regla sin capa a
+   propósito, para que gane sobre el font-family del body. */
+.tabular-nums,
+.text-price {
+  font-family: var(--font-num);
+  /* Los montos venían con tracking apretado (afinado para el sans anterior) y
+     se sentían juntos; un pelín de aire y quedan legibles sin verse sueltos. */
+  letter-spacing: 0.02em;
 }
 
 /* Entrada escalonada (stagger) para listas — curva ease-out fuerte */
@@ -146,6 +256,70 @@
 }
 
 /* ─────────────────────────────────────────────
+   GRÁFICAS — entrada y relieve
+   Una gráfica que aparece de golpe se lee como una imagen; una que se levanta
+   se lee como una medición. La animación es de ENTRADA, no de adorno: dura poco,
+   no se repite y respeta a quien pidió menos movimiento.
+   Las clases viven aquí y no en el componente porque los keyframes con
+   `--retraso`/`--largo` por elemento no se pueden expresar con utilidades.
+   ───────────────────────────────────────────── */
+@keyframes barra-sube {
+  from { transform: scaleY(0); }
+  to   { transform: scaleY(1); }
+}
+.barra-sube {
+  transform-origin: bottom;
+  animation: barra-sube 620ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: var(--retraso, 0ms);
+}
+
+@keyframes barra-crece {
+  from { transform: scaleX(0); }
+  to   { transform: scaleX(1); }
+}
+.barra-crece {
+  transform-origin: left;
+  animation: barra-crece 720ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: var(--retraso, 0ms);
+}
+
+/* El trazo se dibuja solo, revelándose de izquierda a derecha.
+   Se hace con `clip-path` y NO con `stroke-dasharray`: el trazo lleva
+   `vectorEffect="non-scaling-stroke"` —para que no engorde al estirarse el
+   viewBox— y esa combinación deja el guion medido en un espacio y el trazo en
+   otro; el resultado era una línea que se cortaba a la mitad y ahí se quedaba. */
+@keyframes revela-derecha {
+  from { clip-path: inset(0 100% 0 0); }
+  to   { clip-path: inset(0 0 0 0); }
+}
+.revela-derecha {
+  animation: revela-derecha 900ms cubic-bezier(0.33, 1, 0.68, 1) both;
+}
+@keyframes area-aparece {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.area-aparece { animation: area-aparece 700ms 260ms ease-out both; }
+
+/* La dona entra girando desde donde empieza el primer tramo (las 12 en punto),
+   que es como se lee: en el sentido del reloj. */
+@keyframes dona-entra {
+  from { transform: rotate(-24deg) scale(0.94); opacity: 0; }
+  to   { transform: none; opacity: 1; }
+}
+.dona-entra {
+  transform-origin: center;
+  animation: dona-entra 700ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .barra-sube, .barra-crece, .revela-derecha, .area-aparece, .dona-entra {
+    animation: none;
+    clip-path: none;
+  }
+}
+
+/* ─────────────────────────────────────────────
    Panel del super administrador
    El dueño ve el mismo panel, pero su acento es negro en vez de dorado: al
    entrar sabe de inmediato que está en la cuenta que puede tocarlo todo.
@@ -155,6 +329,7 @@
   --c-gold:       #2b2b2b;
   --c-gold-soft:  rgba(43, 43, 43, 0.07);
   --c-gold-on:    #FFFFFF;
+  --c-gold-ink:   #2b2b2b;   /* el acento del dueño ya es oscuro: como texto se lee tal cual */
   --c-gold-glow:  rgba(43, 43, 43, 0.34);
 }
 
@@ -167,6 +342,7 @@
   --c-gold:       #f4f4f5;
   --c-gold-soft:  rgba(244, 244, 245, 0.10);
   --c-gold-on:    #0a0a0b;
+  --c-gold-ink:   #f4f4f5;
   --c-gold-glow:  rgba(244, 244, 245, 0.22);
 }
 
@@ -178,6 +354,62 @@
 .tema-dueno.bg-gold { color: var(--c-gold-on); }
 
 @layer components {
+  /* ─── El campo ───────────────────────────────────────────────
+     La píldora de todos los formularios, escrita UNA vez.
+
+     Antes cada pantalla llevaba su propia cadena de Tailwind: 103 variantes de
+     la misma caja, con seis radios y cinco alturas distintas conviviendo en el
+     mismo formulario, y cambiar el aspecto de "un input" era buscar y reemplazar
+     en 29 archivos. Aquí vive el aspecto; las pantallas solo dicen `campo`.
+
+     Lo que sí cambia de sitio a sitio —el ancho, `font-mono`, el padding para
+     hacerle lugar a un ícono— se sigue poniendo con utilidades al lado: van en
+     una capa posterior y por eso le ganan a esto sin necesidad de `!`. */
+  .campo {
+    width: 100%;
+    height: 3rem;
+    padding-inline: 1.25rem;
+    border-radius: 9999px;
+    border: 1px solid var(--c-border);
+    background-color: var(--c-surface-2);
+    color: var(--c-ink);
+    font-size: 0.875rem;
+    line-height: 1.25;
+    transition: border-color 180ms cubic-bezier(0.23, 1, 0.32, 1),
+                box-shadow 180ms cubic-bezier(0.23, 1, 0.32, 1),
+                background-color 180ms cubic-bezier(0.23, 1, 0.32, 1);
+  }
+  .campo::placeholder { color: var(--c-mute); }
+  /* El foco no se anuncia solo con el borde dorado: sobre el panel oscuro ese
+     cambio de color casi no se ve, y quien navega con Tab necesita saber dónde
+     está parado. El halo suave es la misma firma del botón primario. */
+  .campo:focus {
+    outline: none;
+    border-color: color-mix(in srgb, var(--c-gold) 60%, transparent);
+    box-shadow: 0 0 0 3px var(--c-gold-soft);
+  }
+  .campo:disabled { opacity: 0.6; cursor: not-allowed; }
+  select.campo { cursor: pointer; }
+
+  /* Compacto: barras de filtros y renglones de tabla, donde 48px de alto
+     empujan el contenido fuera de la pantalla. */
+  .campo-sm {
+    height: 2.5rem;
+    padding-inline: 1rem;
+    font-size: 0.8125rem;
+  }
+
+  /* Varias líneas. NO es píldora a propósito: con el radio completo el texto se
+     recorta contra la curva en el primer y el último renglón. */
+  .campo-area {
+    height: auto;
+    min-height: 5.5rem;
+    padding-block: 0.875rem;
+    border-radius: 1rem;
+    line-height: 1.5;
+    resize: vertical;
+  }
+
   /* Botón primario: píldora con halo del propio acento.
      El halo es la firma del botón; por eso vive aquí y no repetido en cada uso:
      cambia con el tema (dorado / negro / claro) sin tocar los componentes. */
@@ -237,370 +469,23 @@
     .btn-renta:active:not(:disabled) { transform: none; }
   }
 
-  /* Cotiza Form Inputs Restoration */
-  .cotiza-form .group {
-    position: relative;
-    margin-bottom: 45px; 
-  }
-
-  .cotiza-form .input {
-    font-size: 16px;
-    padding: 10px 10px 10px 5px;
-    display: block;
-    width: 100%;
-    border: none;
-    border-bottom: 1px solid #757575;
-    background: transparent;
-    border-radius: 0;
-  }
-
-  .cotiza-form .input:focus {
-    outline: none;
-    border-bottom: 1px solid #517ea0;
-  }
-
-  /* LABEL */
-  .cotiza-form label {
-    color: #999;
-    font-size: 16px;
-    font-weight: normal;
-    position: absolute;
-    pointer-events: none;
-    left: 5px;
-    top: 10px;
-    transition: 0.2s ease all;
-  }
-
-  /* active state */
-  .cotiza-form .input:focus ~ label,
-  .cotiza-form .input:not(:placeholder-shown) ~ label {
-    top: -20px;
-    font-size: 13px;
-    color: #517ea0;
-    font-weight: 600;
-  }
-
-  /* BOTTOM BARS */
-  .cotiza-form .bar {
-    position: relative;
-    display: block;
-    width: 100%;
-  }
-
-  .cotiza-form .bar:before,
-  .cotiza-form .bar:after {
-    content: '';
-    height: 2px;
-    width: 0;
-    bottom: 0px;
-    position: absolute;
-    background: #517ea0;
-    transition: 0.2s ease all;
-  }
-
-  .cotiza-form .bar:before {
-    left: 50%;
-  }
-
-  .cotiza-form .bar:after {
-    right: 50%;
-  }
-
-  /* active state */
-  .cotiza-form .input:focus ~ .bar:before,
-  .cotiza-form .input:focus ~ .bar:after {
-    width: 50%;
-  }
-
-  /* HIGHLIGHTER */
-  .cotiza-form .highlight {
-    position: absolute;
-    height: 60%;
-    width: 100px;
-    top: 25%;
-    left: 0;
-    pointer-events: none;
-    opacity: 0.5;
-  }
-
-  .cotiza-form .input:focus ~ .highlight {
-    animation: inputHighlighter 0.3s ease;
-  }
-
-  @keyframes inputHighlighter {
-    from {
-      background: #517ea0;
-    }
-    to {
-      width: 0;
-      background: transparent;
-    }
-  }
-  
-  .btn-fx-motion {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    transition: transform 0.3s ease, box-shadow 0.3s ease;
-    box-shadow: 0px 5px 10px rgba(0, 0, 0, 0.2);
-  }
-  .btn-fx-motion:hover {
-    transform: translateY(-3px);
-    box-shadow: 0px 8px 15px rgba(0, 0, 0, 0.3);
-  }
-  .btn-fx-motion:active {
-    transform: scale(0.95);
-    box-shadow: 0px 2px 5px rgba(0, 0, 0, 0.2);
-  }
-
-  /* Cart Card */
-  .cart-card {
-    background: #ffffff;
-    border: 1px solid #e5e7eb;
-    border-radius: 20px;
-    box-shadow:
-      0px 187px 75px rgba(0, 0, 0, 0.01),
-      0px 105px 63px rgba(0, 0, 0, 0.05),
-      0px 47px 47px rgba(0, 0, 0, 0.08),
-      0px 12px 26px rgba(0, 0, 0, 0.09),
-      0px 0px 0px rgba(0, 0, 0, 0.08);
-    @apply dark:bg-neutral-900 dark:border-neutral-800 dark:shadow-none;
-  }
-
-  .cart-title {
-    height: 42px;
-    display: flex;
-    align-items: center;
-    padding-left: 16px;
-    border-bottom: 1px solid #efeff3;
-    font-weight: 800;
-    font-size: 12px;
-    color: #63656b;
-    border-top-left-radius: 20px;
-    border-top-right-radius: 20px;
-    @apply dark:border-neutral-800 dark:text-neutral-400;
-  }
-
-  .cart-quantity {
-    height: 36px;
-    display: grid;
-    grid-template-columns: 1fr 1fr 1fr;
-    margin: auto;
-    background-color: #ffffff;
-    border: 1px solid #e5e5e5;
-    border-radius: 9px;
-    filter:
-      drop-shadow(0px 1px 0px #efefef)
-      drop-shadow(0px 1px 0.5px rgba(239, 239, 239, 0.5));
-    @apply dark:bg-neutral-800 dark:border-neutral-700 dark:filter-none;
-  }
-  .cart-quantity label {
-    width: 30px;
-    height: 36px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 15px;
-    font-weight: 800;
-    color: #374151;
-    @apply dark:text-neutral-200;
-  }
-  .cart-quantity button {
-    width: 36px;
-    height: 36px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border: 0;
-    outline: none;
-    background-color: transparent;
-    color: #374151;
-    font-size: 18px;
-    font-weight: 800;
-    @apply dark:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-700 transition-colors;
-  }
-
-  .cart-checkout-footer {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 12px 16px;
-    background-color: #f3f4f6;
-    border-bottom-left-radius: 20px;
-    border-bottom-right-radius: 20px;
-    @apply dark:bg-neutral-800;
-  }
-
-  .cart-price {
-    position: relative;
-    font-size: 24px;
-    color: #111827;
-    font-weight: 900;
-    @apply dark:text-white;
-  }
-
-  /* Inputs */
-  .input-primary {
-    width: 100%;
-    height: 38px;
-    padding: 0 12px;
-    border-radius: 9999px;
-    border: 1px solid #e5e7eb;
-    background-color: #ffffff;
-    color: #111827;
-    transition: all 0.2s ease;
-    @apply dark:bg-neutral-900 dark:border-neutral-700 dark:text-white dark:placeholder-neutral-500;
-  }
-  .input-primary:focus {
-    outline: none;
-    border-color: transparent;
-    box-shadow: 0 0 0 2px rgba(81, 126, 160, 0.6);
-    background-color: #ffffff;
-    @apply dark:bg-neutral-900 dark:shadow-blue-500/50;
-  }
-  @media (min-width: 640px) {
-    .input-primary {
-      height: 40px;
-      padding: 0 14px;
-    }
-  }
-
-  /* User Profile Button */
-  .user-profile {
-    width: 110px;
-    height: 44px;
-    border-radius: 15px;
-    cursor: pointer;
-    transition: 0.3s ease;
-    background-color: #517ea0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    box-shadow: 0 6px 18px rgba(81, 126, 160, 0.25);
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    @apply dark:bg-neutral-800 dark:border-neutral-700 dark:shadow-none;
-  }
-  .user-profile:hover,
-  .user-profile:focus {
-    background-color: #5488af;
-    box-shadow: 0 10px 24px rgba(81, 126, 160, 0.35), inset 0 -1px 0 rgba(255, 255, 255, 0.12);
-    outline: 2px solid rgba(81, 126, 160, 0.35);
-    outline-offset: 2px;
-    @apply dark:bg-neutral-700 dark:outline-neutral-500;
-  }
-  .user-profile-inner {
-    width: 106px;
-    height: 40px;
-    border-radius: 9999px;
-    background-color: #487aa1;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 6px;
-    color: #fff;
-    font-weight: 600;
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12), inset 0 -1px 0 rgba(0, 0, 0, 0.08);
-    background-image: linear-gradient(to bottom, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0));
-    @apply dark:bg-neutral-900;
-  }
-  @media (max-width: 640px) {
-    .user-profile { width: 44px; height: 44px; }
-    .user-profile-inner { width: 40px; height: 40px; }
-  }
-
-  /* Tabs */
-  .tabs {
-    display: flex;
-    position: relative;
-    background-color: #f3f4f6;
-    box-shadow: none;
-    border: none;
-    padding: 0.375rem;
-    border-radius: 99px;
-    justify-content: center;
-    align-items: center;
-    @apply dark:bg-neutral-800;
-  }
-  .tab {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    min-height: 30px;
-    padding: 0 10px;
-    width: auto;
-    font-size: .8rem;
-    color: black;
-    font-weight: 500;
-    border-radius: 99px;
-    cursor: pointer;
-    transition: color 0.15s ease-in;
-    z-index: 2;
-    @apply dark:text-neutral-300;
-  }
-  .glider {
-    position: absolute;
-    display: flex;
-    height: 30px;
-    width: 0;
-    background-color: #ffffff;
-    z-index: 1;
-    border-radius: 99px;
-    transition: 0.25s ease-out;
-    top: 50%;
-    transform: translateY(-50%); /* Fix vertical alignment */
-    @apply dark:bg-neutral-600;
-  }
-  .tabs input[type="radio"]:checked + label {
-    color: #517ea0;
-    @apply dark:text-white;
-  }
-  
-  /* Shine Button */
-  .shine-button {
-    overflow: hidden;
-    transition: transform 0.25s ease, box-shadow 0.25s ease;
-    will-change: transform, box-shadow;
-  }
-  .shine-button:hover { transform: scale(1.03); }
-  .shine-button:active { transform: scale(0.98); }
-  .shine-button::before {
-    content: "";
-    position: absolute;
-    width: 120px;
-    height: 100%;
-    top: 0;
-    left: -100px;
-    opacity: 0.35;
-    background-image: linear-gradient(
-      120deg,
-      rgba(255, 255, 255, 0) 25%,
-      rgba(255, 255, 255, 0.85) 50%,
-      rgba(255, 255, 255, 0) 75%
-    );
-  }
-  .shine-button:hover::before { animation: shine 1.5s ease-out; }
-  
-  @keyframes shine {
-    0% { left: -100px; }
-    60% { left: 100%; }
-    100% { left: 100%; }
-  }
-
   /* Glass Radio Group - From Uiverse.io by chase2k25 */
-  .glass-radio-group { 
-    --bg: rgba(0, 0, 0, 0.05); 
-    --text: #000; 
-  
-    display: flex; 
-    position: relative; 
-    background: var(--bg); 
-    border-radius: 9999px; 
-    backdrop-filter: blur(12px); 
-    border: 1px solid rgba(0, 0, 0, 0.05);
-    overflow: hidden; 
-    width: fit-content; 
-  } 
-  
+  .glass-radio-group {
+    /* Theme-aware: en oscuro el fondo negro al 5% y el texto negro se perdían.
+       Ahora la pista y el texto salen de los tokens y se ven en ambos temas. */
+    --bg: var(--c-surface-2);
+    --text: var(--c-mute);
+
+    display: flex;
+    position: relative;
+    background: var(--bg);
+    border-radius: 9999px;
+    backdrop-filter: blur(12px);
+    border: 1px solid var(--c-border);
+    overflow: hidden;
+    width: fit-content;
+  }
+
   .glass-radio-group input { 
     display: none; 
   } 
@@ -622,17 +507,14 @@
     transition: all 0.2s ease-in-out; 
   } 
   
-  .glass-radio-group label:hover { 
-    background: linear-gradient(135deg, #2563eb, #7c3aed);
-    -webkit-background-clip: text;
-    background-clip: text;
-    color: transparent;
-  } 
-  
-  .glass-radio-group input:checked + label { 
-    color: #fff; 
+  .glass-radio-group label:hover {
+    color: var(--c-gold);
+  }
+
+  .glass-radio-group input:checked + label {
+    color: var(--c-gold-on, #1a1400);
     background: none;
-  } 
+  }
   
   .glass-glider { 
     position: absolute; 
@@ -646,11 +528,11 @@
       background 0.3s ease-in-out, 
       box-shadow 0.3s ease-in-out; 
   
-    background: linear-gradient(135deg, #2563eb, #7c3aed); 
-    box-shadow: 
-      0 0 10px rgba(99, 102, 241, 0.3), 
-      0 0 5px rgba(255, 255, 255, 0.2) inset; 
-  } 
+    background: linear-gradient(135deg, #FFD35A, var(--c-gold));
+    box-shadow:
+      0 4px 12px rgba(0, 0, 0, 0.22),
+      0 0 0 1px rgba(0, 0, 0, 0.06) inset;
+  }
   
   /* Movimiento del selector */ 
   #plan-dia:checked ~ .glass-glider { 
@@ -661,109 +543,359 @@
     transform: translateX(100%); 
   } 
   
-  #plan-mes:checked ~ .glass-glider { 
-    transform: translateX(200%); 
+  #plan-mes:checked ~ .glass-glider {
+    transform: translateX(200%);
   }
 
-  /* Wave Group Input */
-  .wave-group { 
-    position: relative; 
-  } 
-  
-  .wave-group .input { 
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-    font-size: 16px; 
-    padding: 10px 10px 10px 5px; 
-    display: block; 
-    width: 100%; 
-    border: none; 
-    border-bottom: 1px solid #515151; 
-    background: transparent; 
-  } 
-  
-  .wave-group .input:focus { 
-    outline: none; 
-  } 
-  
-  .wave-group .label { 
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-    color: #999; 
-    font-size: 18px; 
-    font-weight: normal; 
-    position: absolute; 
-    pointer-events: none; 
-    left: 5px; 
-    top: 10px; 
-    display: flex; 
-  } 
-  
-  .wave-group .label-char { 
-    transition: 0.2s ease all; 
-    transition-delay: calc(var(--index) * .05s); 
-  } 
-  
-  .wave-group .input:focus ~ label .label-char, 
-  .wave-group .input:valid ~ label .label-char,
-  .wave-group .input:not(:placeholder-shown) ~ label .label-char { 
-    transform: translateY(-20px); 
-    font-size: 14px; 
-    color: #5264AE; 
-  } 
-  
-  .wave-group .bar { 
-    position: relative; 
-    display: block; 
-    width: 100%; 
-  } 
-  
-  .wave-group .bar:before,.wave-group .bar:after { 
-    content: ''; 
-    height: 2px; 
-    width: 0; 
-    bottom: 1px; 
-    position: absolute; 
-    background: #5264AE; 
-    transition: 0.2s ease all; 
-    -moz-transition: 0.2s ease all; 
-    -webkit-transition: 0.2s ease all; 
-  } 
-  
-  .wave-group .bar:before { 
-    left: 50%; 
-  } 
-  
-  .wave-group .bar:after { 
-    right: 50%; 
-  } 
-  
-  .wave-group .input:focus ~ .bar:before, 
-  .wave-group .input:focus ~ .bar:after { 
-    width: 50%; 
-  }
+  /* Mismo glider para el filtro Todos / Comprar / Rentar (3 opciones). */
+  #uso-todos:checked ~ .glass-glider { transform: translateX(0%); }
+  #uso-venta:checked ~ .glass-glider { transform: translateX(100%); }
+  #uso-renta:checked ~ .glass-glider { transform: translateX(200%); }
+}
 
-  /* Universe Buttons */
-  .btn-universe-primary {
-    display: inline-flex;
+/* Los ex-mono: peso semibold y números tabulares para que no bailen. */
+.font-mono { font-variant-numeric: tabular-nums; font-weight: 600; }
+
+/* Alerta superior: entra deslizando desde arriba. */
+/* Barra de vida de una alerta: se vacía en el tiempo que la alerta permanece. */
+@keyframes toast-avance { from { width: 100%; } to { width: 0%; } }
+
+/* Modal: el fondo se funde y el panel (su hijo directo) entra escalando desde
+   0.97 — nada aparece "de la nada". UNA sola clase `modal-in` en el backdrop
+   cubre ambos. Misma curva ease-out del sistema; centrado (transform-origin por
+   defecto), como debe ser un modal no anclado a un botón. */
+@keyframes modal-backdrop-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes modal-panel-in { from { opacity: 0; transform: translateY(10px) scale(0.97); } to { opacity: 1; transform: none; } }
+.modal-in { animation: modal-backdrop-in 180ms ease-out both; }
+.modal-in > * { animation: modal-panel-in 260ms cubic-bezier(0.23, 1, 0.32, 1) both; }
+/* Movimiento reducido: se conserva el fundido (ayuda a ubicar el cambio) pero
+   se quita el desplazamiento/escala. */
+@media (prefers-reduced-motion: reduce) {
+  .modal-in > * { animation: modal-backdrop-in 180ms ease-out both; }
+}
+
+/* SALIDA de un modal que TRASPASA a otra pantalla (no el cierre normal, que no
+   necesita ceremonia: ahí no vas a ningún lado).
+
+   Se usa cuando una acción te lleva a otro sitio —de la cotización a su renta—
+   y sirve para que el cambio se lea como causado por ti y no como un corte. La
+   hoja se retira hacia atrás mientras el fondo se apaga; al llegar, la pantalla
+   destino entra con `modal-in`, la misma curva, así el viaje es UNO.
+
+   Sale más rápido de lo que entró (160 vs 260ms): lo que ya viste no necesita
+   presentarse otra vez, y una salida lenta se siente como que el sistema no
+   responde. */
+@keyframes modal-backdrop-out { from { opacity: 1; } to { opacity: 0; } }
+/* Se va HACIA LA IZQUIERDA porque tú vas hacia la derecha: la hoja que dejas
+   atrás se desplaza en sentido contrario a tu avance, como una página que pasa.
+   Es la gramática de "adelante" de cualquier sistema operativo, y por eso no
+   hay que explicarla. */
+@keyframes modal-panel-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateX(-28px) scale(0.985); } }
+/* El retraso de 90ms es el gesto: la flecha ya salió disparada y el panel
+   arranca detrás de ella. Se solapan —no van en fila— para que se lea como un
+   arrastre, no como dos animaciones esperando turno. */
+.modal-out { animation: modal-backdrop-out 160ms cubic-bezier(0.4, 0, 1, 1) 90ms both; pointer-events: none; }
+.modal-out > * { animation: modal-panel-out 160ms cubic-bezier(0.4, 0, 1, 1) 90ms both; }
+
+/* Entrada del OTRO extremo del mismo viaje: llega desde la derecha, que es
+   hacia donde apuntaba la flecha que tocaste. La curva es la del sistema
+   (llega con calma) y dura más que la salida: lo nuevo sí se presenta. */
+@keyframes modal-panel-avance { from { opacity: 0; transform: translateX(34px) scale(0.99); } to { opacity: 1; transform: none; } }
+.modal-avance { animation: modal-backdrop-in 180ms ease-out both; }
+.modal-avance > * { animation: modal-panel-avance 280ms cubic-bezier(0.23, 1, 0.32, 1) both; }
+
+/* La flecha se va ANTES que la hoja: tocas, sale disparada, y el panel la
+   sigue. Da la sensación de que ella te llevó —causa y efecto, no dos cosas
+   que pasaron juntas— y de paso es el acuse del clic, que el botón necesitaba
+   igual. 140ms: se siente, no se espera. */
+@keyframes flecha-vuela {
+  0%   { opacity: 1; transform: none; }
+  55%  { opacity: 1; transform: translateX(5px); }
+  100% { opacity: 0; transform: translateX(22px); }
+}
+.flecha-vuela { animation: flecha-vuela 240ms cubic-bezier(0.4, 0, 1, 1) both; }
+
+@media (prefers-reduced-motion: reduce) {
+  /* Se conserva el fundido —marca que algo cambió— y se quita el viaje lateral. */
+  .modal-out > * { animation: modal-backdrop-out 160ms ease-in both; }
+  .modal-avance > * { animation: modal-backdrop-in 180ms ease-out both; }
+  .flecha-vuela { animation: none; opacity: 0.5; }
+}
+
+/* Éxito (p. ej. al vincular): UN solo momento de delight. La insignia entra con
+   un pop suave (nada nace de la nada), un anillo de confirmación se expande una
+   vez, la palomita se dibuja sola y el texto sube en cascada. Momento raro, así
+   que un toque está bien; curva ease-out del sistema y reduced-motion respetado. */
+@keyframes exito-pop {
+  0%   { opacity: 0; transform: scale(0.86); }
+  60%  { opacity: 1; transform: scale(1.04); }
+  100% { transform: scale(1); }
+}
+/* Un solo pulso detrás de la insignia: el "quedó hecho". */
+@keyframes exito-ring {
+  0%   { opacity: 0.5; transform: scale(0.75); }
+  100% { opacity: 0;   transform: scale(1.7); }
+}
+@keyframes vc-rise {
+  0%   { opacity: 0; transform: translateY(10px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+.exito-pop  { animation: exito-pop 520ms cubic-bezier(0.23, 1, 0.32, 1) both; }
+/* 1.7 y no más: a 1.9 el anillo rebasa el respiro (p-8) de la tarjeta y se
+   recorta justo mientras la caja está creciendo. */
+.exito-ring { animation: exito-ring 900ms cubic-bezier(0.23, 1, 0.32, 1) 140ms both; }
+/* Cascada genérica del texto/botones de vincular; delay inline por elemento. */
+.vc-rise { opacity: 0; animation: vc-rise 460ms cubic-bezier(0.23, 1, 0.32, 1) both; }
+@media (prefers-reduced-motion: reduce) {
+  .exito-pop, .vc-rise { animation: none; }
+  .exito-pop  { opacity: 1; transform: none; }
+  .vc-rise { opacity: 1; transform: none; }
+  .exito-ring { display: none; }
+}
+
+/* Entrada CALMADA de la insignia (sin rebote): la usan los estados neutros de
+   vincular (sin sesión, confirmar) y el error. El error suma .err-shake, un "no"
+   sutil una sola vez. En todos los casos el texto sube con .vc-rise. */
+@keyframes vc-pop {
+  0%   { opacity: 0; transform: scale(0.92); }
+  100% { opacity: 1; transform: scale(1); }
+}
+@keyframes err-shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-3px); }
+  45% { transform: translateX(3px); }
+  70% { transform: translateX(-2px); }
+  88% { transform: translateX(1px); }
+}
+.vc-pop    { animation: vc-pop 320ms cubic-bezier(0.23, 1, 0.32, 1) both; }
+.err-shake { animation: err-shake 440ms ease-in-out 300ms 1 both; }
+@media (prefers-reduced-motion: reduce) {
+  .vc-pop    { animation: none; opacity: 1; transform: none; }
+  .err-shake { animation: none; }
+}
+
+/* ── Pantalla de un solo mensaje ─────────────────────────────────────────────
+   404, 500, "esto es para clientes": páginas que dicen UNA cosa y ofrecen una
+   salida. Van centradas en el espacio que de verdad queda libre, que no es la
+   ventana entera:
+
+     · arriba lo comen la barra de aviso (`--alto-aviso`) y el menú (`--nav-h`),
+       los dos FIJOS, así que no ocupan sitio en el flujo pero sí tapan pantalla.
+     · centrar en `100vh` deja el texto alto y con un hueco abajo; centrar en un
+       `78vh` a ojo —como estaba la 404— falla distinto según haya aviso o no.
+
+   Las dos variables las publican sus componentes midiéndose (`BarraAviso`,
+   `Navbar`), y si no existen valen 0: la misma clase sirve dentro y fuera de
+   la tienda. `dvh` y no `vh` por el navegador móvil, donde la barra de
+   direcciones se encoge al hacer scroll y `vh` se queda con el alto viejo. */
+.pantalla-mensaje {
+  min-height: calc(100dvh - var(--alto-aviso, 0px));
+  padding-top: var(--nav-h, 0px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ── Casillas del código de verificación (OTP) ───────────────────────────────
+   Esta pantalla se ve UNA vez por cuenta, y esa frecuencia es la que decide
+   cuánto movimiento cabe: lo que en un atajo de teclado —cientos de usos al
+   día— sería un estorbo, aquí es cuidado. Aun así nada dura más de 200ms.
+
+   El vocabulario es el que ya existe (`vc-rise` para la cascada, `err-shake`
+   para el "no"); solo se agrega lo que estas cajas necesitan y no había. */
+.otp-casilla {
+  /* Nunca `all`: solo lo que de verdad cambia, y transform/opacity van por GPU. */
+  transition: border-color 150ms ease, background-color 150ms ease,
+              transform 140ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+/* Al caer el dígito la caja da un tirón mínimo. Confirma que el teclazo entró
+   sin obligar a mirar: se siente antes de verse. */
+.otp-llena  { transform: scale(1.04); }
+/* La activa se levanta un poco: dice dónde vas sin que haya que leer. */
+.otp-activa { transform: scale(1.03); }
+
+/* Cursor de la casilla activa. Solo opacidad, y `steps` para que parpadee como
+   un cursor de verdad en vez de desvanecerse. */
+@keyframes otp-caret { 0%, 45% { opacity: 1; } 55%, 100% { opacity: 0; } }
+.otp-caret { animation: otp-caret 1.1s steps(1, end) infinite; }
+
+/* El "no" del código incorrecto. Reusa `err-shake` pero SIN su retraso de
+   300ms: aquel espera a que entre una insignia; aquí la respuesta tiene que
+   salir en el instante del error o deja de leerse como respuesta. */
+.otp-error { animation: err-shake 440ms ease-in-out 1 both; }
+
+@media (prefers-reduced-motion: reduce) {
+  /* Reducir no es apagar: el color sigue transicionando porque ayuda a
+     entender; lo que se va es el movimiento. */
+  .otp-llena, .otp-activa { transform: none; }
+  .otp-caret { animation: none; }
+  .otp-error { animation: none; }
+}
+
+/* ── Anti-zoom al enfocar inputs en iOS ──────────────────────────────────────
+   iOS Safari hace zoom automático al enfocar un campo cuyo texto mide < 16px.
+   En dispositivos táctiles (móvil/tablet) forzamos 16px en los campos para
+   evitarlo. NO se toca el zoom por pinch (accesible) ni el diseño de escritorio
+   (puntero fino). `!important` porque gana a las utilidades text-* de Tailwind. */
+@media (hover: none) and (pointer: coarse) {
+  input:not([type='checkbox']):not([type='radio']):not([type='range']),
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
+}
+
+/* ── Selects: apariencia propia + alto cómodo ────────────────────────────────
+   Los <select> NATIVOS ignoran la altura CSS en varios navegadores (Safari, y a
+   veces Chrome), por eso "se veían igual" al subir el padding. Se les quita la
+   apariencia nativa (appearance:none) para poder controlar el alto de verdad, y
+   se les pone una flecha propia. Global: aplica a todos los <select> del sitio.
+   Solo afecta alto/flecha; ancho, color y borde siguen viniendo de su clase. */
+select {
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  padding-right: 2.5rem;   /* espacio para la flecha propia */
+  background-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='16'%20height='16'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='%239ca3af'%20stroke-width='2.2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M6%209l6%206%206-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.85rem center;
+  background-size: 16px;
+}
+select::-ms-expand { display: none; }
+
+/* Las OPCIONES del desplegable, que en oscuro no se leían.
+   La causa: `.campo` pinta el select con `--c-surface-2`, que en tema oscuro es
+   `rgba(255,255,255,0.05)` —translúcido a propósito, para que las superficies
+   secundarias se fundan con el panel—. El popup nativo hereda ese fondo, pero
+   NO hereda el panel de atrás: se dibuja sobre el blanco del sistema, así que
+   quedaba texto casi blanco sobre casi blanco.
+
+   Es el mismo caso que las alertas y se resuelve igual: lo que FLOTA sobre la
+   página va opaco. `--c-alert` existe exactamente para eso. */
+select option {
+  background-color: var(--c-alert);
+  color: var(--c-ink);
+}
+
+/* Inputs numéricos: fuera las flechitas nativas (spinners), se ven baratas y
+   descuadran el alto. El número se teclea. Global: todos los <input type=number>. */
+input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+/* ── Tablas del panel en celular ─────────────────────────────────────────────
+   Las tablas del admin traen `min-w-[760px]` y más: en escritorio se ven bien,
+   pero en un teléfono obligaban a hacer scroll horizontal para leer una fila.
+   Debajo de 768px cada FILA se convierte en una tarjeta apilada: se esconde el
+   thead y cada celda enseña su etiqueta (`data-col`) a la izquierda y el valor
+   a la derecha. Las celdas SIN `data-col` (la principal con el nombre y la de
+   acciones) se quedan a ancho completo, sin etiqueta.
+   Solo hay que ponerle `tabla-panel` al <table> y `data-col="Precio"` a los td
+   que necesiten etiqueta. De 768px para arriba no cambia absolutamente nada. */
+@media (max-width: 767px) {
+  .tabla-panel { display: block; min-width: 0 !important; }
+  .tabla-panel thead { display: none; }
+  .tabla-panel tbody { display: block; }
+  .tabla-panel tr { display: block; padding: 0.6rem 0; }
+  .tabla-panel td { display: block; padding: 0.28rem 0.9rem; white-space: normal; }
+  /* Una celda escondida con `hidden` sigue escondida: la regla de arriba tiene
+     más peso que la utilidad de Tailwind y sin esto reaparecería en celular. */
+  .tabla-panel td.hidden, .tabla-panel th.hidden { display: none; }
+  .tabla-panel td[data-col] {
+    display: flex;
     align-items: center;
-    justify-content: center;
-    padding: 0.75rem 1.5rem;
-    font-weight: 600;
-    transition: all 0.2s ease;
-    min-height: 48px;
+    justify-content: space-between;
+    gap: 0.75rem;
+    text-align: left;
   }
-  
-  .btn-universe-primary:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(81, 126, 160, 0.25);
+  .tabla-panel td[data-col]::before {
+    content: attr(data-col);
+    flex: 0 0 auto;
+    font-size: 10.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--c-mute);
   }
+  /* El valor se pega a la derecha, frente a su etiqueta; si trae varias líneas
+     (fechas, montos) quedan alineadas entre sí y no ragged contra el borde. */
+  .tabla-panel td[data-col] > * { text-align: right; }
+  /* La celda del nombre manda: un poco más de aire arriba para que se lea como
+     el título de la tarjeta. */
+  .tabla-panel td:first-child { padding-top: 0.15rem; padding-bottom: 0.5rem; }
+  /* Los truncados y anchos máximos pensados para una columna estrecha estorban
+     cuando la celda ya ocupa toda la pantalla. */
+  .tabla-panel td.truncate,
+  .tabla-panel td .truncate { overflow: visible; text-overflow: clip; white-space: normal; }
+  .tabla-panel td[class*="max-w-["],
+  .tabla-panel td [class*="max-w-["] { max-width: none; }
+}
 
-  .btn-universe-primary:active {
-    transform: scale(0.98);
-  }
-  
-  .btn-sm {
-    padding: 0.5rem 1rem;
-    min-height: 36px;
-    font-size: 0.875rem;
-  }
+/* ── El cursor de la tienda ──────────────────────────────────────────────────
+   Una punta de navegación: cuatro vértices simétricos respecto a la diagonal y
+   esquinas VIVAS, sin redondear. El vértice de en medio es la MUESCA —el único
+   cóncavo— y es el que forma la colita: acercarlo a la punta la alarga,
+   alejarlo la borra. Es el único número con criterio en toda la figura.
+
+   Ojo con "simplificarla" a un triángulo de lados rectos: se lee como botón de
+   "play", no como cursor. La muesca es lo que la vuelve flecha.
+
+   Recortada de la página, no puesta encima: el relleno es la tinta y el halo es
+   el color del fondo. Por eso se invierte sola en tema oscuro y por eso nunca se
+   pierde sobre la foto de una retroexcavadora — el halo la despega de lo que sea
+   que tenga debajo.
+
+   Lo accionable NO cambia de figura: es LA MISMA punta, encendida en naranja de
+   obra (#FF6B2C). Cambiar de forma (a la manita) mueve el punto de clic y obliga
+   a reaprender dónde apuntas; cambiar de color dice "aquí sí" sin mover nada.
+   Naranja y no el dorado de la marca porque lo accionable casi siempre ES
+   dorado: el cursor tiene que despegarse del botón, no fundirse con él.
+
+   Lo dibuja el sistema operativo, no el navegador: va pegado al pixel, sin JS y
+   sin un frame de retraso. Si el SVG falla, cae al cursor nativo (la palabra
+   suelta al final de cada regla) y nadie se entera.
+
+   Fuera de la tienda no existe: en el panel se trabaja horas seguidas, con
+   tablas y selección de texto, y ahí el cursor del sistema es el correcto.
+   `body:has(.tienda)` traza esa frontera, sin una línea de JS.
+
+   El 4 4 del final de cada url() es el punto de clic y cae en el vértice de la
+   punta. Si mueves la geometría, muévelo: el día que no coincidan, la gente
+   apunta a un lado y hace clic en otro. */
+@media (hover: hover) and (pointer: fine) and (forced-colors: none) {
+  body:has(.tienda) { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cpath d='M4 4 21.7 11.2 12.7 12.7 11.2 21.7Z' fill='none' stroke='%23F6F7F9' stroke-width='3' stroke-linejoin='round'/%3E%3Cpath d='M4 4 21.7 11.2 12.7 12.7 11.2 21.7Z' fill='%23111827'/%3E%3C/svg%3E") 4 4, auto; }
+  body:has(.tienda) :is(a, button, [role="button"], summary, select, label[for], .cursor-pointer, [data-accionable]) { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cpath d='M4 4 21.7 11.2 12.7 12.7 11.2 21.7Z' fill='none' stroke='%23F6F7F9' stroke-width='3' stroke-linejoin='round'/%3E%3Cpath d='M4 4 21.7 11.2 12.7 12.7 11.2 21.7Z' fill='%23FF6B2C'/%3E%3C/svg%3E") 4 4, pointer; }
+  body:has(.tienda) :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="submit"]):not([type="button"]), textarea, [contenteditable="true"]) { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cpath d='M12 4v16M9 4h6M9 20h6' fill='none' stroke='%23F6F7F9' stroke-width='3.6' stroke-linecap='round'/%3E%3Cpath d='M12 4v16M9 4h6M9 20h6' fill='none' stroke='%23111827' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E") 12 12, text; }
+
+  .dark body:has(.tienda) { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cpath d='M4 4 21.7 11.2 12.7 12.7 11.2 21.7Z' fill='none' stroke='%230a0a0b' stroke-width='3' stroke-linejoin='round'/%3E%3Cpath d='M4 4 21.7 11.2 12.7 12.7 11.2 21.7Z' fill='%23f4f4f5'/%3E%3C/svg%3E") 4 4, auto; }
+  .dark body:has(.tienda) :is(a, button, [role="button"], summary, select, label[for], .cursor-pointer, [data-accionable]) { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cpath d='M4 4 21.7 11.2 12.7 12.7 11.2 21.7Z' fill='none' stroke='%230a0a0b' stroke-width='3' stroke-linejoin='round'/%3E%3Cpath d='M4 4 21.7 11.2 12.7 12.7 11.2 21.7Z' fill='%23FF6B2C'/%3E%3C/svg%3E") 4 4, pointer; }
+  .dark body:has(.tienda) :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="submit"]):not([type="button"]), textarea, [contenteditable="true"]) { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cpath d='M12 4v16M9 4h6M9 20h6' fill='none' stroke='%230a0a0b' stroke-width='3.6' stroke-linecap='round'/%3E%3Cpath d='M12 4v16M9 4h6M9 20h6' fill='none' stroke='%23f4f4f5' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E") 12 12, text; }
+
+  /* Lo apagado se queda con el aviso del sistema: "no se puede" es información,
+     no decoración, y el nativo ya lo dice en el idioma de cada quien. */
+  body:has(.tienda) :is(a, button, [role="button"], input, select, textarea):is(:disabled, [aria-disabled="true"]) { cursor: not-allowed; }
+}
+
+/* ── Página de error ────────────────────────────────────────────────────────
+   Estaban en framer-motion, y esa página es el fallback del ErrorBoundary: no
+   puede depender de una librería de 123 KB para pintarse justo cuando algo se
+   rompió. Son decorativas, así que van en CSS y de paso respetan
+   prefers-reduced-motion sin preguntarle a un hook. */
+@keyframes error-entra { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
+.error-entra { animation: error-entra 500ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+/* Banda de precaución de obra: el patrón se desliza en bucle. */
+@keyframes banda-obra { from { background-position-x: 0; } to { background-position-x: 44px; } }
+.banda-obra { animation: banda-obra 1.6s linear infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  .error-entra { animation: none; }
+  .banda-obra { animation: none; }
 }

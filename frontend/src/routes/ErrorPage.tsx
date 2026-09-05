@@ -1,150 +1,142 @@
-import { motion } from 'framer-motion'
 import { useNavigate } from 'react-router-dom'
 import React from 'react'
 
+/* ─────────────────────────────────────────────────────────────────────────
+   Página de error de REMALI.
+
+   Dirección de diseño: aterrizarla en el mundo de la empresa —maquinaria
+   ligera, obra, taller—. La pieza-firma es la BANDA DE PRECAUCIÓN: la franja
+   amarilla y negra de las máquinas pesadas y las barreras de obra. Un error
+   ES una zona bloqueada, así que la señalética de obra cae natural.
+
+   Sin gradiente en el texto, sin burbujas genéricas. Usa los tokens del tema
+   (bg-app / text-ink / text-gold-ink…), así que se ve bien en claro y en oscuro.
+   Respeta prefers-reduced-motion. ──────────────────────────────────────── */
+
 type ErrorType = '404' | '500' | '403' | 'maintenance'
 
-interface ErrorConfig {
+type Cfg = {
   code: string
   title: string
   message: string
-  icon: (props: { className?: string }) => React.ReactElement
-  action?: { label: string; path: string }
+  glyph: React.ReactNode
+  action?: { label: string; to: string }   // to === '.' → recargar
+  volver?: boolean                          // muestra el botón secundario "Regresar"
 }
 
-const errors: Record<ErrorType, ErrorConfig> = {
+const svg = (children: React.ReactNode) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}
+    strokeLinecap="round" strokeLinejoin="round" className="w-9 h-9 sm:w-10 sm:h-10">
+    {children}
+  </svg>
+)
+
+const CFG: Record<ErrorType, Cfg> = {
   '404': {
     code: '404',
-    title: 'Página no encontrada',
-    message: 'Lo sentimos, no pudimos encontrar la página que estás buscando. Puede que haya sido movida o eliminada.',
-    icon: ({ className }) => (
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" className={className}>
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-      </svg>
-    ),
-    action: { label: 'Volver al inicio', path: '/' }
-  },
-  '500': {
-    code: '500',
-    title: 'Error del servidor',
-    message: 'Nuestros servidores están teniendo problemas. Por favor, inténtalo de nuevo más tarde.',
-    icon: ({ className }) => (
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" className={className}>
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-      </svg>
-    ),
-    action: { label: 'Reintentar', path: '.' }
+    title: 'Esta ruta no existe',
+    message: 'La página que buscas no está en el mapa. Quizá la movimos o el enlace ya quedó viejo.',
+    // Mapa de obra doblado.
+    glyph: svg(<><path d="M9 6 3.5 4v14L9 20l6-2 5.5 2V6L15 4 9 6Z" /><path d="M9 6v14M15 4v14" /></>),
+    action: { label: 'Ir al inicio', to: '/' },
+    volver: true,
   },
   '403': {
     code: '403',
-    title: 'Acceso denegado',
-    message: 'No tienes permisos para acceder a esta página. Contacta al administrador si crees que es un error.',
-    icon: ({ className }) => (
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" className={className}>
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-      </svg>
-    ),
-    action: { label: 'Ir al inicio', path: '/' }
+    title: 'Zona restringida',
+    message: 'Tu cuenta no tiene acceso a esta área. Si crees que deberías entrar, pídele acceso a un administrador.',
+    // Casco de obra.
+    glyph: svg(<><path d="M3 18.5h18" /><path d="M5.5 18.5v-1.5a6.5 6.5 0 0 1 13 0v1.5" /><path d="M12 4.5v3.2" /><path d="M8.6 7.7A4.5 4.5 0 0 0 6.2 11" /><path d="M15.4 7.7A4.5 4.5 0 0 1 17.8 11" /></>),
+    action: { label: 'Ir al inicio', to: '/' },
+    volver: true,
+  },
+  '500': {
+    code: '500',
+    title: 'Se nos descompuso algo',
+    message: 'Falló una pieza de nuestro lado, no fuiste tú. Ya lo estamos revisando; intenta de nuevo en un momento.',
+    // Engrane con chispa.
+    glyph: svg(<><circle cx="11" cy="12" r="3" /><path d="M11 5.5V4M11 20v-1.5M5.5 12H4M18 12h-1.5M6.9 7.9 5.8 6.8M16.2 17.2l-1.1-1.1M6.9 16.1l-1.1 1.1M16.2 6.8l-1.1 1.1" /><path d="M19 3v4M19 10.5h.01" /></>),
+    action: { label: 'Reintentar', to: '.' },
   },
   'maintenance': {
-    code: 'Mantenimiento',
+    code: '—',
     title: 'En mantenimiento',
-    message: 'Estamos realizando mejoras en nuestra plataforma. Volveremos pronto.',
-    icon: ({ className }) => (
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" className={className}>
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-      </svg>
-    ),
-  }
+    message: 'Estamos afinando la maquinaria. Volvemos en unos minutos; gracias por la paciencia.',
+    // Llave de tuercas.
+    glyph: svg(<path d="M14.7 6.3a4 4 0 0 0-5.6 5.6l-6 6v3h3l6-6a4 4 0 0 0 5.6-5.6l-2.5 2.5-2.1-2.1 2.1-2.1z" />),
+    action: { label: 'Reintentar', to: '.' },
+  },
 }
 
 export default function ErrorPage({ type = '404' }: { type?: ErrorType }) {
-  const config = errors[type]
+  const cfg = CFG[type]
   const nav = useNavigate()
 
+  const go = (to: string) => (to === '.' ? window.location.reload() : nav(to))
+
+  // Banda de precaución (amarillo/oscuro en diagonal). El tramo es de 44px, así
+  // que animar background-position 44px la hace "correr" sin costura.
+  const bandStyle: React.CSSProperties = {
+    backgroundImage: 'repeating-linear-gradient(-45deg, var(--c-gold) 0 12px, var(--c-gold-on) 12px 24px)',
+    backgroundSize: '44px 100%',
+  }
+
   return (
-    <div className="min-h-[70vh] flex flex-col items-center justify-center p-4 text-center overflow-hidden">
-      <motion.div
-        initial={{ scale: 0.8, opacity: 0 }}
-        animate={{ scale: 1, opacity: 1 }}
-        transition={{ duration: 0.5, ease: "easeOut" }}
-        className="relative mb-8"
-      >
-        <motion.div 
-          animate={{ scale: [1, 1.2, 1], opacity: [0.3, 0.5, 0.3] }}
-          transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
-          className="absolute inset-0 bg-blue-100 rounded-full blur-3xl opacity-50 transform scale-150" 
-        />
-        <motion.div 
-          whileHover={{ rotate: 5, scale: 1.05 }}
-          transition={{ type: "spring", stiffness: 300 }}
-          className="relative w-32 h-32 sm:w-40 sm:h-40 rounded-full bg-gradient-to-br from-[#e9f2f7] to-[#dbe9f2] flex items-center justify-center shadow-inner z-10"
-        >
-          <motion.div
-            animate={{ y: [0, -5, 0] }}
-            transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
-          >
-            <config.icon className="w-16 h-16 sm:w-20 sm:h-20 text-[#517ea0]" />
-          </motion.div>
-        </motion.div>
-        
-        {/* Floating elements animation */}
-        <motion.div 
-          animate={{ y: [0, -15, 0], rotate: [0, 10, 0], x: [0, 5, 0] }}
-          transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
-          className="absolute -top-4 -right-4 w-12 h-12 rounded-full bg-white shadow-xl flex items-center justify-center border border-blue-50 z-20"
-        >
-          <span className="text-2xl font-bold text-[#517ea0]">!</span>
-        </motion.div>
+    <main className="pantalla-mensaje relative overflow-hidden bg-app text-ink px-6 py-12">
+      {/* Halo dorado tenue de fondo — atmósfera, no decoración chillona. */}
+      <div aria-hidden className="pointer-events-none absolute left-1/2 top-[38%] -translate-x-1/2 -translate-y-1/2 h-[42rem] w-[42rem] rounded-full opacity-[0.5]"
+        style={{ background: 'radial-gradient(closest-side, var(--c-gold-soft), transparent)' }} />
 
-        {/* Extra decorative bubbles */}
-        <motion.div
-          animate={{ y: [0, 10, 0], x: [0, -5, 0] }}
-          transition={{ duration: 5, repeat: Infinity, ease: "easeInOut", delay: 1 }}
-          className="absolute bottom-0 -left-2 w-6 h-6 rounded-full bg-blue-50 shadow-sm border border-blue-100 z-0"
-        />
-      </motion.div>
+      <div className="error-entra relative flex w-full max-w-lg flex-col items-center text-center">
+        {/* Glifo de obra en placa dorada suave */}
+        <div className="mb-7 grid h-16 w-16 sm:h-[72px] sm:w-[72px] place-items-center rounded-2xl bg-gold-soft text-gold-ink ring-1 ring-[color:var(--c-gold)]/20">
+          {cfg.glyph}
+        </div>
 
-      <motion.div
-        initial={{ y: 20, opacity: 0 }}
-        animate={{ y: 0, opacity: 1 }}
-        transition={{ delay: 0.2, duration: 0.5 }}
-        className="max-w-md space-y-4 relative z-10"
-      >
-        <motion.h1 
-          animate={{ backgroundPosition: ["0% 50%", "100% 50%", "0% 50%"] }}
-          transition={{ duration: 5, repeat: Infinity, ease: "linear" }}
-          className="text-6xl sm:text-8xl font-black text-transparent bg-clip-text bg-gradient-to-r from-[#5488af] via-[#487aa1] to-[#5488af] bg-[length:200%_auto]"
-        >
-          {config.code}
-        </motion.h1>
-        <h2 className="text-2xl font-bold text-neutral-800">
-          {config.title}
-        </h2>
-        <p className="text-neutral-600">
-          {config.message}
+        {/* Código gigante, sólido (nada de gradiente en texto) */}
+        <div className="relative">
+          <span className="block text-[92px] leading-[0.9] sm:text-[128px] font-black tracking-tighter text-ink tabular-nums select-none">
+            {cfg.code}
+          </span>
+          {/* PIEZA-FIRMA: banda de precaución de obra */}
+          <div
+            aria-hidden
+            className="banda-obra mx-auto mt-2 h-3.5 w-[min(320px,86%)] overflow-hidden rounded-full ring-1 ring-black/10 dark:ring-white/10"
+            style={bandStyle}
+          />
+        </div>
+
+        <h1 className="mt-8 text-[26px] sm:text-[30px] font-black tracking-tight text-ink text-balance">
+          {cfg.title}
+        </h1>
+        <p className="mt-3 max-w-md text-[15px] leading-relaxed text-mute text-pretty">
+          {cfg.message}
         </p>
 
-        {config.action && (
-          <motion.div 
-            initial={{ y: 10, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            transition={{ delay: 0.4 }}
-            className="pt-6"
-          >
-            <button
-              onClick={() => config.action?.path === '.' ? window.location.reload() : nav(config.action!.path)}
-              className="px-8 py-3 rounded-full bg-gradient-to-r from-[#5488af] to-[#487aa1] text-white font-semibold shadow-lg shadow-blue-900/10 hover:shadow-xl hover:-translate-y-0.5 transition-all duration-300 flex items-center gap-2 mx-auto"
-            >
-              <span>{config.action.label}</span>
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
-                <path fillRule="evenodd" d="M3 10a.75.75 0 01.75-.75h10.638L10.23 5.29a.75.75 0 111.04-1.08l5.5 5.25a.75.75 0 010 1.08l-5.5 5.25a.75.75 0 11-1.04-1.08l4.158-3.96H3.75A.75.75 0 013 10z" clipRule="evenodd" />
+        {/* Acciones */}
+        <div className="mt-9 flex w-full flex-col-reverse items-center justify-center gap-3 sm:w-auto sm:flex-row">
+          {cfg.volver && (
+            <button onClick={() => nav(-1)}
+              className="h-11 w-full sm:w-auto px-6 rounded-full border border-edge bg-surface text-[14px] font-bold text-ink transition-colors hover:bg-surface-2 active:scale-[0.98]">
+              Regresar
+            </button>
+          )}
+          {cfg.action && (
+            <button onClick={() => go(cfg.action!.to)}
+              className="h-11 w-full sm:w-auto px-7 rounded-full bg-gold text-[color:var(--c-gold-on)] text-[14px] font-black transition-[transform,box-shadow] hover:shadow-[0_10px_30px_var(--c-gold-glow)] active:scale-[0.98] inline-flex items-center justify-center gap-2">
+              {cfg.action.label}
+              <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+                <path fillRule="evenodd" d="M3 10a.75.75 0 0 1 .75-.75h10.638L10.23 5.29a.75.75 0 1 1 1.04-1.08l5.5 5.25a.75.75 0 0 1 0 1.08l-5.5 5.25a.75.75 0 1 1-1.04-1.08l4.158-3.96H3.75A.75.75 0 0 1 3 10Z" clipRule="evenodd" />
               </svg>
             </button>
-          </motion.div>
-        )}
-      </motion.div>
-    </div>
+          )}
+        </div>
+      </div>
+
+      {/* Anclaje de marca/localidad — grounding, letra chica */}
+      <p className="relative mt-14 text-[12px] font-medium tracking-wide text-mute">
+        REMALI · Maquinaria ligera · Acapulco, Gro.
+      </p>
+    </main>
   )
 }

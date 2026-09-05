@@ -18,7 +18,11 @@ export function PriceUnitProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     try {
       localStorage.setItem('price_unit', unit)
-    } catch {}
+    } catch {
+      // Este SÍ se traga a propósito y no hace falta rastro: en modo privado o
+      // con la cuota llena, guardar falla y lo único que se pierde es recordar
+      // en qué unidad venía viendo los precios. No hay nada que reportar.
+    }
   }, [unit])
   const value = useMemo(() => ({ unit, setUnit }), [unit])
   return <PriceUnitCtx.Provider value={value}>{children}</PriceUnitCtx.Provider>

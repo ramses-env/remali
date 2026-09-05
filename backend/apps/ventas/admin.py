@@ -27,7 +27,7 @@ class VentaAdmin(admin.ModelAdmin):
 
     fieldsets = (
         ("Información de la Venta", {
-            'fields': ('nombre_cliente', 'telefono_cliente', 'empresa', 'metodo_pago', 'estado', 'usuario')
+            'fields': ('nombre_cliente', 'telefono_cliente', 'cliente', 'metodo_pago', 'estado', 'usuario')
         }),
         ("Venta de Maquinaria (Opcional)", {
             'fields': ('inventario', 'precio_maquina'),

@@ -4,8 +4,8 @@ export default function PriceUnitToggle() {
   const { unit, setUnit } = usePriceUnit()
   
   return (
-    <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 text-sm w-full sm:w-auto">
-      <span className="text-gray-700 mb-1 sm:mb-0 font-medium ml-1">Precio por</span>
+    <div data-onboarding="toggle-precio" className="flex flex-col sm:flex-row items-start sm:items-center gap-2 text-sm w-full sm:w-auto">
+      <span className="text-mute mb-1 sm:mb-0 font-medium ml-1">Precio por</span>
       
       <div className="glass-radio-group w-full sm:w-auto justify-between sm:justify-start" role="radiogroup" aria-label="Selecciona unidad de precio">
         

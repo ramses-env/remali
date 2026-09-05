@@ -32,6 +32,43 @@ export async function searchAddresses(query: string, signal?: AbortSignal): Prom
   return Array.isArray(res.data) ? res.data : []
 }
 
+/**
+ * Predicción de autocompletado (as-you-type). NO trae coordenadas: se resuelven
+ * con `getAddressDetails(place_id)` al seleccionar. Los proveedores sin
+ * autocomplete nativo (Photon/Nominatim) embeben la dirección completa en
+ * `detalle`, así el front la usa sin una segunda llamada.
+ */
+export type AddressPrediction = {
+  place_id: string
+  description: string
+  main_text: string
+  secondary_text: string
+  detalle?: AddressResult
+}
+
+/**
+ * Token de sesión de autocompletado: agrupa las llamadas de un mismo tecleo + el
+ * `details` final en UNA sesión de facturación de Google (bastante más barato).
+ * Se renueva tras cada selección.
+ */
+export function nuevaSesionDireccion(): string {
+  try { return crypto.randomUUID() } catch { return `s-${Date.now()}-${Math.round(Math.random() * 1e9)}` }
+}
+
+/** Sugerencias EN VIVO. Acepta AbortSignal para cancelar con el debounce. */
+export async function autocompleteAddresses(query: string, session: string, signal?: AbortSignal): Promise<AddressPrediction[]> {
+  const q = query.trim()
+  if (q.length < 3) return []
+  const res = await api.get<AddressPrediction[]>('/address/autocomplete/', { params: { q, session }, signal })
+  return Array.isArray(res.data) ? res.data : []
+}
+
+/** Resuelve una predicción (place_id) a su dirección completa, al seleccionarla. */
+export async function getAddressDetails(placeId: string, session: string): Promise<AddressResult> {
+  const res = await api.get<AddressResult>('/address/details/', { params: { place_id: placeId, session } })
+  return res.data
+}
+
 /** Compone una dirección legible a partir del resultado estructurado. */
 export function formatAddress(a: AddressResult): string {
   const linea1 = [a.street, a.house_number].filter(Boolean).join(' ')

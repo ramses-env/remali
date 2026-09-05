@@ -31,7 +31,7 @@ class SolicitudFactura(models.Model):
     tipo = models.CharField(max_length=6, choices=TIPOS)
     venta = models.ForeignKey('ventas.Venta', null=True, blank=True, on_delete=models.CASCADE, related_name='solicitudes_factura')
     renta = models.ForeignKey('renta.Renta', null=True, blank=True, on_delete=models.CASCADE, related_name='solicitudes_factura')
-    empresa = models.ForeignKey('empresas.Empresa', null=True, blank=True, on_delete=models.SET_NULL, related_name='solicitudes_factura')
+    cliente = models.ForeignKey('clientes.Cliente', null=True, blank=True, on_delete=models.SET_NULL, related_name='solicitudes_factura')
 
     # ── Receptor (snapshot fiscal al momento de la solicitud) ──
     rfc = models.CharField(max_length=20, blank=True, default='')
@@ -67,7 +67,10 @@ class SolicitudFactura(models.Model):
     @property
     def folio_origen(self):
         if self.venta_id:
-            return f'V-{self.venta_id}'
+            # Folio de la venta (VEN-AAAA-NNNN) si lo tiene; los históricos sin
+            # folio caen al identificador corto de siempre.
+            folio = getattr(self.venta, 'folio', None) if self.venta else None
+            return folio or f'V-{self.venta_id}'
         if self.renta_id:
             return f'R-{self.renta_id}'
         return '—'
@@ -86,9 +89,9 @@ class SolicitudFactura(models.Model):
 
     # ── Alta desde una venta o renta ──
     @classmethod
-    def registrar(cls, *, venta=None, renta=None, empresa=None, receptor=None, forma_pago='', concepto=''):
+    def registrar(cls, *, venta=None, renta=None, cliente=None, receptor=None, forma_pago='', concepto=''):
         """Crea (o devuelve la existente) la solicitud a partir de una venta o renta.
-        Prioriza el snapshot fiscal de la empresa; si no hay, usa `receptor` (mostrador)."""
+        Prioriza el snapshot fiscal del cliente del padrón; si no hay, usa `receptor`."""
         obj = venta or renta
         if obj is None:
             return None
@@ -98,9 +101,9 @@ class SolicitudFactura(models.Model):
             return existente
 
         receptor = receptor or {}
-        if empresa is not None:
-            rfc, razon = empresa.rfc, empresa.nombre
-            cp, regimen, uso, email = empresa.codigo_postal, empresa.regimen_fiscal, empresa.uso_cfdi, empresa.email
+        if cliente is not None:
+            rfc, razon = cliente.rfc, (cliente.razon_social or cliente.nombre)
+            cp, regimen, uso, email = (cliente.cp_fiscal or cliente.codigo_postal), cliente.regimen_fiscal, cliente.uso_cfdi, (cliente.email_fiscal or cliente.email)
         else:
             rfc = (receptor.get('rfc') or '').strip().upper()
             razon = (receptor.get('razon_social') or '').strip()
@@ -120,7 +123,7 @@ class SolicitudFactura(models.Model):
 
         return cls.objects.create(
             tipo='venta' if venta else 'renta',
-            venta=venta, renta=renta, empresa=empresa,
+            venta=venta, renta=renta, cliente=cliente,
             rfc=rfc, razon_social=razon, codigo_postal=cp, regimen_fiscal=regimen, uso_cfdi=uso, email=email,
             subtotal=subtotal, iva=iva, total=total,
             forma_pago=FORMA_PAGO_SAT.get((forma_pago or '').lower(), ''),

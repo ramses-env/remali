@@ -5,3 +5,6 @@ class CotizacionesConfig(AppConfig):
     default_auto_field = 'django.db.models.BigAutoField'
     name = 'cotizaciones'
     verbose_name = 'Cotizaciones'
+
+    def ready(self):
+        from . import signals  # noqa: F401

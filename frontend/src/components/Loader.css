@@ -1,5 +1,5 @@
-/* Overlay de carga a pantalla completa. Lo dispara RouteLoader en cada cambio
-   de ruta. El scrim sigue el tema (antes era blanco fijo: destellaba en oscuro). */
+/* Overlay de carga a pantalla completa. Lo muestra CargaGlobal cuando hay una
+   petición real en vuelo. El scrim sigue el tema (antes era blanco fijo). */
 .loader-overlay {
   position: fixed;
   inset: 0;

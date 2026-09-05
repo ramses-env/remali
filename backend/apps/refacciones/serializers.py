@@ -9,7 +9,7 @@ class RefaccionSerializer(serializers.ModelSerializer):
         model = Refaccion
         fields = [
             'id', 'nombre', 'descripcion', 'precio_venta', 'stock', 'stock_minimo',
-            'para_venta', 'ubicacion', 'codigo_barras', 'bajo_stock', 'fecha_creacion',
+            'para_venta', 'ubicacion', 'categoria', 'codigo_barras', 'bajo_stock', 'fecha_creacion',
         ]
         extra_kwargs = {
             # Si viene vacío, el modelo genera el código automáticamente.

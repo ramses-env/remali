@@ -39,14 +39,21 @@ class RentaFlowTest(TestCase):
         self.inv.refresh_from_db()
         self.assertEqual(self.inv.estado, 'rentado')
 
-    def test_devolver_tarde_genera_recargo(self):
+    def test_devolver_tarde_NO_genera_recargo(self):
+        """REMALI no cobra por tardarse: el retraso no cambia lo que se debe.
+
+        Se cobraba solo (`tarifa_diaria × días`) y nadie lo había pedido. Lo que
+        sustituye al recargo son los recordatorios (`recordar_rentas`): en vez de
+        cobrarle por tardarse, no se le deja olvidar. La máquina se devuelve
+        igual y la unidad se libera igual.
+        """
         r = Renta.objects.create(
             inventario=self.inv, modalidad='dia', duracion=2, direccion='Obra Norte'
         )
         self.assertEqual(r.total, Decimal('200.00'))
         r.finalizar(fecha_devolucion=r.fecha_fin + timedelta(days=2))
-        self.assertEqual(r.recargo, Decimal('200.00'))   # 100/día x 2 días de retraso
-        self.assertEqual(r.total, Decimal('400.00'))
+        self.assertEqual(r.recargo, Decimal('0.00'))
+        self.assertEqual(r.total, Decimal('200.00'))     # intacto
         self.inv.refresh_from_db()
         self.assertEqual(self.inv.estado, 'disponible')
         self.assertIsNotNone(r.fecha_devolucion_real)
@@ -75,12 +82,17 @@ class RentaFlowTest(TestCase):
         self.assertEqual(resp2.status_code, 400)
 
     def test_cancelar_libera_unidad(self):
+        # Cancelar es acción sensible: exige el PIN personal del operador.
+        from maquinaria.seguridad import definir_codigo
+        definir_codigo(self.user, '123456')
+
         r = Renta.objects.create(
             inventario=self.inv, modalidad='dia', duracion=1, direccion='Obra X'
         )
         self.inv.refresh_from_db()
         self.assertEqual(self.inv.estado, 'rentado')
-        resp = self.client.post(reverse('cancelar_renta', args=[r.id]), {}, format='json')
+        resp = self.client.post(reverse('cancelar_renta', args=[r.id]),
+                                {'codigo_seguridad': '123456'}, format='json')
         self.assertEqual(resp.status_code, 200, resp.data)
         self.inv.refresh_from_db()
         self.assertEqual(self.inv.estado, 'disponible')

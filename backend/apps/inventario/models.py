@@ -1,5 +1,7 @@
+from django.conf import settings
 from django.db import models
 from django.db.models import Max
+from django.utils import timezone
 from maquinaria.models import Equipo
 
 
@@ -17,6 +19,7 @@ class Inventario(models.Model):
     ESTADOS = [
         ('disponible', 'Disponible'),
         ('rentado', 'Rentado'),
+        ('apartado', 'Apartado'),          # reservada por una venta con anticipo (apartado)
         ('mantenimiento', 'Mantenimiento'),
         ('vendido', 'Vendido'),
     ]
@@ -31,15 +34,12 @@ class Inventario(models.Model):
         related_name='unidades'
     )
 
-    # 👉 CÓDIGO INTERNO AUTOMÁTICO (IDENTIFICADOR REAL)
     codigo = models.CharField(
-    max_length=20,
-    unique=True,
-    editable=False
-)    # 👈 agregar
+        max_length=20,
+        unique=True,
+        editable=False
+    )
 
-
-    # 👉 SERIAL DEL FABRICANTE (OPCIONAL)
     numero_serie = models.CharField(
         max_length=100,
         blank=True,
@@ -63,6 +63,33 @@ class Inventario(models.Model):
         default="Bodega"
     )
 
+    # ⭐ NUEVO CAMPO: Autoriza temporalmente rentar una unidad NUEVA.
+    # Motivos típicos:
+    #   - Sustitución de seminueva dañada en una renta activa.
+    #   - Alta demanda de renta, sacar nueva para cubrir.
+    # La condición NO cambia: sigue siendo NUEVA (al devolverse, si no se
+    # usó, puede volver a venta como nueva). Esta bandera es un permiso
+    # operativo, no un cambio de propiedad del activo.
+    autorizada_para_renta = models.BooleanField(
+        default=False,
+        help_text=(
+            'Autoriza rentar esta unidad aunque sea NUEVA. '
+            'Marcar por: sustitución de unidad dañada, demanda extraordinaria, etc.'
+        ),
+    )
+    autorizada_renta_en = models.DateTimeField(
+        null=True, blank=True, editable=False,
+    )
+    autorizada_renta_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True, blank=True, on_delete=models.SET_NULL, editable=False,
+        related_name='+'
+    )
+    autorizada_renta_nota = models.CharField(
+        max_length=255, blank=True, default='',
+        help_text='Motivo por el cual se autorizó la renta de una unidad nueva.',
+    )
+
     fecha_creacion = models.DateTimeField(auto_now_add=True)
     fecha_actualizacion = models.DateTimeField(auto_now=True)
 
@@ -70,15 +97,18 @@ class Inventario(models.Model):
     # GENERADOR DE CÓDIGO
     # ============================
 
-    def generar_codigo(self):
+    @staticmethod
+    def proximo_codigo(equipo):
         """
-        Genera un código/etiqueta automático a partir del modelo.
+        Predice el código/etiqueta que se asignará a la próxima unidad de
+        `equipo`, SIN crear nada. Misma lógica que usa `generar_codigo` al
+        guardar, para poder mostrarlo en una confirmación antes del alta.
         Ejemplo: Taladro -> TAL-0001, HM-1810 -> HM1-0001
         """
         import re
 
         # Prefijo: primeros 3 caracteres alfanuméricos del modelo, en mayúsculas
-        limpio = re.sub(r'[^A-Za-z0-9]', '', self.equipo.modelo or '')
+        limpio = re.sub(r'[^A-Za-z0-9]', '', getattr(equipo, 'modelo', '') or '')
         prefijo = (limpio[:3] or 'EQ').upper()
 
         ultimo = Inventario.objects.filter(
@@ -95,6 +125,10 @@ class Inventario(models.Model):
             numero = 1
 
         return f"{prefijo}-{numero:04d}"
+
+    def generar_codigo(self):
+        """Código para ESTA unidad al guardarla (delega en `proximo_codigo`)."""
+        return Inventario.proximo_codigo(self.equipo)
 
     # ============================
     # SAVE OVERRIDE
@@ -122,9 +156,19 @@ class Inventario(models.Model):
 
     @property
     def disponible_para_renta(self):
-        if self.condicion == 'nueva':
+        """
+        Regla actualizada:
+          - Siempre puede rentarse una 'seminueva' disponible.
+          - Una 'nueva' SÓLO puede rentarse SI fue autorizada
+            (`autorizada_para_renta=True`) y está disponible.
+          - En cualquier otro caso, no.
+        """
+        if self.estado != 'disponible':
             return False
-        return self.estado == 'disponible'
+        if self.condicion == 'seminueva':
+            return True
+        # condicion == 'nueva'
+        return bool(self.autorizada_para_renta)
 
     # Métodos usados por las vistas de renta/venta
     def puede_venderse(self):
@@ -132,6 +176,62 @@ class Inventario(models.Model):
 
     def puede_rentarse(self):
         return self.disponible_para_renta
+
+    # ============================
+    # TRANSICIONES OPERATIVAS NUEVAS
+    #  (pensadas para sustitución / demanda extraordinaria)
+    # ============================
+
+    def autorizar_para_renta(self, *, motivo='', usuario=None):
+        """
+        Marca una unidad como autorizada para rentarse aunque sea NUEVA.
+        Solo cambia la bandera de autorización; NO ocupa la unidad.
+        Devuelve True si se produjo un cambio.
+
+        Se usa típicamente en dos escenarios:
+          a) Sustitución: seminueva en renta activa se daña → se autoriza
+             la nueva para enviarla con el cliente.
+          b) Demanda extraordinaria: no hay seminuevas disponibles → se
+             decide sacar una nueva a renta.
+        """
+        if self.autorizada_para_renta:
+            return False
+        self.autorizada_para_renta = True
+        self.autorizada_renta_en = timezone.now()
+        self.autorizada_renta_nota = motivo or ''
+        if usuario is not None and getattr(usuario, 'is_authenticated', False):
+            self.autorizada_renta_por = usuario
+        self.save(update_fields=[
+            'autorizada_para_renta', 'autorizada_renta_en',
+            'autorizada_renta_por', 'autorizada_renta_nota',
+            'fecha_actualizacion',
+        ])
+        return True
+
+    def revocar_autorizacion_renta(self, *, motivo=''):
+        """
+        Revoca la autorización especial de renta (solo si la unidad NO
+        está rentada ni reservada). Útil cuando la unidad fue autorizada
+        por demanda, la demanda pasó y la queremos de regreso en venta
+        como nueva.
+        """
+        if not self.autorizada_para_renta:
+            return False
+        if self.estado in ('rentado',):
+            raise ValueError(
+                f'No se puede revocar: la unidad {self.codigo} está rentada.'
+            )
+        self.autorizada_para_renta = False
+        if motivo:
+            self.autorizada_renta_nota = (
+                (self.autorizada_renta_nota or '')
+                + f' | Revocado: {motivo}'
+            )[-255:]
+        self.save(update_fields=[
+            'autorizada_para_renta', 'autorizada_renta_nota',
+            'fecha_actualizacion',
+        ])
+        return True
 
     # ============================
     # TRANSICIONES DE ESTADO
@@ -152,12 +252,47 @@ class Inventario(models.Model):
         if campos:
             campos.append('fecha_actualizacion')
             self.save(update_fields=campos)
+            # Volver a estar libre es noticia para quien cotizó este equipo y se
+            # quedó sin él. Va AQUÍ, en el único punto por el que pasan todos
+            # los cambios de estado, y no en `liberar()`: una unidad también
+            # vuelve a la bodega al salir del taller o al cancelarse una venta,
+            # y esos caminos habrían quedado mudos.
+            if 'estado' in campos and nuevo_estado == 'disponible' and self.equipo_id:
+                try:
+                    from cotizaciones.models import avisar_equipo_liberado
+                    avisar_equipo_liberado(self.equipo_id)
+                except Exception:
+                    # Un aviso que falla no puede deshacer una devolución que ya
+                    # ocurrió: la máquina está en la bodega, con correo o sin él.
+                    pass
 
     def ocupar_por_renta(self, ubicacion='Cliente (en renta)'):
-        """disponible -> rentado. Única vía para ocupar la unidad por una renta."""
+        """
+        disponible -> rentado.
+        Versión flexible: la regla de SI puede rentarse ya no depende solo
+        de condición seminueva; respeta `puede_rentarse()` (nueva+autorizada
+        también es válida).
+        """
         if self.estado != 'disponible':
+            # Quien lee esto es el técnico parado frente a la máquina, no un
+            # programador: el motivo va en su idioma y con la salida a la mano.
+            motivo = {
+                'rentado': 'ya está rentada en otra renta',
+                'apartado': 'está apartada por una venta con anticipo',
+                'mantenimiento': 'está en el taller',
+                'vendido': 'ya se vendió',
+            }.get(self.estado, f'está en estado {self.estado}')
             raise ValueError(
-                f"La unidad {self.codigo} no está disponible (estado actual: {self.estado})."
+                f'No se puede entregar la unidad {self.codigo}: {motivo}. '
+                f'Avisa a administración para que asigne otra unidad.'
+            )
+        if not self.puede_rentarse():
+            detalle = (
+                'no fue autorizada para renta' if self.condicion == 'nueva'
+                else 'no está en condición rentable'
+            )
+            raise ValueError(
+                f"La unidad {self.codigo} no se puede rentar: {detalle}."
             )
         self._set_estado('rentado', ubicacion)
 
@@ -166,16 +301,85 @@ class Inventario(models.Model):
         if self.estado == 'rentado':
             self._set_estado('disponible', ubicacion)
 
+    # ── Apartado (venta con anticipo) ────────────────────────────────
+    def renta_comprometida(self):
+        """La renta activa o RESERVADA que ya tiene apalabrada esta unidad, si hay.
+
+        Una reserva a futuro no cambia el estado de la unidad —a propósito: que
+        esté apartada para el día 20 no impide rentarla hoy y recogerla el 19—,
+        así que el estado por sí solo no dice si la unidad ya tiene dueño. Para
+        eso hay que preguntarle a las rentas.
+        """
+        from renta.models import Renta
+        return (Renta.objects
+                .filter(inventario=self, estado__in=('activa', 'reservada'))
+                .order_by('fecha_inicio')
+                .first())
+
+    def _exigir_libre_de_renta(self, verbo):
+        """Impide llevarse una unidad que una renta ya tiene apalabrada.
+
+        Sin esto, el admin elegía APi-0001 para una renta del jueves, alguien la
+        vendía el martes, y el técnico se estrellaba al ir a entregarla: la
+        unidad ya no existía para rentar y la renta seguía viva.
+        """
+        r = self.renta_comprometida()
+        if r is None:
+            return
+        cuando = f'{r.fecha_inicio:%d/%m}' + (f' al {r.fecha_fin:%d/%m}' if r.fecha_fin else '')
+        estado = 'rentada' if r.estado == 'activa' else 'reservada'
+        raise ValueError(
+            f'La unidad {self.codigo} no se puede {verbo}: está {estado} '
+            f'en la renta #{r.id} ({cuando}). Cancela esa renta o elige otra unidad.'
+        )
+
+    def apartar(self, ubicacion='Apartado (anticipo)'):
+        """disponible -> apartado. Reserva la unidad para una venta con anticipo;
+        deja de estar disponible para venta/renta hasta que se entregue o cancele."""
+        if self.estado != 'disponible':
+            raise ValueError(
+                f"La unidad {self.codigo} no está disponible (estado actual: {self.estado})."
+            )
+        self._exigir_libre_de_renta('apartar')
+        self._set_estado('apartado', ubicacion)
+
+    def entregar_apartado(self):
+        """apartado -> vendido (al liquidar y entregar el apartado)."""
+        if self.estado == 'apartado':
+            self._set_estado('vendido')
+
+    def liberar_apartado(self, ubicacion='Bodega'):
+        """apartado -> disponible (al cancelar el apartado)."""
+        if self.estado == 'apartado':
+            self._set_estado('disponible', ubicacion)
+
     def enviar_mantenimiento(self):
         self._set_estado('mantenimiento', 'Taller')
 
     def salir_mantenimiento(self):
         self._set_estado('disponible', 'Bodega')
 
-    def marcar_vendido(self):
+    def marcar_vendido(self, forzar=False):
+        """disponible/apartado -> vendido.
+
+        `forzar` solo para casos donde la venta de una unidad comprometida sea
+        deliberada (y quede escrito quién lo decidió); por defecto se protege.
+        """
         if self.estado == 'vendido':
             return
+        if not forzar:
+            self._exigir_libre_de_renta('vender')
         self._set_estado('vendido')
+
+    def liberar_venta(self, ubicacion='Bodega'):
+        """vendido/apartado -> disponible (al cancelar la venta o quitar la máquina).
+
+        Es el espejo público de `marcar_vendido`/`apartar`. Existe para que la
+        venta no tenga que llamar al `_set_estado` privado: la regla de qué
+        estados pueden regresar al patio vive aquí, con las demás.
+        """
+        if self.estado in ('vendido', 'apartado'):
+            self._set_estado('disponible', ubicacion)
 
     def marcar_rentado(self):
         """Compatibilidad hacia atrás: delega en la vía central."""
@@ -247,10 +451,39 @@ class OrdenReparacion(models.Model):
     folio = models.CharField(max_length=20, unique=True, editable=False, blank=True)
     tipo = models.CharField(max_length=10, choices=TIPOS, default='cliente')
 
-    # Cliente
+    # ── Cliente ──
+    # `cliente`/`contacto` son la identidad NUEVA (padrón único). Los campos de
+    # abajo —cliente_nombre, cliente_telefono, empresa, usuario— son la forma
+    # vieja: espejo de solo lectura durante la fase 1, se van en la fase 3.
+    # Las órdenes `tipo='interna'` (máquina propia) NUNCA llevan cliente.
+    cliente = models.ForeignKey(
+        'clientes.Cliente',
+        null=True, blank=True,
+        on_delete=models.SET_NULL,
+        related_name='reparaciones',
+    )
+    contacto = models.ForeignKey(
+        'clientes.Contacto',
+        null=True, blank=True,
+        on_delete=models.SET_NULL,
+        related_name='reparaciones',
+    )
+
     cliente_nombre = models.CharField(max_length=200, blank=True, default='')
     cliente_telefono = models.CharField(max_length=40, blank=True, default='')
-    empresa = models.ForeignKey('empresas.Empresa', null=True, blank=True, on_delete=models.SET_NULL, related_name='ordenes_reparacion')
+    # Cuenta de cliente ligada (por la liga de vinculación): habilita "Mis
+    # reparaciones" en su panel. Distinta del cliente de mostrador (texto libre).
+    usuario = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='reparaciones_cliente',
+    )
+    # Liga de un solo uso (con caducidad): el admin la genera, el cliente la abre
+    # con su sesión y la orden queda en SU cuenta.
+    token_vinculo = models.CharField(max_length=32, unique=True, null=True, blank=True, editable=False)
+    token_vinculo_expira = models.DateTimeField(null=True, blank=True, editable=False)
+    # Liga PÚBLICA de seguimiento (permanente, solo lectura): el cliente sin
+    # cuenta ve el avance de su reparación con esta liga, sin registrarse.
+    token_publico = models.CharField(max_length=32, unique=True, null=True, blank=True, editable=False)
 
     # Equipo: propio (unidad) o del cliente (descripción libre)
     unidad = models.ForeignKey(Inventario, null=True, blank=True, on_delete=models.SET_NULL, related_name='ordenes_reparacion')
@@ -275,18 +508,26 @@ class OrdenReparacion(models.Model):
         ordering = ['-fecha_recibida']
 
     def generar_folio(self):
-        ultimo = OrdenReparacion.objects.filter(folio__startswith='OR-').aggregate(m=Max('folio'))['m']
+        # Folio por ejercicio: OR-AAAA-NNNN, el consecutivo reinicia cada año
+        # (mismo patrón que COT/VEN). Se filtra por el prefijo del año, así el
+        # Max() (comparación de texto) coincide con el orden numérico del año.
+        from server.periodos import anio_actual
+        prefijo = f'OR-{anio_actual()}-'
+        ultimo = OrdenReparacion.objects.filter(folio__startswith=prefijo).aggregate(m=Max('folio'))['m']
         n = 1
         if ultimo:
             try:
                 n = int(ultimo.split('-')[-1]) + 1
             except (ValueError, IndexError):
                 n = 1
-        return f'OR-{n:04d}'
+        return f'{prefijo}{n:04d}'
 
     def save(self, *args, **kwargs):
         if not self.folio:
             self.folio = self.generar_folio()
+        if not self.token_publico:
+            import secrets
+            self.token_publico = secrets.token_hex(16)
         super().save(*args, **kwargs)
 
     @property
@@ -299,8 +540,8 @@ class OrdenReparacion(models.Model):
 
     @property
     def cliente_display(self):
-        if self.empresa_id and self.empresa:
-            return self.empresa.nombre
+        if self.cliente_id and self.cliente:
+            return self.cliente.nombre
         return self.cliente_nombre or 'Cliente'
 
     @property

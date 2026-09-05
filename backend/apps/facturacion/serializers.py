@@ -12,15 +12,16 @@ class SolicitudFacturaSerializer(serializers.ModelSerializer):
     class Meta:
         model = SolicitudFactura
         fields = [
-            'id', 'tipo', 'venta', 'renta', 'empresa', 'folio_origen',
+            'id', 'tipo', 'venta', 'renta', 'cliente', 'folio_origen',
             'rfc', 'razon_social', 'codigo_postal', 'regimen_fiscal', 'uso_cfdi', 'email',
             'subtotal', 'iva', 'total', 'forma_pago', 'concepto',
             'estado', 'uuid', 'fecha_timbrado', 'notas',
-            'cliente_display', 'datos_completos', 'fecha_origen', 'creada', 'actualizada',
+            'cliente_display', 'datos_completos', 'fecha_origen',
+            'creada', 'actualizada',
         ]
         # El alta se hace desde las ventas/rentas; aquí solo se completan/marcan.
         read_only_fields = [
-            'tipo', 'venta', 'renta', 'empresa', 'subtotal', 'iva', 'total',
+            'tipo', 'venta', 'renta', 'cliente', 'subtotal', 'iva', 'total',
             'concepto', 'creada', 'actualizada',
         ]
 

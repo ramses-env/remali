@@ -3,13 +3,14 @@ import { useNavigate } from 'react-router-dom'
 import { gsap } from 'gsap'
 import { ScrollTrigger } from 'gsap/ScrollTrigger'
 import ProductCard from '../components/ProductCard'
-import api from '../lib/api'
+import { useDatos } from '../lib/datos'
+import Migas from '../components/Migas'
 import resolveMediaUrl from '../lib/resolveMediaUrl'
 import PriceUnitToggle from '../components/PriceUnitToggle'
 import FloatingFilters from '../components/FloatingFilters'
 import FilterSidebar from '../components/FilterSidebar'
 import { usePriceUnit } from '../store/priceUnit'
-import { downloadEquiposPdf } from '../lib/pdf'
+import { toNumber } from '../lib/utils'
 
 gsap.registerPlugin(ScrollTrigger)
 
@@ -22,19 +23,34 @@ type Equipo = {
   precio_dia?: number | string | null
   precio_semana?: number | string | null
   precio_mes?: number | string | null
+  precio_venta?: number | string | null
+  condicion?: string
+  modo?: 'venta' | 'renta'
+  modos?: Array<'venta' | 'renta'>
+  promo_pct?: number
   estado?: string
   tipo?: { id: number; nombre: string }
   categoria?: { id: number; nombre: string }
   marca?: { id: number; nombre: string }
   disponible_venta?: boolean
   disponible_renta?: boolean
+  ofrece_venta?: boolean
+  ofrece_renta?: boolean
+  venta_disponible?: boolean
+  renta_disponible?: boolean
+  venta_estado?: 'sin_venta' | 'inmediata' | 'sobre_pedido' | 'agotado'
+  renta_estado?: 'sin_renta' | 'disponible' | 'agotado'
+  entrega_estimada_dias?: number | null
   condiciones?: string[]
-}
-
-function toNumber(v: any): number | null {
-  const n = typeof v === 'string' ? parseFloat(v) : typeof v === 'number' ? v : null
-  if (n === null || Number.isNaN(n)) return null
-  return n
+  permite_sobre_pedido?: boolean
+  disponibilidad_detallada?: Record<string, {
+    venta_disponible: boolean
+    renta_disponible: boolean
+    venta_estado: 'sin_venta' | 'inmediata' | 'sobre_pedido' | 'agotado'
+    stock_venta: number
+    stock_renta: number
+    entrega_estimada_dias?: number | null
+  }>
 }
 
 export default function EquiposList() {
@@ -43,7 +59,6 @@ export default function EquiposList() {
   const gridRef = useRef<HTMLDivElement | null>(null)
   const firstCardRef = useRef<HTMLDivElement | null>(null)
 
-  const [items, setItems] = useState<Equipo[]>([])
   const { unit } = usePriceUnit()
   const [sortKey, setSortKey] = useState<'price-asc' | 'price-desc' | 'title' | 'recientes'>('recientes')
   const [page, setPage] = useState<number>(0)
@@ -53,9 +68,28 @@ export default function EquiposList() {
   const [inputValue, setInputValue] = useState('')
   const [showSuggestions, setShowSuggestions] = useState(false)
   const [activeSuggestion, setActiveSuggestion] = useState<number>(-1)
-  const [loading, setLoading] = useState(true)
-  const [loadError, setLoadError] = useState(false)
   const [uso, setUso] = useState<'' | 'venta' | 'renta'>('')
+
+  // Popover de descarga: el cliente elige qué incluir en el PDF.
+  const [dlOpen, setDlOpen] = useState(false)
+  const [dlVenta, setDlVenta] = useState(true)
+  const [dlRenta, setDlRenta] = useState(true)
+  const [dlTodosPrecios, setDlTodosPrecios] = useState(true)
+  const dlRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!dlOpen) return
+    const onDoc = (e: MouseEvent) => {
+      if (dlRef.current && !dlRef.current.contains(e.target as Node)) setDlOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setDlOpen(false) }
+    document.addEventListener('mousedown', onDoc)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDoc)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [dlOpen])
 
   // Animaciones GSAP de entrada
   useEffect(() => {
@@ -66,8 +100,11 @@ export default function EquiposList() {
     return () => ctx.revert()
   }, [])
 
-  useEffect(() => {
-    setLoading(true)
+  /* La URL del catálogo con los filtros puestos. Se calcula en un memo y no
+     dentro del efecto porque ES la llave de la caché: dos visitas con los mismos
+     filtros son la misma llave, y por eso volver atrás desde una ficha ya no
+     vuelve a pedir nada — pinta lo de antes y refresca por debajo. */
+  const urlCatalogo = useMemo(() => {
     const params: Record<string, string> = {}
     const categories = filters['category']?.filter(Boolean) || []
     if (categories.length) params['category'] = categories.join(',')
@@ -86,13 +123,20 @@ export default function EquiposList() {
     }
     if (uso) params['uso'] = uso
     const qs = Object.entries(params).map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&')
-    setLoadError(false)
-    api.get<Equipo[]>(`/equipos/?${qs}${search}`)
-      .then(r => setItems(Array.isArray(r.data) ? r.data : []))
-      // Sin datos-mock: mostrar productos falsos a un cliente real es engañoso.
-      .catch(() => { setItems([]); setLoadError(true) })
-      .finally(() => setLoading(false))
+    return `/equipos/?${qs}${search}`
   }, [filters, query, uso])
+
+  // Sin datos-mock: mostrar productos falsos a un cliente real es engañoso; si
+  // esto falla y no hay nada cacheado, la rejilla enseña el estado de error.
+  const { datos: catalogo, cargando, refrescando, error } = useDatos<Equipo[]>(urlCatalogo)
+  const loading = cargando
+  const loadError = Boolean(error) && !catalogo
+
+  /* Derivado, no copiado a estado: el catálogo ya vive en la caché y tenerlo
+     además en un `useState` sincronizado por efecto son dos copias del mismo
+     dato que pueden discrepar durante un render, más un render de más en cada
+     llegada. */
+  const items = useMemo(() => (Array.isArray(catalogo) ? catalogo : []), [catalogo])
 
   useEffect(() => {
     const w = window.innerWidth
@@ -114,46 +158,123 @@ export default function EquiposList() {
 
   useEffect(() => { setPage(0) }, [query, filters, sortKey, uso])
 
-  // Categorías para chips rápidos (derivadas del catálogo cargado)
-  const categoriasChips = useMemo(() => {
-    const m = new Map<string, number>()
-    items.forEach(e => { const n = e.categoria?.nombre; if (n) m.set(n, (m.get(n) || 0) + 1) })
-    return [...m.entries()].sort((a, b) => b[1] - a[1]).map(([nombre]) => nombre)
-  }, [items])
-  const activeCat = (filters['category'] || [])[0] || ''
-  const setCat = (nombre: string) => setFilters(f => {
-    const next = { ...f }
-    if (!nombre || activeCat === nombre) delete next['category']
-    else next['category'] = [nombre]
-    return next
-  })
+  // (Se quitó el filtro de categorías por chips amarillos del hero: el catálogo
+  //  muestra todas. El filtrado sigue por búsqueda y por el panel de Filtros.)
 
-  const asProduct = useMemo(() => (e: Equipo) => {
+  // ⭐ FIX: UNA CARD POR CADA (CONDICIÓN × MODO) VÁLIDO.
+  // Antes: 1 card por modo, colapsando todas las condiciones en una sola
+  //        (p. ej. si había Martillo NUEVO + SEMINUEVO para venta, solo
+  //         salía una card "Nueva" y la Seminueva se perdía).
+  // Ahora:  Si hay 2 condiciones válidas, se generan 2 cards de venta
+  //         (una etiquetada "Nueva", otra "Seminueva"), cada una con su
+  //         disponibilidad específica.
+  //
+  // Jerarquía de fuentes:
+  //   1. disponibilidad_detallada (backend nuevo, info por condición)
+  //   2. Fallback a la lógica anterior (backend viejo, info colapsada)
+  const asProducts = useMemo(() => (e: Equipo) => {
     const d = toNumber(e.precio_dia)
     const s = toNumber(e.precio_semana)
     const m = toNumber(e.precio_mes)
-    const price =
+    const rentaPrice =
       unit === 'dia' ? (d ?? s ?? m ?? 0) :
       unit === 'semana' ? (s ?? (d ? d * 7 : null) ?? m ?? 0) :
       (m ?? (d ? d * 30 : null) ?? (s ? s * 4 : null) ?? 0)
-    return {
-      id: e.id,
-      title: e.modelo,
-      price,
-      image: resolveMediaUrl(e.imagen || (e.imagenes || [])[0] || '') || '',
-      description: e.descripcion || '',
-      condition: (e as any).condicion || '',
-      brand: (e as any).marca?.nombre || '',
-      category: (e as any).categoria?.nombre || '',
-      type: (e as any).tipo?.nombre || '',
-      ventaOk: e.disponible_venta ?? true,
-      rentaOk: e.disponible_renta ?? false,
-      condiciones: e.condiciones || [],
+    const promo = Math.max(0, Math.min(90, e.promo_pct || 0))
+    const precioVentaNum = toNumber(e.precio_venta) ?? 0
+    const precioVentaOk = precioVentaNum > 0
+    const precioRentaOk = !!((d && d > 0) || (s && s > 0) || (m && m > 0))
+
+    // ═══════════════════════════════════════════════════════════════
+    // BUILDER: crea una card PARA UNA CONDICIÓN + MODO ESPECÍFICOS.
+    // ═══════════════════════════════════════════════════════════════
+    const card = (modo: 'venta' | 'renta', condition: string, opts: {
+      estado: 'inmediata' | 'disponible' | 'sobre_pedido' | 'agotado'
+      entregaDias?: number | null
+    }) => {
+      const bruto = modo === 'venta' ? precioVentaNum : rentaPrice
+      const price = promo ? Math.round(bruto * (1 - promo / 100) * 100) / 100 : bruto
+      // `estado` (del backend) es la fuente de verdad; `disponible` se deriva de
+      // él y se conserva por compatibilidad con el resto del archivo (chips, PDF…).
+      const disponible = opts.estado === 'inmediata' || opts.estado === 'disponible'
+
+      return {
+        id: e.id,
+        key: `${e.id}-${condition}-${modo}`,
+        title: e.modelo,
+        price,
+        priceOriginal: promo ? bruto : undefined,
+        promo,
+        modo,
+        estado: opts.estado,
+        disponible,
+        precioDia: d,
+        precioSemana: s,
+        precioMes: m,
+        image: resolveMediaUrl(e.imagen || (e.imagenes || [])[0] || '') || '',
+        description: e.descripcion || '',
+        condition,
+        brand: (e as any).marca?.nombre || '',
+        category: (e as any).categoria?.nombre || '',
+        type: (e as any).tipo?.nombre || '',
+        entregaDias: opts.entregaDias ?? e.entrega_estimada_dias ?? null,
+        condiciones: e.condiciones || [],
+      }
     }
+
+    type Producto = ReturnType<typeof card>
+    const out: Producto[] = []
+
+    // ═══════════════════════════════════════════════════════════════
+    //  DISPONIBILIDAD — fuente de verdad: el BACKEND.
+    //  Cada equipo expone CAPACIDAD + ESTADO EN VIVO por modo:
+    //    ofrece_venta / venta_estado  (sin_venta|inmediata|sobre_pedido|agotado)
+    //    ofrece_renta / renta_estado  (sin_renta|disponible|agotado)
+    //  Reglas de negocio (ya resueltas en el backend, ver models.py):
+    //   • Venta pública = SOLO línea NUEVA. Seminueva → 'sin_venta'
+    //     (se vende internamente, pero no se promociona al público).
+    //   • Nueva sin stock pero permite_sobre_pedido → 'sobre_pedido';
+    //     al LLEGAR stock vuelve a 'inmediata'; sin ninguna vía → 'agotado'.
+    //   • Renta = línea SEMINUEVA (o nueva autorizada, muy rara vez).
+    //  Generamos como máximo UNA card de venta y UNA de renta por equipo.
+    //  (Con fallbacks por si el backend aún no manda las props nuevas.)
+    // ═══════════════════════════════════════════════════════════════
+    const ventaEstado: 'sin_venta' | 'inmediata' | 'sobre_pedido' | 'agotado' =
+      e.venta_estado ?? (precioVentaOk
+        ? ((e.venta_disponible ?? e.disponible_venta) ? 'inmediata'
+            : (e.permite_sobre_pedido ? 'sobre_pedido' : 'agotado'))
+        : 'sin_venta')
+    const ofreceVenta = e.ofrece_venta ?? (precioVentaOk && ventaEstado !== 'sin_venta')
+
+    const rentaEstado: 'sin_renta' | 'disponible' | 'agotado' =
+      e.renta_estado ?? (precioRentaOk
+        ? ((e.renta_disponible ?? e.disponible_renta) ? 'disponible' : 'agotado')
+        : 'sin_renta')
+    const ofreceRenta = e.ofrece_renta ?? (precioRentaOk && rentaEstado !== 'sin_renta')
+
+    // ——— Card de VENTA (solo línea nueva; el backend ya excluye seminueva) ———
+    if (ofreceVenta && ventaEstado !== 'sin_venta') {
+      out.push(card('venta', 'nueva', {
+        estado: ventaEstado,
+        entregaDias: e.entrega_estimada_dias,
+      }))
+    }
+
+    // ——— Card de RENTA (línea seminueva / nueva autorizada) ———
+    if (ofreceRenta && rentaEstado !== 'sin_renta') {
+      // La renta suele ser seminueva; usamos esa condición para el filtro
+      // (la card ya no muestra badge de condición, solo Venta/Renta).
+      const condRenta = (e.condiciones || []).includes('seminueva')
+        ? 'seminueva'
+        : ((e.condiciones || []).find(c => c !== 'nueva') || 'seminueva')
+      out.push(card('renta', condRenta, { estado: rentaEstado }))
+    }
+
+    return out
   }, [unit])
 
   const filteredAll = useMemo(() => {
-    let out = items.map(asProduct)
+    let out = items.flatMap(asProducts)
     const priceSel = (filters['price'] || [])[0]
     if (priceSel) {
       const [minStr, maxStr] = priceSel.split(':')
@@ -178,36 +299,68 @@ export default function EquiposList() {
         default: return b.id - a.id // recientes
       }
     })
+    // El cliente pidió los equipos de venta SEPARADOS de los de renta: en
+    // "Todos" van agrupados (venta primero), con el orden elegido dentro de
+    // cada grupo. Con un chip (Comprar/Rentar) activo el grupo ya es único.
+    out = [...out.filter(p => p.modo === 'venta'), ...out.filter(p => p.modo !== 'venta')]
     return out
-  }, [items, filters, query, sortKey, unit, asProduct])
+  }, [items, filters, query, sortKey, unit, asProducts])
+
+  // El grid respeta la pestaña activa: Comprar → SOLO cards de venta; Rentar →
+  // SOLO de renta; Todos → ambas. (Un equipo con venta Y renta —p.ej. la
+  // Mezcladora— generaba dos cards; en Comprar se colaba la de renta.)
+  // filteredAll se queda completo para el PDF y sus conteos venta/renta.
+  const filteredVista = useMemo(
+    () => (uso ? filteredAll.filter(p => p.modo === uso) : filteredAll),
+    [filteredAll, uso],
+  )
 
   const shown = useMemo(() => {
     const start = page * pageSize
-    return filteredAll.slice(start, start + pageSize)
-  }, [filteredAll, page, pageSize])
+    return filteredVista.slice(start, start + pageSize)
+  }, [filteredVista, page, pageSize])
 
-  // Animar cards cuando cambia el resultado
+  // Firma estable del conjunto visible: la animación debe dispararse cuando cambia
+  // QUÉ cards se muestran (filtros, búsqueda, página), NO cada vez que se recalcula
+  // pageSize y devuelve el MISMO conjunto en un array nuevo. Ese re-disparo a medio
+  // vuelo era lo que dejaba una card atenuada (oscura) al refrescar.
+  const shownKey = shown.map(p => p.key).join('|')
+
+  // Entrada de las cards. fromTo (NO from) es la clave: fija el estado FINAL en
+  // opacity:1 / y:0. Con .from(), GSAP INFIERE el final leyendo el estilo actual;
+  // si el efecto se re-disparaba mientras un tween anterior iba a medias, capturaba
+  // una opacidad intermedia como "final" y la card quedaba semitransparente para
+  // siempre. overwrite:'auto' mata cualquier tween previo sobre la misma card y
+  // clearProps limpia los estilos inline al terminar (la card queda con su CSS
+  // natural, siempre visible).
+  //
+  // Targeteamos SOLO el wrapper (.equipo-card-anim), no '.equipo-card' a secas:
+  // esa clase también vive en la raíz de ProductCard, así que '.equipo-card'
+  // animaba wrapper + raíz ANIDADOS y sus opacidades se multiplicaban a media
+  // animación (oscurecía de más). Con el wrapper basta: contiene a la card entera.
   useEffect(() => {
     if (loading) return
     const ctx = gsap.context(() => {
-      gsap.from('.equipo-card', {
-        y: 50,
-        opacity: 0,
-        duration: 0.7,
-        ease: 'expo.out',
-        stagger: 0.07,
-      })
+      gsap.fromTo('.equipo-card-anim',
+        { y: 50, opacity: 0 },
+        { y: 0, opacity: 1, duration: 0.7, ease: 'expo.out', stagger: 0.07, overwrite: 'auto', clearProps: 'opacity,transform' },
+      )
     }, gridRef)
     return () => ctx.revert()
-  }, [loading, shown])
+  }, [loading, shownKey])
 
   const suggestions = useMemo(() => {
     const q = inputValue.trim().toLowerCase()
     if (!q) return []
-    return items.map(asProduct).filter(p =>
-      `${p.title} ${p.description} ${p.brand} ${p.category}`.toLowerCase().includes(q)
-    ).slice(0, 6)
-  }, [items, inputValue, asProduct])
+    // Una sugerencia por MODELO (no por modo): dedup por id para no repetir.
+    const vistos = new Set<number>()
+    return items.flatMap(asProducts).filter(p => {
+      if (vistos.has(p.id)) return false
+      const match = `${p.title} ${p.description} ${p.brand} ${p.category}`.toLowerCase().includes(q)
+      if (match) vistos.add(p.id)
+      return match
+    }).slice(0, 6)
+  }, [items, inputValue, asProducts])
 
   const activeFilterCount = Object.values(filters).flat().filter(Boolean).length
 
@@ -216,51 +369,38 @@ export default function EquiposList() {
       <FloatingFilters value={filters} onChange={setFilters} />
 
       {/* ── HEADER ── */}
-      <div className="relative px-6 md:px-16 lg:px-24 pt-28 pb-8 overflow-hidden">
+      <div className="contenedor relative pt-28 pb-8 overflow-hidden">
         {/* Fondo premium: rejilla + glow dorado */}
         <div className="absolute inset-0 pointer-events-none -z-10">
           <div className="absolute inset-0 opacity-[0.04]" style={{ backgroundImage: 'linear-gradient(var(--c-grid) 1px,transparent 1px),linear-gradient(90deg,var(--c-grid) 1px,transparent 1px)', backgroundSize: '64px 64px' }} />
           <div className="absolute -top-20 right-[8%] w-[420px] h-[420px] rounded-full bg-gold/10 blur-[130px]" />
         </div>
 
-        <p className="catalog-header-title text-[11px] font-mono text-gold uppercase tracking-[0.3em] mb-4">
+        <div className="mb-4"><Migas items={[{ label: 'Inicio', to: '/' }, { label: 'Equipos' }]} /></div>
+        <p className="catalog-header-title text-[11px] font-mono text-gold-ink uppercase tracking-[0.3em] mb-4">
           — Maquinaria ligera · Renta y venta
         </p>
         <div className="overflow-hidden mb-1">
           <h1 className="text-5xl md:text-7xl font-black tracking-tighter leading-[0.92]">
-            {'CATÁLOGO'.split('').map((c, i) => <span key={i} className="char inline-block">{c}</span>)}{' '}
-            <span className="text-gold">{'DE EQUIPOS'.split('').map((c, i) => <span key={i} className="char inline-block">{c === ' ' ? ' ' : c}</span>)}</span>
+            {/* Cada PALABRA en un contenedor nowrap: la animación sigue letra por
+                letra, pero el salto de línea solo cae ENTRE palabras completas
+                (antes la "E" de EQUIPOS se quedaba arriba y el resto abajo). */}
+            <span className="inline-block whitespace-nowrap">{'CATÁLOGO'.split('').map((c, i) => <span key={i} className="char inline-block">{c}</span>)}</span>{' '}
+            <span className="text-gold-ink"><span className="inline-block whitespace-nowrap">{'DE'.split('').map((c, i) => <span key={`d${i}`} className="char inline-block">{c}</span>)}</span>{' '}<span className="inline-block whitespace-nowrap">{'EQUIPOS'.split('').map((c, i) => <span key={`e${i}`} className="char inline-block">{c}</span>)}</span></span>
           </h1>
         </div>
         <p className="catalog-header-title text-mute text-sm md:text-base mt-4 max-w-xl leading-relaxed">
           Explora nuestra flota. Filtra por categoría, compara precios por día, semana o mes, y solicita tu equipo en minutos.
         </p>
 
-        {/* Chips de categoría */}
-        {categoriasChips.length > 0 && (
-          <div className="catalog-header-title flex gap-2 mt-6 overflow-x-auto pb-1 -mx-1 px-1 scrollbar-thin">
-            <button
-              onClick={() => setCat('')}
-              className={`shrink-0 px-4 py-1.5 rounded-full text-xs font-semibold border transition-colors ${!activeCat ? 'bg-gold text-black border-gold' : 'border-edge bg-surface-2 text-mute hover:text-ink'}`}
-            >
-              Todas
-            </button>
-            {categoriasChips.map(c => (
-              <button
-                key={c}
-                onClick={() => setCat(c)}
-                className={`shrink-0 px-4 py-1.5 rounded-full text-xs font-semibold border transition-colors ${activeCat === c ? 'bg-gold text-black border-gold' : 'border-edge bg-surface-2 text-mute hover:text-ink'}`}
-              >
-                {c}
-              </button>
-            ))}
-          </div>
-        )}
       </div>
 
       {/* ── BARRA DE CONTROLES ── */}
-      <div className="catalog-controls sticky top-[64px] z-30 bg-app/90 backdrop-blur-md border-y border-edge px-6 md:px-16 lg:px-24 py-4">
-        <div className="flex flex-col md:flex-row md:items-center gap-4">
+      {/* En móvil NO es fija: apilada (buscador + filtros + precio + conteo) mide
+          demasiado y, pegada arriba, tapaba media pantalla y estorbaba para ver
+          las máquinas. Se deja fija solo en desktop, donde sí cabe en una fila. */}
+      <div className="catalog-controls relative md:sticky md:top-[64px] z-30 bg-app/90 backdrop-blur-md border-y border-edge py-4">
+        <div className="contenedor flex flex-col md:flex-row md:items-center gap-4">
           {/* Buscador */}
           <div className="relative flex-1 max-w-xl">
             <div className="absolute left-4 top-1/2 -translate-y-1/2 text-mute pointer-events-none">
@@ -285,7 +425,7 @@ export default function EquiposList() {
                 } else if (e.key === 'Escape') setShowSuggestions(false)
               }}
               placeholder="Buscar equipo..."
-              className="w-full bg-surface-2 border border-edge rounded-full pl-10 pr-10 py-2.5 text-sm text-ink placeholder-mute focus:outline-none focus:border-gold/50 focus:bg-surface-2 transition-all"
+              className="campo pl-11 pr-11"
             />
             {inputValue && (
               <button
@@ -329,24 +469,24 @@ export default function EquiposList() {
           </div>
 
           {/* Controles derecha */}
-          <div className="flex items-center gap-3 flex-wrap">
-            {/* Segmented Comprar / Rentar */}
-            <div className="flex items-center p-1 rounded-full border border-edge bg-surface-2">
-              {([['', 'Todos'], ['venta', 'Comprar'], ['renta', 'Rentar']] as const).map(([val, lbl]) => (
-                <button
-                  key={val}
-                  onClick={() => setUso(val)}
-                  className={`px-3.5 py-1.5 rounded-full text-xs font-semibold transition-colors ${uso === val ? 'bg-gold text-black' : 'text-mute hover:text-ink'}`}
-                >
-                  {lbl}
-                </button>
-              ))}
+          <div className="flex flex-wrap items-center gap-2.5 md:gap-3">
+            {/* Segmentado Todos / Comprar / Rentar — mismo estilo glass que el
+                selector de periodo (glider deslizante). */}
+            <div className="glass-radio-group w-full md:w-auto" role="radiogroup" aria-label="Tipo">
+              <input type="radio" name="uso" id="uso-todos" checked={uso === ''} onChange={() => setUso('')} />
+              <label htmlFor="uso-todos">Todos</label>
+              <input type="radio" name="uso" id="uso-venta" checked={uso === 'venta'} onChange={() => setUso('venta')} />
+              <label htmlFor="uso-venta">Comprar</label>
+              <input type="radio" name="uso" id="uso-renta" checked={uso === 'renta'} onChange={() => setUso('renta')} />
+              <label htmlFor="uso-renta">Rentar</label>
+              <div className="glass-glider"></div>
             </div>
 
             {/* Filtros mobile */}
             <button
+              data-onboarding="filtros-flotantes"
               onClick={() => window.dispatchEvent(new Event('toggleFilters'))}
-              className={`md:hidden flex items-center gap-2 px-4 py-2.5 rounded-full border text-sm font-medium transition-colors ${activeFilterCount > 0 ? 'border-gold bg-gold-soft text-gold' : 'border-edge bg-surface-2 text-mute hover:text-ink hover:border-edge'}`}
+              className={`md:hidden flex items-center gap-2 px-4 py-2.5 rounded-full border text-sm font-medium transition-colors ${activeFilterCount > 0 ? 'border-gold bg-gold-soft text-gold-ink' : 'border-edge bg-surface-2 text-mute hover:text-ink hover:border-edge'}`}
             >
               <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M3 6h18M7 12h10M10 18h4" strokeLinecap="round" strokeLinejoin="round" />
@@ -359,7 +499,7 @@ export default function EquiposList() {
               <select
                 value={sortKey}
                 onChange={e => setSortKey(e.target.value as typeof sortKey)}
-                className="appearance-none pl-4 pr-9 py-2.5 rounded-full border border-edge bg-surface-2 text-mute hover:text-ink text-xs font-semibold focus:outline-none focus:border-gold/50 transition-colors cursor-pointer"
+                className="campo campo-sm w-auto appearance-none pr-9 text-xs font-semibold text-mute hover:text-ink"
                 aria-label="Ordenar"
               >
                 <option value="recientes" className="bg-surface">Más recientes</option>
@@ -370,33 +510,98 @@ export default function EquiposList() {
               <svg className="w-3.5 h-3.5 absolute right-3.5 top-1/2 -translate-y-1/2 text-mute pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" /></svg>
             </div>
 
-            {/* Toggle precio */}
-            <PriceUnitToggle />
+            {/* Precio por periodo: SOLO aplica a renta. En Comprar no tiene
+                sentido (una venta no se cobra por día/semana/mes). Ahí NO se quita
+                —se deja invisible en escritorio para RESERVAR su espacio— si no, la
+                fila se recorría y el toggle Todos/Comprar/Rentar saltaba bajo el
+                cursor. En móvil (apilado) sí se oculta: no hay fila que recorrer. */}
+            <div className={uso === 'venta' ? 'hidden md:block md:invisible md:pointer-events-none md:w-auto' : 'w-full md:w-auto'}>
+              <PriceUnitToggle />
+            </div>
 
-            {/* PDF */}
-            <button
-              onClick={async () => await downloadEquiposPdf(filteredAll, filters, unit)}
-              className="flex items-center gap-2 px-4 py-2.5 rounded-full border border-edge bg-surface-2 text-mute hover:text-ink hover:border-edge text-sm font-medium transition-colors"
-            >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-              </svg>
-              <span className="hidden sm:inline">PDF</span>
-            </button>
+            {/* PDF con opciones de descarga */}
+            <div className="relative" ref={dlRef}>
+              <button
+                onClick={() => setDlOpen(o => !o)}
+                aria-expanded={dlOpen}
+                aria-label="Opciones de descarga PDF"
+                className="flex items-center gap-2 px-4 py-2.5 rounded-full border border-edge bg-surface-2 text-mute hover:text-ink hover:border-edge text-sm font-medium transition-colors"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+                <span className="hidden sm:inline">PDF</span>
+                <svg className={`w-3 h-3 transition-transform duration-200 ${dlOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" /></svg>
+              </button>
+
+              {dlOpen && (
+                <div className="absolute right-0 mt-2 w-72 rounded-2xl border border-edge bg-surface shadow-[0_16px_50px_rgba(0,0,0,0.5)] p-4 z-50 origin-top-right stagger-item">
+                  <p className="text-sm font-bold text-ink">Descargar catálogo</p>
+                  <p className="text-[11px] text-mute mb-3">Elige qué incluir en el PDF.</p>
+
+                  <label className="flex items-center justify-between gap-3 py-1.5 cursor-pointer">
+                    <span className="text-sm text-ink">Equipos en venta</span>
+                    <span className="flex items-center gap-2">
+                      <span className="text-[11px] text-mute font-mono">{filteredAll.filter(p => p.modo === 'venta').length}</span>
+                      <input type="checkbox" className="w-4 h-4 accent-gold" checked={dlVenta} onChange={e => setDlVenta(e.target.checked)} />
+                    </span>
+                  </label>
+
+                  <label className="flex items-center justify-between gap-3 py-1.5 cursor-pointer">
+                    <span className="text-sm text-ink">Equipos en renta</span>
+                    <span className="flex items-center gap-2">
+                      <span className="text-[11px] text-mute font-mono">{filteredAll.filter(p => p.modo !== 'venta').length}</span>
+                      <input type="checkbox" className="w-4 h-4 accent-gold" checked={dlRenta} onChange={e => setDlRenta(e.target.checked)} />
+                    </span>
+                  </label>
+
+                  {/* Precios de renta: los tres o solo la unidad activa */}
+                  <div className={`mt-2.5 mb-3.5 transition-opacity ${dlRenta ? '' : 'opacity-40 pointer-events-none'}`}>
+                    <p className="text-[11px] text-mute mb-1.5">Precios de renta</p>
+                    <div className="flex rounded-full border border-edge overflow-hidden text-[11px] font-semibold">
+                      <button
+                        type="button"
+                        onClick={() => setDlTodosPrecios(true)}
+                        className={`flex-1 px-2 py-1.5 transition-colors ${dlTodosPrecios ? 'bg-gold text-black' : 'text-mute hover:text-ink'}`}
+                      >Día · Semana · Mes</button>
+                      <button
+                        type="button"
+                        onClick={() => setDlTodosPrecios(false)}
+                        className={`flex-1 px-2 py-1.5 transition-colors ${!dlTodosPrecios ? 'bg-gold text-black' : 'text-mute hover:text-ink'}`}
+                      >Solo {unit === 'mes' ? 'mes' : unit === 'semana' ? 'semana' : 'día'}</button>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    disabled={!dlVenta && !dlRenta}
+                    onClick={async () => {
+                      setDlOpen(false)
+                      // jsPDF pesa ~350 KB: se descarga solo cuando alguien genera un PDF.
+                      const { downloadEquiposPdf } = await import('../lib/pdf')
+                      await downloadEquiposPdf(filteredAll, filters, unit, { venta: dlVenta, renta: dlRenta, rentaTodosPrecios: dlTodosPrecios })
+                    }}
+                    className="w-full py-2.5 rounded-full bg-gold text-black text-sm font-bold btn-acento disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    Descargar PDF
+                  </button>
+                </div>
+              )}
+            </div>
 
             {/* Contador */}
             <p className="text-xs text-mute font-mono whitespace-nowrap">
-              {shown.length} / {filteredAll.length} equipos
+              {shown.length} / {filteredVista.length} equipos
             </p>
           </div>
         </div>
       </div>
 
       {/* ── LAYOUT PRINCIPAL ── */}
-      <div className="flex gap-0 px-6 md:px-16 lg:px-24 py-10">
+      <div className="contenedor flex gap-0 py-10">
 
         {/* Sidebar filtros desktop */}
-        <aside className="hidden md:block w-64 shrink-0 mr-10">
+        <aside data-onboarding="filtros-flotantes" className="hidden md:block w-64 shrink-0 mr-10">
           <div className="sticky top-[140px] max-h-[calc(100vh-160px)] overflow-y-auto scrollbar-thin">
             <div className="bg-surface border border-edge rounded-2xl overflow-hidden">
               <div className="flex items-center justify-between px-5 py-4 border-b border-edge">
@@ -404,10 +609,10 @@ export default function EquiposList() {
                 {activeFilterCount > 0 && (
                   <button
                     onClick={() => setFilters({})}
-                    className="text-xs text-gold hover:text-gold font-medium transition-colors flex items-center gap-1"
+                    className="text-xs text-gold-ink hover:text-gold-ink font-medium transition-colors flex items-center gap-1"
                   >
                     Limpiar
-                    <span className="w-4 h-4 rounded-full bg-gold/20 text-gold flex items-center justify-center font-bold">{activeFilterCount}</span>
+                    <span className="w-4 h-4 rounded-full bg-gold/20 text-gold-ink flex items-center justify-center font-bold">{activeFilterCount}</span>
                   </button>
                 )}
               </div>
@@ -418,7 +623,10 @@ export default function EquiposList() {
 
         {/* Grid de equipos */}
         <div className="flex-1 min-w-0">
-          <div ref={gridRef} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5 min-h-[50vh]">
+          {/* Una lista que se recarga NO se borra: se atenúa. Cambiar un filtro
+              con resultados ya en pantalla los deja visibles y apagados hasta
+              que llegan los nuevos, en vez de vaciar la rejilla y rearmarla. */}
+          <div ref={gridRef} className={`grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5 min-h-[50vh] content-start items-start transition-opacity duration-200 ${refrescando ? 'opacity-60' : 'opacity-100'}`}>
 
             {/* Skeletons */}
             {loading && Array.from({ length: 6 }).map((_, i) => (
@@ -439,7 +647,7 @@ export default function EquiposList() {
                 </p>
                 <button
                   onClick={() => { setFilters({}); setQuery(''); setInputValue('') }}
-                  className="px-6 py-3 rounded-full border border-gold/30 bg-gold-soft text-gold text-sm font-semibold hover:bg-gold/20 transition-colors"
+                  className="px-6 py-3 rounded-full border border-gold/30 bg-gold-soft text-gold-ink text-sm font-semibold hover:bg-gold/20 transition-colors"
                 >
                   Limpiar filtros
                 </button>
@@ -448,20 +656,27 @@ export default function EquiposList() {
 
             {/* Cards */}
             {!loading && shown.map((p, i) => (
-              <div key={p.id} className="equipo-card" ref={i === 0 ? firstCardRef : undefined}>
+              /* h-full: la card llena su celda del grid; sin esto, una card sin
+                 descripción queda más corta que su vecina y el precio flota. */
+              <div key={p.key} className="equipo-card equipo-card-anim h-full" ref={i === 0 ? firstCardRef : undefined}>
                 <ProductCard
                   id={p.id}
                   title={p.title}
                   price={p.price}
+                  modo={p.modo}
+                  estado={p.estado}
+                  agotado={!p.disponible}
+                  entregaDias={p.entregaDias}
                   image={p.image || ''}
-                  subtitle={p.description?.slice(0, 48)}
+                  subtitle={p.description}
                   meta={[p.category, p.brand].filter(Boolean).join(' · ')}
-                  linkTo={`/equipo/${p.id}`}
+                  linkTo={`/equipo/${p.id}?ver=${p.modo === 'venta' ? 'venta' : 'renta'}`}
+                  priceOriginal={p.priceOriginal}
                   tags={[
-                    ...(p.condiciones.includes('nueva') ? [{ label: 'Nuevo', tone: 'new' as const }] : []),
-                    ...(p.condiciones.includes('seminueva') ? [{ label: 'Seminuevo', tone: 'used' as const }] : []),
-                    ...(p.rentaOk ? [{ label: 'Renta', tone: 'rent' as const }] : []),
-                    ...(p.ventaOk ? [{ label: 'Venta', tone: 'sale' as const }] : []),
+                    // Solo el MODO (Venta/Renta): con la regla nuevo→venta / seminuevo→renta,
+                    // la condición es redundante. La promo (si hay) se conserva.
+                    ...(p.promo ? [{ label: `PROMO −${p.promo}%`, tone: 'promo' as const }] : []),
+                    p.modo === 'venta' ? { label: 'Venta', tone: 'sale' as const } : { label: 'Renta', tone: 'rent' as const },
                   ]}
                 />
               </div>
@@ -469,7 +684,7 @@ export default function EquiposList() {
           </div>
 
           {/* Paginación */}
-          {filteredAll.length > pageSize && (
+          {filteredVista.length > pageSize && (
             <div className="mt-10 flex items-center justify-center gap-4">
               <button
                 onClick={() => setPage(p => Math.max(p - 1, 0))}
@@ -480,12 +695,12 @@ export default function EquiposList() {
               </button>
 
               <span className="text-xs text-mute font-mono">
-                {page + 1} / {Math.ceil(filteredAll.length / pageSize)}
+                {page + 1} / {Math.ceil(filteredVista.length / pageSize)}
               </span>
 
               <button
-                onClick={() => setPage(p => (p + 1) * pageSize < filteredAll.length ? p + 1 : p)}
-                disabled={(page + 1) * pageSize >= filteredAll.length}
+                onClick={() => setPage(p => (p + 1) * pageSize < filteredVista.length ? p + 1 : p)}
+                disabled={(page + 1) * pageSize >= filteredVista.length}
                 className="px-6 py-3 rounded-full bg-gold text-black text-sm font-bold hover:opacity-90 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
               >
                 Siguiente →

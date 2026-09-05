@@ -1,7 +1,8 @@
 from rest_framework import serializers
 from .models import (
     Equipo, Cupon, Categoria, Tipo, Marca, PerfilUsuario, Notificacion,
-    ConversacionSoporte, MensajeSoporte, ConfiguracionSitio, CorreoAviso,
+    ConfiguracionSitio, CorreoAviso, ObraCliente, nombre_propio,
+    ConversacionSoporte, MensajeSoporte, Favorito,
 )
 
 
@@ -10,69 +11,11 @@ class NotificacionSerializer(serializers.ModelSerializer):
         model = Notificacion
         fields = ['id', 'tipo', 'titulo', 'mensaje', 'seccion', 'leida', 'data', 'creada']
 
-class MensajeSoporteSerializer(serializers.ModelSerializer):
-    autor_admin_username = serializers.SerializerMethodField()
-
+class ObraClienteSerializer(serializers.ModelSerializer):
     class Meta:
-        model = MensajeSoporte
-        fields = ['id', 'autor_tipo', 'autor_admin_username', 'cuerpo', 'creada']
-
-    def get_autor_admin_username(self, obj):
-        try:
-            return obj.autor_admin.username if obj.autor_admin else None
-        except Exception:
-            return None
-
-
-class ConversacionSoporteListSerializer(serializers.ModelSerializer):
-    no_leidos_admin = serializers.SerializerMethodField()
-    ultimo_mensaje = serializers.SerializerMethodField()
-    ultima_actividad = serializers.DateTimeField(source='actualizada', read_only=True)
-
-    class Meta:
-        model = ConversacionSoporte
-        fields = [
-            'id', 'nombre', 'email', 'telefono', 'asunto', 'estado',
-            'asignado_a', 'ultima_actividad', 'ultimo_mensaje', 'no_leidos_admin',
-        ]
-        depth = 1
-
-    # Iteran la caché de prefetch_related('mensajes'); .filter()/.count()/.first()
-    # lanzarían 1 query por conversación (N+1) en la lista de soporte.
-    def get_no_leidos_admin(self, obj):
-        lr = obj.last_read_admin
-        return sum(
-            1 for m in obj.mensajes.all()
-            if m.autor_tipo == 'usuario' and (lr is None or m.creada > lr)
-        )
-
-    def get_ultimo_mensaje(self, obj):
-        mensajes = list(obj.mensajes.all())
-        if not mensajes:
-            return ''
-        m = max(mensajes, key=lambda x: (x.creada, x.id))
-        txt = (m.cuerpo or '').strip()
-        return (txt[:140] + '…') if len(txt) > 140 else txt
-
-
-class ConversacionSoporteDetailSerializer(serializers.ModelSerializer):
-    no_leidos_admin = serializers.SerializerMethodField()
-    mensajes = MensajeSoporteSerializer(many=True, read_only=True)
-
-    class Meta:
-        model = ConversacionSoporte
-        fields = [
-            'id', 'nombre', 'email', 'telefono', 'asunto', 'estado',
-            'asignado_a', 'creada', 'actualizada', 'last_read_admin',
-            'no_leidos_admin', 'mensajes',
-        ]
-        depth = 1
-
-    def get_no_leidos_admin(self, obj):
-        qs = obj.mensajes.filter(autor_tipo='usuario')
-        if obj.last_read_admin:
-            qs = qs.filter(creada__gt=obj.last_read_admin)
-        return qs.count()
+        model = ObraCliente
+        fields = ['id', 'nombre', 'responsable', 'direccion', 'telefono', 'email', 'predeterminada', 'creada']
+        read_only_fields = ['creada']
 
 
 class PerfilUsuarioSerializer(serializers.ModelSerializer):
@@ -88,13 +31,61 @@ class PerfilUsuarioSerializer(serializers.ModelSerializer):
     groups = serializers.SerializerMethodField()
     avatar = serializers.ImageField(required=False, allow_null=True)
     avatar_url = serializers.SerializerMethodField()
+    # El dibujo POR ROL. Va SIEMPRE, haya foto subida o no: es la segunda capa
+    # del avatar en el frontend (foto → dibujo del rol → inicial). `avatar_url`
+    # se queda en null cuando no hay foto a propósito —la pantalla de perfil lo
+    # usa para saber si hay algo que quitar—, así que sin este campo el panel se
+    # iba directo a la inicial mientras la tienda enseñaba el dibujo del rol.
+    avatar_url_rol = serializers.SerializerMethodField()
+    # Solo lectura: lo decide el modelo. Si el cliente pudiera enviarlo, se
+    # marcaría "completo" sin haber llenado nada.
+    datos_completos = serializers.BooleanField(read_only=True)
+    # Quien entró con Google no tiene contraseña: la pantalla de seguridad usa
+    # esto para pedir "la actual" solo a quien realmente tiene una.
+    tiene_password = serializers.SerializerMethodField()
+    # Verificación de correo + estado "perfil verificado" (correo + datos), y el
+    # cupón de 5% que se desbloquea al completarlo. Todo read-only: lo decide el
+    # servidor, el cliente no puede marcarse verificado ni darse un cupón.
+    email_verificado = serializers.BooleanField(read_only=True)
+    perfil_verificado = serializers.BooleanField(read_only=True)
+    cupon = serializers.SerializerMethodField()
 
     class Meta:
         model = PerfilUsuario
         fields = [
             'id', 'username', 'email', 'first_name', 'last_name', 'is_staff', 'is_superuser', 'puede', 'groups',
-            'telefono', 'puesto', 'bio', 'avatar', 'avatar_url',
+            'telefono', 'puesto', 'bio', 'avatar', 'avatar_url', 'avatar_url_rol',
+            'empresa', 'obra_direccion', 'obra_responsable', 'datos_completos', 'tiene_password',
+            'email_verificado', 'perfil_verificado', 'cupon',
+            'fiscal_razon_social', 'fiscal_rfc', 'fiscal_regimen', 'fiscal_cp', 'fiscal_uso_cfdi', 'fiscal_email',
         ]
+
+    def get_tiene_password(self, obj):
+        return obj.usuario.has_usable_password()
+
+    def get_cupon(self, obj):
+        """El cupón personal de 5% por completar el perfil (o None).
+
+        `usado` va en la respuesta porque el perfil lo lee: sin él, un cupón ya
+        gastado se pintaba como disponible, con su código listo para copiar, y
+        el cliente lo tecleaba en la siguiente compra para que se lo rechazaran.
+        """
+        from .cupones import cupon_personal
+        return cupon_personal(obj.usuario)
+
+    def validate_telefono(self, value):
+        """Se guarda como lo escriban, pero si viene, debe traer 10 dígitos."""
+        v = (value or '').strip()
+        if v and len(''.join(c for c in v if c.isdigit())) != 10:
+            raise serializers.ValidationError('El teléfono debe tener 10 dígitos.')
+        return v
+
+    def validate_fiscal_rfc(self, value):
+        """El RFC se guarda como lo emite el SAT: mayúsculas y sin espacios."""
+        return (value or '').strip().upper()
+
+    def validate_fiscal_email(self, value):
+        return (value or '').strip().lower()
 
     def get_groups(self, obj):
         return list(obj.usuario.groups.values_list('name', flat=True))
@@ -102,6 +93,11 @@ class PerfilUsuarioSerializer(serializers.ModelSerializer):
     def get_puede(self, obj):
         from .permissions import puede_de
         return puede_de(obj.usuario)
+
+    def get_avatar_url_rol(self, obj):
+        from .models import avatar_por_rol
+        request = self.context.get('request')
+        return avatar_por_rol(obj.usuario, absoluta=True, request=request)
 
     def get_avatar_url(self, obj):
         if not obj.avatar:
@@ -123,7 +119,13 @@ class PerfilUsuarioSerializer(serializers.ModelSerializer):
         user = instance.usuario
         for attr in ('email', 'first_name', 'last_name'):
             if attr in user_data:
-                setattr(user, attr, user_data[attr])
+                valor = user_data[attr]
+                # Reglas de la casa: correos en minúsculas, nombres como nombre propio.
+                if attr == 'email':
+                    valor = (valor or '').strip().lower()
+                else:
+                    valor = nombre_propio(valor)
+                setattr(user, attr, valor)
         user.save()
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
@@ -131,6 +133,15 @@ class PerfilUsuarioSerializer(serializers.ModelSerializer):
         return instance
 
 class EquipoSerializer(serializers.ModelSerializer):
+    # Con depth=1 las relaciones se leen anidadas pero DRF las vuelve de solo
+    # lectura: lo que el formulario mandaba en 'categoria' se descartaba en
+    # silencio. Estos alias escriben la relación sin perder la lectura anidada.
+    categoria_id = serializers.PrimaryKeyRelatedField(
+        source='categoria', queryset=Categoria.objects.all(), required=False, allow_null=True, write_only=True)
+    tipo_id = serializers.PrimaryKeyRelatedField(
+        source='tipo', queryset=Tipo.objects.all(), required=False, allow_null=True, write_only=True)
+    marca_id = serializers.PrimaryKeyRelatedField(
+        source='marca', queryset=Marca.objects.all(), required=False, allow_null=True, write_only=True)
     # Escribible (acepta el archivo al crear/editar) y en lectura devuelve la URL.
     imagen = serializers.ImageField(required=False, allow_null=True)
     imagenes = serializers.SerializerMethodField()
@@ -139,10 +150,33 @@ class EquipoSerializer(serializers.ModelSerializer):
     # Disponibilidad derivada de las unidades de inventario
     disponible_venta = serializers.SerializerMethodField()
     disponible_renta = serializers.SerializerMethodField()
+    ofrece_venta = serializers.SerializerMethodField()
+    ofrece_renta = serializers.SerializerMethodField()
+    venta_disponible = serializers.SerializerMethodField()
+    renta_disponible = serializers.SerializerMethodField()
     condiciones = serializers.SerializerMethodField()
     stock_disponible = serializers.SerializerMethodField()
     unidades_total = serializers.SerializerMethodField()
     unidades_rentadas = serializers.SerializerMethodField()
+    # Estado de venta al público: inmediata | sobre_pedido | agotado | sin_venta.
+    # Una máquina de venta agotada cae sola en 'sobre_pedido' (se ordena al proveedor);
+    # al reponer stock vuelve a 'inmediata'. El frontend pinta el badge con esto.
+    venta_estado = serializers.SerializerMethodField()
+    entrega_estimada_dias = serializers.SerializerMethodField()
+    # 'venta' (nueva) o 'renta' (seminueva). Lo decide la condición del equipo.
+    modo = serializers.CharField(read_only=True)
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        # El precio de venta de un equipo de RENTA es interno (referencia del
+        # admin): no se expone al público ni a los clientes, solo a administración.
+        if instance.modo == 'renta':
+            from .permissions import puede_de
+            u = getattr(self.context.get('request'), 'user', None)
+            es_admin = bool(u and u.is_authenticated and puede_de(u).get('nivel', 0) > 0)
+            if not es_admin:
+                data.pop('precio_venta', None)
+        return data
 
     def validate_especificaciones(self, value):
         """Normaliza la lista de specs. Vía multipart llega como string JSON;
@@ -167,6 +201,40 @@ class EquipoSerializer(serializers.ModelSerializer):
                 limpio.append({'etiqueta': etiqueta[:60], 'valor': valor[:120]})
         return limpio
 
+    def validate(self, attrs):
+        # ── Precios ──────────────────────────────────────────────────────────
+        # Va PRIMERO y sin atajos: un precio en cero no es un precio, es una
+        # máquina que sale del patio gratis. La regla vive en el modelo
+        # (`Equipo.errores_de_precio`) y aquí solo se consulta; copiarla haría
+        # que el panel y el admin de Django exigieran cosas distintas.
+        # En una edición parcial se mezcla lo que llega con lo ya guardado:
+        # quien cambia solo la tarifa por día no está diciendo nada del precio
+        # de venta y no puede verse obligado a repetirlo.
+        base = self.instance or Equipo()
+        tentativo = Equipo(**{campo: attrs.get(campo, getattr(base, campo, None))
+                              for campo, _ in Equipo.PRECIOS})
+        errores = tentativo.errores_de_precio()
+        if errores:
+            # Sin llave de campo: cada mensaje ya nombra el precio que está mal,
+            # y el panel los pinta tal cual en vez de "precio_venta: ...".
+            raise serializers.ValidationError(errores)
+
+        # Un PATCH de metadatos (p. ej. solo clasificación) no debe fallar por
+        # specs que faltaban de antes: la regla aplica al crear o al tocarlas.
+        if self.instance is not None and 'condicion' not in attrs and 'especificaciones' not in attrs:
+            return attrs
+        # Los equipos de VENTA (nueva) deben traer características: con ellas se
+        # arma la ficha que ve el cliente. Renta no las exige.
+        condicion = attrs.get('condicion') or getattr(self.instance, 'condicion', 'nueva')
+        if condicion == 'nueva':
+            especs = attrs.get('especificaciones')
+            if especs is None:
+                especs = getattr(self.instance, 'especificaciones', None) or []
+            if not especs:
+                raise serializers.ValidationError(
+                    {'especificaciones': 'Los equipos de venta deben tener al menos una característica.'})
+        return attrs
+
     class Meta:
         model = Equipo
         fields = '__all__'
@@ -181,6 +249,27 @@ class EquipoSerializer(serializers.ModelSerializer):
     def get_disponible_renta(self, obj):
         return any(u.condicion == 'seminueva' and u.estado == 'disponible' for u in obj.unidades.all())
 
+    # ── Qué MODOS ofrece el producto, según sus unidades + precios ──
+    # Un mismo modelo puede venderse Y rentarse: las unidades nuevas se venden,
+    # las seminuevas se rentan. El catálogo ya no depende de Equipo.condicion
+    # para esto; lo decide el inventario real.
+    def get_ofrece_venta(self, obj):
+        # Fuente única: la property del modelo. Cubre los tres casos —con stock
+        # (unidad nueva disponible), agotada, y SOBRE PEDIDO sin unidades— para que
+        # una máquina de puro sobre pedido (0 unidades) también salga en el catálogo.
+        return obj.ofrece_venta_catalogo
+
+    def get_ofrece_renta(self, obj):
+        tiene_precio = any([obj.precio_dia, obj.precio_semana, obj.precio_mes])
+        return tiene_precio and any(u.condicion == 'seminueva' and u.estado != 'vendido' for u in obj.unidades.all())
+
+    # Disponibilidad por modo (Disponible / Agotado), precisa por condición.
+    def get_venta_disponible(self, obj):
+        return any(u.condicion == 'nueva' and u.estado == 'disponible' for u in obj.unidades.all())
+
+    def get_renta_disponible(self, obj):
+        return any(u.condicion == 'seminueva' and u.estado == 'disponible' for u in obj.unidades.all())
+
     def get_condiciones(self, obj):
         return sorted({u.condicion for u in obj.unidades.all() if u.condicion})
 
@@ -192,6 +281,12 @@ class EquipoSerializer(serializers.ModelSerializer):
 
     def get_unidades_rentadas(self, obj):
         return sum(1 for u in obj.unidades.all() if u.estado == 'rentado')
+
+    def get_venta_estado(self, obj):
+        return obj.estado_venta_catalogo
+
+    def get_entrega_estimada_dias(self, obj):
+        return obj.entrega_estimada_dias
 
     def get_imagenes(self, obj):
         urls = []
@@ -247,10 +342,57 @@ class ConfiguracionSitioSerializer(serializers.ModelSerializer):
         model = ConfiguracionSitio
         fields = [
             'whatsapp_principal', 'whatsapp_respaldos',
-            'negocio_nombre', 'negocio_telefono', 'negocio_direccion', 'negocio_rfc', 'negocio_footer',
+            'negocio_nombre', 'negocio_telefono', 'negocio_direccion', 'negocio_email', 'negocio_web',
+            'negocio_rfc', 'negocio_representante', 'negocio_footer',
+            'cotizacion_condiciones', 'cotizacion_condiciones_renta', 'datos_bancarios', 'cotizacion_cierre',
+            'caja_vende_maquinaria', 'caja_renta_maquinaria', 'caja_cobra_abonos',
+            'ticket_logo', 'ticket_logo_origen', 'ticket_logo_escala', 'ticket_mostrar_logo', 'ticket_lema',
+            'ticket_mostrar_direccion', 'ticket_mostrar_telefono', 'ticket_mostrar_rfc', 'ticket_mostrar_web',
+            'ticket_codigo_barras', 'ticket_leyenda',
+            # Piso para poder RECOGER una máquina rentada (% del total abonado).
+            'renta_liquidacion_minima_pct',
+            # Barra de aviso de la tienda (temporada, promoción, horario).
+            'aviso_activo', 'aviso_texto', 'aviso_liga', 'aviso_liga_texto', 'aviso_hasta',
             'actualizada',
         ]
         read_only_fields = ['actualizada']
+
+    def validate_renta_liquidacion_minima_pct(self, value):
+        """Un porcentaje, y nada más.
+
+        Arriba de 100 el piso sería inalcanzable y ninguna máquina se podría
+        recoger nunca sin autorización; en 0 la empresa fía sin condiciones. Los
+        dos extremos son decisiones válidas, pero fuera de ese rango el número
+        no significa nada.
+        """
+        if value is None:
+            return value
+        if not (0 <= int(value) <= 100):
+            raise serializers.ValidationError('Debe ser un porcentaje entre 0 y 100.')
+        return value
+
+
+    def validate_datos_bancarios(self, value):
+        """El titular, banco, cuenta y CLABE se imprimen en CADA cotización y en
+        el PDF que recibe el cliente. Cambiarlos desvía los pagos a otra cuenta, y
+        no se nota hasta que alguien diga "ya te pagué" y el dinero no esté.
+
+        Por eso son del dueño y no de quien administra. Se valida aquí, en el
+        servidor: esconder el campo en el panel no detendría a nadie que llame al
+        endpoint directo.
+        """
+        from .permissions import puede_de
+        pedido = (value or '').strip()
+        actual = (getattr(self.instance, 'datos_bancarios', '') or '').strip()
+        if pedido == actual:
+            return value   # no lo está cambiando: pasa aunque no pueda editarlo
+        user = getattr(self.context.get('request'), 'user', None)
+        if not puede_de(user).get('editar_datos_bancarios'):
+            raise serializers.ValidationError(
+                'Solo el dueño puede cambiar los datos bancarios: son los que se '
+                'imprimen en las cotizaciones.'
+            )
+        return value
 
     def validate_whatsapp_respaldos(self, value):
         """Normaliza la lista de respaldos: solo {label, number} con número válido."""
@@ -278,6 +420,33 @@ class ConfiguracionSitioSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError('El número debe tener al menos 10 dígitos.')
         return num
 
+    # El logo llega ya monocromo desde el panel (data URI PNG). Aquí solo se
+    # comprueba que sea eso y que quepa: es un campo de texto en la base y un
+    # PNG a color de 2 MB la inflaría sin que nadie lo note hasta que duela.
+    LOGO_MAX_BYTES = 400_000
+
+    def validate_ticket_logo(self, value):
+        v = (value or '').strip()
+        if not v:
+            return ''
+        if not v.startswith('data:image/png;base64,'):
+            raise serializers.ValidationError('El logo debe venir como PNG monocromo del panel.')
+        if len(v) > self.LOGO_MAX_BYTES:
+            raise serializers.ValidationError('El logo es demasiado grande. Usa una imagen más chica.')
+        return v
+
+    def validate_ticket_logo_origen(self, value):
+        v = (value or '').strip()
+        if v and not v.startswith('data:image/'):
+            raise serializers.ValidationError('Formato de imagen no reconocido.')
+        if len(v) > self.LOGO_MAX_BYTES * 2:
+            raise serializers.ValidationError('La imagen original es demasiado grande.')
+        return v
+
+    def validate_ticket_logo_escala(self, value):
+        # Menos del 30 % no se distingue; más del 100 % no cabe en el papel.
+        return max(30, min(100, int(value or 70)))
+
 
 class CorreoAvisoSerializer(serializers.ModelSerializer):
     class Meta:
@@ -291,6 +460,13 @@ class CuponSerializer(serializers.ModelSerializer):
     class Meta:
         model = Cupon
         fields = '__all__'
+        # `__all__` sin esto dejaba escribir TODO por API, incluido `usado`:
+        # quien puede emitir cupones podía des-gastar uno personal —de un solo
+        # uso— y volver a aplicarlo, o reasignárselo a otra cuenta. No es una
+        # puerta de fuera (hace falta `emitir_cupones`), pero sí un descuento
+        # que se puede reciclar sin dejar rastro, y eso lo decide el sistema al
+        # concretar la venta, no una petición.
+        read_only_fields = ['usado', 'usado_en', 'creado', 'motivo']
 
 class _CatalogoSerializer(serializers.ModelSerializer):
     """Base de catálogos: normaliza el nombre (trim) y valida unicidad
@@ -323,3 +499,83 @@ class MarcaSerializer(_CatalogoSerializer):
     class Meta:
         model = Marca
         fields = ['id', 'nombre']
+
+
+# ── Soporte (conversaciones + mensajes) y Favoritos ──
+# Reconstruidos tras una corrupción de este archivo (colisión de sesiones).
+class MensajeSoporteSerializer(serializers.ModelSerializer):
+    autor_admin_username = serializers.SerializerMethodField()
+
+    class Meta:
+        model = MensajeSoporte
+        fields = ['id', 'autor_tipo', 'autor_admin_username', 'cuerpo', 'creada']
+
+    def get_autor_admin_username(self, obj):
+        try:
+            return obj.autor_admin.username if obj.autor_admin_id else None
+        except Exception:
+            return None
+
+
+class ConversacionSoporteListSerializer(serializers.ModelSerializer):
+    no_leidos_admin = serializers.SerializerMethodField()
+    ultimo_mensaje = serializers.SerializerMethodField()
+    ultima_actividad = serializers.DateTimeField(source='actualizada', read_only=True)
+
+    class Meta:
+        model = ConversacionSoporte
+        fields = [
+            'id', 'nombre', 'email', 'telefono', 'asunto', 'estado',
+            'asignado_a', 'ultima_actividad', 'ultimo_mensaje', 'no_leidos_admin',
+        ]
+        depth = 1
+
+    def get_no_leidos_admin(self, obj):
+        qs = obj.mensajes.filter(autor_tipo='usuario')
+        if obj.last_read_admin:
+            qs = qs.filter(creada__gt=obj.last_read_admin)
+        return qs.count()
+
+    def get_ultimo_mensaje(self, obj):
+        m = obj.mensajes.order_by('-creada', '-id').first()
+        if not m:
+            return None
+        txt = (m.cuerpo or '').strip()
+        return (txt[:140] + '…') if len(txt) > 140 else txt
+
+
+class ConversacionSoporteDetailSerializer(serializers.ModelSerializer):
+    no_leidos_admin = serializers.SerializerMethodField()
+    mensajes = MensajeSoporteSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = ConversacionSoporte
+        fields = [
+            'id', 'nombre', 'email', 'telefono', 'asunto', 'estado',
+            'asignado_a', 'creada', 'actualizada', 'last_read_admin',
+            'no_leidos_admin', 'mensajes',
+        ]
+        depth = 1
+
+    def get_no_leidos_admin(self, obj):
+        qs = obj.mensajes.filter(autor_tipo='usuario')
+        if obj.last_read_admin:
+            qs = qs.filter(creada__gt=obj.last_read_admin)
+        return qs.count()
+
+
+class FavoritoSerializer(serializers.ModelSerializer):
+    equipo = EquipoSerializer(read_only=True)
+    equipo_id = serializers.IntegerField(write_only=True, required=True)
+
+    class Meta:
+        model = Favorito
+        fields = ['id', 'equipo', 'equipo_id', 'fecha_agregado']
+        read_only_fields = ['id', 'fecha_agregado']
+
+    def create(self, validated_data):
+        perfil = self.context['perfil']
+        equipo_id = validated_data.pop('equipo_id')
+        equipo = Equipo.objects.get(pk=equipo_id)
+        favorito, _ = Favorito.objects.get_or_create(perfil=perfil, equipo=equipo)
+        return favorito

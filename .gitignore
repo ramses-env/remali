@@ -50,7 +50,17 @@ Thumbs.db
 
 # Respaldos de BD (dumps de datos, no se versionan)
 backups/
+backend/backup*.json
+backend/backup*.json.gz
+backend/*backup*.json
+backend/*backup*.json.gz
 
 # Config local de herramientas (Claude Code, etc.)
 .claude/
-test.txt
+
+# Herramientas de agente: no son código de Remali (skills-lock.json ya versiona lo que importa)
+.agents/
+.impeccable/
+
+# Maquetas del brainstorming (visual companion), no son del producto
+.superpowers/

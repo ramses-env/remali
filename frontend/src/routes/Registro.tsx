@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -6,9 +6,9 @@ import * as z from 'zod'
 import { Eye, EyeOff, Loader2 } from 'lucide-react'
 
 import api from '../lib/api'
-import { useIrTrasEntrar, useRedirigirSiHaySesion } from '../lib/sesion'
+import { useIrTrasEntrar } from '../lib/sesion'
 import { useAuth } from '../store/auth'
-import { AuthItem, AuthSplitScreen } from '@/components/ui/auth-split-screen'
+import { AuthCabecera, AuthItem } from '@/components/ui/auth-split-screen'
 import { SocialAuthButtons } from '@/components/ui/social-auth-buttons'
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
@@ -19,7 +19,7 @@ import { Input } from '@/components/ui/input'
 const esquema = z
   .object({
     nombre: z.string().trim().min(2, { message: 'Escribe tu nombre.' }),
-    email: z.string().trim().email({ message: 'Escribe un correo válido.' }),
+    email: z.string().trim().email({ message: 'Escribe un correo válido.' }).transform(v => v.toLowerCase()),
     password: z.string().min(8, { message: 'Mínimo 8 caracteres.' }),
     confirmar: z.string(),
   })
@@ -31,7 +31,7 @@ const esquema = z
 type Valores = z.infer<typeof esquema>
 
 export default function Registro() {
-  const { login, entrarConToken } = useAuth()
+  const { entrarConToken } = useAuth()
   const nav = useNavigate()
   const loc = useLocation()
   const next = new URLSearchParams(loc.search).get('next') || ''
@@ -39,7 +39,21 @@ export default function Registro() {
   const [error, setError] = useState<string | undefined>(undefined)
   const [verPass, setVerPass] = useState(false)
 
-  const verificando = useRedirigirSiHaySesion(next)
+  /* El aviso vive ARRIBA del formulario y el botón está hasta abajo: en un
+     teléfono, o con el teclado abierto, el mensaje nacía fuera de la pantalla.
+     El error estaba bien manejado y aun así el usuario veía un botón que no
+     hacía nada. Manejarlo no basta: hay que llevárselo a los ojos.
+
+     Se mueve el foco además de hacer scroll, para que el lector de pantalla lo
+     anuncie y para que quien navega con teclado no pierda su lugar. */
+  const avisoRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!error) return
+    avisoRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    avisoRef.current?.focus({ preventScroll: true })
+  }, [error])
+
+  // El redirect "si ya hay sesión" lo hace el layout, una sola vez para ambas.
   const irTrasEntrar = useIrTrasEntrar(next)
 
   const form = useForm<Valores>({
@@ -58,50 +72,57 @@ export default function Registro() {
       })
     } catch (err: any) {
       const status = err?.response?.status
-      if (status === 429) setError('Demasiadas altas desde esta red. Intenta más tarde.')
-      else setError(err?.response?.data?.detail || 'No se pudo crear la cuenta. Revisa tus datos.')
+      // "Altas" es palabra de sistema, no de cliente. Y el mensaje genérico dice
+      // qué pasó pero no qué hacer: se le agrega la salida.
+      if (status === 429) {
+        // "Espera un rato" deja al usuario probando a ciegas. El servidor dice
+        // cuántos segundos faltan (Retry-After o el propio detalle): se traduce a
+        // minutos para que sepa si es cosa de esperar o de volver mañana.
+        const seg = Number(err?.response?.headers?.['retry-after']) ||
+          Number(String(err?.response?.data?.detail || '').match(/(\d+) segundos/)?.[1]) || 0
+        const min = Math.ceil(seg / 60)
+        setError(
+          'Se crearon varias cuentas desde esta red.' +
+            (min > 0 ? ` Vuelve a intentar en ${min} minuto${min === 1 ? '' : 's'}.` : ' Espera un rato e intenta de nuevo.'),
+        )
+      } else if (!err?.response) {
+        // Sin respuesta no es un dato mal escrito: es red, servidor caído o
+        // tiempo agotado. Mandarlo a "revisa los datos" lo pone a corregir algo
+        // que está bien.
+        setError('No hubo respuesta del servidor. Revisa tu conexión y vuelve a intentar.')
+      } else {
+        setError(
+          err?.response?.data?.detail ||
+            'No se pudo crear la cuenta. Revisa los datos y vuelve a intentar.',
+        )
+      }
       return
     }
 
-    // Cuenta creada: se entra de una vez. Mandar al login a repetir el correo y
-    // la contraseña recién escritos sería trabajo de más sin ninguna ganancia.
-    try {
-      await login(datos.email, datos.password, true)
-      await irTrasEntrar()
-    } catch {
-      // La cuenta sí quedó creada; solo falló entrar. Que lo intente a mano.
-      nav('/login?creada=1', { replace: true })
-    }
-  }
-
-  if (verificando) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-app">
-        <div className="flex flex-col items-center gap-4">
-          <span className="w-8 h-8 border-2 border-edge border-t-gold rounded-full animate-spin" />
-          <p className="text-mute text-sm">Verificando tu sesión…</p>
-        </div>
-      </div>
-    )
+    /* Derecho a escribir el código, sin escala en el login. Antes se rebotaba a
+       `/login?confirmar=1`, que dejaba al recién registrado en una pantalla de
+       ENTRAR —con sus campos de correo y contraseña— cuando lo que tenía que
+       hacer era otra cosa. El correo viaja en la liga porque el código de seis
+       dígitos no identifica a nadie por sí solo. */
+    nav(`/verificar?correo=${encodeURIComponent(datos.email.trim().toLowerCase())}`, { replace: true })
   }
 
   return (
-    <AuthSplitScreen
-      title="Crear cuenta"
-      description="Regístrate para cotizar y dar seguimiento a tus rentas."
-      footer={
-        <>
-          ¿Ya tienes cuenta?{' '}
-          <Link to="/login" className="font-semibold text-gold hover:underline">
-            Inicia sesión
-          </Link>
-          .
-        </>
-      }
-    >
+    <>
+      {/* La bajada anterior prometía "dar seguimiento a tus rentas", y eso todavía
+          no existe: la cuenta de cliente aún no muestra nada propio. Prometer de
+          más se paga en la primera visita. Esta dice algo cierto y útil: cuánto
+          cuesta registrarse. */}
+      <AuthCabecera title="Crear cuenta" description="Solo necesitas tu nombre y un correo." />
+
       {error && (
         <AuthItem>
-          <div className="px-4 py-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-600 dark:text-red-400 text-sm">
+          <div
+            ref={avisoRef}
+            role="alert"
+            tabIndex={-1}
+            className="px-4 py-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-600 dark:text-red-400 text-sm outline-none focus-visible:ring-2 focus-visible:ring-red-500/40"
+          >
             {error}
           </div>
         </AuthItem>
@@ -114,13 +135,13 @@ export default function Registro() {
               control={form.control}
               name="nombre"
               render={({ field }) => (
-                <FormItem>
+                <FormItem className="gap-3">
                   <FormLabel className="text-mute">Nombre</FormLabel>
                   <FormControl>
+                    {/* Un ejemplo enseña más que repetir la etiqueta. */}
                     <Input
-                      placeholder="Tu nombre"
+                      placeholder="Juan Pérez"
                       autoComplete="name"
-                      className="h-11 rounded-xl bg-surface-2 border-edge text-ink placeholder:text-mute focus-visible:ring-gold/30"
                       disabled={enviando}
                       {...field}
                     />
@@ -136,14 +157,13 @@ export default function Registro() {
               control={form.control}
               name="email"
               render={({ field }) => (
-                <FormItem>
+                <FormItem className="gap-3">
                   <FormLabel className="text-mute">Correo</FormLabel>
                   <FormControl>
                     <Input
                       type="email"
                       placeholder="correo@ejemplo.com"
                       autoComplete="email"
-                      className="h-11 rounded-xl bg-surface-2 border-edge text-ink placeholder:text-mute focus-visible:ring-gold/30"
                       disabled={enviando}
                       {...field}
                     />
@@ -159,7 +179,7 @@ export default function Registro() {
               control={form.control}
               name="password"
               render={({ field }) => (
-                <FormItem>
+                <FormItem className="gap-3">
                   <FormLabel className="text-mute">Contraseña</FormLabel>
                   <FormControl>
                     <div className="relative">
@@ -167,7 +187,7 @@ export default function Registro() {
                         type={verPass ? 'text' : 'password'}
                         placeholder="Mínimo 8 caracteres"
                         autoComplete="new-password"
-                        className="h-11 rounded-xl bg-surface-2 border-edge pr-12 text-ink placeholder:text-mute focus-visible:ring-gold/30"
+                        className="pr-12"
                         disabled={enviando}
                         {...field}
                       />
@@ -175,7 +195,7 @@ export default function Registro() {
                         type="button"
                         onClick={() => setVerPass(v => !v)}
                         aria-label={verPass ? 'Ocultar contraseña' : 'Mostrar contraseña'}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-mute hover:text-gold transition-colors"
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-mute hover:text-gold-ink transition-colors"
                       >
                         {verPass ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                       </button>
@@ -192,14 +212,13 @@ export default function Registro() {
               control={form.control}
               name="confirmar"
               render={({ field }) => (
-                <FormItem>
+                <FormItem className="gap-3">
                   <FormLabel className="text-mute">Confirmar contraseña</FormLabel>
                   <FormControl>
                     <Input
                       type={verPass ? 'text' : 'password'}
                       placeholder="Repite tu contraseña"
                       autoComplete="new-password"
-                      className="h-11 rounded-xl bg-surface-2 border-edge text-ink placeholder:text-mute focus-visible:ring-gold/30"
                       disabled={enviando}
                       {...field}
                     />
@@ -233,6 +252,14 @@ export default function Registro() {
           onError={setError}
         />
       </AuthItem>
-    </AuthSplitScreen>
+
+      <AuthItem className="text-center text-sm text-mute">
+        ¿Ya tienes cuenta?{' '}
+        <Link to="/login" className="font-semibold text-gold-ink hover:underline">
+          Inicia sesión
+        </Link>
+        .
+      </AuthItem>
+    </>
   )
 }

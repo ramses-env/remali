@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 
 import { consultarYo, destinoTrasEntrar, recordarAcceso } from './acceso'
 import { useAuth } from '../store/auth'
@@ -40,10 +40,21 @@ export function useIrTrasEntrar(next: string) {
 export function useRedirigirSiHaySesion(next: string): boolean {
   const { token, logout } = useAuth()
   const nav = useNavigate()
-  const [verificando, setVerificando] = useState(() => Boolean(token))
+  const loc = useLocation()
+  // Las pantallas que vienen de una liga del correo DEBEN funcionar aunque haya
+  // sesión abierta:
+  //  · restablecer: el caso típico es que alguien olvidó la clave pero seguía
+  //    logueado en otra pestaña; si redirigiéramos al panel, jamás vería el
+  //    formulario del enlace.
+  //  · verificar: la liga trae su propia sesión y manda sobre la del navegador
+  //    (puede ser de otra cuenta); rebotar al panel dejaría el correo sin
+  //    confirmar para siempre.
+  const esLigaDeCorreo =
+    loc.pathname.startsWith('/restablecer') || loc.pathname.startsWith('/verificar')
+  const [verificando, setVerificando] = useState(() => !esLigaDeCorreo && Boolean(token))
 
   useEffect(() => {
-    if (!token) return
+    if (esLigaDeCorreo || !token) return
     let vivo = true
     consultarYo()
       .then(yo => {

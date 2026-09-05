@@ -14,18 +14,69 @@ import logging
 import threading
 
 from django.conf import settings
-from django.core.mail import EmailMessage
+from django.core.mail import EmailMessage, EmailMultiAlternatives
 from django.db import connections
 
 log = logging.getLogger(__name__)
 
 
-def _enviar(asunto, cuerpo, destinatarios, adjuntos):
+def _enviar_api_brevo(asunto, cuerpo, destinatarios, adjuntos, html=None):
+    """El mismo correo, por la API HTTP de Brevo: entra directo a su pipeline
+    transaccional (más rápido y rastreable que el relay SMTP). Devuelve False
+    si no hay BREVO_API_KEY o la API lo rechaza — el llamador cae al SMTP."""
+    import os
+    api_key = os.environ.get('BREVO_API_KEY', '').strip()
+    if not api_key:
+        return False
+    import base64
+    import json
+    import urllib.request
+    payload = {
+        'sender': {'email': settings.DEFAULT_FROM_EMAIL},
+        'to': [{'email': d} for d in destinatarios],
+        'subject': asunto,
+        'textContent': cuerpo,
+    }
+    # El texto viaja SIEMPRE, aunque haya HTML: hay clientes que solo muestran
+    # texto, y un correo sin parte de texto puntúa peor en los filtros de spam.
+    if html:
+        payload['htmlContent'] = html
+    if adjuntos:
+        payload['attachment'] = [
+            {'name': n, 'content': base64.b64encode(c).decode()} for n, c, _t in adjuntos
+        ]
+    req = urllib.request.Request(
+        'https://api.brevo.com/v3/smtp/email',
+        data=json.dumps(payload).encode(),
+        headers={'api-key': api_key, 'content-type': 'application/json', 'accept': 'application/json'},
+        method='POST',
+    )
     try:
-        msg = EmailMessage(asunto, cuerpo, settings.DEFAULT_FROM_EMAIL, destinatarios)
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return 200 <= r.status < 300
+    except Exception:
+        log.exception('Brevo API rechazó "%s"; se intenta por SMTP', asunto)
+        return False
+
+
+def _enviar(asunto, cuerpo, destinatarios, adjuntos, html=None):
+    import time
+    t0 = time.monotonic()
+    try:
+        if _enviar_api_brevo(asunto, cuerpo, destinatarios, adjuntos, html):
+            log.info('Correo "%s" aceptado por Brevo API en %.1fs', asunto, time.monotonic() - t0)
+            return
+        # Con HTML va un correo multiparte: el texto es el cuerpo y el HTML la
+        # alternativa. Quien no pueda pintar HTML sigue leyendo el mensaje.
+        if html:
+            msg = EmailMultiAlternatives(asunto, cuerpo, settings.DEFAULT_FROM_EMAIL, destinatarios)
+            msg.attach_alternative(html, 'text/html')
+        else:
+            msg = EmailMessage(asunto, cuerpo, settings.DEFAULT_FROM_EMAIL, destinatarios)
         for nombre, contenido, tipo in adjuntos:
             msg.attach(nombre, contenido, tipo)
         msg.send(fail_silently=False)
+        log.info('Correo "%s" aceptado por SMTP en %.1fs', asunto, time.monotonic() - t0)
     except Exception:
         log.exception('No se pudo enviar el correo "%s" a %s', asunto, destinatarios)
     finally:
@@ -34,10 +85,14 @@ def _enviar(asunto, cuerpo, destinatarios, adjuntos):
         connections.close_all()
 
 
-def enviar_async(asunto, cuerpo, destinatarios, adjuntos=None):
+def enviar_async(asunto, cuerpo, destinatarios, adjuntos=None, html=None):
     """Encola el correo en un hilo. Devuelve False solo si no hay a quién mandarlo.
 
     `adjuntos` es una lista de (nombre, contenido_bytes, content_type).
+
+    `html` es OPCIONAL y nunca sustituye a `cuerpo`: van los dos. El texto es lo
+    que ve quien tiene el HTML desactivado —más gente de la que parece— y su
+    ausencia además penaliza en los filtros de spam.
 
     Ojo: True significa "se puso en camino", no "llegó". El resultado real del
     envío queda en el log.
@@ -46,7 +101,52 @@ def enviar_async(asunto, cuerpo, destinatarios, adjuntos=None):
     if not destinatarios:
         return False
     threading.Thread(
-        target=_enviar, args=(asunto, cuerpo, destinatarios, list(adjuntos or [])),
+        target=_enviar, args=(asunto, cuerpo, destinatarios, list(adjuntos or []), html),
         daemon=True, name='correo-remali',
     ).start()
+    return True
+
+
+def enviar_plantilla_brevo(template_id, email, nombre=None, params=None, adjuntos=None):
+    """Dispara una PLANTILLA transaccional de Brevo por su API, en un hilo.
+
+    El diseño vive en Brevo (editable sin tocar código) y usa `{{ params.xxx }}`
+    para los datos que le pasamos aquí. `adjuntos` es la misma lista de
+    (nombre, contenido_bytes, content_type) que usa `enviar_async`; se mandan en
+    base64. El asunto y el remitente los define la propia plantilla en Brevo.
+
+    Devuelve True si está configurada (BREVO_API_KEY + template_id) y se encoló;
+    False si falta configuración — así quien llama puede caer al SMTP de texto.
+    """
+    import os
+
+    api_key = os.environ.get('BREVO_API_KEY', '').strip()
+    if not api_key or not template_id or not email:
+        return False
+    import base64
+    import json
+    import urllib.request
+
+    cuerpo = {
+        'templateId': int(template_id),
+        'to': [{'email': email, 'name': nombre or email}],
+        'params': params or {},
+    }
+    if adjuntos:
+        cuerpo['attachment'] = [
+            {'name': nom, 'content': base64.b64encode(contenido).decode('ascii')}
+            for nom, contenido, _tipo in adjuntos
+        ]
+    payload = json.dumps(cuerpo).encode('utf-8')
+
+    def _worker():
+        try:
+            req = urllib.request.Request(
+                'https://api.brevo.com/v3/smtp/email', data=payload,
+                headers={'api-key': api_key, 'content-type': 'application/json', 'accept': 'application/json'})
+            urllib.request.urlopen(req, timeout=20)
+        except Exception:
+            log.exception('No se pudo enviar la plantilla Brevo %s a %s', template_id, email)
+
+    threading.Thread(target=_worker, daemon=True, name='brevo-remali').start()
     return True

@@ -12,15 +12,52 @@ import api from './api'
 export type Capacidades = {
   nivel: number; rol: string
   gestionar_usuarios: boolean; configurar_negocio: boolean
-  /** Las cuentas del negocio: métricas, ingresos, historial de ventas. */
+  /** El Resumen, los ingresos del día/mes/año, gráficas y reportes exportables. */
   ver_dinero: boolean
+  /** La lista de ventas, rentas, adeudos y pedidos, para poder trabajarlos.
+   *  Separada de `ver_dinero` para que el Gestor pueda operar el negocio sin
+   *  ver cuánto gana el negocio. */
+  ver_operacion: boolean
+  /** Borrar productos, unidades y refacciones. Solo el dueño: borrar es cómo se
+   *  encubre una máquina que falta. */
+  borrar_catalogo: boolean
+  /** El titular, banco, cuenta y CLABE que se imprimen en cada cotización. */
+  editar_datos_bancarios: boolean
+  /** Fijar un NIP propio. El Gestor no lo tiene: sus acciones delicadas las
+   *  autoriza el dueño con el de él. */
+  tener_codigo_propio: boolean
   /** Los montos de lo que uno mismo opera: quien entrega también cobra. */
   ver_montos_operacion: boolean
   vender: boolean; rentar: boolean; cotizar: boolean
+  /** Entregar, recoger y subir las fotos de una renta que ya existe.
+   *  Distinto de `rentar`, que es levantarla: el técnico opera lo que
+   *  otro levantó. */
+  operar_jornada: boolean
   facturar: boolean; editar_catalogo: boolean
   /** Dar de alta equipo nuevo, distinto de mover el que ya existe. */
   alta_inventario: boolean
-  operar_inventario: boolean; reparar: boolean
+  operar_inventario: boolean
+  /** Crear y cambiar cupones: margen que se regala, aparte del catálogo. */
+  emitir_cupones: boolean
+  /** Hacer el trabajo de taller: recibir y trabajar órdenes desde Mi jornada. */
+  reparar: boolean
+  /** Llevar el taller: la sección Reparaciones (historial, costos, entrega). */
+  gestionar_reparaciones: boolean
+  /** La caja: punto de venta de refacciones en el mostrador. */
+  usar_caja: boolean
+  /** Cerrar el turno de caja (arqueo). */
+  corte_caja: boolean
+  /** Buscar en el padrón y abrir la ficha de un cliente. Nivel 1: el
+   *  mostrador es quien más lo necesita. */
+  ver_clientes: boolean
+  /** Dar de alta clientes y contactos. Los fiscales siguen siendo de admin. */
+  editar_clientes: boolean
+  /** "Mi jornada": el escritorio del técnico de campo (no cascadea a admin). */
+  jornada_campo: boolean
+  /** Mirar el tablero de campo sin poder tocarlo (supervisión de administración). */
+  ver_jornada: boolean
+  /** La pantalla de permisos. Del núcleo: solo el dueño, y no se puede regalar. */
+  configurar_permisos: boolean
 }
 
 export type Yo = {
@@ -32,6 +69,10 @@ export type Yo = {
 
 export const CLAVE_NIVEL = 'remali_nivel'
 export const CLAVE_DUENO = 'remali_dueno'
+/** ¿Esta cuenta ACTÚA en campo? Decide en qué sección abre el panel, y hay que
+ *  saberlo antes de que llegue el perfil por red. El nivel no basta: el cajero y
+ *  el asesor comparten el nivel 1 con el técnico y no andan en campo. */
+export const CLAVE_JORNADA = 'remali_jornada'
 
 /** Con nivel 0 la cuenta existe pero no tiene rol: no entra al panel. */
 export function entraAlPanel(yo: Yo | null | undefined): boolean {
@@ -58,8 +99,14 @@ export function destinoSegun(yo: Yo | null | undefined): string {
  */
 export function destinoTrasEntrar(yo: Yo | null | undefined, next?: string | null): string {
   const base = destinoSegun(yo)
-  if (!next) return base
-  if (!entraAlPanel(yo) && next.startsWith('/dashboard')) return base
+  // Admin/dueño/técnico SIEMPRE entran al panel: su lugar es administrar, no la
+  // tienda ni el perfil de cliente. Un `next` de la tienda (perfil, favoritos,
+  // un equipo…) no los desvía — para eso entraron.
+  if (entraAlPanel(yo)) return '/dashboard'
+  // Cliente (no entra al panel): un `next` que apunte al panel lo mandaría al
+  // guard, que lo rechaza y lo regresa al login con el mismo `next` → bucle
+  // (parpadeo). Para él, una ruta del panel NO es un destino válido.
+  if (!next || next.startsWith('/dashboard')) return base
   return next
 }
 
@@ -73,6 +120,7 @@ export function recordarAcceso(yo: Yo | null | undefined) {
   try {
     localStorage.setItem(CLAVE_NIVEL, String(nivel))
     localStorage.setItem(CLAVE_DUENO, dueno ? '1' : '0')
+    localStorage.setItem(CLAVE_JORNADA, yo?.puede?.jornada_campo ? '1' : '0')
   } catch { /* modo privado: se resuelve al cargar el perfil */ }
   document.documentElement.classList.toggle('tema-dueno', dueno)
 }
@@ -82,6 +130,7 @@ export function olvidarAcceso() {
   try {
     localStorage.removeItem(CLAVE_NIVEL)
     localStorage.removeItem(CLAVE_DUENO)
+    localStorage.removeItem(CLAVE_JORNADA)
   } catch { /* nada que limpiar */ }
   document.documentElement.classList.remove('tema-dueno')
 }

@@ -28,3 +28,19 @@ export default function LogoRemali({
     </svg>
   )
 }
+
+/**
+ * El logo para DOCUMENTOS (cotización, orden, ficha): siempre en tinta, nunca
+ * teñido del acento del tipo. Los documentos van a papel y el logo se imprime
+ * tal cual es —el mismo negro que el archivo del PDF—, así la vista previa y
+ * lo que se descarga son la misma hoja.
+ */
+export const TINTA_LOGO_DOC = '#111111'
+
+export function LogoRemaliDoc({ className = 'h-10 w-10' }: { className?: string }) {
+  return (
+    <span style={{ color: TINTA_LOGO_DOC, display: 'inline-flex' }}>
+      <LogoRemali className={className} title="REMALI" />
+    </span>
+  )
+}

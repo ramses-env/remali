@@ -1,11 +1,4 @@
-function normalizeBase(url?: string) {
-  let u = (url || "").trim();
-  if (!u) return "/api";
-  if (u.startsWith("/")) return u;
-  if (u.startsWith(":")) return `http://localhost${u}`;
-  if (!/^https?:\/\//.test(u)) return `http://${u}`;
-  return u;
-}
+import { normalizeBase } from './api'
 
 function backendOrigin() {
   const base = normalizeBase(import.meta.env.VITE_API_URL);
@@ -19,6 +12,21 @@ function backendOrigin() {
   return "";
 }
 
+/** Normaliza URLs absolutas de MEDIA en localhost (comportamiento histórico):
+ *  si la imagen fue servida a través del mismo backend pero con el host escrito
+ *  explícitamente, lo reducimos a /media/... relativa para mantener el mismo
+ *  comportamiento de siempre.
+ *
+ *  NOTA sobre /static/: las avatares por rol (PNG estáticos del paquete) el
+ *  backend los entrega como URL ABSOLUTA (http://host:8000/static/...) porque
+ *  Vite NO proxyea /static/ (solo /api y /ws). Si quitáramos el host, el
+ *  navegador pediría /static al frontend (puerto 5173) → 404. Por eso las
+ *  URLs absolutas de /static las dejamos INTACTAS. */
+function removerLocalhostHostMediaHistorico(s: string): string {
+  const re = /^https?:\/\/(localhost|127\.0\.0\.1)(?::\d+)?(\/media\/)/
+  return s.replace(re, "$2")
+}
+
 export default function resolveMediaUrl(src?: string | null) {
   if (!src) return "";
   let s = String(src).trim();
@@ -26,10 +34,7 @@ export default function resolveMediaUrl(src?: string | null) {
 
   if (s.startsWith("blob:") || s.startsWith("data:")) return s;
 
-  s = s.replace(/^https?:\/\/localhost(\/media\/)/, "$1");
-  s = s.replace(/^https?:\/\/localhost:\d+(\/media\/)/, "$1");
-  s = s.replace(/^https?:\/\/127\.0\.0\.1(\/media\/)/, "$1");
-  s = s.replace(/^https?:\/\/127\.0\.0\.1:\d+(\/media\/)/, "$1");
+  s = removerLocalhostHostMediaHistorico(s);
 
   if (/^https?:\/\//.test(s)) return s;
 
@@ -43,3 +48,4 @@ export default function resolveMediaUrl(src?: string | null) {
 
   return origin ? `${origin}/${s}` : s;
 }
+

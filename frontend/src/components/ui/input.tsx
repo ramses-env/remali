@@ -8,10 +8,10 @@ const Input = React.forwardRef<HTMLInputElement, InputProps>(({ className, type,
   return (
     <input
       type={type}
-      className={cn(
-        'flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50',
-        className,
-      )}
+      // El aspecto lo pone `.campo` (index.css), el mismo de todo el panel: este
+      // componente venía de shadcn con su propia paleta (`border-input`,
+      // `bg-background`) y era el único input de la app que no seguía el tema.
+      className={cn('campo', className)}
       ref={ref}
       {...props}
     />

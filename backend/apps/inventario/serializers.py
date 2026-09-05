@@ -8,6 +8,7 @@ class InventarioSerializer(serializers.ModelSerializer):
     renta_activa = serializers.SerializerMethodField()
     puede_rentarse = serializers.SerializerMethodField()
     puede_venderse = serializers.SerializerMethodField()
+    autorizacion_renta = serializers.SerializerMethodField()
 
     class Meta:
         model = Inventario
@@ -15,9 +16,38 @@ class InventarioSerializer(serializers.ModelSerializer):
             'id', 'equipo', 'equipo_modelo', 'equipo_info', 'codigo', 'numero_serie',
             'condicion', 'estado', 'ubicacion_actual',
             'renta_activa', 'puede_rentarse', 'puede_venderse',
+            # Permiso para rentar una unidad NUEVA (sustitución, demanda extra).
+            # `puede_rentarse` no sirve para filtrar por sí solo: es falso en
+            # cuanto la unidad deja de estar disponible, así que una seminueva
+            # ya rentada saldría como "no rentable". Con esto el panel puede
+            # preguntar por la CONDICIÓN, que no cambia con el estado.
+            'autorizada_para_renta',
+            # El RASTRO de esa autorización. Se guardaba desde siempre —quién,
+            # cuándo y por qué— y no salía en ninguna respuesta: para leerlo
+            # había que entrar a la base. Un rastro que nadie puede consultar
+            # no protege de nada, y sacar una máquina NUEVA a renta es
+            # justamente de las decisiones que alguien va a querer explicar
+            # meses después.
+            'autorizacion_renta',
             'fecha_creacion',
         ]
         read_only_fields = ['codigo', 'estado', 'equipo']
+
+    def get_autorizacion_renta(self, obj):
+        """Quién autorizó rentar esta unidad nueva, cuándo y con qué motivo.
+
+        `None` cuando no está autorizada o cuando la autorización es anterior a
+        que se empezara a guardar el rastro: decir "autorizada por nadie" sería
+        inventar un dato que no existe.
+        """
+        if not obj.autorizada_para_renta or not obj.autorizada_renta_en:
+            return None
+        quien = obj.autorizada_renta_por
+        return {
+            'en': obj.autorizada_renta_en,
+            'por': (quien.get_full_name() or quien.get_username()) if quien else None,
+            'nota': obj.autorizada_renta_nota or '',
+        }
 
     def get_equipo_info(self, obj):
         e = obj.equipo
@@ -38,6 +68,10 @@ class InventarioSerializer(serializers.ModelSerializer):
             'precio_semana': str(e.precio_semana) if e.precio_semana is not None else None,
             'precio_mes': str(e.precio_mes) if e.precio_mes is not None else None,
             'precio_venta': str(e.precio_venta) if e.precio_venta is not None else None,
+            'condiciones': e.condiciones_catalogo,
+            'modos': e.modos_catalogo,
+            'ofrece_venta': e.ofrece_venta_catalogo,
+            'ofrece_renta': e.ofrece_renta_catalogo,
         }
 
     def get_renta_activa(self, obj):
@@ -49,7 +83,7 @@ class InventarioSerializer(serializers.ModelSerializer):
             return None
         return {
             'id': r.id,
-            'cliente': r.cliente,
+            'cliente': r.cliente_texto,
             'cliente_nombre': r.cliente_nombre,
             'telefono_cliente': r.telefono_cliente,
             'direccion': r.direccion,
@@ -57,6 +91,9 @@ class InventarioSerializer(serializers.ModelSerializer):
             'fecha_inicio': r.fecha_inicio,
             'fecha_fin': r.fecha_fin,
             'dias_restantes': r.dias_restantes,
+            'vence_en': r.vence_en,
+            'horas_restantes': round(r.horas_restantes, 1),
+            'por_vencer': r.por_vencer,
             'vencida': r.vencida,
             'total': str(r.total),
         }
@@ -87,19 +124,24 @@ class OrdenReparacionSerializer(serializers.ModelSerializer):
     cliente_display = serializers.CharField(read_only=True)
     equipo_display = serializers.CharField(read_only=True)
     unidad_codigo = serializers.CharField(source='unidad.codigo', read_only=True)
-    empresa_nombre = serializers.CharField(source='empresa.nombre', read_only=True)
+    cliente_padron_nombre = serializers.CharField(source='cliente.nombre', read_only=True)
+    cuenta = serializers.SerializerMethodField()
 
     class Meta:
         model = OrdenReparacion
         fields = [
             'id', 'folio', 'tipo', 'estado',
-            'cliente_nombre', 'cliente_telefono', 'empresa', 'empresa_nombre',
+            'cliente_nombre', 'cliente_telefono', 'cliente', 'cliente_padron_nombre',
             'unidad', 'unidad_codigo', 'equipo_descripcion', 'numero_serie',
             'diagnostico', 'trabajo_realizado', 'costo_mano_obra', 'notas',
             'items', 'total_refacciones', 'total', 'cliente_display', 'equipo_display',
-            'fecha_recibida', 'fecha_entrega', 'actualizado_en',
+            'cuenta', 'token_publico', 'fecha_recibida', 'fecha_entrega', 'actualizado_en',
         ]
         read_only_fields = ['folio', 'fecha_recibida', 'actualizado_en']
+
+    def get_cuenta(self, obj):
+        u = obj.usuario if obj.usuario_id else None
+        return (u.get_full_name() or u.username) if u else None
 
     def get_total_refacciones(self, obj):
         return str(obj.total_refacciones)

@@ -1,9 +1,10 @@
 import './Loader.css'
 
 /**
- * Loader de pantalla completa (overlay). Lo dispara RouteLoader en cada cambio
- * de ruta. Los cuadros siguen el acento del tema (dorado/amarillo, negro para
- * el Dueño) vía --c-gold. Spinner base: Uiverse.io (Nawsome).
+ * Loader de pantalla completa (overlay). Lo muestra CargaGlobal cuando hay una
+ * petición real en vuelo que ya se está haciendo notar. Los cuadros siguen el
+ * acento del tema (dorado/amarillo, negro para el Dueño) vía --c-gold.
+ * Spinner base: Uiverse.io (Nawsome).
  */
 export default function Loader() {
   return (

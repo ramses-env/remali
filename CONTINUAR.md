@@ -1,4 +1,4 @@
-# REMALI — Guía para continuar el proyecto
+# REMALI: guía para continuar el proyecto
 
 > Documento de traspaso. Si vas a retomar este proyecto (con otra cuenta de
 > Claude o después de un tiempo), **lee esto primero**. Recoge el estado real,
@@ -130,8 +130,18 @@ protegido.
 **Frontend:** `frontend/src/lib/acceso.ts` centraliza "quién entra al panel"
 (`entraAlPanel`, `recordarAcceso`, `olvidarAcceso`, contexto `usePuede()`). En
 `Dashboard.tsx`, el mapa `REQUIERE` dice qué capacidad exige cada sección del menú.
-El **técnico solo ve "Tu día", Notificaciones y Configuración**; los módulos de
-gestión están ocultos para él (pero las APIs que usa "Tu día" siguen accesibles).
+El **técnico solo ve "Tu día" y Configuración**; los módulos de gestión están
+ocultos para él (pero las APIs que usa "Tu día" siguen accesibles). La sección
+"Notificaciones" se retiró (ago-2026): las notificaciones se leen en la **campana**
+de la barra de arriba, que es donde siempre se leyeron.
+
+**La caja es del mostrador.** `usar_caja` y `corte_caja` NO cascadean por nivel
+(`nivel_minimo=None`): las trae el puesto de Cajero y nadie más —ni
+administración, ni el Gestor, ni el dueño—. Administración sigue vendiendo desde
+Ventas y Pedidos; lo que no puede es cobrar en el cajón ni colgarle un movimiento
+al turno de la cajera (la bandera `desde_caja` de vender/rentar también pide
+`usar_caja`). Si el negocio enciende "Levantar rentas desde la caja", hay que
+encenderle además «Rentar» al puesto de Cajero en Permisos.
 
 **`/auth/me/`** y **`/auth/perfil/`** devuelven `is_superuser` y `puede` (capacidades).
 
@@ -142,7 +152,7 @@ cuenta autenticada podía crear ventas/rentas. Ya está en el nivel correcto.
 
 ## 4. Módulos y flujos construidos en esta sesión
 
-### "Tu día" (experiencia del técnico) — `Dashboard.tsx` → `UbicacionesAdmin`
+### "Tu día" (experiencia del técnico), en `Dashboard.tsx` → `UbicacionesAdmin`
 - Endpoint: **`GET /rentas/tareas/`** (`renta/views.py` → `mis_tareas`). Devuelve
   **solo lo accionable**: entregar / recoger / reparar. Una máquina a mitad de
   renta no aparece. Ordenado por urgencia (vencida → hoy → taller → mañana → próxima).
@@ -151,14 +161,14 @@ cuenta autenticada podía crear ventas/rentas. Ya está en el nivel correcto.
   (`<input capture="environment">` abre la cámara) y luego marca la entrega. El botón
   principal exige ≥1 foto; "sin fotos" es un escape explícito con advertencia.
 
-### Confirmación de entrega/recolección — `renta/models.py` + `renta/views.py`
+### Confirmación de entrega y recolección, en `renta/models.py` y `renta/views.py`
 - Campos en `Renta`: `entregada_en/por`, `recogida_en/por`.
 - Endpoints: `POST /rentas/<id>/entregar/` y `.../devolver/`.
 - **Avisa a administración por notificación** (`crear_notificacion`), que el panel
   ya refresca cada ~5s → el admin se entera sin recargar ni llamar. (Esto reemplaza
   la necesidad de WebSockets para este caso.)
 
-### Evidencia fotográfica — `renta/evidencia.py` (reglas) + `renta/views.py`
+### Evidencia fotográfica, en `renta/evidencia.py` (reglas) y `renta/views.py`
 - `EvidenciaRenta`: foto, momento (entrega/devolución), nota, quién, cuándo, `tomada_en` (EXIF).
 - **Endurecida:** valida que sea imagen real con Pillow (no confía en extensión/mimetype;
   antes se colaba un script `.jpg`), solo JPG/PNG/WEBP, máx 10 MB, tope 12 por momento,
@@ -168,11 +178,11 @@ cuenta autenticada podía crear ventas/rentas. Ya está en el nivel correcto.
 - **EXIF advisory:** guarda la fecha de la foto y avisa si difiere >1 día de la subida.
   No bloquea (muchos teléfonos borran EXIF).
 
-### Reparaciones — flujo de proceso, no instantáneo
+### Reparaciones: flujo de proceso, no instantáneo
 - `Dashboard.tsx` → `TallerTrabajoModal`. Estados: **recibida → en proceso → terminada**.
 - En "recibida" solo aparece "Empezar reparación". En "en proceso" toma refacciones
   del inventario (descuenta stock vía `POST /reparaciones/<id>/items/`), escribe
-  "¿Qué le hiciste?" (autosave), y **"Marcar terminada" exige la descripción** — no
+  "¿Qué le hiciste?" (autosave), y "Marcar terminada" exige la descripción, así que no
   se cierra en segundos. "Seguir después" la deja abierta (dura días).
 - El admin ve todo en su módulo **Reparaciones** (`ReparacionesAdmin`), agrega
   **mano de obra** y notas, e imprime la **orden carta** (`OrdenCartaModal`), que ya
@@ -182,25 +192,25 @@ cuenta autenticada podía crear ventas/rentas. Ya está en el nivel correcto.
   órdenes estancadas: recibida >1 día sin empezar, o en proceso >2 días sin avance.
   Un aviso por orden por día (dedup por ref con fecha).
 
-### Usuarios — `apps/maquinaria/views_usuarios.py` + `Dashboard.tsx` → `UsuariosAdmin`
+### Usuarios, en `apps/maquinaria/views_usuarios.py` y `Dashboard.tsx` → `UsuariosAdmin`
 - Solo el **Dueño** gestiona usuarios (`EsDueno`). CRUD + cambiar contraseña + activar/desactivar.
 - **No se borran, se desactivan** (todas las FK a User son SET_NULL: borrar perdería
   el rastro). Protecciones: no quitarte tu propio admin, no dejar el sistema sin ningún admin.
 - Tabla estilo comp: badge de rol bajo el nombre, menú "…" en portal. Rol negro para
   Dueño, amarillo para los demás.
 
-### Configuración del negocio — `apps/maquinaria` (ConfiguracionSitio, CorreoAviso)
+### Configuración del negocio, en `apps/maquinaria` (ConfiguracionSitio, CorreoAviso)
 - Solo Dueño. WhatsApp (principal + respaldos), datos del negocio (nombre, dirección,
   RFC, pie de ticket), y **correos de aviso con verificación por token**.
 - `GET /config/publica/` (sin sesión, para la tienda) vs `GET/PATCH /config/` (Dueño).
 - Los datos del negocio salían de `localStorage` (por navegador) → ahora del servidor.
 
-### Bus de invalidación en tiempo real — `frontend/src/lib/realtime.ts`
+### Bus de invalidación en tiempo real, en `frontend/src/lib/realtime.ts`
 - Enganchado al interceptor de axios: toda mutación (POST/PATCH/DELETE) exitosa publica
   su "tema" y quien esté suscrito (`useRecurso`) refetchea. Resuelve el "tengo que
   recargar para ver cambios" **sin Redis ni WebSockets**. Ver decisión en §7.
 
-### Panel del Dueño en negro — `frontend/src/index.css` (`.tema-dueno`) + botón `.btn-acento`
+### Panel del Dueño en negro, en `frontend/src/index.css` (`.tema-dueno`) y el botón `.btn-acento`
 - El acento del panel es negro para el superusuario (amarillo para los demás), con
   glow. Se aplica en `<html>` **antes de montar React** (script en `index.html` + flag
   en localStorage) para que no parpadee de dorado a negro al recargar.
@@ -212,12 +222,12 @@ cuenta autenticada podía crear ventas/rentas. Ya está en el nivel correcto.
   con `--c-renta` (6.28:1).
 - **Correos fuera del request:** `apps/maquinaria/correo.py` (`enviar_async`) manda en un
   hilo; antes un SMTP lento congelaba al único worker.
-- **gunicorn** con `gthread`, 2 workers × 4 threads (Procfile + Dockerfile) — antes 1
+- gunicorn con `gthread`, 2 workers × 4 threads (Procfile y Dockerfile). Antes era 1
   petición a la vez.
 - **Throttling** en endpoints públicos (`SolicitudPublicaThrottle`, `anon_publico`).
 - **Acuse al cliente** al cotizar en la tienda: correo con folio + PDF (`cotizaciones/pdf.py`).
 - **Respaldo de BD:** comandos `respaldar_bd` / `restaurar_bd` (sube a Cloudinary; ojo
-  con ContentTypes huérfanos de la app vieja 'shop' — ver el comando).
+  con ContentTypes huérfanos de la app vieja 'shop'; ver el comando).
 - **`init_roles`** estaba roto (importaba modelos de 'shop'); reescrito, con `--limpiar`.
 
 ---
@@ -299,3 +309,90 @@ Grupos existentes: `Administrador`, `Técnico`, `Cliente`.
 - Probado en navegador (móvil y escritorio) y por API con rollback: roles, "Tu día",
   entrega con fotos, flujo de reparación, orden imprimible, recordatorios.
 ```
+
+### Gráficas del Resumen (ago-2026)
+
+El panel no usaba ninguna librería: cada gráfica era JSX a mano y la dona un
+`conic-gradient`. Ahora hay un kit propio en `frontend/src/components/charts/`,
+copiado y adaptado de **Rosen Charts** (MIT, copy-paste, `d3-scale` +
+`d3-shape`): `barras-apiladas`, `dona`, `barras-ranking`, `area`, más `tooltip`
+y `formato`. Cuatro reglas de la casa que el kit conserva y ninguna librería
+trae: recorrido con **flechas** (una parada de tabulador, no treinta), tabla
+`sr-only` con las mismas cifras, techo de eje con escalera fina (`techo`) y los
+colores desde los tokens `--chart-*`.
+
+Pase visual (lo que hace que no se vean "de tablero"): degradado vertical en
+cada barra con filo de luz arriba, tramos de dona con degradado + bisel y
+sombra, área con halo y barrido de izquierda a derecha, entradas escalonadas
+—todas apagadas bajo `prefers-reduced-motion`—, y la rejilla a media tinta con
+la línea del cero entera. Los keyframes viven en `index.css` (`barra-sube`,
+`barra-crece`, `revela-derecha`, `dona-entra`) porque llevan variables por
+elemento. Ojo: el barrido del área NO usa `stroke-dasharray` —con
+`vectorEffect="non-scaling-stroke"` la línea se corta a la mitad—, usa
+`clip-path`.
+
+En la columna derecha, **"Inventario por estado" se retiró**: repetía las tres
+cifras de la dona de arriba con otro dibujo. En su lugar va **"Dinero por
+cobrar"**, la cartera por antigüedad (al corriente / vencido ≤30 / vencido +30)
+con el desglose rentas vs. apartados. Se calcula en el navegador con lo que el
+Resumen ya baja (`/rentas/adeudos/` y `/ventas/pedidos/`); vencido = pasó la
+fecha de fin de la renta o la fecha estimada de entrega del apartado.
+
+`/api/dashboard/metricas/` agrega `top_equipos` (los 6 modelos que más
+cobraron en 30 días, con su mezcla renta/venta) y `ocupacion_por_dia` (unidades
+rentadas por día contra la flota de ESE día). Reglas probadas en
+`maquinaria/tests_metricas_graficas.py`: la ocupación se cuenta por RANGO de la
+renta —no por la fecha de alta—, una vencida sin recoger sigue ocupando, y la
+flota histórica no descuenta lo que se vendió después.
+
+### Paginación de las tablas (ago-2026)
+
+Una lista sin paginar crece para siempre: a los dos años, "Por facturar" o
+"Reparaciones" son mil renglones que el navegador pinta enteros. El pie de
+tabla es una sola pieza —`components/ui/paginador.tsx` (dibujo) y
+`usar-paginado.ts` (el corte y el salto a la cabecera)—, con dos formas de uso:
+
+- **El servidor ya pagina** → se le pasan `pagina/paginas/total` y `onIr` pide
+  la página nueva: **Cotizaciones** (`CotizacionPagination`, 25),
+  **Ventas** (`/ventas/lista/`, 50) y **Clientes** (`desde`/`limite`, 25).
+- **La lista viene completa** → `usePaginado(filtradas, porPagina, [filtros])`
+  corta el arreglo YA FILTRADO: **Por facturar**, **Reparaciones**,
+  **Inventario**, **Productos**, **Refacciones**, **Pedidos**, **Adeudos**
+  (por CLIENTE, no por renta: cortar a la mitad la deuda de alguien sería
+  enseñarla incompleta) y **Equipo**.
+
+Dos reglas que no se pueden perder al tocar esto: los KPIs de arriba siguen
+contando sobre el TOTAL (no sobre la página), y la página se reinicia al
+cambiar un FILTRO —nunca al cambiar el número de renglones, o una orden nueva
+que llega por el latido te sacaría de la página que estás leyendo—.
+
+Pendiente si algún día el volumen lo pide: las de la segunda lista siguen
+BAJANDO todo y paginando en el navegador. Pasarlas al servidor exige mover
+antes sus cifras al backend, como se hizo con Ventas.
+
+### El parpadeo al cambiar de módulo (ago-2026)
+
+Eran DOS cosas, no una:
+
+1. **El overlay de pantalla completa** (`CargaGlobal` → `Loader`) se enciende
+   con cualquier petición que pase de 350 ms. Cambiar de módulo dispara entre
+   dos y seis peticiones a la vez, así que la pantalla entera se cubría y se
+   destapaba en cada cambio. Solución: **todas las listas del panel van con
+   `fondo: true`** (la opción ya existía; ahora está tipada en `api.ts`, sin
+   `as never`). El overlay se queda para lo que el usuario dispara a propósito
+   —guardar, timbrar, generar un PDF—, donde tapar la pantalla sí comunica algo.
+2. **Los carteles de vacío mentían mientras cargaba.** Al quitar el overlay,
+   entrar a un módulo enseñaba "Aún no hay órdenes" antes de que llegara la
+   lista. El Dashboard ahora lleva `cargados` (qué recurso ya contestó, marcado
+   al ASENTARSE: si falló, el vacío es lo honesto) y pasa `cargando` a los nueve
+   módulos que se alimentan del padre; su cartel dice "Cargando…" hasta que hay
+   respuesta.
+
+Y aparte, el que más se notaba: **Clientes** cambiaba la tabla entera por un
+renglón de "Cargando…" en CADA recarga —teclear en el buscador, pasar de
+página, volver de dar de alta a alguien—, así que la tarjeta se desplomaba de
+800 px a 60 y volvía a crecer. Ahora la tabla se queda, apenas atenuada
+(`aria-busy`), y el cartel de carga es solo para cuando todavía no hay nada.
+
+Regla para lo que venga: **una lista que se recarga no se borra**; se atenúa. El
+cartel de carga es para la primera vez.

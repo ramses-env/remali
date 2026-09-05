@@ -21,13 +21,13 @@ Cálido, cercano, humano.
 
 ## Anti-references
 
-- SaaS genérico de plantilla (cards repetidas, jerarquía plana, “dashboard cualquiera”).
+- SaaS genérico de plantilla (cards repetidas, jerarquía plana, "dashboard cualquiera").
 - Material default sin identidad (espaciados/formas/estados sin intención).
-- “Muy simple” sin motion o feedback: la interfaz debe sentirse viva pero sobria.
+- "Muy simple" sin motion o feedback: la interfaz debe sentirse viva pero sobria.
 
 ## Design Principles
 
-- Claridad operativa: cada pantalla debe responder “qué pasó, qué hago ahora”.
+- Claridad operativa: cada pantalla debe responder "qué pasó, qué hago ahora".
 - Confianza primero: estados, conteos y confirmaciones deben ser consistentes y verificables.
 - Acciones rápidas con feedback: cada acción importante confirma, falla bien, y sugiere el siguiente paso.
 - Cálido sin ruido: tono humano y cercano, sin decoración innecesaria.

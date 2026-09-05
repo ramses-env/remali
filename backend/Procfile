@@ -1,1 +1,6 @@
-web: PYTHONPATH=backend gunicorn server.wsgi:application --worker-class gthread --workers ${WEB_CONCURRENCY:-2} --threads ${WEB_THREADS:-4} --timeout ${WEB_TIMEOUT:-60} --access-logfile - --error-logfile -
+# ASGI, no WSGI: con `server.wsgi` los WebSockets simplemente no existen —el
+# navegador intenta /ws/… y recibe un 404 de Django—, y con ellos se caen las
+# notificaciones en vivo, la campana y el bus del panel. Channels necesita ASGI.
+# El worker de uvicorn le da a gunicorn (procesos, reinicios, señales) un bucle
+# asíncrono; las vistas síncronas de siempre siguen corriendo en su threadpool.
+web: gunicorn server.asgi:application --worker-class uvicorn.workers.UvicornWorker --workers ${WEB_CONCURRENCY:-2} --timeout ${WEB_TIMEOUT:-60} --access-logfile - --error-logfile -

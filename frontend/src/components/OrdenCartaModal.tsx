@@ -1,5 +1,8 @@
 import { createPortal } from 'react-dom'
+import Modal from './Modal'
 import { usePrintSettings } from '../lib/printSettings'
+import { formatMoney } from '../lib/utils'
+import { LogoRemaliDoc } from './ui/logo-remali'
 
 type Item = { id: number; origen: string; nombre: string; cantidad: number; costo_unitario: string; subtotal: string }
 type Orden = {
@@ -40,19 +43,23 @@ export default function OrdenCartaModal({ orden, onClose }: { orden: Orden; onCl
   const [ps, setPs] = usePrintSettings()
   const a4 = ps.docSize === 'a4'
   const pw = a4 ? 210 : 216, ph = a4 ? 297 : 279, pageName = a4 ? 'A4' : 'Letter'
-  const money = (v: any) => '$' + (Number(v) || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })
+  const money = formatMoney
+  const interna = orden.tipo === 'interna'  // máquina propia: sin cliente ni cobro
   const fecha = (v?: string | null) => (v ? new Date(v).toLocaleDateString('es-MX', { day: '2-digit', month: 'long', year: 'numeric' }) : '—')
 
   return createPortal(
-    <div className="oc-overlay fixed inset-0 z-[95] bg-black/70 backdrop-blur-sm flex items-start justify-center p-4 overflow-y-auto" onClick={onClose}>
+    <Modal className="oc-overlay modal-in fixed inset-0 z-[95] bg-black/70 backdrop-blur-sm flex items-start justify-center p-4 overflow-y-auto" onClose={onClose} label="Orden en hoja carta">
       <div className="oc-card bg-surface border border-edge rounded-2xl overflow-hidden w-full max-w-[880px] my-4" onClick={e => e.stopPropagation()}>
         <div className="oc-scroll max-h-[80vh] overflow-y-auto bg-neutral-200 p-5 flex justify-center">
           <div className="orden-carta">
             {/* Encabezado */}
             <div className="row" style={{ alignItems: 'flex-start', borderBottom: '2px solid #111827', paddingBottom: 12 }}>
               <div>
-                <h1>REMALI</h1>
-                <div className="muted" style={{ fontSize: '9.5pt' }}>Renta · Venta · Servicio de maquinaria</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+                  <LogoRemaliDoc className="h-10 w-10" />
+                  <h1>REMALI</h1>
+                </div>
+                <div className="muted" style={{ fontSize: '9.5pt', marginTop: 2 }}>Renta · Venta · Servicio de maquinaria</div>
               </div>
               <div style={{ textAlign: 'right' }}>
                 <div style={{ fontSize: '14pt', fontWeight: 800 }}>ORDEN DE REPARACIÓN</div>
@@ -63,11 +70,18 @@ export default function OrdenCartaModal({ orden, onClose }: { orden: Orden; onCl
 
             {/* Cliente / equipo */}
             <div className="row" style={{ marginTop: 14 }}>
-              <div className="box" style={{ flex: 1 }}>
-                <div className="sect-title" style={{ marginTop: 0 }}>Cliente</div>
-                <div style={{ fontWeight: 700 }}>{orden.cliente_display}</div>
-                {orden.cliente_telefono && <div className="muted" style={{ fontSize: '9.5pt' }}>Tel: {orden.cliente_telefono}</div>}
-              </div>
+              {interna ? (
+                <div className="box" style={{ flex: 1 }}>
+                  <div className="sect-title" style={{ marginTop: 0 }}>Tipo</div>
+                  <div style={{ fontWeight: 700 }}>Máquina propia · mantenimiento interno</div>
+                </div>
+              ) : (
+                <div className="box" style={{ flex: 1 }}>
+                  <div className="sect-title" style={{ marginTop: 0 }}>Cliente</div>
+                  <div style={{ fontWeight: 700 }}>{orden.cliente_display}</div>
+                  {orden.cliente_telefono && <div className="muted" style={{ fontSize: '9.5pt' }}>Tel: {orden.cliente_telefono}</div>}
+                </div>
+              )}
               <div className="box" style={{ flex: 1 }}>
                 <div className="sect-title" style={{ marginTop: 0 }}>Equipo</div>
                 <div style={{ fontWeight: 700 }}>{orden.equipo_display}</div>
@@ -114,16 +128,18 @@ export default function OrdenCartaModal({ orden, onClose }: { orden: Orden; onCl
               <div style={{ flex: 1 }} />
               <div style={{ width: '62mm' }}>
                 <div className="row"><span className="muted">Refacciones</span><span>{money(orden.total_refacciones)}</span></div>
-                <div className="row"><span className="muted">Mano de obra</span><span>{money(orden.costo_mano_obra)}</span></div>
-                <div className="row" style={{ borderTop: '1px solid #E5E7EB', marginTop: 4, paddingTop: 6, fontWeight: 800, fontSize: '13pt' }}><span>TOTAL</span><span style={{ color: '#B8872E' }}>{money(orden.total)}</span></div>
+                {!interna && <div className="row"><span className="muted">Mano de obra</span><span>{money(orden.costo_mano_obra)}</span></div>}
+                <div className="row" style={{ borderTop: '1px solid #E5E7EB', marginTop: 4, paddingTop: 6, fontWeight: 800, fontSize: '13pt' }}><span>{interna ? 'COSTO INTERNO' : 'TOTAL'}</span><span style={{ color: '#B8872E' }}>{money(orden.total)}</span></div>
               </div>
             </div>
 
             {/* Firmas */}
             <div className="row" style={{ marginTop: '20mm' }}>
               <div style={{ flex: 1, textAlign: 'center' }}><div style={{ borderTop: '1px solid #111827', paddingTop: 4 }} className="muted">Firma del técnico</div></div>
-              <div style={{ width: 24 }} />
-              <div style={{ flex: 1, textAlign: 'center' }}><div style={{ borderTop: '1px solid #111827', paddingTop: 4 }} className="muted">Firma del cliente (conforme)</div></div>
+              {!interna && <>
+                <div style={{ width: 24 }} />
+                <div style={{ flex: 1, textAlign: 'center' }}><div style={{ borderTop: '1px solid #111827', paddingTop: 4 }} className="muted">Firma del cliente (conforme)</div></div>
+              </>}
             </div>
           </div>
         </div>
@@ -138,7 +154,7 @@ export default function OrdenCartaModal({ orden, onClose }: { orden: Orden; onCl
         </div>
       </div>
       <style>{CSS(pw, ph, pageName)}</style>
-    </div>,
+    </Modal>,
     document.body,
   )
 }

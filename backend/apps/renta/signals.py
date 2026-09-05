@@ -1,18 +1,32 @@
-"""
-Señales de la app `renta`.
+from django.db.models.signals import post_delete, post_save
+from django.dispatch import receiver
 
-⚠️ INTENCIONALMENTE VACÍO.
+from maquinaria.ws_events import omitir_en_restauracion, push_panel_event, push_user_event
+from renta.models import Renta
 
-La sincronización del estado de la unidad de inventario (rentado ↔ disponible)
-se maneja ahora como FUENTE ÚNICA DE VERDAD en los modelos:
 
-    - Renta.save()      -> Inventario.ocupar_por_renta()   (al crear una renta activa)
-    - Renta.activar()   -> Inventario.ocupar_por_renta()   (reserva -> activa)
-    - Renta.finalizar() -> Inventario.liberar()            (devolución)
-    - Renta.cancelar()  -> Inventario.liberar()            (cancelación)
+def _emitir_renta_eventos(renta: Renta | None, accion: str):
+    if not renta:
+        return
+    push_panel_event('rentas')
+    if not renta.usuario_id:
+        return
+    base = {
+        'action': accion,
+        'source': 'renta',
+        'renta_id': renta.id,
+        'cotizacion_id': renta.cotizacion_id,
+    }
+    push_user_event(renta.usuario_id, {'topic': 'rentas', **base})
+    push_user_event(renta.usuario_id, {'topic': 'adeudos', **base})
 
-Antes esta lógica estaba duplicada aquí (pre_save/post_save), en Renta.save() y en
-la vista crear_renta, lo que provocaba escrituras redundantes y riesgo de divergencia.
-Se dejó este módulo (importado por RentaConfig.ready) por compatibilidad; si en el
-futuro se necesita un side-effect real (p. ej. emails), agregar aquí los receivers.
-"""
+
+@receiver(post_save, sender=Renta)
+@omitir_en_restauracion
+def renta_guardada(sender, instance, created, **kwargs):
+    _emitir_renta_eventos(instance, 'creada' if created else 'actualizada')
+
+
+@receiver(post_delete, sender=Renta)
+def renta_eliminada(sender, instance, **kwargs):
+    _emitir_renta_eventos(instance, 'eliminada')

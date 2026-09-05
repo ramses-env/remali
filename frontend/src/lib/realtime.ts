@@ -22,7 +22,8 @@ import { useEffect } from 'react'
 export type Tema =
   | 'equipos' | 'unidades' | 'catalogos' | 'cupones' | 'rentas' | 'ventas'
   | 'cotizaciones' | 'refacciones' | 'reparaciones' | 'facturacion'
-  | 'empresas' | 'notificaciones' | 'metricas' | 'config' | 'usuarios'
+  | 'empresas' | 'clientes' | 'notificaciones' | 'metricas' | 'config' | 'usuarios'
+  | 'permisos'
 
 /** Primer segmento de la ruta → tema. Lo que no aparezca aquí se ignora. */
 const RUTA_A_TEMA: Record<string, Tema> = {
@@ -30,6 +31,7 @@ const RUTA_A_TEMA: Record<string, Tema> = {
   unidades: 'unidades',
   categorias: 'catalogos', tipos: 'catalogos', marcas: 'catalogos',
   cupones: 'cupones',
+  clientes: 'clientes',
   rentas: 'rentas',
   ventas: 'ventas',
   cotizaciones: 'cotizaciones',
@@ -60,10 +62,23 @@ const ARRASTRA: Record<Tema, Tema[]> = {
   refacciones: ['refacciones', 'metricas'],
   facturacion: ['facturacion', 'metricas'],
   empresas: ['empresas'],
+  clientes: ['clientes'],
   notificaciones: ['notificaciones'],
   metricas: ['metricas'],
   config: ['config'],
   usuarios: ['usuarios'],
+  // Mover un permiso cambia lo que CADA panel abierto puede hacer, así que
+  // arrastra al perfil (`usuarios`): los menús y los botones se reacomodan
+  // solos, sin cerrarle la sesión a nadie.
+  permisos: ['permisos', 'usuarios'],
+}
+
+export function expandTemas(temas: Tema[]): Tema[] {
+  const out = new Set<Tema>()
+  for (const tema of temas) {
+    for (const arrastra of ARRASTRA[tema] || [tema]) out.add(arrastra)
+  }
+  return Array.from(out)
 }
 
 const suscriptores = new Map<Tema, Set<() => void>>()
@@ -72,10 +87,32 @@ const suscriptores = new Map<Tema, Set<() => void>>()
 let pendientes = new Set<Tema>()
 let timer: number | null = null
 
+/* Oyentes que quieren enterarse de TODO lo que se invalida, sin apuntarse tema
+   por tema. Lo usa la caché de `lib/datos.ts` para tirar lo que quedó viejo.
+
+   Van en su propia lista y NO en `suscriptores` a propósito: `alVolver()`
+   invalida todos los temas que tengan suscriptores, así que apuntar la caché
+   ahí haría que cada vez que vuelves a la pestaña se recargara el programa
+   entero. Aquí solo escucha; no pide nada por su cuenta. */
+const oyentesGlobales = new Set<(temas: Tema[]) => void>()
+
+/** Avisa de cada tanda de invalidación. Devuelve cómo darse de baja. */
+export function alInvalidar(fn: (temas: Tema[]) => void): () => void {
+  oyentesGlobales.add(fn)
+  return () => { oyentesGlobales.delete(fn) }
+}
+
 function vaciar() {
   timer = null
   const temas = pendientes
   pendientes = new Set()
+  // Primero la caché, luego quien recarga: si fuera al revés, el suscriptor
+  // pediría de nuevo y la caché le devolvería justo el dato viejo que se
+  // acababa de invalidar.
+  const lista = Array.from(temas)
+  for (const fn of oyentesGlobales) {
+    try { fn(lista) } catch { /* un oyente roto no debe frenar a los demás */ }
+  }
   for (const tema of temas) {
     for (const fn of suscriptores.get(tema) || []) {
       try { fn() } catch { /* un suscriptor roto no debe frenar a los demás */ }
@@ -101,7 +138,7 @@ export function notificarMutacion(url: string, metodo: string) {
   const m = (metodo || '').toUpperCase()
   if (m === 'GET' || m === 'HEAD' || m === 'OPTIONS') return
   const tema = temaDeRuta(url)
-  if (tema) invalidar(...ARRASTRA[tema])
+  if (tema) invalidar(...expandTemas([tema]))
 }
 
 export function suscribir(temas: Tema[], fn: () => void): () => void {
@@ -134,12 +171,19 @@ if (typeof window !== 'undefined') {
 /**
  * Suscribe una carga de datos a sus temas y la ejecuta al montar.
  * `cargar` debe ser estable (useCallback con deps vacías), como los load* actuales.
+ *
+ * `activo` sirve para pedir SOLO lo que la pantalla abierta necesita. Apagado,
+ * ni carga ni se suscribe: el latido puede invalidar ese tema veinte veces que
+ * nadie va a pedir la lista. Al encenderse (entras a la sección) carga y se
+ * suscribe; al apagarse suelta la suscripción y los datos que ya tenía se
+ * quedan en su estado, así volver a la sección no parpadea en vacío.
  */
-export function useRecurso(temas: Tema[], cargar: () => void) {
+export function useRecurso(temas: Tema[], cargar: () => void, activo = true) {
   useEffect(() => {
+    if (!activo) return
     cargar()
     return suscribir(temas, cargar)
     // Los temas se declaran fijos en cada llamada; cargar es estable.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cargar])
+  }, [cargar, activo])
 }
