@@ -89,6 +89,8 @@ const CotizacionesAdmin = lazy(() => import('./dashboard/cotizaciones'))
 /* Configuración es la sección más pesada y la que menos se abre: viaja aparte
    y se descarga solo cuando alguien entra a ella. */
 const ConfiguracionAdmin = lazy(() => import('./dashboard/configuracion'))
+// La MISMA pantalla que la pestaña "Cuenta" de Configuración, no una copia.
+const PerfilAdmin = lazy(() => import('./dashboard/configuracion').then(m => ({ default: m.PerfilAdmin })))
 
 /**
  * Sección donde abre el panel. Administración empieza en el Resumen; el almacén
@@ -1281,10 +1283,16 @@ export default function Dashboard() {
           {section === 'equipo' && <EquipoAdmin usuarios={usuarios} reload={loadUsuarios} notify={notify} yoId={me?.id} cargando={!listo('usuarios')} />}
           {section === 'permisos' && <PermisosAdmin notify={notify} />}
           {section === 'configuracion' && <ConfiguracionAdmin notify={notify} lang={lang} onLang={cambiarIdioma} />}
+          {/* El menú de la cuenta lleva aquí desde siempre y aquí no había nada:
+              salía el encabezado, el pie justo debajo y ni un dato. La pantalla
+              ya estaba escrita, viviendo dentro de Configuración → Cuenta. */}
+          {section === 'perfil' && <PerfilAdmin notify={notify} />}
           </Suspense>
 
-          {/* Firma del sistema: cierra el panel como cierra la tienda. */}
-          <PieByRix className="mt-6" />
+          {/* Firma del sistema: cierra el panel como cierra la tienda. Pegado a
+              lo de arriba: separado se leía como una sección más, y no lo es —
+              es el borde inferior de lo que ya terminaste de leer. */}
+          <PieByRix className="mt-3" />
           </div>
         </main>
       </div>

@@ -56,7 +56,7 @@ export default function Footer() {
 
         {/* Quién construyó el sistema y qué versión ve el cliente. El © ya va
             arriba (es el del negocio), aquí solo la versión y la firma. */}
-        <PieByRix copyright={false} fondo="surface-2" className="mt-6" />
+        <PieByRix copyright={false} fondo="surface-2" className="mt-3" />
       </div>
     </footer>
   )
