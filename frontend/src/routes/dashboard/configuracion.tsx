@@ -1257,7 +1257,15 @@ function PrintSettingsCard({ notify }: { notify: Notify }) {
   )
 }
 
-function PerfilAdmin({ notify }: { notify: Notify }) {
+/** El perfil de quien está usando el panel.
+ *
+ * Se exporta porque lo pintan DOS entradas: la pestaña "Cuenta" de
+ * Configuración y la sección "Perfil" del menú de la cuenta (arriba a la
+ * derecha). Esa segunda existía en el menú y en los títulos, pero no tenía
+ * nada que renderizar: la pantalla salía vacía, con el encabezado y el pie
+ * pegados. Es la misma pantalla, no una copia.
+ */
+export function PerfilAdmin({ notify }: { notify: Notify }) {
   const [perfil, setPerfil] = useState<Perfil | null>(null)
   const [form, setForm] = useState<Perfil>({})
   const [avatarFile, setAvatarFile] = useState<File | null>(null)
