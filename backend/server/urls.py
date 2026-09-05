@@ -15,7 +15,9 @@ Including another URLconf
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
 from django.contrib import admin
-from django.http import JsonResponse
+from django.http import HttpResponseRedirect, JsonResponse
+from django.template import TemplateDoesNotExist
+from django.template.loader import get_template
 from django.urls import path, include, re_path
 from django.conf import settings
 from django.conf.urls.static import static
@@ -28,6 +30,27 @@ def api_404(request, resto=''):
     index.html del catch-all de React: si no, una URL mal escrita en el
     frontend devuelve 200 con HTML y el error queda invisible."""
     return JsonResponse({'detail': f'Endpoint no encontrado: /api/{resto}'}, status=404)
+
+def fuera_del_api(request):
+    """Todo lo que no es /api/, /admin/ ni /media/.
+
+    Mientras Django sirvió también el SPA, aquí se devolvía su index.html. Con
+    el frontend en su PROPIO servicio esa plantilla ya no viaja en esta imagen,
+    y el catch-all reventaba con TemplateDoesNotExist: la raíz de api.remali.mx
+    contestaba un 500 en vez de decir algo útil, y un 500 en la portada del API
+    es justo lo que enciende alarmas por nada.
+
+    Si la plantilla está —desarrollo, o un despliegue todo-en-uno— se sigue
+    sirviendo igual que siempre. Si no está, quien llegó aquí buscaba el sitio:
+    se le manda al sitio. Los /api/ mal escritos NO pasan por aquí; tienen su
+    propio 404 en JSON, que es lo que un cliente de API sabe leer.
+    """
+    try:
+        get_template('index.html')
+    except TemplateDoesNotExist:
+        return HttpResponseRedirect(getattr(settings, 'FRONTEND_URL', '') or '/')
+    return TemplateView.as_view(template_name='index.html')(request)
+
 
 admin.site.site_header = "Remali Administrador"
 admin.site.site_title = "Remali Administrador"
@@ -48,8 +71,8 @@ urlpatterns = [
     # 404 JSON para /api/ sin match — SIEMPRE después de los include de arriba.
     re_path(r'^api/(?P<resto>.*)$', api_404),
     re_path(r'^media/(?P<path>.*)$', serve, {'document_root': settings.MEDIA_ROOT}),
-    # Catch-all para React Frontend
-    re_path(r'^.*$', TemplateView.as_view(template_name='index.html')),
+    # Catch-all: el SPA si vive aquí, y si no, al sitio.
+    re_path(r'^.*$', fuera_del_api),
 ]
 
 if settings.MEDIA_URL and settings.MEDIA_ROOT:
