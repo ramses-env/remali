@@ -27,6 +27,13 @@ class Command(BaseCommand):
             help='Además borra las cuentas que NO son superusuario (para arrancar de cero).',
         )
         parser.add_argument(
+            '--conservar',
+            metavar='QUIEN',
+            help=('Deja UNA sola cuenta y borra todas las demás. Acepta usuario, '
+                  'correo o nombre completo. Si no encuentra exactamente una, no borra nada: '
+                  'quedarse sin la cuenta del dueño no se deshace.'),
+        )
+        parser.add_argument(
             '--conservar-clasificacion',
             action='store_true',
             help='Conserva categorías, marcas y tipos además de usuarios y configuración.',
@@ -94,7 +101,12 @@ class Command(BaseCommand):
             ('Equipos (catálogo)', Equipo),
         ]
         conservados = ['usuarios', 'roles', 'perfiles', 'configuración del sitio']
-        if opts['solo_superusuario']:
+        unico = None
+        if opts['conservar']:
+            unico = self._resolver_cuenta(opts['conservar'])
+            conservados[0] = (f'SOLO la cuenta {unico.username!r} '
+                              f'({(unico.first_name + " " + unico.last_name).strip() or "sin nombre"})')
+        elif opts['solo_superusuario']:
             from django.contrib.auth.models import User
             conservados[0] = f'SOLO superusuarios ({User.objects.filter(is_superuser=True).count()})'
 
@@ -124,10 +136,15 @@ class Command(BaseCommand):
             for etiqueta, modelo in plan:
                 borrados, _ = modelo.objects.all().delete()
                 self.stdout.write(f'  ✓ {etiqueta}: {borrados} eliminados')
-            if opts['solo_superusuario']:
-                # Al final: si se borraran antes, los documentos que apuntan a
-                # esas cuentas cambiarían de estado mientras se recorre el plan.
-                from django.contrib.auth.models import User
+            # Al final: si las cuentas se borraran antes, los documentos que
+            # apuntan a ellas cambiarían de estado mientras se recorre el plan.
+            from django.contrib.auth.models import User
+            if unico is not None:
+                fuera = User.objects.exclude(pk=unico.pk)
+                n = fuera.count()
+                fuera.delete()
+                self.stdout.write(f'  ✓ Todas las cuentas menos {unico.username!r}: {n} eliminadas')
+            elif opts['solo_superusuario']:
                 fuera = User.objects.filter(is_superuser=False)
                 n = fuera.count()
                 fuera.delete()
@@ -137,3 +154,44 @@ class Command(BaseCommand):
         if opts['conservar_clasificacion']:
             resumen += ' + clasificación'
         self.stdout.write(self.style.SUCCESS(f'\n✅ Listo. Base lista para pruebas ({resumen}).'))
+
+    def _resolver_cuenta(self, texto):
+        """La cuenta que sobrevive. Exige UNA coincidencia exacta en su universo.
+
+        Se busca por usuario, correo y nombre completo porque quien corre esto
+        escribe el nombre que ve en el panel, no el `username`. Y si hay cero o
+        varias coincidencias se aborta: borrar todas las cuentas menos la
+        equivocada deja al dueño fuera de su propio sistema, y eso no se
+        deshace.
+        """
+        from django.contrib.auth.models import User
+        from django.db.models import Q, Value
+        from django.db.models.functions import Concat, Lower
+        from django.core.management.base import CommandError
+
+        q = (texto or '').strip().lower()
+        if not q:
+            raise CommandError('--conservar necesita un usuario, correo o nombre.')
+
+        encontrados = (
+            User.objects
+            .annotate(completo=Lower(Concat('first_name', Value(' '), 'last_name')))
+            .filter(Q(username__iexact=q) | Q(email__iexact=q) | Q(completo=q))
+        )
+        if not encontrados.exists():
+            # Segunda pasada, más laxa: "merced" debe encontrar a "Merced Mendoza".
+            encontrados = (
+                User.objects
+                .annotate(completo=Lower(Concat('first_name', Value(' '), 'last_name')))
+                .filter(Q(username__icontains=q) | Q(email__icontains=q) | Q(completo__contains=q))
+            )
+
+        n = encontrados.count()
+        if n == 0:
+            raise CommandError(f'No hay ninguna cuenta que corresponda a {texto!r}. No se borró nada.')
+        if n > 1:
+            listado = ', '.join(f'{u.username} <{u.email}>' for u in encontrados[:8])
+            raise CommandError(
+                f'{texto!r} corresponde a {n} cuentas ({listado}). '
+                f'Concreta con el usuario o el correo exacto. No se borró nada.')
+        return encontrados.first()
